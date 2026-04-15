@@ -22,11 +22,30 @@ export async function POST(request: NextRequest) {
   const { data: task } = await client.from('experience_tasks').select('*').eq('id', body.task_id).single();
   const { data: records } = await client.from('check_records').select('*').eq('task_id', body.task_id);
   const { data: issues } = await client.from('issues').select('*').eq('task_id', body.task_id);
+  const { data: materials } = await client.from('materials').select('*').eq('task_id', body.task_id);
+
+  // 查询食谱/功能及其步骤
+  const { data: recipes } = await client.from('recipes').select('*').eq('task_id', body.task_id);
+  const recipesWithSteps = await Promise.all(
+    (recipes || []).map(async (recipe: Record<string, unknown>) => {
+      const { data: steps } = await client.from('recipe_steps').select('*').eq('recipe_id', recipe.id).order('step_number', { ascending: true });
+      // For each step, get its materials
+      const stepsWithMaterials = await Promise.all(
+        (steps || []).map(async (step: Record<string, unknown>) => {
+          const { data: stepMaterials } = await client.from('materials').select('*').eq('recipe_step_id', step.id);
+          return { ...step, materials: stepMaterials || [] };
+        })
+      );
+      return { ...recipe, recipe_steps: stepsWithMaterials };
+    })
+  );
 
   const reportContent = {
     task: task,
     records: records || [],
     issues: issues || [],
+    recipes: recipesWithSteps || [],
+    materials: materials || [],
     generatedAt: new Date().toISOString(),
   };
 

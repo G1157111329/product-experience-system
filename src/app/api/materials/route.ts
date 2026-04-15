@@ -20,21 +20,30 @@ export async function GET(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   const client = getSupabaseClient();
   const body = await request.json();
-  const { id, file_name } = body;
+  const { id, file_name, record_id, recipe_step_id } = body;
 
-  if (!id || !file_name) {
+  if (!id) {
     return NextResponse.json({ code: 1, message: '缺少必要参数' }, { status: 400 });
+  }
+
+  const updateData: Record<string, unknown> = {};
+  if (file_name !== undefined) updateData.file_name = file_name;
+  if (record_id !== undefined) updateData.record_id = record_id;
+  if (recipe_step_id !== undefined) updateData.recipe_step_id = recipe_step_id;
+
+  if (Object.keys(updateData).length === 0) {
+    return NextResponse.json({ code: 1, message: '没有需要更新的字段' }, { status: 400 });
   }
 
   const { data, error } = await client
     .from('materials')
-    .update({ file_name })
+    .update(updateData)
     .eq('id', id)
     .select()
     .single();
 
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
-  return NextResponse.json({ code: 0, message: '重命名成功', data });
+  return NextResponse.json({ code: 0, message: '更新成功', data });
 }
 
 export async function DELETE(request: NextRequest) {

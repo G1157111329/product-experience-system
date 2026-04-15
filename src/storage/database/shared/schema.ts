@@ -112,6 +112,7 @@ export const materials = pgTable(
   {
     id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
     record_id: varchar("record_id", { length: 36 }).references(() => checkRecords.id, { onDelete: "cascade" }),
+    recipe_step_id: varchar("recipe_step_id", { length: 36 }).references(() => recipeSteps.id, { onDelete: "set null" }),
     task_id: varchar("task_id", { length: 36 }).notNull().references(() => experienceTasks.id, { onDelete: "cascade" }),
     material_type: varchar("material_type", { length: 10 }).notNull(), // image/video
     file_name: varchar("file_name", { length: 200 }),
@@ -128,6 +129,7 @@ export const materials = pgTable(
     index("materials_record_id_idx").on(table.record_id),
     index("materials_task_id_idx").on(table.task_id),
     index("materials_type_idx").on(table.material_type),
+    index("materials_recipe_step_id_idx").on(table.recipe_step_id),
   ]
 );
 

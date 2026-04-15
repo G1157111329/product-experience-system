@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Pencil, Trash2, X, Check, Image as ImageIcon, Upload } from 'lucide-react';
+import { ArrowLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Pencil, Trash2, Check, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -16,6 +16,7 @@ import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useImagePreview } from '@/components/image-preview';
+import { MaterialPicker } from '@/components/material-picker';
 
 /* ─── Types ─── */
 interface TaskDetail {
@@ -216,7 +217,7 @@ function MaterialsTab({ taskId }: { taskId: string }) {
   const [editName, setEditName] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
-  const { previewUrl, open, close, PreviewComponent } = useImagePreview();
+  const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
 
   const fetchMaterials = useCallback(async () => {
     const res = await fetch(`/api/materials?task_id=${taskId}`);
@@ -379,8 +380,10 @@ function MaterialsTab({ taskId }: { taskId: string }) {
 function SensesTab({ taskId, records, onRefresh }: { taskId: string; records: CheckRecord[]; onRefresh: () => void }) {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [form, setForm] = useState({ sensory_dimension: '', check_dimension: '', check_item: '', problem_description: '' });
+  const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
+  const [, setSelectedMaterials] = useState<Material[]>([]);
   const [selectedRecord, setSelectedRecord] = useState<CheckRecord | null>(null);
-  const { previewUrl, open, close, PreviewComponent } = useImagePreview();
+  const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
 
   const handleAdd = async () => {
     const res = await fetch('/api/records', {
@@ -389,8 +392,20 @@ function SensesTab({ taskId, records, onRefresh }: { taskId: string; records: Ch
     });
     const data = await res.json();
     if (data.code === 0) {
+      const recordId = data.data?.id;
+      // Link selected materials to the new record
+      if (recordId && selectedMaterialIds.length > 0) {
+        for (const matId of selectedMaterialIds) {
+          await fetch('/api/materials', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: matId, record_id: recordId }),
+          });
+        }
+      }
       setAddDialogOpen(false);
       setForm({ sensory_dimension: '', check_dimension: '', check_item: '', problem_description: '' });
+      setSelectedMaterialIds([]);
+      setSelectedMaterials([]);
       onRefresh();
       toast.success('问题点已添加');
     }
@@ -463,8 +478,8 @@ function SensesTab({ taskId, records, onRefresh }: { taskId: string; records: Ch
       </div>
 
       {/* Add dialog */}
-      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-        <DialogContent>
+      <Dialog open={addDialogOpen} onOpenChange={(open) => { setAddDialogOpen(open); if (!open) { setSelectedMaterialIds([]); setSelectedMaterials([]); } }}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>新增问题点</DialogTitle></DialogHeader>
           <div className="space-y-3 mt-2">
             <div className="space-y-1.5">
@@ -498,6 +513,11 @@ function SensesTab({ taskId, records, onRefresh }: { taskId: string; records: Ch
               <Label>问题描述 *</Label>
               <Textarea placeholder="描述发现的问题..." value={form.check_item} onChange={(e) => setForm({ ...form, check_item: e.target.value })} rows={3} />
             </div>
+            <MaterialPicker
+              taskId={taskId}
+              selectedIds={selectedMaterialIds}
+              onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }}
+            />
             <Button onClick={handleAdd} className="w-full" disabled={!form.check_dimension || !form.check_item}>
               添加
             </Button>
@@ -514,6 +534,8 @@ function RecordDetailCard({ record, taskId, onRefresh, onImageClick }: {
 }) {
   const [evaluation, setEvaluation] = useState(record.evaluation_result);
   const [description, setDescription] = useState(record.problem_description || '');
+  const [referenceIds, setReferenceIds] = useState<string[]>([]);
+  const [, setReferenceMats] = useState<Material[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSave = async () => {
@@ -521,6 +543,17 @@ function RecordDetailCard({ record, taskId, onRefresh, onImageClick }: {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ evaluation_result: evaluation, problem_description: description }),
     });
+    // Link referenced materials to this record
+    if (referenceIds.length > 0) {
+      for (const matId of referenceIds) {
+        await fetch('/api/materials', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: matId, record_id: record.id }),
+        });
+      }
+      setReferenceIds([]);
+      setReferenceMats([]);
+    }
     onRefresh();
     toast.success('已保存');
   };
@@ -571,6 +604,12 @@ function RecordDetailCard({ record, taskId, onRefresh, onImageClick }: {
             ))}
           </div>
         )}
+        {/* Reference material picker */}
+        <MaterialPicker
+          taskId={taskId}
+          selectedIds={referenceIds}
+          onSelectionChange={(ids, mats) => { setReferenceIds(ids); setReferenceMats(mats); }}
+        />
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
             <Upload className="h-3.5 w-3.5 mr-1" /> 上传图片
@@ -592,7 +631,9 @@ function FunctionsTab({ taskId }: { taskId: string }) {
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [newRecipe, setNewRecipe] = useState({ name: '', ingredients: '', recipe_type: '食谱' });
   const [newStep, setNewStep] = useState({ operation: '', problem_point: '' });
-  const { previewUrl, open, close, PreviewComponent } = useImagePreview();
+  const [stepMaterialIds, setStepMaterialIds] = useState<string[]>([]);
+  const [, setStepMaterials] = useState<Material[]>([]);
+  const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
 
   const fetchRecipes = useCallback(async () => {
     const res = await fetch(`/api/recipes?task_id=${taskId}`);
@@ -622,12 +663,24 @@ function FunctionsTab({ taskId }: { taskId: string }) {
     const stepNum = (selectedRecipe.recipe_steps?.length || 0) + 1;
     const res = await fetch('/api/recipe-steps', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipe_id: selectedRecipe.id, step_number: stepNum, ...newStep }),
+      body: JSON.stringify({ recipe_id: selectedRecipe.id, step_number: stepNum, ...newStep, material_ids: stepMaterialIds }),
     });
     const data = await res.json();
     if (data.code === 0) {
+      // Link materials to the new step
+      const stepId = data.data?.id;
+      if (stepId && stepMaterialIds.length > 0) {
+        for (const matId of stepMaterialIds) {
+          await fetch('/api/materials', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: matId, recipe_step_id: stepId }),
+          });
+        }
+      }
       setAddStepDialogOpen(false);
       setNewStep({ operation: '', problem_point: '' });
+      setStepMaterialIds([]);
+      setStepMaterials([]);
       fetchRecipes();
       toast.success('步骤已添加');
     }
@@ -668,7 +721,7 @@ function FunctionsTab({ taskId }: { taskId: string }) {
               {selectedRecipe?.id === recipe.id && (
                 <div className="px-4 pb-4 space-y-2 border-t border-border pt-3" onClick={(e) => e.stopPropagation()}>
                   {recipe.recipe_steps?.map((step) => (
-                    <div key={step.id} className="p-3 rounded-lg bg-muted/30 space-y-1">
+                    <div key={step.id} className="p-3 rounded-lg bg-muted/30 space-y-1.5">
                       <div className="flex items-center gap-2">
                         <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] flex items-center justify-center font-medium">
                           {step.step_number}
@@ -677,6 +730,20 @@ function FunctionsTab({ taskId }: { taskId: string }) {
                       </div>
                       {step.problem_point && (
                         <p className="text-xs text-amber-600 ml-7">问题: {step.problem_point}</p>
+                      )}
+                      {step.materials && step.materials.length > 0 && (
+                        <div className="flex gap-1.5 ml-7 flex-wrap">
+                          {step.materials.map((mat) => (
+                            <div key={mat.id} className="w-12 h-12 rounded-md overflow-hidden border border-border cursor-pointer"
+                              onClick={() => mat.material_type === 'image' && open(mat.file_url)}>
+                              {mat.material_type === 'image' ? (
+                                <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center bg-muted"><Video className="h-4 w-4 text-muted-foreground" /></div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </div>
                   ))}
@@ -728,8 +795,8 @@ function FunctionsTab({ taskId }: { taskId: string }) {
       </Dialog>
 
       {/* Add step dialog */}
-      <Dialog open={addStepDialogOpen} onOpenChange={setAddStepDialogOpen}>
-        <DialogContent>
+      <Dialog open={addStepDialogOpen} onOpenChange={(open) => { setAddStepDialogOpen(open); if (!open) { setStepMaterialIds([]); setStepMaterials([]); } }}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>新增步骤 - {selectedRecipe?.name}</DialogTitle></DialogHeader>
           <div className="space-y-3 mt-2">
             <div className="space-y-1.5">
@@ -742,6 +809,11 @@ function FunctionsTab({ taskId }: { taskId: string }) {
               <Textarea placeholder="发现的问题（可选）" value={newStep.problem_point}
                 onChange={(e) => setNewStep({ ...newStep, problem_point: e.target.value })} rows={2} />
             </div>
+            <MaterialPicker
+              taskId={taskId}
+              selectedIds={stepMaterialIds}
+              onSelectionChange={(ids, mats) => { setStepMaterialIds(ids); setStepMaterials(mats); }}
+            />
             <Button onClick={handleAddStep} className="w-full" disabled={!newStep.operation}>保存步骤</Button>
           </div>
         </DialogContent>

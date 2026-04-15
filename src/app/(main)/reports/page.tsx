@@ -2,14 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { FileText, Plus, ChevronRight } from 'lucide-react';
+import { FileText, Plus, ChevronRight, Download } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -113,10 +112,10 @@ export default function ReportsPage() {
       ) : (
         <div className="grid gap-3">
           {reports.map((report) => (
-            <Link key={report.id} href={`/reports/${report.id}`}>
-              <Card className="hover:bg-muted/30 transition-colors">
-                <CardContent className="p-4 flex items-center gap-4">
-                  <div className="flex-1 min-w-0">
+            <Card key={report.id} className="hover:bg-muted/30 transition-colors">
+              <CardContent className="p-4 flex items-center gap-4">
+                <div className="flex-1 min-w-0">
+                  <Link href={`/reports/${report.id}`}>
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="text-sm font-medium truncate">{report.title}</h3>
                       <Badge className={cn('text-[10px]', statusColors[report.status] || '')}>{report.status}</Badge>
@@ -125,11 +124,16 @@ export default function ReportsPage() {
                       <span>V{report.version}</span>
                       <span>{new Date(report.updated_at).toLocaleDateString()}</span>
                     </div>
-                  </div>
+                  </Link>
+                </div>
+                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={(e) => { e.stopPropagation(); window.open(`/reports/print?id=${report.id}`, '_blank'); }}>
+                  <Download className="h-4 w-4 text-muted-foreground" />
+                </Button>
+                <Link href={`/reports/${report.id}`}>
                   <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                </CardContent>
-              </Card>
-            </Link>
+                </Link>
+              </CardContent>
+            </Card>
           ))}
         </div>
       )}
