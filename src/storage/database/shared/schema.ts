@@ -111,7 +111,7 @@ export const materials = pgTable(
   "materials",
   {
     id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
-    record_id: varchar("record_id", { length: 36 }).notNull().references(() => checkRecords.id, { onDelete: "cascade" }),
+    record_id: varchar("record_id", { length: 36 }).references(() => checkRecords.id, { onDelete: "cascade" }),
     task_id: varchar("task_id", { length: 36 }).notNull().references(() => experienceTasks.id, { onDelete: "cascade" }),
     material_type: varchar("material_type", { length: 10 }).notNull(), // image/video
     file_name: varchar("file_name", { length: 200 }),
@@ -196,5 +196,41 @@ export const reports = pgTable(
   },
   (table) => [
     index("reports_task_id_idx").on(table.task_id),
+  ]
+);
+
+// 食谱/功能
+export const recipes = pgTable(
+  "recipes",
+  {
+    id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+    task_id: varchar("task_id", { length: 36 }).notNull().references(() => experienceTasks.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 200 }).notNull(),
+    ingredients: text("ingredients"),
+    recipe_type: varchar("recipe_type", { length: 20 }).default("食谱"), // 食谱/功能
+    problem_count: integer("problem_count").default(0),
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("recipes_task_id_idx").on(table.task_id),
+  ]
+);
+
+// 食谱步骤
+export const recipeSteps = pgTable(
+  "recipe_steps",
+  {
+    id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+    recipe_id: varchar("recipe_id", { length: 36 }).notNull().references(() => recipes.id, { onDelete: "cascade" }),
+    step_number: integer("step_number").notNull().default(1),
+    operation: text("operation").notNull(),
+    problem_point: text("problem_point"),
+    sort_order: integer("sort_order").default(0),
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("recipe_steps_recipe_id_idx").on(table.recipe_id),
   ]
 );

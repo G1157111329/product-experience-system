@@ -14,8 +14,27 @@ export async function GET(request: NextRequest) {
   const { data, error } = await query.order('created_at', { ascending: false });
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
 
-  // 动态生成签名URL
   return NextResponse.json({ code: 0, message: 'success', data });
+}
+
+export async function PUT(request: NextRequest) {
+  const client = getSupabaseClient();
+  const body = await request.json();
+  const { id, file_name } = body;
+
+  if (!id || !file_name) {
+    return NextResponse.json({ code: 1, message: '缺少必要参数' }, { status: 400 });
+  }
+
+  const { data, error } = await client
+    .from('materials')
+    .update({ file_name })
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
+  return NextResponse.json({ code: 0, message: '重命名成功', data });
 }
 
 export async function DELETE(request: NextRequest) {

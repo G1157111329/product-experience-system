@@ -14,10 +14,11 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
-    const record_id = formData.get('record_id') as string;
+    const record_id = formData.get('record_id') as string | null;
     const task_id = formData.get('task_id') as string;
+    const recipe_step_id = formData.get('recipe_step_id') as string | null;
 
-    if (!file || !record_id || !task_id) {
+    if (!file || !task_id) {
       return NextResponse.json({ code: 1, message: '缺少必要参数' }, { status: 400 });
     }
 
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest) {
     // 保存素材记录到数据库
     const client = getSupabaseClient();
     const { data, error } = await client.from('materials').insert({
-      record_id,
+      record_id: record_id || null,
       task_id,
       material_type: materialType,
       file_name: file.name,
