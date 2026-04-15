@@ -13,6 +13,8 @@
 - **Styling**: Tailwind CSS 4
 - **Database**: Supabase (PostgreSQL)
 - **File Storage**: S3 兼容对象存储 (coze-coding-dev-sdk)
+- **AI/LLM**: doubao-seed-2-0-lite (coze-coding-dev-sdk)
+- **PDF/Excel解析**: coze-coding-dev-sdk FetchClient + xlsx
 - **Theme**: Teal 主色 / Business 字体 / Cool 阴影
 
 ## 目录结构
@@ -22,15 +24,17 @@
 │   ├── app/
 │   │   ├── (main)/              # 主布局路由组
 │   │   │   ├── dashboard/       # 工作台
-│   │   │   ├── standards/       # 标准管理（含 [id] 详情）
-│   │   │   ├── tasks/           # 体验计划（含 [id] 详情）
+│   │   │   ├── standards/       # 标准管理（含 [id] 详情、批量导入）
+│   │   │   ├── tasks/           # 体验计划（含 [id] 详情，五感体验关联标准项）
 │   │   │   ├── issues/          # 问题管理（含 [id] 详情）
 │   │   │   ├── reports/         # 报告中心（含 [id] 详情）
 │   │   │   └── analysis/        # 数据分析
 │   │   ├── reports/print/       # 报告打印/PDF导出页面
 │   │   ├── api/                 # 后端 API 路由
 │   │   │   ├── standards/       # 标准 CRUD
+│   │   │   │   └── import/      # 标准批量导入（PDF/Excel）
 │   │   │   ├── standard-items/  # 标准检查项 CRUD
+│   │   │   │   └── search/      # 标准检查项跨标准搜索（感官/阶段/维度筛选）
 │   │   │   ├── tasks/           # 体验任务 CRUD
 │   │   │   ├── records/         # 检查记录 CRUD
 │   │   │   ├── materials/       # 素材管理（上传/删除/重命名/关联）
@@ -76,7 +80,9 @@
 |------|------|------|
 | GET/POST | `/api/standards` | 标准列表/创建 |
 | GET/PUT/DELETE | `/api/standards/[id]` | 标准详情/更新/删除 |
+| POST | `/api/standards/import` | 标准批量导入（PDF/Excel，LLM解析） |
 | GET/POST | `/api/standard-items` | 检查项列表/创建（支持批量） |
+| GET | `/api/standard-items/search` | 跨标准检查项搜索（感官维度/阶段/维度筛选） |
 | GET/POST | `/api/tasks` | 任务列表/创建（分页+筛选） |
 | GET/PUT/DELETE | `/api/tasks/[id]` | 任务详情（含记录+问题）/更新/删除 |
 | GET/POST | `/api/records` | 检查记录列表/创建（支持批量） |
@@ -124,6 +130,8 @@ pnpm build
 6. **PDF导出**: 通过打印页面(`/reports/print?id=xxx`)实现，浏览器原生打印为PDF，含照片/视频预览图
 7. **数据库**: Supabase PostgreSQL，Drizzle ORM，RLS 公开读写
 8. **AI 预留**: materials 表预留 ai_analysis_status 和 ai_result 字段
+9. **标准批量导入**: 支持 PDF（fetch-url提取+LLM结构化解析）和 Excel（xlsx直接解析）格式
+10. **标准关联五感体验**: 新增问题点时可从标准库引用检查项，支持按感官维度/体验阶段/检查维度筛选
 
 ## 代码风格
 

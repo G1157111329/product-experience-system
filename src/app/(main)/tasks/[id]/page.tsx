@@ -152,7 +152,7 @@ export default function TaskDetailPage() {
       {/* Tab Content */}
       {activeTab === 'info' && <BasicInfoTab task={task} />}
       {activeTab === 'materials' && <MaterialsTab taskId={id} />}
-      {activeTab === 'senses' && <SensesTab taskId={id} records={task.records || []} onRefresh={fetchTask} />}
+      {activeTab === 'senses' && <SensesTab taskId={id} records={task.records || []} taskProductCategory={task.product_category} onRefresh={fetchTask} />}
       {activeTab === 'functions' && <FunctionsTab taskId={id} />}
     </div>
   );
@@ -354,7 +354,24 @@ function MaterialsTab({ taskId }: { taskId: string }) {
 }
 
 /* ─── Tab: 五感体验 ─── */
-function SensesTab({ taskId, records, onRefresh }: { taskId: string; records: CheckRecord[]; onRefresh: () => void }) {
+interface StandardItem {
+  id: string;
+  standard_id: string;
+  sensory_dimension: string | null;
+  test_phase: string | null;
+  check_dimension: string | null;
+  check_item: string;
+  check_requirement: string | null;
+  measurement_position: string | null;
+  check_tool: string | null;
+  standard_a: string | null;
+  standard_b: string | null;
+  standard_c: string | null;
+  problem_level: string | null;
+  standard: { id: string; standard_name: string; category: string; product_category: string | null } | null;
+}
+
+function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId: string; records: CheckRecord[]; taskProductCategory?: string; onRefresh: () => void }) {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [form, setForm] = useState({ sensory_dimension: '', check_dimension: '', check_item: '', problem_description: '' });
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
@@ -362,6 +379,41 @@ function SensesTab({ taskId, records, onRefresh }: { taskId: string; records: Ch
   const [selectedRecord, setSelectedRecord] = useState<CheckRecord | null>(null);
   const [recordMaterials, setRecordMaterials] = useState<Record<string, Material[]>>({});
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
+
+  // Standard items search state
+  const [standardItems, setStandardItems] = useState<StandardItem[]>([]);
+  const [filterSensory, setFilterSensory] = useState<string>('');
+  const [filterPhase, setFilterPhase] = useState<string>('');
+  const [filterDimension, setFilterDimension] = useState<string>('');
+  const [selectedStandardItem, setSelectedStandardItem] = useState<StandardItem | null>(null);
+  const [showStandardItemPanel, setShowStandardItemPanel] = useState(false);
+
+  // Fetch standard items when filters change
+  useEffect(() => {
+    const fetchItems = async () => {
+      const params = new URLSearchParams();
+      if (filterSensory) params.set('sensory_dimension', filterSensory);
+      if (filterPhase) params.set('test_phase', filterPhase);
+      if (filterDimension) params.set('check_dimension', filterDimension);
+      if (taskProductCategory) params.set('product_category', taskProductCategory);
+      const res = await fetch(`/api/standard-items/search?${params}`);
+      const data = await res.json();
+      if (data.code === 0) setStandardItems(data.data || []);
+      else setStandardItems([]);
+    };
+    fetchItems();
+  }, [filterSensory, filterPhase, filterDimension, taskProductCategory]);
+
+  // When a standard item is selected, populate the form
+  const handleSelectStandardItem = (item: StandardItem) => {
+    setSelectedStandardItem(item);
+    setForm({
+      sensory_dimension: item.sensory_dimension || '',
+      check_dimension: item.check_dimension || '',
+      check_item: item.check_item || '',
+      problem_description: item.check_requirement || '',
+    });
+  };
 
   // Fetch materials for each record
   useEffect(() => {
@@ -382,7 +434,13 @@ function SensesTab({ taskId, records, onRefresh }: { taskId: string; records: Ch
   const handleAdd = async () => {
     const res = await fetch('/api/records', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ task_id: taskId, ...form, evaluation_result: '待定', sort_order: records.length }),
+      body: JSON.stringify({
+        task_id: taskId,
+        standard_item_id: selectedStandardItem?.id || null,
+        ...form,
+        evaluation_result: '待定',
+        sort_order: records.length,
+      }),
     });
     const data = await res.json();
     if (data.code === 0) {
@@ -399,6 +457,8 @@ function SensesTab({ taskId, records, onRefresh }: { taskId: string; records: Ch
       setForm({ sensory_dimension: '', check_dimension: '', check_item: '', problem_description: '' });
       setSelectedMaterialIds([]);
       setSelectedMaterials([]);
+      setSelectedStandardItem(null);
+      setShowStandardItemPanel(false);
       onRefresh();
       toast.success('问题点已添加');
     }
@@ -411,6 +471,11 @@ function SensesTab({ taskId, records, onRefresh }: { taskId: string; records: Ch
     acc[key].push(r);
     return acc;
   }, {});
+
+  // Get unique values from standard items for filter options
+  const uniqueSensory = [...new Set(standardItems.map(i => i.sensory_dimension).filter(Boolean))] as string[];
+  const uniquePhases = [...new Set(standardItems.map(i => i.test_phase).filter(Boolean))] as string[];
+  const uniqueDimensions = [...new Set(standardItems.map(i => i.check_dimension).filter(Boolean))] as string[];
 
   return (
     <div className="space-y-4">
@@ -488,24 +553,109 @@ function SensesTab({ taskId, records, onRefresh }: { taskId: string; records: Ch
       </div>
 
       {/* Add dialog */}
-      <Dialog open={addDialogOpen} onOpenChange={(open) => { setAddDialogOpen(open); if (!open) { setSelectedMaterialIds([]); setSelectedMaterials([]); } }}>
+      <Dialog open={addDialogOpen} onOpenChange={(open) => { setAddDialogOpen(open); if (!open) { setSelectedMaterialIds([]); setSelectedMaterials([]); setSelectedStandardItem(null); setShowStandardItemPanel(false); } }}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>新增问题点</DialogTitle></DialogHeader>
           <div className="space-y-3 mt-2">
-            <div className="space-y-1.5">
-              <Label>检查维度 *</Label>
-              <Select value={form.check_dimension} onValueChange={(v) => setForm({ ...form, check_dimension: v })}>
-                <SelectTrigger><SelectValue placeholder="选择检查维度" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="间隙">间隙</SelectItem>
-                  <SelectItem value="段差">段差</SelectItem>
-                  <SelectItem value="表面质量">表面质量</SelectItem>
-                  <SelectItem value="结构强度">结构强度</SelectItem>
-                  <SelectItem value="装配精度">装配精度</SelectItem>
-                  <SelectItem value="其他">其他</SelectItem>
-                </SelectContent>
-              </Select>
+            {/* Standard item reference section */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-muted-foreground">从标准库引用（可选）</Label>
+                <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setShowStandardItemPanel(!showStandardItemPanel)}>
+                  {showStandardItemPanel ? '收起' : '展开筛选'}
+                </Button>
+              </div>
+              {showStandardItemPanel && (
+                <div className="space-y-2 p-3 rounded-lg bg-muted/30 border border-border">
+                  <div className="grid grid-cols-3 gap-2">
+                    <Select value={filterSensory} onValueChange={(v) => setFilterSensory(v === 'all' ? '' : v)}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="感官维度" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">全部</SelectItem>
+                        <SelectItem value="视觉">视觉</SelectItem>
+                        <SelectItem value="听觉">听觉</SelectItem>
+                        <SelectItem value="触觉">触觉</SelectItem>
+                        <SelectItem value="嗅觉">嗅觉</SelectItem>
+                        <SelectItem value="味觉">味觉</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={filterPhase} onValueChange={(v) => setFilterPhase(v === 'all' ? '' : v)}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="体验阶段" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">全部</SelectItem>
+                        {uniquePhases.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                        <SelectItem value="开箱">开箱</SelectItem>
+                        <SelectItem value="使用">使用</SelectItem>
+                        <SelectItem value="清洁">清洁</SelectItem>
+                        <SelectItem value="收纳">收纳</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={filterDimension} onValueChange={(v) => setFilterDimension(v === 'all' ? '' : v)}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="检查维度" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">全部</SelectItem>
+                        <SelectItem value="间隙">间隙</SelectItem>
+                        <SelectItem value="段差">段差</SelectItem>
+                        <SelectItem value="表面质量">表面质量</SelectItem>
+                        <SelectItem value="色差">色差</SelectItem>
+                        <SelectItem value="结构强度">结构强度</SelectItem>
+                        {uniqueDimensions.map(d => (
+                          !['间隙','段差','表面质量','色差','结构强度'].includes(d) && <SelectItem key={d} value={d}>{d}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {/* Standard items list */}
+                  {standardItems.length > 0 ? (
+                    <div className="max-h-40 overflow-y-auto space-y-1">
+                      {standardItems.slice(0, 30).map((item) => (
+                        <div
+                          key={item.id}
+                          className={cn(
+                            'p-2 rounded-md cursor-pointer text-xs transition-colors border',
+                            selectedStandardItem?.id === item.id
+                              ? 'border-primary bg-primary/5'
+                              : 'border-transparent hover:bg-muted/50'
+                          )}
+                          onClick={() => handleSelectStandardItem(item)}
+                        >
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {item.sensory_dimension && (
+                              <Badge className={cn('text-[9px] h-4', sensoryColors[item.sensory_dimension] || 'bg-muted')}>{item.sensory_dimension}</Badge>
+                            )}
+                            <span className="font-medium">{item.check_item}</span>
+                            {item.check_dimension && (
+                              <span className="text-muted-foreground">{item.check_dimension}</span>
+                            )}
+                          </div>
+                          {item.check_requirement && (
+                            <p className="text-muted-foreground mt-0.5 line-clamp-1">{item.check_requirement}</p>
+                          )}
+                          {item.standard && (
+                            <p className="text-muted-foreground mt-0.5 text-[10px]">来源: {item.standard.standard_name}</p>
+                          )}
+                        </div>
+                      ))}
+                      {standardItems.length > 30 && (
+                        <p className="text-[10px] text-muted-foreground text-center py-1">还有 {standardItems.length - 30} 项...</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground text-center py-2">暂无匹配的标准检查项</p>
+                  )}
+                </div>
+              )}
+              {selectedStandardItem && (
+                <div className="flex items-center gap-2 px-2 py-1.5 bg-primary/5 rounded-md border border-primary/20">
+                  <Badge className="text-[9px] h-4">已引用</Badge>
+                  <span className="text-xs font-medium truncate">{selectedStandardItem.check_item}</span>
+                  <Button variant="ghost" size="sm" className="h-5 w-5 p-0 ml-auto" onClick={() => { setSelectedStandardItem(null); setForm({ sensory_dimension: '', check_dimension: '', check_item: '', problem_description: '' }); }}>
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+              )}
             </div>
+
             <div className="space-y-1.5">
               <Label>感官维度</Label>
               <Select value={form.sensory_dimension} onValueChange={(v) => setForm({ ...form, sensory_dimension: v })}>
@@ -520,6 +670,21 @@ function SensesTab({ taskId, records, onRefresh }: { taskId: string; records: Ch
               </Select>
             </div>
             <div className="space-y-1.5">
+              <Label>检查维度</Label>
+              <Select value={form.check_dimension} onValueChange={(v) => setForm({ ...form, check_dimension: v })}>
+                <SelectTrigger><SelectValue placeholder="选择检查维度" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="间隙">间隙</SelectItem>
+                  <SelectItem value="段差">段差</SelectItem>
+                  <SelectItem value="表面质量">表面质量</SelectItem>
+                  <SelectItem value="色差">色差</SelectItem>
+                  <SelectItem value="结构强度">结构强度</SelectItem>
+                  <SelectItem value="装配精度">装配精度</SelectItem>
+                  <SelectItem value="其他">其他</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
               <Label>问题描述 *</Label>
               <Textarea placeholder="描述发现的问题..." value={form.check_item} onChange={(e) => setForm({ ...form, check_item: e.target.value })} rows={3} />
             </div>
@@ -528,7 +693,7 @@ function SensesTab({ taskId, records, onRefresh }: { taskId: string; records: Ch
               selectedIds={selectedMaterialIds}
               onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }}
             />
-            <Button onClick={handleAdd} className="w-full" disabled={!form.check_dimension || !form.check_item}>
+            <Button onClick={handleAdd} className="w-full" disabled={!form.check_item}>
               添加
             </Button>
           </div>
