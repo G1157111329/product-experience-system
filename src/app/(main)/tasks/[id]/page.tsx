@@ -90,7 +90,12 @@ export default function TaskDetailPage() {
     });
     const data = await res.json();
     if (data.code === 0) {
-      toast.success('报告生成成功');
+      // Update task status to 已完成
+      await fetch(`/api/tasks/${id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: '已完成' }),
+      });
+      toast.success('报告生成成功，任务已标记为已完成');
       router.push('/reports');
     } else {
       toast.error(data.message || '报告生成失败');
@@ -628,17 +633,38 @@ function FunctionsTab({ taskId }: { taskId: string }) {
   const [loading, setLoading] = useState(true);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addStepDialogOpen, setAddStepDialogOpen] = useState(false);
+  const [editStepDialogOpen, setEditStepDialogOpen] = useState(false);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
+  const [editingStep, setEditingStep] = useState<RecipeStep | null>(null);
   const [newRecipe, setNewRecipe] = useState({ name: '', ingredients: '', recipe_type: '食谱' });
   const [newStep, setNewStep] = useState({ operation: '', problem_point: '' });
   const [stepMaterialIds, setStepMaterialIds] = useState<string[]>([]);
   const [, setStepMaterials] = useState<Material[]>([]);
+  const [editStepForm, setEditStepForm] = useState({ operation: '', problem_point: '' });
+  const [editStepMaterialIds, setEditStepMaterialIds] = useState<string[]>([]);
+  const [, setEditStepMaterials] = useState<Material[]>([]);
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
 
   const fetchRecipes = useCallback(async () => {
     const res = await fetch(`/api/recipes?task_id=${taskId}`);
     const data = await res.json();
-    if (data.code === 0) setRecipes(data.data || []);
+    if (data.code === 0) {
+      // For each recipe, fetch step materials
+      const recipesData = data.data || [];
+      const enriched = await Promise.all(
+        recipesData.map(async (recipe: Recipe) => {
+          const stepsWithMats = await Promise.all(
+            (recipe.recipe_steps || []).map(async (step) => {
+              const matRes = await fetch(`/api/materials?recipe_step_id=${step.id}`);
+              const matData = await matRes.json();
+              return { ...step, materials: matData.data || [] };
+            })
+          );
+          return { ...recipe, recipe_steps: stepsWithMats };
+        })
+      );
+      setRecipes(enriched);
+    }
     setLoading(false);
   }, [taskId]);
 
@@ -663,11 +689,10 @@ function FunctionsTab({ taskId }: { taskId: string }) {
     const stepNum = (selectedRecipe.recipe_steps?.length || 0) + 1;
     const res = await fetch('/api/recipe-steps', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipe_id: selectedRecipe.id, step_number: stepNum, ...newStep, material_ids: stepMaterialIds }),
+      body: JSON.stringify({ recipe_id: selectedRecipe.id, step_number: stepNum, ...newStep }),
     });
     const data = await res.json();
     if (data.code === 0) {
-      // Link materials to the new step
       const stepId = data.data?.id;
       if (stepId && stepMaterialIds.length > 0) {
         for (const matId of stepMaterialIds) {
@@ -683,6 +708,44 @@ function FunctionsTab({ taskId }: { taskId: string }) {
       setStepMaterials([]);
       fetchRecipes();
       toast.success('步骤已添加');
+    }
+  };
+
+  const handleEditStep = (step: RecipeStep) => {
+    setEditingStep(step);
+    setEditStepForm({ operation: step.operation, problem_point: step.problem_point || '' });
+    setEditStepMaterialIds([]);
+    setEditStepMaterialIds([]);
+    setEditStepDialogOpen(true);
+  };
+
+  const handleSaveEditStep = async () => {
+    if (!editingStep) return;
+    const res = await fetch(`/api/recipe-steps/${editingStep.id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        step_number: editingStep.step_number,
+        operation: editStepForm.operation,
+        problem_point: editStepForm.problem_point || null,
+      }),
+    });
+    const data = await res.json();
+    if (data.code === 0) {
+      // Link new materials
+      if (editStepMaterialIds.length > 0) {
+        for (const matId of editStepMaterialIds) {
+          await fetch('/api/materials', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: matId, recipe_step_id: editingStep.id }),
+          });
+        }
+      }
+      setEditStepDialogOpen(false);
+      setEditingStep(null);
+      setEditStepMaterialIds([]);
+      setEditStepMaterials([]);
+      fetchRecipes();
+      toast.success('步骤已更新');
     }
   };
 
@@ -721,12 +784,14 @@ function FunctionsTab({ taskId }: { taskId: string }) {
               {selectedRecipe?.id === recipe.id && (
                 <div className="px-4 pb-4 space-y-2 border-t border-border pt-3" onClick={(e) => e.stopPropagation()}>
                   {recipe.recipe_steps?.map((step) => (
-                    <div key={step.id} className="p-3 rounded-lg bg-muted/30 space-y-1.5">
+                    <div key={step.id} className="p-3 rounded-lg bg-muted/30 space-y-1.5 cursor-pointer hover:bg-muted/50 transition-colors"
+                      onClick={() => handleEditStep(step)}>
                       <div className="flex items-center gap-2">
                         <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] flex items-center justify-center font-medium">
                           {step.step_number}
                         </span>
-                        <span className="text-sm">{step.operation}</span>
+                        <span className="text-sm flex-1">{step.operation}</span>
+                        <Pencil className="h-3 w-3 text-muted-foreground shrink-0" />
                       </div>
                       {step.problem_point && (
                         <p className="text-xs text-amber-600 ml-7">问题: {step.problem_point}</p>
@@ -734,8 +799,8 @@ function FunctionsTab({ taskId }: { taskId: string }) {
                       {step.materials && step.materials.length > 0 && (
                         <div className="flex gap-1.5 ml-7 flex-wrap">
                           {step.materials.map((mat) => (
-                            <div key={mat.id} className="w-12 h-12 rounded-md overflow-hidden border border-border cursor-pointer"
-                              onClick={() => mat.material_type === 'image' && open(mat.file_url)}>
+                            <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border cursor-pointer"
+                              onClick={(e) => { e.stopPropagation(); mat.material_type === 'image' && open(mat.file_url); }}>
                               {mat.material_type === 'image' ? (
                                 <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
                               ) : (
@@ -815,6 +880,49 @@ function FunctionsTab({ taskId }: { taskId: string }) {
               onSelectionChange={(ids, mats) => { setStepMaterialIds(ids); setStepMaterials(mats); }}
             />
             <Button onClick={handleAddStep} className="w-full" disabled={!newStep.operation}>保存步骤</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit step dialog */}
+      <Dialog open={editStepDialogOpen} onOpenChange={(open) => { setEditStepDialogOpen(open); if (!open) { setEditingStep(null); setEditStepMaterialIds([]); setEditStepMaterials([]); } }}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>编辑步骤 {editingStep?.step_number}</DialogTitle></DialogHeader>
+          <div className="space-y-3 mt-2">
+            <div className="space-y-1.5">
+              <Label>具体操作 *</Label>
+              <Textarea placeholder="描述该步骤的操作" value={editStepForm.operation}
+                onChange={(e) => setEditStepForm({ ...editStepForm, operation: e.target.value })} rows={3} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>问题点</Label>
+              <Textarea placeholder="发现的问题（可选）" value={editStepForm.problem_point}
+                onChange={(e) => setEditStepForm({ ...editStepForm, problem_point: e.target.value })} rows={2} />
+            </div>
+            {/* Existing materials preview */}
+            {editingStep?.materials && editingStep.materials.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>当前关联素材</Label>
+                <div className="flex gap-1.5 flex-wrap">
+                  {editingStep.materials.map((mat) => (
+                    <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border cursor-pointer"
+                      onClick={() => mat.material_type === 'image' && open(mat.file_url)}>
+                      {mat.material_type === 'image' ? (
+                        <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-muted"><Video className="h-4 w-4 text-muted-foreground" /></div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <MaterialPicker
+              taskId={taskId}
+              selectedIds={editStepMaterialIds}
+              onSelectionChange={(ids, mats) => { setEditStepMaterialIds(ids); setEditStepMaterials(mats); }}
+            />
+            <Button onClick={handleSaveEditStep} className="w-full" disabled={!editStepForm.operation}>保存修改</Button>
           </div>
         </DialogContent>
       </Dialog>

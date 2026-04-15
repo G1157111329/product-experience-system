@@ -20,9 +20,17 @@ export async function POST(request: NextRequest) {
 
   // 自动生成报告 - 从任务和记录中填充内容
   const { data: task } = await client.from('experience_tasks').select('*').eq('id', body.task_id).single();
-  const { data: records } = await client.from('check_records').select('*').eq('task_id', body.task_id);
+  const { data: rawRecords } = await client.from('check_records').select('*').eq('task_id', body.task_id);
   const { data: issues } = await client.from('issues').select('*').eq('task_id', body.task_id);
   const { data: materials } = await client.from('materials').select('*').eq('task_id', body.task_id);
+
+  // Enrich records with their associated materials
+  const recordsWithMaterials = await Promise.all(
+    (rawRecords || []).map(async (record: Record<string, unknown>) => {
+      const { data: recordMaterials } = await client.from('materials').select('*').eq('record_id', record.id);
+      return { ...record, materials: recordMaterials || [] };
+    })
+  );
 
   // 查询食谱/功能及其步骤
   const { data: recipes } = await client.from('recipes').select('*').eq('task_id', body.task_id);
@@ -42,7 +50,7 @@ export async function POST(request: NextRequest) {
 
   const reportContent = {
     task: task,
-    records: records || [],
+    records: recordsWithMaterials || [],
     issues: issues || [],
     recipes: recipesWithSteps || [],
     materials: materials || [],
