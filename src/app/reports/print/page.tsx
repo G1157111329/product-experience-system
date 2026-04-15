@@ -159,18 +159,9 @@ export default function ReportPrintPage() {
   const records = content.records || [];
   const issues = content.issues || [];
   const recipes = content.recipes || [];
-  const materials = content.materials || [];
 
   const passCount = records.filter((r) => r.evaluation_result === '合格').length;
   const failCount = records.filter((r) => r.evaluation_result === '不合格').length;
-  const images = materials.filter((m) => m.material_type === 'image');
-  const videos = materials.filter((m) => m.material_type === 'video');
-
-  const resultBadgeStyle = (result: string) => {
-    if (result === '合格') return 'background:#d1fae5;color:#065f46;';
-    if (result === '不合格') return 'background:#fee2e2;color:#991b1b;';
-    return 'background:#fef3c7;color:#92400e;';
-  };
 
   return (
     <div className="print-container" style={{ padding: '40px', maxWidth: '1000px', margin: '0 auto', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif', color: '#1a1a1a', lineHeight: 1.6, fontSize: '14px' }}>
@@ -301,41 +292,6 @@ export default function ReportPrintPage() {
               <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 500, background: '#e0f2fe', color: '#0c4a6e' }}>{String(issue.status || '')}</span>
             </div>
           ))}
-        </>
-      )}
-
-      {/* Material Appendix - Photos & Videos */}
-      {(images.length > 0 || videos.length > 0) && (
-        <>
-          <div style={{ pageBreakBefore: 'always' }} />
-          <h2 style={{ fontSize: '18px', margin: '24px 0 12px', color: '#0d9488', borderBottom: '2px solid #0d9488', paddingBottom: '4px' }}>附录 - 素材预览</h2>
-          {images.length > 0 && (
-            <div>
-              <h3 style={{ fontSize: '15px', margin: '16px 0 8px' }}>照片 ({images.length})</h3>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', margin: '12px 0' }}>
-                {images.map((mat) => (
-                  <div key={mat.id} style={{ width: '120px', textAlign: 'center' }}>
-                    <img src={mat.file_url} alt={mat.file_name} style={{ width: '120px', height: '120px', borderRadius: '4px', objectFit: 'cover', border: '1px solid #e5e7eb' }} crossOrigin="anonymous" />
-                    <div style={{ fontSize: '10px', color: '#666', marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mat.file_name}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {videos.length > 0 && (
-            <div>
-              <h3 style={{ fontSize: '15px', margin: '16px 0 8px' }}>视频 ({videos.length})</h3>
-              {videos.map((mat) => (
-                <div key={mat.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px', background: '#f9fafb', borderRadius: '4px', margin: '4px 0' }}>
-                  <div style={{ width: '32px', height: '32px', background: '#e5e7eb', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px' }}>&#9654;</div>
-                  <div>
-                    <div style={{ fontSize: '13px' }}>{mat.file_name}</div>
-                    <div style={{ color: '#666', fontSize: '11px' }}>{((mat.file_size || 0) / 1024 / 1024).toFixed(1)} MB</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </>
       )}
 

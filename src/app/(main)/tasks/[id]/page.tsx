@@ -11,7 +11,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -105,10 +104,6 @@ export default function TaskDetailPage() {
   if (loading) return <div className="p-6 animate-pulse space-y-4"><div className="h-8 bg-muted rounded w-64" /></div>;
   if (!task) return <div className="p-6">任务不存在</div>;
 
-  const completedRecords = task.records?.filter((r) => r.evaluation_result !== '待定').length || 0;
-  const totalRecords = task.records?.length || 0;
-  const progress = totalRecords > 0 ? Math.round((completedRecords / totalRecords) * 100) : 0;
-
   return (
     <div className="p-4 lg:p-6 space-y-4">
       {/* Header */}
@@ -129,17 +124,6 @@ export default function TaskDetailPage() {
           <FileText className="h-4 w-4 mr-1.5" /> 报告生成
         </Button>
       </div>
-
-      {/* Progress */}
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium">走查进度</span>
-            <span className="text-sm text-muted-foreground">{completedRecords}/{totalRecords} ({progress}%)</span>
-          </div>
-          <Progress value={progress} className="h-2" />
-        </CardContent>
-      </Card>
 
       {/* Tab Navigation */}
       <div className="flex gap-2 overflow-x-auto pb-1">
@@ -180,6 +164,7 @@ function BasicInfoTab({ task }: { task: TaskDetail }) {
     <Card>
       <CardContent className="p-4 space-y-3">
         {[
+          { label: '任务名称', value: task.task_name },
           { label: '产品品类', value: task.product_category },
           { label: '产品型号', value: task.product_model },
           { label: '项目阶段', value: task.project_phase },
@@ -188,27 +173,14 @@ function BasicInfoTab({ task }: { task: TaskDetail }) {
           { label: '目标人群', value: task.target_user },
           { label: '体验目的', value: task.test_purpose },
           { label: '体验方法', value: task.test_method },
+          { label: '状态', value: task.status },
+          { label: '负责人', value: task.assigned_to },
         ].map((item) => (
           <div key={item.label} className="flex gap-4">
             <span className="text-xs text-muted-foreground w-20 shrink-0">{item.label}</span>
             <span className="text-sm">{item.value || '-'}</span>
           </div>
         ))}
-        <Separator />
-        <div className="grid grid-cols-3 gap-3 text-center">
-          <div>
-            <p className="text-lg font-semibold text-emerald-600">{task.records?.filter(r => r.evaluation_result === '合格').length || 0}</p>
-            <p className="text-[10px] text-muted-foreground">合格</p>
-          </div>
-          <div>
-            <p className="text-lg font-semibold text-destructive">{task.records?.filter(r => r.evaluation_result === '不合格').length || 0}</p>
-            <p className="text-[10px] text-muted-foreground">不合格</p>
-          </div>
-          <div>
-            <p className="text-lg font-semibold text-amber-600">{task.issues?.length || 0}</p>
-            <p className="text-[10px] text-muted-foreground">问题</p>
-          </div>
-        </div>
       </CardContent>
     </Card>
   );
@@ -388,7 +360,24 @@ function SensesTab({ taskId, records, onRefresh }: { taskId: string; records: Ch
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
   const [, setSelectedMaterials] = useState<Material[]>([]);
   const [selectedRecord, setSelectedRecord] = useState<CheckRecord | null>(null);
+  const [recordMaterials, setRecordMaterials] = useState<Record<string, Material[]>>({});
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
+
+  // Fetch materials for each record
+  useEffect(() => {
+    const fetchRecordMaterials = async () => {
+      const map: Record<string, Material[]> = {};
+      for (const record of records) {
+        try {
+          const res = await fetch(`/api/materials?record_id=${record.id}`);
+          const data = await res.json();
+          if (data.code === 0) map[record.id] = data.data || [];
+        } catch { /* ignore */ }
+      }
+      setRecordMaterials(map);
+    };
+    if (records.length > 0) fetchRecordMaterials();
+  }, [records]);
 
   const handleAdd = async () => {
     const res = await fetch('/api/records', {
@@ -398,7 +387,6 @@ function SensesTab({ taskId, records, onRefresh }: { taskId: string; records: Ch
     const data = await res.json();
     if (data.code === 0) {
       const recordId = data.data?.id;
-      // Link selected materials to the new record
       if (recordId && selectedMaterialIds.length > 0) {
         for (const matId of selectedMaterialIds) {
           await fetch('/api/materials', {
@@ -444,27 +432,44 @@ function SensesTab({ taskId, records, onRefresh }: { taskId: string; records: Ch
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-1.5">
-              {items.map((record) => (
-                <div
-                  key={record.id}
-                  className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 hover:bg-muted/50 cursor-pointer transition-colors"
-                  onClick={() => setSelectedRecord(selectedRecord?.id === record.id ? null : record)}
-                >
-                  <span className={cn(
-                    'w-2 h-2 rounded-full shrink-0',
-                    record.evaluation_result === '合格' ? 'bg-emerald-500' :
-                    record.evaluation_result === '不合格' ? 'bg-red-500' : 'bg-amber-500'
-                  )} />
-                  <span className="text-sm flex-1 truncate">{record.check_item}</span>
-                  {record.check_dimension && (
-                    <span className="text-[10px] text-muted-foreground bg-background px-1.5 py-0.5 rounded">{record.check_dimension}</span>
-                  )}
-                  <span className={cn('text-xs font-medium shrink-0',
-                    record.evaluation_result === '合格' ? 'text-emerald-600' :
-                    record.evaluation_result === '不合格' ? 'text-destructive' : 'text-amber-600'
-                  )}>{record.evaluation_result}</span>
-                </div>
-              ))}
+              {items.map((record) => {
+                const mats = recordMaterials[record.id] || [];
+                const matImages = mats.filter(m => m.material_type === 'image');
+                return (
+                  <div
+                    key={record.id}
+                    className="p-3 rounded-lg bg-muted/30 hover:bg-muted/50 cursor-pointer transition-colors"
+                    onClick={() => setSelectedRecord(selectedRecord?.id === record.id ? null : record)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className={cn(
+                        'w-2 h-2 rounded-full shrink-0',
+                        record.evaluation_result === '合格' ? 'bg-emerald-500' :
+                        record.evaluation_result === '不合格' ? 'bg-red-500' : 'bg-amber-500'
+                      )} />
+                      <span className="text-sm flex-1 truncate">{record.check_item}</span>
+                      {record.check_dimension && (
+                        <span className="text-[10px] text-muted-foreground bg-background px-1.5 py-0.5 rounded">{record.check_dimension}</span>
+                      )}
+                      <span className={cn('text-xs font-medium shrink-0',
+                        record.evaluation_result === '合格' ? 'text-emerald-600' :
+                        record.evaluation_result === '不合格' ? 'text-destructive' : 'text-amber-600'
+                      )}>{record.evaluation_result}</span>
+                    </div>
+                    {/* Thumbnails per problem point */}
+                    {matImages.length > 0 && (
+                      <div className="flex gap-1.5 ml-5 mt-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                        {matImages.map((mat) => (
+                          <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border cursor-pointer"
+                            onClick={() => open(mat.file_url)}>
+                            <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </CardContent>
           </Card>
         ))
@@ -686,7 +691,11 @@ function FunctionsTab({ taskId }: { taskId: string }) {
 
   const handleAddStep = async () => {
     if (!selectedRecipe) return;
-    const stepNum = (selectedRecipe.recipe_steps?.length || 0) + 1;
+    // Query current step count from DB to avoid stale client state
+    const countRes = await fetch(`/api/recipe-steps?recipe_id=${selectedRecipe.id}`);
+    const countData = await countRes.json();
+    const currentSteps = countData.data || [];
+    const stepNum = currentSteps.length + 1;
     const res = await fetch('/api/recipe-steps', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ recipe_id: selectedRecipe.id, step_number: stepNum, ...newStep }),
@@ -724,7 +733,6 @@ function FunctionsTab({ taskId }: { taskId: string }) {
     const res = await fetch(`/api/recipe-steps/${editingStep.id}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        step_number: editingStep.step_number,
         operation: editStepForm.operation,
         problem_point: editStepForm.problem_point || null,
       }),
@@ -746,6 +754,15 @@ function FunctionsTab({ taskId }: { taskId: string }) {
       setEditStepMaterials([]);
       fetchRecipes();
       toast.success('步骤已更新');
+    }
+  };
+
+  const handleDeleteStep = async (step: RecipeStep) => {
+    const res = await fetch(`/api/recipe-steps/${step.id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.code === 0) {
+      fetchRecipes();
+      toast.success('步骤已删除');
     }
   };
 
@@ -783,14 +800,17 @@ function FunctionsTab({ taskId }: { taskId: string }) {
               {/* Expanded detail */}
               {selectedRecipe?.id === recipe.id && (
                 <div className="px-4 pb-4 space-y-2 border-t border-border pt-3" onClick={(e) => e.stopPropagation()}>
-                  {recipe.recipe_steps?.map((step) => (
+                  {recipe.recipe_steps?.map((step, stepIdx) => (
                     <div key={step.id} className="p-3 rounded-lg bg-muted/30 space-y-1.5 cursor-pointer hover:bg-muted/50 transition-colors"
                       onClick={() => handleEditStep(step)}>
                       <div className="flex items-center gap-2">
                         <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] flex items-center justify-center font-medium">
-                          {step.step_number}
+                          {stepIdx + 1}
                         </span>
                         <span className="text-sm flex-1">{step.operation}</span>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={(e) => { e.stopPropagation(); handleDeleteStep(step); }}>
+                          <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
+                        </Button>
                         <Pencil className="h-3 w-3 text-muted-foreground shrink-0" />
                       </div>
                       {step.problem_point && (
@@ -887,7 +907,7 @@ function FunctionsTab({ taskId }: { taskId: string }) {
       {/* Edit step dialog */}
       <Dialog open={editStepDialogOpen} onOpenChange={(open) => { setEditStepDialogOpen(open); if (!open) { setEditingStep(null); setEditStepMaterialIds([]); setEditStepMaterials([]); } }}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>编辑步骤 {editingStep?.step_number}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>编辑步骤</DialogTitle></DialogHeader>
           <div className="space-y-3 mt-2">
             <div className="space-y-1.5">
               <Label>具体操作 *</Label>
