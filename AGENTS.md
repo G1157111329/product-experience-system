@@ -1,56 +1,118 @@
-# 项目上下文
+# 产品体验管理平台 - AGENTS.md
 
-### 版本技术栈
+## 项目概览
+
+产品体验管理平台，覆盖体验计划、现场走查、报告输出、数据分析全流程。主要面向体验工程师使用，支持移动端操作。
+
+## 技术栈
 
 - **Framework**: Next.js 16 (App Router)
 - **Core**: React 19
 - **Language**: TypeScript 5
 - **UI 组件**: shadcn/ui (基于 Radix UI)
 - **Styling**: Tailwind CSS 4
+- **Database**: Supabase (PostgreSQL)
+- **File Storage**: S3 兼容对象存储 (coze-coding-dev-sdk)
+- **Theme**: Teal 主色 / Business 字体 / Cool 阴影
 
 ## 目录结构
 
 ```
-├── public/                 # 静态资源
-├── scripts/                # 构建与启动脚本
-│   ├── build.sh            # 构建脚本
-│   ├── dev.sh              # 开发环境启动脚本
-│   ├── prepare.sh          # 预处理脚本
-│   └── start.sh            # 生产环境启动脚本
 ├── src/
-│   ├── app/                # 页面路由与布局
-│   ├── components/ui/      # Shadcn UI 组件库
-│   ├── hooks/              # 自定义 Hooks
-│   ├── lib/                # 工具库
-│   │   └── utils.ts        # 通用工具函数 (cn)
-│   └── server.ts           # 自定义服务端入口
-├── next.config.ts          # Next.js 配置
-├── package.json            # 项目依赖管理
-└── tsconfig.json           # TypeScript 配置
+│   ├── app/
+│   │   ├── (main)/              # 主布局路由组
+│   │   │   ├── dashboard/       # 工作台
+│   │   │   ├── standards/       # 标准管理（含 [id] 详情）
+│   │   │   ├── tasks/           # 体验计划（含 [id] 详情、[id]/walkthrough 走查）
+│   │   │   ├── issues/          # 问题管理（含 [id] 详情）
+│   │   │   ├── reports/         # 报告中心（含 [id] 详情）
+│   │   │   └── analysis/        # 数据分析
+│   │   ├── api/                 # 后端 API 路由
+│   │   │   ├── standards/       # 标准 CRUD
+│   │   │   ├── standard-items/  # 标准检查项 CRUD
+│   │   │   ├── tasks/           # 体验任务 CRUD
+│   │   │   ├── records/         # 检查记录 CRUD
+│   │   │   ├── materials/       # 素材管理（上传/删除）
+│   │   │   ├── issues/          # 问题整改 CRUD
+│   │   │   ├── reports/         # 报告生成/CRUD
+│   │   │   └── dashboard/       # 仪表盘数据
+│   │   ├── layout.tsx           # 根布局（含 Toaster）
+│   │   └── page.tsx             # 首页重定向到 /dashboard
+│   ├── components/
+│   │   ├── navigation.tsx       # 导航组件（桌面侧栏 + 移动端底部/顶部）
+│   │   └── ui/                  # Shadcn UI 组件库
+│   ├── storage/database/
+│   │   ├── supabase-client.ts   # Supabase 客户端
+│   │   └── shared/schema.ts     # Drizzle ORM Schema
+│   └── lib/utils.ts
+├── package.json
+└── tsconfig.json
 ```
 
-- 项目文件（如 app 目录、pages 目录、components 等）默认初始化到 `src/` 目录下。
+## 数据库表结构
 
-## 包管理规范
+| 表名 | 说明 |
+|------|------|
+| `standards` | 体验标准库（通用/品类专用/感官评价） |
+| `standard_items` | 标准检查项 |
+| `experience_tasks` | 体验任务 |
+| `check_records` | 检查记录（走查） |
+| `materials` | 素材（图片/视频，含 AI 预留字段） |
+| `issues` | 问题整改 |
+| `report_templates` | 报告模板 |
+| `reports` | 报告 |
 
-**仅允许使用 pnpm** 作为包管理器，**严禁使用 npm 或 yarn**。
-**常用命令**：
-- 安装依赖：`pnpm add <package>`
-- 安装开发依赖：`pnpm add -D <package>`
-- 安装所有依赖：`pnpm install`
-- 移除依赖：`pnpm remove <package>`
+## API 接口
 
-## 开发规范
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET/POST | `/api/standards` | 标准列表/创建 |
+| GET/PUT/DELETE | `/api/standards/[id]` | 标准详情/更新/删除 |
+| GET/POST | `/api/standard-items` | 检查项列表/创建（支持批量） |
+| GET/POST | `/api/tasks` | 任务列表/创建（分页+筛选） |
+| GET/PUT/DELETE | `/api/tasks/[id]` | 任务详情（含记录+问题）/更新/删除 |
+| GET/POST | `/api/records` | 检查记录列表/创建（支持批量） |
+| PUT/DELETE | `/api/records/[id]` | 记录更新/删除 |
+| POST | `/api/materials/upload` | 素材上传（文件大小100MB限制，仅图片/视频） |
+| GET/DELETE | `/api/materials` | 素材列表/删除 |
+| GET/POST | `/api/issues` | 问题列表/创建 |
+| GET/PUT/DELETE | `/api/issues/[id]` | 问题详情/更新/删除 |
+| GET/POST | `/api/reports` | 报告列表/生成 |
+| GET/PUT/DELETE | `/api/reports/[id]` | 报告详情/更新/删除 |
+| GET | `/api/dashboard` | 仪表盘统计数据 |
 
-### Hydration 问题防范
+## 构建与运行
 
-1. 严禁在 JSX 渲染逻辑中直接使用 typeof window、Date.now()、Math.random() 等动态数据。**必须使用 'use client' 并配合 useEffect + useState 确保动态内容仅在客户端挂载后渲染**；同时严禁非法 HTML 嵌套（如 <p> 嵌套 <div>）。
-2. **禁止使用 head 标签**，优先使用 metadata，详见文档：https://nextjs.org/docs/app/api-reference/functions/generate-metadata
-   1. 三方 CSS、字体等资源可在 `globals.css` 中顶部通过 `@import` 引入或使用 next/font
-   2. preload, preconnect, dns-prefetch 通过 ReactDOM 的 preload、preconnect、dns-prefetch 方法引入
-   3. json-ld 可阅读 https://nextjs.org/docs/app/guides/json-ld
+```bash
+# 安装依赖
+pnpm install
 
-## UI 设计与组件规范 (UI & Styling Standards)
+# 开发模式
+pnpm dev
 
-- 模板默认预装核心组件库 `shadcn/ui`，位于`src/components/ui/`目录下
-- Next.js 项目**必须默认**采用 shadcn/ui 组件、风格和规范，**除非用户指定用其他的组件和规范。**
+# 类型检查
+pnpm ts-check
+
+# Lint
+pnpm lint
+
+# 构建
+pnpm build
+```
+
+## 关键设计决策
+
+1. **响应式布局**: 桌面端左侧导航 + 右侧内容；移动端顶部汉堡菜单 + 底部Tab导航
+2. **走查页面**: 桌面端三栏布局（检查项列表|详情|素材上传）；移动端单栏+底部翻页
+3. **自动保存**: 走查页面使用 debounce(300ms) 自动保存，beforeunload 触发保存
+4. **素材上传**: 100MB 限制，仅图片/视频，上传至 S3 对象存储
+5. **数据库**: Supabase PostgreSQL，Drizzle ORM，RLS 公开读写
+6. **AI 预留**: materials 表预留 ai_analysis_status 和 ai_result 字段
+
+## 代码风格
+
+- 使用 shadcn/ui 语义化变量（bg-primary, text-muted-foreground 等），禁止硬编码颜色
+- 使用 cn() 合并类名
+- 所有 API 返回统一结构 `{ code, message, data }`
+- React 组件使用 'use client' 标注客户端组件
+- 禁止 Hydration 错误：不在 JSX 中使用 typeof window/Date.now() 等
