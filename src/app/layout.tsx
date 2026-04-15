@@ -21,7 +21,7 @@ export default function RootLayout({
 
   return (
     <html lang="zh-CN">
-      <body className="antialiased bg-background text-foreground">
+      <body className="antialiased bg-background text-foreground" suppressHydrationWarning>
         {isDev && <Inspector />}
         {children}
         <Toaster position="top-center" />
