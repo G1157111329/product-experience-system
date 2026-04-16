@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Inspector } from 'react-dev-inspector';
 import { Toaster } from '@/components/ui/sonner';
+import { AuthProvider } from '@/lib/auth-context';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -22,9 +23,11 @@ export default function RootLayout({
   return (
     <html lang="zh-CN">
       <body className="antialiased bg-background text-foreground" suppressHydrationWarning>
-        {isDev && <Inspector />}
-        {children}
-        <Toaster position="top-center" />
+        <AuthProvider>
+          {isDev && <Inspector />}
+          {children}
+          <Toaster position="top-center" />
+        </AuthProvider>
       </body>
     </html>
   );

@@ -43,57 +43,54 @@ async function parsePdfWithLLM(pdfUrl: string, headers: Record<string, string>):
     throw new Error('PDF内容为空或过短，无法提取标准项');
   }
 
-  // Use LLM to extract structured standard items from text
   const llmConfig = new Config();
   const llmClient = new LLMClient(llmConfig, headers);
 
-  const systemPrompt = `你是一个产品体验标准解析专家。你的任务是从标准文档文本中提取检查项。
-你必须只输出一个JSON数组，不要输出任何其他文字、解释或markdown代码块标记。
-每个元素是一个对象，包含以下字段：
-- sensory_dimension: 感官维度，值为"视觉"/"听觉"/"触觉"/"嗅觉"/"味觉"之一，无法确定则设为null
-- test_phase: 体验阶段，如"开箱"/"使用"/"清洁"/"收纳"等，无法确定则设为null
-- check_dimension: 检查维度，如"间隙"/"段差"/"表面质量"/"色差"/"结构强度"等，无法确定则设为null
-- check_item: 检查条目内容（必填，字符串）
-- check_requirement: 检查要求或合格判定标准，无法确定则设为null
-- measurement_position: 测量位置/检查范围，无法确定则设为null
-- check_tool: 检查工具，如"目视"/"卡尺"/"测力计"等，无法确定则设为null
-- standard_a: A面标准，无法确定则设为null
-- standard_b: B面标准，无法确定则设为null
-- standard_c: C面标准，无法确定则设为null
-- problem_level: 问题等级，值为"致命"/"严重"/"一般"/"轻微"之一，无法确定则设为"一般"
+  const systemPrompt = `你是中国产品体验标准解析专家。你从标准文档文本中提取检查项，所有输出必须使用中文。
+规则：
+1. 只输出一个JSON数组，不要输出任何其他文字、解释或markdown标记
+2. 所有字段值必须用中文填写，禁止使用英文
+3. sensory_dimension只允许：视觉/听觉/触觉/嗅觉/味觉，无法确定设为null
+4. test_phase只允许中文：开箱/安装/使用/清洁/收纳/维护等，无法确定设为null
+5. check_dimension用中文：间隙/段差/表面质量/色差/结构强度/装配精度/间隙段差/异味/噪音/安全性能/口感/移位等，无法确定设为null
+6. check_item用中文描述具体检查内容（必填）
+7. check_requirement用中文描述合格判定标准，无法确定设为null
+8. measurement_position用中文描述测量位置/检查范围，无法确定设为null
+9. check_tool用中文：目视/卡尺/塞尺/测力计/噪音仪/手感等，无法确定设为null
+10. problem_level只允许：致命/严重/一般/轻微，无法确定设为"一般"
+11. standard_a/standard_b/standard_c为A/B/C面标准值，无法确定设为null
 
-输出示例：
+示例输出：
 [{"sensory_dimension":"视觉","test_phase":"开箱","check_dimension":"间隙","check_item":"上盖与机身间隙","check_requirement":"间隙≤2mm，间隙差≤0.3mm","measurement_position":"上盖与机身连接处","check_tool":"目视","standard_a":null,"standard_b":null,"standard_c":null,"problem_level":"一般"}]`;
 
-  const userPrompt = `请从以下文本中提取所有标准检查项。文本可能包含表格数据，请仔细识别每行对应一个检查项。如果某些字段信息不明确，设为null。请确保check_item字段不为空。
+  // Split long text into chunks if needed, process first chunk
+  const maxLen = 6000;
+  const textChunk = textContent.substring(0, maxLen);
+
+  const userPrompt = `请从以下中文标准文档文本中提取所有检查项。这是一份产品体验标准文档，可能包含表格。每行/每条对应一个检查项。请仔细识别每个检查项的各个字段，确保所有内容都用中文填写。check_item字段不能为空。
 
 文本内容：
-${textContent.substring(0, 6000)}`;
+${textChunk}`;
 
   const messages = [
     { role: 'system' as const, content: systemPrompt },
     { role: 'user' as const, content: userPrompt },
   ];
 
+  // Use pro model for better accuracy
   const response = await llmClient.invoke(messages, {
-    model: 'doubao-seed-2-0-lite-260215',
-    temperature: 0.1,
+    model: 'doubao-seed-2-0-pro-260215',
+    temperature: 0.05,
   });
 
-  // Extract JSON from response - try multiple patterns
   const content = response.content.trim();
 
-  // Try to find JSON array in the response
   let jsonStr: string | null = null;
-
-  // Remove markdown code blocks if present
   const cleanedContent = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
 
-  // Try direct parse first
   if (cleanedContent.startsWith('[')) {
     jsonStr = cleanedContent;
   } else {
-    // Try to find array pattern
     const match = cleanedContent.match(/\[[\s\S]*\]/);
     if (match) {
       jsonStr = match[0];
@@ -106,10 +103,20 @@ ${textContent.substring(0, 6000)}`;
 
   try {
     const items = JSON.parse(jsonStr) as ExtractedItem[];
-    // Validate items have check_item
     return items.filter(item => item.check_item && typeof item.check_item === 'string' && item.check_item.trim().length > 0);
-  } catch (parseErr) {
-    console.error('JSON parse error:', parseErr, 'Content:', jsonStr.substring(0, 200));
+  } catch {
+    // JSON may be truncated (LLM output limit). Try to repair by finding last complete object
+    try {
+      const lastBrace = jsonStr.lastIndexOf('}');
+      if (lastBrace > 0) {
+        const repaired = jsonStr.substring(0, lastBrace + 1) + ']';
+        const items = JSON.parse(repaired) as ExtractedItem[];
+        return items.filter(item => item.check_item && typeof item.check_item === 'string' && item.check_item.trim().length > 0);
+      }
+    } catch {
+      // fallback
+    }
+    console.error('JSON parse error, content:', jsonStr.substring(0, 300));
     throw new Error('LLM返回的JSON解析失败，请重试');
   }
 }
@@ -120,11 +127,10 @@ function parseExcel(buffer: Buffer): ExtractedItem[] {
   const sheet = workbook.Sheets[sheetName];
   const rows = xlsx.utils.sheet_to_json<Record<string, string>>(sheet, { defval: '' });
 
-  // Map common column names to fields
   const columnMap: Record<string, string[]> = {
     sensory_dimension: ['感官维度', '感官', 'sensory_dimension'],
     test_phase: ['体验阶段', '产品使用阶段', '使用阶段', '阶段', 'test_phase'],
-    check_dimension: ['检查维度', '维度', 'check_dimension'],
+    check_dimension: ['检查维度', '检查维度/检查项', '维度', 'check_dimension'],
     check_item: ['检查条目', '检查项', '检查内容', 'check_item'],
     check_requirement: ['检查要求', '合格标准', 'b.检查要求', 'check_requirement'],
     measurement_position: ['测量位置', 'a.检查范围', '检查范围', 'measurement_position'],
@@ -135,7 +141,6 @@ function parseExcel(buffer: Buffer): ExtractedItem[] {
     problem_level: ['问题等级', '等级', 'problem_level'],
   };
 
-  // Build column mapping
   const fieldMapping: Record<string, string> = {};
   if (rows.length > 0) {
     const headers = Object.keys(rows[0]);
@@ -195,7 +200,6 @@ export async function POST(request: NextRequest) {
     const fileName = file.name.toLowerCase();
 
     if (fileName.endsWith('.pdf')) {
-      // Upload PDF to S3, then parse with fetch-url + LLM
       const buffer = Buffer.from(await file.arrayBuffer());
       const s3FileName = `standards-import/${Date.now()}_${file.name}`;
       const fileKey = await storage.uploadFile({
@@ -207,7 +211,6 @@ export async function POST(request: NextRequest) {
 
       items = await parsePdfWithLLM(pdfUrl, customHeaders);
     } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv')) {
-      // Parse Excel/CSV directly
       const buffer = Buffer.from(await file.arrayBuffer());
       items = parseExcel(buffer);
     } else {
@@ -218,7 +221,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ code: 1, message: '未能从文件中提取到标准检查项，请检查文件内容或尝试Excel格式' }, { status: 400 });
     }
 
-    // Create standard
     const client = getSupabaseClient();
     const { data: standard, error: stdError } = await client.from('standards').insert({
       standard_name,
@@ -232,7 +234,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ code: 1, message: stdError.message }, { status: 500 });
     }
 
-    // Insert standard items
     const standardItems = items.map((item, index) => ({
       standard_id: standard.id,
       sort_order: index + 1,
@@ -252,7 +253,6 @@ export async function POST(request: NextRequest) {
     const { error: itemsError } = await client.from('standard_items').insert(standardItems);
 
     if (itemsError) {
-      // Try to clean up the created standard
       await client.from('standards').delete().eq('id', standard.id);
       return NextResponse.json({ code: 1, message: itemsError.message }, { status: 500 });
     }

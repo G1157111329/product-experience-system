@@ -2,16 +2,18 @@
 
 import { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
-import { Plus, Search, BookOpen, ChevronRight, Upload, FileUp, Loader2 } from 'lucide-react';
+import { Plus, Search, BookOpen, ChevronRight, Upload, FileUp, Loader2, Trash2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from '@/components/ui/dialog';
 import {
   Select,
@@ -24,6 +26,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { useAuth } from '@/lib/auth-context';
 
 interface Standard {
   id: string;
@@ -44,6 +47,7 @@ const categoryMap: Record<string, { label: string; color: string }> = {
 };
 
 export default function StandardsPage() {
+  const { isAdmin } = useAuth();
   const [standards, setStandards] = useState<Standard[]>([]);
   const [loading, setLoading] = useState(true);
   const [keyword, setKeyword] = useState('');
@@ -51,6 +55,9 @@ export default function StandardsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState({
     standard_name: '',
@@ -92,6 +99,7 @@ export default function StandardsPage() {
       setDialogOpen(false);
       setForm({ standard_name: '', category: '通用标准', product_category: '', description: '' });
       fetchStandards();
+      toast.success('标准创建成功');
     }
   };
 
@@ -136,6 +144,50 @@ export default function StandardsPage() {
     }
   };
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === standards.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(standards.map(s => s.id)));
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) return;
+    setDeleting(true);
+    try {
+      const results = await Promise.all(
+        Array.from(selectedIds).map(id =>
+          fetch(`/api/standards/${id}`, { method: 'DELETE' }).then(r => r.json())
+        )
+      );
+      const failed = results.filter(r => r.code !== 0);
+      if (failed.length > 0) {
+        toast.error(`${failed.length} 项删除失败`);
+      } else {
+        toast.success(`已删除 ${selectedIds.size} 项标准`);
+      }
+      setSelectedIds(new Set());
+      setDeleteDialogOpen(false);
+      fetchStandards();
+    } catch {
+      toast.error('批量删除失败');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const isSelectMode = selectedIds.size > 0;
+
   return (
     <div className="p-4 lg:p-6 space-y-4">
       {/* Header */}
@@ -145,62 +197,71 @@ export default function StandardsPage() {
           <p className="text-sm text-muted-foreground mt-1">管理和维护体验标准库</p>
         </div>
         <div className="flex gap-2">
-          <Button size="sm" variant="outline" className="shrink-0" onClick={() => setImportDialogOpen(true)}>
-            <Upload className="h-4 w-4 mr-1.5" /> 批量导入
-          </Button>
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <Button size="sm" className="shrink-0" onClick={() => setDialogOpen(true)}>
-              <Plus className="h-4 w-4 mr-1.5" /> 新建标准
+          {isSelectMode && (
+            <Button size="sm" variant="destructive" className="shrink-0" onClick={() => setDeleteDialogOpen(true)}>
+              <Trash2 className="h-4 w-4 mr-1.5" /> 删除({selectedIds.size})
             </Button>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>新建体验标准</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4 mt-2">
-                <div className="space-y-1.5">
-                  <Label>标准名称</Label>
-                  <Input
-                    placeholder="请输入标准名称"
-                    value={form.standard_name}
-                    onChange={(e) => setForm({ ...form, standard_name: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>标准分类</Label>
-                  <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="通用标准">通用标准</SelectItem>
-                      <SelectItem value="品类专用标准">品类专用标准</SelectItem>
-                      <SelectItem value="感官评价标准">感官评价标准</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {form.category === '品类专用标准' && (
-                  <div className="space-y-1.5">
-                    <Label>关联品类</Label>
-                    <Input
-                      placeholder="如：破壁机、电饭煲"
-                      value={form.product_category}
-                      onChange={(e) => setForm({ ...form, product_category: e.target.value })}
-                    />
-                  </div>
-                )}
-                <div className="space-y-1.5">
-                  <Label>描述</Label>
-                  <Textarea
-                    placeholder="标准说明"
-                    value={form.description}
-                    onChange={(e) => setForm({ ...form, description: e.target.value })}
-                    rows={3}
-                  />
-                </div>
-                <Button onClick={handleCreate} className="w-full" disabled={!form.standard_name}>
-                  创建标准
+          )}
+          {isAdmin && (
+            <>
+              <Button size="sm" variant="outline" className="shrink-0" onClick={() => setImportDialogOpen(true)}>
+                <Upload className="h-4 w-4 mr-1.5" /> 批量导入
+              </Button>
+              <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                <Button size="sm" className="shrink-0" onClick={() => setDialogOpen(true)}>
+                  <Plus className="h-4 w-4 mr-1.5" /> 新建标准
                 </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>新建体验标准</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4 mt-2">
+                    <div className="space-y-1.5">
+                      <Label>标准名称</Label>
+                      <Input
+                        placeholder="请输入标准名称"
+                        value={form.standard_name}
+                        onChange={(e) => setForm({ ...form, standard_name: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>标准分类</Label>
+                      <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v })}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="通用标准">通用标准</SelectItem>
+                          <SelectItem value="品类专用标准">品类专用标准</SelectItem>
+                          <SelectItem value="感官评价标准">感官评价标准</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {form.category === '品类专用标准' && (
+                      <div className="space-y-1.5">
+                        <Label>关联品类</Label>
+                        <Input
+                          placeholder="如：破壁机、电饭煲"
+                          value={form.product_category}
+                          onChange={(e) => setForm({ ...form, product_category: e.target.value })}
+                        />
+                      </div>
+                    )}
+                    <div className="space-y-1.5">
+                      <Label>描述</Label>
+                      <Textarea
+                        placeholder="标准说明"
+                        value={form.description}
+                        onChange={(e) => setForm({ ...form, description: e.target.value })}
+                        rows={3}
+                      />
+                    </div>
+                    <Button onClick={handleCreate} className="w-full" disabled={!form.standard_name}>
+                      创建标准
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </>
+          )}
         </div>
       </div>
 
@@ -245,30 +306,48 @@ export default function StandardsPage() {
         </Card>
       ) : (
         <div className="grid gap-3">
+          {/* Select all row */}
+          <div className="flex items-center gap-3 px-1">
+            <Checkbox
+              checked={selectedIds.size === standards.length && standards.length > 0}
+              onCheckedChange={toggleSelectAll}
+              className="h-4 w-4"
+            />
+            <span className="text-xs text-muted-foreground">
+              {isSelectMode ? `已选 ${selectedIds.size} 项` : '全选'}
+            </span>
+          </div>
           {standards.map((std) => (
-            <Link key={std.id} href={`/standards/${std.id}`}>
-              <Card className="hover:bg-muted/30 transition-colors">
-                <CardContent className="p-4 flex items-center gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-sm font-medium truncate">{std.standard_name}</h3>
-                      <Badge
-                        variant="secondary"
-                        className={cn('text-[10px]', categoryMap[std.category]?.color)}
-                      >
-                        {categoryMap[std.category]?.label || std.category}
-                      </Badge>
-                      <span className="text-[10px] text-muted-foreground">{std.version}</span>
+            <div key={std.id} className="flex items-center gap-2">
+              <Checkbox
+                checked={selectedIds.has(std.id)}
+                onCheckedChange={() => toggleSelect(std.id)}
+                className="h-4 w-4 shrink-0"
+              />
+              <Link href={`/standards/${std.id}`} className="flex-1 min-w-0">
+                <Card className="hover:bg-muted/30 transition-colors">
+                  <CardContent className="p-4 flex items-center gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-sm font-medium truncate">{std.standard_name}</h3>
+                        <Badge
+                          variant="secondary"
+                          className={cn('text-[10px]', categoryMap[std.category]?.color)}
+                        >
+                          {categoryMap[std.category]?.label || std.category}
+                        </Badge>
+                        <span className="text-[10px] text-muted-foreground">{std.version}</span>
+                      </div>
+                      <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
+                        {std.product_category && <span>品类: {std.product_category}</span>}
+                        <span>{std.standard_items?.[0]?.count || 0} 项检查项</span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
-                      {std.product_category && <span>品类: {std.product_category}</span>}
-                      <span>{std.standard_items?.[0]?.count || 0} 项检查项</span>
-                    </div>
-                  </div>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                </CardContent>
-              </Card>
-            </Link>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                  </CardContent>
+                </Card>
+              </Link>
+            </div>
           ))}
         </div>
       )}
@@ -357,6 +436,23 @@ export default function StandardsPage() {
             )}
             <Button onClick={handleImport} className="w-full" disabled={!selectedFile || !importForm.standard_name || importing}>
               {importing ? '导入中...' : '开始导入'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Batch Delete Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>确认删除</DialogTitle>
+            <DialogDescription>确定要删除选中的 {selectedIds.size} 项标准吗？此操作不可撤销，关联的检查项也将一并删除。</DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} disabled={deleting}>取消</Button>
+            <Button variant="destructive" onClick={handleBatchDelete} disabled={deleting}>
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Trash2 className="h-4 w-4 mr-1" />}
+              确认删除
             </Button>
           </div>
         </DialogContent>

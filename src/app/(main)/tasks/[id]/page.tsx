@@ -373,7 +373,14 @@ interface StandardItem {
 
 function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId: string; records: CheckRecord[]; taskProductCategory?: string; onRefresh: () => void }) {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [form, setForm] = useState({ sensory_dimension: '', check_dimension: '', check_item: '', problem_description: '' });
+  const [form, setForm] = useState({
+    sensory_dimension: '',
+    check_dimension: '',
+    check_item: '',
+    check_requirement: '',
+    measurement_position: '',
+    problem_description: '',
+  });
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
   const [, setSelectedMaterials] = useState<Material[]>([]);
   const [selectedRecord, setSelectedRecord] = useState<CheckRecord | null>(null);
@@ -386,7 +393,6 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
   const [filterPhase, setFilterPhase] = useState<string>('');
   const [filterDimension, setFilterDimension] = useState<string>('');
   const [selectedStandardItem, setSelectedStandardItem] = useState<StandardItem | null>(null);
-  const [showStandardItemPanel, setShowStandardItemPanel] = useState(false);
 
   // Fetch standard items when filters change
   useEffect(() => {
@@ -404,14 +410,28 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
     fetchItems();
   }, [filterSensory, filterPhase, filterDimension, taskProductCategory]);
 
-  // When a standard item is selected, populate the form
+  // When a standard item is selected, populate the form with ALL fields
   const handleSelectStandardItem = (item: StandardItem) => {
     setSelectedStandardItem(item);
     setForm({
       sensory_dimension: item.sensory_dimension || '',
       check_dimension: item.check_dimension || '',
       check_item: item.check_item || '',
-      problem_description: item.check_requirement || '',
+      check_requirement: item.check_requirement || '',
+      measurement_position: item.measurement_position || '',
+      problem_description: '',
+    });
+  };
+
+  const clearStandardItem = () => {
+    setSelectedStandardItem(null);
+    setForm({
+      sensory_dimension: '',
+      check_dimension: '',
+      check_item: '',
+      check_requirement: '',
+      measurement_position: '',
+      problem_description: '',
     });
   };
 
@@ -437,7 +457,13 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
       body: JSON.stringify({
         task_id: taskId,
         standard_item_id: selectedStandardItem?.id || null,
-        ...form,
+        sensory_dimension: form.sensory_dimension || null,
+        test_phase: selectedStandardItem?.test_phase || null,
+        check_dimension: form.check_dimension || null,
+        check_item: form.check_item,
+        check_requirement: form.check_requirement || null,
+        measurement_position: form.measurement_position || null,
+        problem_description: form.problem_description || null,
         evaluation_result: '待定',
         sort_order: records.length,
       }),
@@ -454,11 +480,10 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
         }
       }
       setAddDialogOpen(false);
-      setForm({ sensory_dimension: '', check_dimension: '', check_item: '', problem_description: '' });
+      setForm({ sensory_dimension: '', check_dimension: '', check_item: '', check_requirement: '', measurement_position: '', problem_description: '' });
       setSelectedMaterialIds([]);
       setSelectedMaterials([]);
       setSelectedStandardItem(null);
-      setShowStandardItemPanel(false);
       onRefresh();
       toast.success('问题点已添加');
     }
@@ -553,140 +578,162 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
       </div>
 
       {/* Add dialog */}
-      <Dialog open={addDialogOpen} onOpenChange={(open) => { setAddDialogOpen(open); if (!open) { setSelectedMaterialIds([]); setSelectedMaterials([]); setSelectedStandardItem(null); setShowStandardItemPanel(false); } }}>
+      <Dialog open={addDialogOpen} onOpenChange={(open) => { setAddDialogOpen(open); if (!open) { setSelectedMaterialIds([]); setSelectedMaterials([]); setSelectedStandardItem(null); setForm({ sensory_dimension: '', check_dimension: '', check_item: '', check_requirement: '', measurement_position: '', problem_description: '' }); } }}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>新增问题点</DialogTitle></DialogHeader>
           <div className="space-y-3 mt-2">
             {/* Standard item reference section */}
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs text-muted-foreground">从标准库引用（可选）</Label>
-                <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setShowStandardItemPanel(!showStandardItemPanel)}>
-                  {showStandardItemPanel ? '收起' : '展开筛选'}
-                </Button>
-              </div>
-              {showStandardItemPanel && (
-                <div className="space-y-2 p-3 rounded-lg bg-muted/30 border border-border">
-                  <div className="grid grid-cols-3 gap-2">
-                    <Select value={filterSensory} onValueChange={(v) => setFilterSensory(v === 'all' ? '' : v)}>
-                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="感官维度" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">全部</SelectItem>
-                        <SelectItem value="视觉">视觉</SelectItem>
-                        <SelectItem value="听觉">听觉</SelectItem>
-                        <SelectItem value="触觉">触觉</SelectItem>
-                        <SelectItem value="嗅觉">嗅觉</SelectItem>
-                        <SelectItem value="味觉">味觉</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Select value={filterPhase} onValueChange={(v) => setFilterPhase(v === 'all' ? '' : v)}>
-                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="体验阶段" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">全部</SelectItem>
-                        {uniquePhases.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                        <SelectItem value="开箱">开箱</SelectItem>
-                        <SelectItem value="使用">使用</SelectItem>
-                        <SelectItem value="清洁">清洁</SelectItem>
-                        <SelectItem value="收纳">收纳</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Select value={filterDimension} onValueChange={(v) => setFilterDimension(v === 'all' ? '' : v)}>
-                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="检查维度" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">全部</SelectItem>
-                        <SelectItem value="间隙">间隙</SelectItem>
-                        <SelectItem value="段差">段差</SelectItem>
-                        <SelectItem value="表面质量">表面质量</SelectItem>
-                        <SelectItem value="色差">色差</SelectItem>
-                        <SelectItem value="结构强度">结构强度</SelectItem>
-                        {uniqueDimensions.map(d => (
-                          !['间隙','段差','表面质量','色差','结构强度'].includes(d) && <SelectItem key={d} value={d}>{d}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  {/* Standard items list */}
-                  {standardItems.length > 0 ? (
-                    <div className="max-h-40 overflow-y-auto space-y-1">
-                      {standardItems.slice(0, 30).map((item) => (
-                        <div
-                          key={item.id}
-                          className={cn(
-                            'p-2 rounded-md cursor-pointer text-xs transition-colors border',
-                            selectedStandardItem?.id === item.id
-                              ? 'border-primary bg-primary/5'
-                              : 'border-transparent hover:bg-muted/50'
+              <Label className="text-xs text-muted-foreground">从标准库引用</Label>
+              <div className="space-y-2 p-3 rounded-lg bg-muted/30 border border-border">
+                <div className="grid grid-cols-3 gap-2">
+                  <Select value={filterSensory} onValueChange={(v) => setFilterSensory(v === 'all' ? '' : v)}>
+                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="感官维度" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部</SelectItem>
+                      <SelectItem value="视觉">视觉</SelectItem>
+                      <SelectItem value="听觉">听觉</SelectItem>
+                      <SelectItem value="触觉">触觉</SelectItem>
+                      <SelectItem value="嗅觉">嗅觉</SelectItem>
+                      <SelectItem value="味觉">味觉</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={filterPhase} onValueChange={(v) => setFilterPhase(v === 'all' ? '' : v)}>
+                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="体验阶段" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部</SelectItem>
+                      {uniquePhases.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                      <SelectItem value="开箱">开箱</SelectItem>
+                      <SelectItem value="安装">安装</SelectItem>
+                      <SelectItem value="使用">使用</SelectItem>
+                      <SelectItem value="清洁">清洁</SelectItem>
+                      <SelectItem value="收纳">收纳</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={filterDimension} onValueChange={(v) => setFilterDimension(v === 'all' ? '' : v)}>
+                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="检查维度" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部</SelectItem>
+                      <SelectItem value="间隙">间隙</SelectItem>
+                      <SelectItem value="段差">段差</SelectItem>
+                      <SelectItem value="间隙段差">间隙段差</SelectItem>
+                      <SelectItem value="表面质量">表面质量</SelectItem>
+                      <SelectItem value="色差">色差</SelectItem>
+                      <SelectItem value="结构强度">结构强度</SelectItem>
+                      <SelectItem value="异味">异味</SelectItem>
+                      <SelectItem value="噪音">噪音</SelectItem>
+                      <SelectItem value="安全性能">安全性能</SelectItem>
+                      <SelectItem value="口感">口感</SelectItem>
+                      {uniqueDimensions.map(d => (
+                        !['间隙','段差','间隙段差','表面质量','色差','结构强度','异味','噪音','安全性能','口感'].includes(d) && <SelectItem key={d} value={d}>{d}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {/* Standard items list */}
+                {standardItems.length > 0 ? (
+                  <div className="max-h-48 overflow-y-auto space-y-1">
+                    {standardItems.slice(0, 50).map((item) => (
+                      <div
+                        key={item.id}
+                        className={cn(
+                          'p-2 rounded-md cursor-pointer text-xs transition-colors border',
+                          selectedStandardItem?.id === item.id
+                            ? 'border-primary bg-primary/5'
+                            : 'border-transparent hover:bg-muted/50'
+                        )}
+                        onClick={() => handleSelectStandardItem(item)}
+                      >
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {item.sensory_dimension && (
+                            <Badge className={cn('text-[9px] h-4', sensoryColors[item.sensory_dimension] || 'bg-muted')}>{item.sensory_dimension}</Badge>
                           )}
-                          onClick={() => handleSelectStandardItem(item)}
-                        >
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            {item.sensory_dimension && (
-                              <Badge className={cn('text-[9px] h-4', sensoryColors[item.sensory_dimension] || 'bg-muted')}>{item.sensory_dimension}</Badge>
-                            )}
-                            <span className="font-medium">{item.check_item}</span>
-                            {item.check_dimension && (
-                              <span className="text-muted-foreground">{item.check_dimension}</span>
-                            )}
-                          </div>
-                          {item.check_requirement && (
-                            <p className="text-muted-foreground mt-0.5 line-clamp-1">{item.check_requirement}</p>
-                          )}
-                          {item.standard && (
-                            <p className="text-muted-foreground mt-0.5 text-[10px]">来源: {item.standard.standard_name}</p>
+                          <span className="font-medium">{item.check_item}</span>
+                          {item.check_dimension && (
+                            <span className="text-muted-foreground">{item.check_dimension}</span>
                           )}
                         </div>
-                      ))}
-                      {standardItems.length > 30 && (
-                        <p className="text-[10px] text-muted-foreground text-center py-1">还有 {standardItems.length - 30} 项...</p>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground text-center py-2">暂无匹配的标准检查项</p>
-                  )}
-                </div>
-              )}
+                        {item.check_requirement && (
+                          <p className="text-muted-foreground mt-0.5 line-clamp-1">{item.check_requirement}</p>
+                        )}
+                        {item.measurement_position && (
+                          <p className="text-muted-foreground mt-0.5 line-clamp-1 text-[10px]">位置: {item.measurement_position}</p>
+                        )}
+                        {item.standard && (
+                          <p className="text-muted-foreground mt-0.5 text-[10px]">来源: {item.standard.standard_name}</p>
+                        )}
+                      </div>
+                    ))}
+                    {standardItems.length > 50 && (
+                      <p className="text-[10px] text-muted-foreground text-center py-1">还有 {standardItems.length - 50} 项...</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground text-center py-2">暂无匹配的标准检查项</p>
+                )}
+              </div>
               {selectedStandardItem && (
                 <div className="flex items-center gap-2 px-2 py-1.5 bg-primary/5 rounded-md border border-primary/20">
                   <Badge className="text-[9px] h-4">已引用</Badge>
                   <span className="text-xs font-medium truncate">{selectedStandardItem.check_item}</span>
-                  <Button variant="ghost" size="sm" className="h-5 w-5 p-0 ml-auto" onClick={() => { setSelectedStandardItem(null); setForm({ sensory_dimension: '', check_dimension: '', check_item: '', problem_description: '' }); }}>
+                  {selectedStandardItem.check_requirement && (
+                    <span className="text-[10px] text-muted-foreground truncate">{selectedStandardItem.check_requirement}</span>
+                  )}
+                  <Button variant="ghost" size="sm" className="h-5 w-5 p-0 ml-auto shrink-0" onClick={clearStandardItem}>
                     <Trash2 className="h-3 w-3" />
                   </Button>
                 </div>
               )}
             </div>
 
-            <div className="space-y-1.5">
-              <Label>感官维度</Label>
-              <Select value={form.sensory_dimension} onValueChange={(v) => setForm({ ...form, sensory_dimension: v })}>
-                <SelectTrigger><SelectValue placeholder="选择" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="视觉">视觉</SelectItem>
-                  <SelectItem value="听觉">听觉</SelectItem>
-                  <SelectItem value="触觉">触觉</SelectItem>
-                  <SelectItem value="嗅觉">嗅觉</SelectItem>
-                  <SelectItem value="味觉">味觉</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>感官维度</Label>
+                <Select value={form.sensory_dimension} onValueChange={(v) => setForm({ ...form, sensory_dimension: v })}>
+                  <SelectTrigger><SelectValue placeholder="选择" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="视觉">视觉</SelectItem>
+                    <SelectItem value="听觉">听觉</SelectItem>
+                    <SelectItem value="触觉">触觉</SelectItem>
+                    <SelectItem value="嗅觉">嗅觉</SelectItem>
+                    <SelectItem value="味觉">味觉</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>检查维度</Label>
+                <Input
+                  placeholder="如：间隙、段差"
+                  value={form.check_dimension}
+                  onChange={(e) => setForm({ ...form, check_dimension: e.target.value })}
+                />
+              </div>
             </div>
             <div className="space-y-1.5">
-              <Label>检查维度</Label>
-              <Select value={form.check_dimension} onValueChange={(v) => setForm({ ...form, check_dimension: v })}>
-                <SelectTrigger><SelectValue placeholder="选择检查维度" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="间隙">间隙</SelectItem>
-                  <SelectItem value="段差">段差</SelectItem>
-                  <SelectItem value="表面质量">表面质量</SelectItem>
-                  <SelectItem value="色差">色差</SelectItem>
-                  <SelectItem value="结构强度">结构强度</SelectItem>
-                  <SelectItem value="装配精度">装配精度</SelectItem>
-                  <SelectItem value="其他">其他</SelectItem>
-                </SelectContent>
-              </Select>
+              <Label>检查条目 *</Label>
+              <Input placeholder="具体检查内容" value={form.check_item} onChange={(e) => setForm({ ...form, check_item: e.target.value })} />
             </div>
             <div className="space-y-1.5">
-              <Label>问题描述 *</Label>
-              <Textarea placeholder="描述发现的问题..." value={form.check_item} onChange={(e) => setForm({ ...form, check_item: e.target.value })} rows={3} />
+              <Label>检查要求（合格标准）</Label>
+              <Textarea placeholder="合格判定标准" value={form.check_requirement} onChange={(e) => setForm({ ...form, check_requirement: e.target.value })} rows={2} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>测量位置</Label>
+                <Input
+                  placeholder="检查范围/测量位置"
+                  value={form.measurement_position}
+                  onChange={(e) => setForm({ ...form, measurement_position: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>补充说明</Label>
+                <Input
+                  placeholder="问题补充说明（可选）"
+                  value={form.problem_description}
+                  onChange={(e) => setForm({ ...form, problem_description: e.target.value })}
+                />
+              </div>
             </div>
             <MaterialPicker
               taskId={taskId}

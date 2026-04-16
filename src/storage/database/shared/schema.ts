@@ -94,6 +94,7 @@ export const checkRecords = pgTable(
     check_requirement: text("check_requirement"),
     evaluation_result: varchar("evaluation_result", { length: 20 }), // 合格/不合格/待定
     problem_description: text("problem_description"),
+    measurement_position: varchar("measurement_position", { length: 200 }), // 测量位置（从标准引用）
     measurement_value: varchar("measurement_value", { length: 100 }),
     tester: varchar("tester", { length: 50 }),
     sort_order: integer("sort_order").default(0),

@@ -41,6 +41,7 @@ export async function POST(request: NextRequest) {
     check_requirement: body.check_requirement || null,
     evaluation_result: body.evaluation_result || '待定',
     problem_description: body.problem_description || null,
+    measurement_position: body.measurement_position || null,
     measurement_value: body.measurement_value || null,
     tester: body.tester || null,
     sort_order: body.sort_order || 0,

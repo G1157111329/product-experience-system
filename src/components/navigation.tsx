@@ -11,13 +11,15 @@ import {
   FileText,
   BarChart3,
   Menu,
-  X,
   ChevronRight,
+  Shield,
+  User,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet';
+import { useAuth } from '@/lib/auth-context';
 
 const navItems = [
   { href: '/dashboard', label: '工作台', icon: LayoutDashboard },
@@ -74,8 +76,32 @@ function NavContent({ onNavigate }: { onNavigate?: () => void }) {
 
       {/* Footer */}
       <div className="px-4 py-3 border-t border-border">
-        <p className="text-xs text-muted-foreground">V1.0 体验工程师端</p>
+        <RoleSwitcher />
       </div>
+    </div>
+  );
+}
+
+function RoleSwitcher() {
+  const { isAdmin, setRole } = useAuth();
+  return (
+    <div className="flex items-center gap-2">
+      <Button
+        variant={isAdmin ? 'default' : 'ghost'}
+        size="sm"
+        className="h-7 text-xs flex-1"
+        onClick={() => setRole('admin')}
+      >
+        <Shield className="h-3 w-3 mr-1" /> 管理员
+      </Button>
+      <Button
+        variant={!isAdmin ? 'default' : 'ghost'}
+        size="sm"
+        className="h-7 text-xs flex-1"
+        onClick={() => setRole('user')}
+      >
+        <User className="h-3 w-3 mr-1" /> 使用者
+      </Button>
     </div>
   );
 }

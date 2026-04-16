@@ -66,7 +66,7 @@
 | `standards` | 体验标准库（通用/品类专用/感官评价） |
 | `standard_items` | 标准检查项 |
 | `experience_tasks` | 体验任务 |
-| `check_records` | 检查记录（走查） |
+| `check_records` | 检查记录（走查，含 measurement_position 从标准引用） |
 | `materials` | 素材（图片/视频，含 AI 预留字段，可关联record或recipe_step） |
 | `issues` | 问题整改 |
 | `report_templates` | 报告模板 |
@@ -130,8 +130,9 @@ pnpm build
 6. **PDF导出**: 通过打印页面(`/reports/print?id=xxx`)实现，浏览器原生打印为PDF，含照片/视频预览图
 7. **数据库**: Supabase PostgreSQL，Drizzle ORM，RLS 公开读写
 8. **AI 预留**: materials 表预留 ai_analysis_status 和 ai_result 字段
-9. **标准批量导入**: 支持 PDF（fetch-url提取+LLM结构化解析）和 Excel（xlsx直接解析）格式
-10. **标准关联五感体验**: 新增问题点时可从标准库引用检查项，支持按感官维度/体验阶段/检查维度筛选
+9. **标准批量导入**: 支持 PDF（fetch-url提取+LLM结构化解析）和 Excel（xlsx直接解析）格式，使用 doubao-seed-2-0-pro 模型提高识别率
+10. **标准关联五感体验**: 新增问题点时可从标准库引用检查项，支持按感官维度/体验阶段/检查维度筛选，引用时自动带入检查条目、检查要求、测量位置等全部字段
+11. **权限控制**: 管理账号(admin)可编辑标准、导入、删除；使用账号(user)只读，侧边栏底部切换角色
 
 ## 代码风格
 
@@ -140,3 +141,18 @@ pnpm build
 - 所有 API 返回统一结构 `{ code, message, data }`
 - React 组件使用 'use client' 标注客户端组件
 - 禁止 Hydration 错误：不在 JSX 中使用 typeof window/Date.now() 等
+- 权限系统：管理账号(admin)可编辑标准、批量导入/删除；使用账号(user)只读
+- 侧边栏底部有角色切换按钮，角色存储在 localStorage('user_role')
+
+## 权限说明
+
+| 操作 | 管理账号(admin) | 使用账号(user) |
+|------|:-:|:-:|
+| 新建标准 | ✅ | ❌ |
+| 批量导入标准 | ✅ | ❌ |
+| 编辑标准信息 | ✅ | ❌ |
+| 编辑/删除检查项 | ✅ | ❌ |
+| 批量删除标准 | ✅ | ❌ |
+| 查看标准 | ✅ | ✅ |
+| 新增问题点（引用标准） | ✅ | ✅ |
+| 标准引用到五感体验 | ✅ | ✅ |
