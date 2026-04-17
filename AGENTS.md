@@ -105,7 +105,7 @@
 | GET/PUT/DELETE | `/api/standards/[id]` | 标准详情/更新/删除 |
 | POST | `/api/standards/import` | 标准批量导入（PDF/Excel，按分类不同LLM prompt） |
 | GET/POST | `/api/standard-items` | 检查项列表/创建（支持批量，含新字段） |
-| GET | `/api/standard-items/search` | 跨标准检查项搜索（支持category/experience_flow筛选） |
+| GET | `/api/standard-items/search` | 跨标准检查项搜索（支持category/experience_flow筛选，product_category自动包含null标准） |
 | GET/POST | `/api/tasks` | 任务列表/创建（分页+筛选） |
 | GET/PUT/DELETE | `/api/tasks/[id]` | 任务详情（含记录+问题）/更新/删除 |
 | GET/POST | `/api/records` | 检查记录列表/创建（含standard_category等新字段） |

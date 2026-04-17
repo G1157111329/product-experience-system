@@ -62,7 +62,13 @@ async function parsePdfWithLLM(pdfUrl: string, headers: Record<string, string>, 
   if (category === '通用标准') {
     systemPrompt += `4. sensory_dimension只允许：视觉/听觉/触觉/嗅觉/味觉
 5. test_phase只允许：开箱/首次安装/产品使用/清洁收纳/其他
-6. experience_flow只允许：拿取外包装/拆开内包装/配件梳理/外观美观/外观缺陷/标识文字/首次安装/放置及组装/操作交互/产品运行/冲水/擦拭/晾干/收纳/其他
+6. experience_flow必须严格遵循以下级联映射（experience_flow必须属于对应的test_phase）：
+   - 开箱 → 拿取外包装/拆开内包装
+   - 首次安装 → 配件梳理/外观美观/外观缺陷/标识文字/首次安装
+   - 产品使用 → 放置及组装/操作交互/产品运行
+   - 清洁收纳 → 冲水/擦拭/晾干/收纳
+   - 其他 → 其他
+   注意：外观缺陷属于首次安装，不属于产品使用；放置及组装属于产品使用，不属于首次安装
 7. touch_point：触点描述，如"外箱手提把手"
 8. check_requirement：检验范围及具体要求
 9. experience_standard：体验标准，如"间隙≤2mm"

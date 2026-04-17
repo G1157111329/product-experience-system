@@ -13,9 +13,14 @@ export async function GET(request: NextRequest) {
   const keyword = searchParams.get('keyword');
 
   // First get matching standards
+  // When product_category is specified, include:
+  //   1. Standards with matching product_category (品类标准 etc.)
+  //   2. Standards with null product_category (通用标准 applies to all products)
   let stdQuery = client.from('standards').select('id, standard_name, category, product_category');
   if (category) stdQuery = stdQuery.eq('category', category);
-  if (product_category) stdQuery = stdQuery.eq('product_category', product_category);
+  if (product_category) {
+    stdQuery = stdQuery.or(`product_category.eq.${product_category},product_category.is.null`);
+  }
 
   const { data: standards, error: stdError } = await stdQuery;
   if (stdError) return NextResponse.json({ code: 1, message: stdError.message }, { status: 500 });
