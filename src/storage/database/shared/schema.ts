@@ -13,7 +13,7 @@ export const standards = pgTable(
   {
     id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
     standard_name: varchar("standard_name", { length: 200 }).notNull(),
-    category: varchar("category", { length: 50 }).notNull(), // 通用标准/品类专用标准/感官评价标准
+    category: varchar("category", { length: 50 }).notNull(), // 通用标准/品类标准/感官评价标准/食谱功能标准
     product_category: varchar("product_category", { length: 50 }), // 关联品类（品类专用标准用）
     version: varchar("version", { length: 20 }).default("V1.0"),
     is_active: boolean("is_active").default(true).notNull(),
@@ -35,16 +35,25 @@ export const standardItems = pgTable(
     standard_id: varchar("standard_id", { length: 36 }).notNull().references(() => standards.id, { onDelete: "cascade" }),
     sort_order: integer("sort_order").default(0),
     sensory_dimension: varchar("sensory_dimension", { length: 20 }), // 感官维度：视觉/听觉/触觉/嗅觉/味觉
-    test_phase: varchar("test_phase", { length: 50 }), // 体验阶段：开箱/使用/清洁等
-    check_dimension: varchar("check_dimension", { length: 50 }), // 检查维度：间隙/段差/表面质量等
-    check_item: varchar("check_item", { length: 200 }).notNull(), // 具体检查条目
-    check_requirement: text("check_requirement"), // 检查要求
+    test_phase: varchar("test_phase", { length: 50 }), // 产品使用阶段：开箱/首次安装/产品使用/清洁收纳
+    experience_flow: varchar("experience_flow", { length: 100 }), // 体验流程（通用标准）
+    touch_point: varchar("touch_point", { length: 200 }), // 触点（通用标准）
+    check_dimension: varchar("check_dimension", { length: 50 }), // 检查维度（品类标准）
+    sub_check_dimension: varchar("sub_check_dimension", { length: 100 }), // 细分检查维度（品类标准）
+    check_item: varchar("check_item", { length: 200 }).notNull(), // 具体检查条目/触点
+    check_requirement: text("check_requirement"), // 检验范围及具体要求/检查要求及区域
+    experience_standard: text("experience_standard"), // 体验标准（通用标准）
+    check_standard: text("check_standard"), // 检查标准（品类标准）
     measurement_position: varchar("measurement_position", { length: 200 }), // 测量位置
-    check_tool: varchar("check_tool", { length: 100 }), // 检查工具
-    standard_a: varchar("standard_a", { length: 200 }), // A面标准
-    standard_b: varchar("standard_b", { length: 200 }), // B面标准
-    standard_c: varchar("standard_c", { length: 200 }), // C面标准
-    problem_level: varchar("problem_level", { length: 20 }), // 问题等级
+    check_tool: varchar("check_tool", { length: 100 }), // 测量工具/检查工具
+    standard_a: varchar("standard_a", { length: 200 }),
+    standard_b: varchar("standard_b", { length: 200 }),
+    standard_c: varchar("standard_c", { length: 200 }),
+    problem_level: varchar("problem_level", { length: 20 }), // 问题等级：一级/二级/三级
+    evaluation_prep: text("evaluation_prep"), // 感官评价准备（感官评价标准）
+    subjective_score: integer("subjective_score"), // 主观满意度分值（感官评价标准）
+    subjective_rating: text("subjective_rating"), // 主观满意度描述（感官评价标准）
+    reference_images: jsonb("reference_images"), // 参考图片（品类标准-检查要求及区域）
     created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -87,11 +96,15 @@ export const checkRecords = pgTable(
     id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
     task_id: varchar("task_id", { length: 36 }).notNull().references(() => experienceTasks.id, { onDelete: "cascade" }),
     standard_item_id: varchar("standard_item_id", { length: 36 }), // 关联标准检查项
+    standard_category: varchar("standard_category", { length: 50 }), // 标准类型：通用标准/品类标准/感官评价标准
     sensory_dimension: varchar("sensory_dimension", { length: 20 }),
     test_phase: varchar("test_phase", { length: 50 }),
+    experience_flow: varchar("experience_flow", { length: 100 }), // 体验流程（通用标准）
+    touch_point: varchar("touch_point", { length: 200 }), // 触点（通用标准）
     check_dimension: varchar("check_dimension", { length: 50 }),
     check_item: varchar("check_item", { length: 200 }).notNull(),
     check_requirement: text("check_requirement"),
+    experience_standard: text("experience_standard"), // 体验标准（通用标准）
     evaluation_result: varchar("evaluation_result", { length: 20 }), // 合格/不合格/待定
     problem_description: text("problem_description"),
     measurement_position: varchar("measurement_position", { length: 200 }), // 测量位置（从标准引用）

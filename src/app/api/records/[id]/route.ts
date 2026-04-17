@@ -11,6 +11,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     'evaluation_result', 'problem_description', 'measurement_value',
     'tester', 'sort_order', 'sensory_dimension', 'test_phase',
     'check_dimension', 'check_item', 'check_requirement',
+    'standard_category', 'experience_flow', 'touch_point', 'experience_standard',
   ];
 
   for (const field of allowedFields) {

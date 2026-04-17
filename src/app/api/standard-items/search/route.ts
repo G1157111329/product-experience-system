@@ -6,6 +6,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const sensory_dimension = searchParams.get('sensory_dimension');
   const test_phase = searchParams.get('test_phase');
+  const experience_flow = searchParams.get('experience_flow');
   const check_dimension = searchParams.get('check_dimension');
   const category = searchParams.get('category');
   const product_category = searchParams.get('product_category');
@@ -35,6 +36,7 @@ export async function GET(request: NextRequest) {
 
   if (sensory_dimension) itemQuery = itemQuery.eq('sensory_dimension', sensory_dimension);
   if (test_phase) itemQuery = itemQuery.eq('test_phase', test_phase);
+  if (experience_flow) itemQuery = itemQuery.eq('experience_flow', experience_flow);
   if (check_dimension) itemQuery = itemQuery.eq('check_dimension', check_dimension);
   if (keyword) itemQuery = itemQuery.ilike('check_item', `%${keyword}%`);
 

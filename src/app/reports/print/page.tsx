@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 
@@ -71,6 +71,14 @@ async function imageUrlToBase64(url: string): Promise<string> {
 }
 
 export default function ReportPrintPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-screen"><Loader2 className="h-8 w-8 animate-spin" /></div>}>
+      <ReportPrintContent />
+    </Suspense>
+  );
+}
+
+function ReportPrintContent() {
   const searchParams = useSearchParams();
   const reportId = searchParams.get('id');
   const [report, setReport] = useState<ReportData | null>(null);

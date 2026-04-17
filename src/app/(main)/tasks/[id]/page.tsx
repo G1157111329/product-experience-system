@@ -30,6 +30,9 @@ interface CheckRecord {
   id: string; sensory_dimension: string | null; check_dimension: string | null;
   check_item: string; check_requirement: string | null; evaluation_result: string;
   problem_description: string | null; measurement_value: string | null;
+  standard_category: string | null; test_phase: string | null;
+  experience_flow: string | null; touch_point: string | null;
+  experience_standard: string | null;
   materials?: Material[];
 }
 
@@ -359,81 +362,69 @@ interface StandardItem {
   standard_id: string;
   sensory_dimension: string | null;
   test_phase: string | null;
+  experience_flow: string | null;
+  touch_point: string | null;
   check_dimension: string | null;
+  sub_check_dimension: string | null;
   check_item: string;
   check_requirement: string | null;
-  measurement_position: string | null;
-  check_tool: string | null;
-  standard_a: string | null;
-  standard_b: string | null;
-  standard_c: string | null;
-  problem_level: string | null;
+  check_standard: string | null;
+  experience_standard: string | null;
+  evaluation_prep: string | null;
+  subjective_score: number | null;
+  subjective_rating: string | null;
   standard: { id: string; standard_name: string; category: string; product_category: string | null } | null;
 }
 
+const phaseOptions = ['开箱', '首次安装', '产品使用', '清洁收纳', '其他'];
+const sensoryOptions = ['视觉', '听觉', '触觉', '嗅觉', '味觉'];
+const flowByPhase: Record<string, string[]> = {
+  '开箱': ['拿取外包装', '拆开内包装'],
+  '首次安装': ['配件梳理', '外观美观', '外观缺陷', '标识文字', '首次安装'],
+  '产品使用': ['放置及组装', '操作交互', '产品运行'],
+  '清洁收纳': ['冲水', '擦拭', '晾干', '收纳'],
+  '其他': ['其他'],
+};
+const standardCategoryOptions = ['通用标准', '品类标准', '感官评价标准'];
+
 function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId: string; records: CheckRecord[]; taskProductCategory?: string; onRefresh: () => void }) {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [form, setForm] = useState({
-    sensory_dimension: '',
-    check_dimension: '',
-    check_item: '',
-    check_requirement: '',
-    measurement_position: '',
-    problem_description: '',
-  });
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
   const [, setSelectedMaterials] = useState<Material[]>([]);
   const [selectedRecord, setSelectedRecord] = useState<CheckRecord | null>(null);
   const [recordMaterials, setRecordMaterials] = useState<Record<string, Material[]>>({});
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
 
-  // Standard items search state
-  const [standardItems, setStandardItems] = useState<StandardItem[]>([]);
-  const [filterSensory, setFilterSensory] = useState<string>('');
-  const [filterPhase, setFilterPhase] = useState<string>('');
-  const [filterDimension, setFilterDimension] = useState<string>('');
-  const [selectedStandardItem, setSelectedStandardItem] = useState<StandardItem | null>(null);
+  // New standard-type-based form
+  const [formCategory, setFormCategory] = useState('通用标准');
+  const [generalForm, setGeneralForm] = useState({ test_phase: '', experience_flow: '', sensory_dimension: '', problem_description: '' });
+  const [categoryForm, setCategoryForm] = useState({ sensory_dimension: '', check_dimension: '', sub_check_dimension: '', check_item: '', check_requirement: '', check_standard: '', problem_description: '' });
+  const [sensoryForm, setSensoryForm] = useState({ sensory_dimension: '', evaluation_prep: '', subjective_score: '', subjective_rating: '', problem_description: '' });
 
-  // Fetch standard items when filters change
+  // Standard items for auto-fill in general standard mode
+  const [matchedItems, setMatchedItems] = useState<StandardItem[]>([]);
+
+  // Fetch matched standard items for general standard when all 3 selects are chosen
   useEffect(() => {
+    if (formCategory !== '通用标准') return;
+    if (!generalForm.test_phase || !generalForm.experience_flow || !generalForm.sensory_dimension) {
+      setMatchedItems([]);
+      return;
+    }
     const fetchItems = async () => {
       const params = new URLSearchParams();
-      if (filterSensory) params.set('sensory_dimension', filterSensory);
-      if (filterPhase) params.set('test_phase', filterPhase);
-      if (filterDimension) params.set('check_dimension', filterDimension);
+      params.set('category', '通用标准');
+      params.set('sensory_dimension', generalForm.sensory_dimension);
+      params.set('test_phase', generalForm.test_phase);
+      params.set('experience_flow', generalForm.experience_flow);
       if (taskProductCategory) params.set('product_category', taskProductCategory);
       const res = await fetch(`/api/standard-items/search?${params}`);
       const data = await res.json();
-      if (data.code === 0) setStandardItems(data.data || []);
-      else setStandardItems([]);
+      if (data.code === 0) setMatchedItems(data.data || []);
+      else setMatchedItems([]);
     };
     fetchItems();
-  }, [filterSensory, filterPhase, filterDimension, taskProductCategory]);
-
-  // When a standard item is selected, populate the form with ALL fields
-  const handleSelectStandardItem = (item: StandardItem) => {
-    setSelectedStandardItem(item);
-    setForm({
-      sensory_dimension: item.sensory_dimension || '',
-      check_dimension: item.check_dimension || '',
-      check_item: item.check_item || '',
-      check_requirement: item.check_requirement || '',
-      measurement_position: item.measurement_position || '',
-      problem_description: '',
-    });
-  };
-
-  const clearStandardItem = () => {
-    setSelectedStandardItem(null);
-    setForm({
-      sensory_dimension: '',
-      check_dimension: '',
-      check_item: '',
-      check_requirement: '',
-      measurement_position: '',
-      problem_description: '',
-    });
-  };
+  }, [formCategory, generalForm.test_phase, generalForm.experience_flow, generalForm.sensory_dimension, taskProductCategory]);
 
   // Fetch materials for each record
   useEffect(() => {
@@ -451,22 +442,57 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
     if (records.length > 0) fetchRecordMaterials();
   }, [records]);
 
+  const resetForms = () => {
+    setFormCategory('通用标准');
+    setGeneralForm({ test_phase: '', experience_flow: '', sensory_dimension: '', problem_description: '' });
+    setCategoryForm({ sensory_dimension: '', check_dimension: '', sub_check_dimension: '', check_item: '', check_requirement: '', check_standard: '', problem_description: '' });
+    setSensoryForm({ sensory_dimension: '', evaluation_prep: '', subjective_score: '', subjective_rating: '', problem_description: '' });
+    setSelectedMaterialIds([]);
+    setSelectedMaterials([]);
+    setMatchedItems([]);
+  };
+
   const handleAdd = async () => {
+    let body: Record<string, unknown> = { task_id: taskId, evaluation_result: '待定', sort_order: records.length };
+
+    if (formCategory === '通用标准') {
+      // Auto-fill from first matched standard item
+      const matched = matchedItems[0];
+      body = {
+        ...body,
+        standard_category: '通用标准',
+        sensory_dimension: generalForm.sensory_dimension || null,
+        test_phase: generalForm.test_phase || null,
+        experience_flow: generalForm.experience_flow || null,
+        touch_point: matched?.touch_point || null,
+        check_item: matched?.touch_point || generalForm.experience_flow || '',
+        check_requirement: matched?.check_requirement || null,
+        experience_standard: matched?.experience_standard || null,
+        problem_description: generalForm.problem_description || null,
+      };
+    } else if (formCategory === '品类标准') {
+      body = {
+        ...body,
+        standard_category: '品类标准',
+        sensory_dimension: categoryForm.sensory_dimension || null,
+        check_dimension: categoryForm.check_dimension || null,
+        check_item: categoryForm.check_item,
+        check_requirement: categoryForm.check_requirement || null,
+        problem_description: categoryForm.problem_description || null,
+      };
+    } else if (formCategory === '感官评价标准') {
+      body = {
+        ...body,
+        standard_category: '感官评价标准',
+        sensory_dimension: sensoryForm.sensory_dimension || null,
+        check_item: `${sensoryForm.sensory_dimension}评价`,
+        check_requirement: sensoryForm.evaluation_prep || null,
+        problem_description: sensoryForm.problem_description || null,
+      };
+    }
+
     const res = await fetch('/api/records', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        task_id: taskId,
-        standard_item_id: selectedStandardItem?.id || null,
-        sensory_dimension: form.sensory_dimension || null,
-        test_phase: selectedStandardItem?.test_phase || null,
-        check_dimension: form.check_dimension || null,
-        check_item: form.check_item,
-        check_requirement: form.check_requirement || null,
-        measurement_position: form.measurement_position || null,
-        problem_description: form.problem_description || null,
-        evaluation_result: '待定',
-        sort_order: records.length,
-      }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
     const data = await res.json();
     if (data.code === 0) {
@@ -480,27 +506,157 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
         }
       }
       setAddDialogOpen(false);
-      setForm({ sensory_dimension: '', check_dimension: '', check_item: '', check_requirement: '', measurement_position: '', problem_description: '' });
-      setSelectedMaterialIds([]);
-      setSelectedMaterials([]);
-      setSelectedStandardItem(null);
+      resetForms();
       onRefresh();
       toast.success('问题点已添加');
     }
   };
 
-  // Group by sensory dimension
+  // Check if form is valid for submission
+  const isFormValid = () => {
+    if (formCategory === '通用标准') return !!(generalForm.test_phase && generalForm.experience_flow && generalForm.sensory_dimension);
+    if (formCategory === '品类标准') return !!categoryForm.check_item;
+    if (formCategory === '感官评价标准') return !!sensoryForm.sensory_dimension;
+    return false;
+  };
+
+  // Group records by standard_category then sensory_dimension
   const grouped = records.reduce<Record<string, CheckRecord[]>>((acc, r) => {
-    const key = r.sensory_dimension || '未分类';
+    const cat = r.standard_category || '未分类';
+    const key = `${cat} · ${r.sensory_dimension || '未分类'}`;
     if (!acc[key]) acc[key] = [];
     acc[key].push(r);
     return acc;
   }, {});
 
-  // Get unique values from standard items for filter options
-  const uniqueSensory = [...new Set(standardItems.map(i => i.sensory_dimension).filter(Boolean))] as string[];
-  const uniquePhases = [...new Set(standardItems.map(i => i.test_phase).filter(Boolean))] as string[];
-  const uniqueDimensions = [...new Set(standardItems.map(i => i.check_dimension).filter(Boolean))] as string[];
+  // Render the add form based on category
+  const renderAddForm = () => {
+    // Standard type selector
+    const categorySelector = (
+      <div className="space-y-1.5">
+        <Label>标准类型</Label>
+        <div className="grid grid-cols-3 gap-2">
+          {standardCategoryOptions.map((cat) => (
+            <button
+              key={cat}
+              type="button"
+              className={cn(
+                'px-2 py-2 rounded-md text-xs font-medium border-2 transition-colors text-center',
+                formCategory === cat ? 'border-primary bg-primary/5 text-primary' : 'border-border text-muted-foreground hover:border-primary/30'
+              )}
+              onClick={() => { setFormCategory(cat); setMatchedItems([]); }}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+
+    if (formCategory === '通用标准') return (
+      <div className="space-y-3">
+        {categorySelector}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label>产品使用阶段 *</Label>
+            <Select value={generalForm.test_phase} onValueChange={(v) => setGeneralForm({ ...generalForm, test_phase: v, experience_flow: '' })}>
+              <SelectTrigger><SelectValue placeholder="选择" /></SelectTrigger>
+              <SelectContent>{phaseOptions.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>体验流程 *</Label>
+            <Select value={generalForm.experience_flow} onValueChange={(v) => setGeneralForm({ ...generalForm, experience_flow: v })}>
+              <SelectTrigger><SelectValue placeholder="选择" /></SelectTrigger>
+              <SelectContent>{(flowByPhase[generalForm.test_phase] || []).map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label>感官维度 *</Label>
+          <Select value={generalForm.sensory_dimension} onValueChange={(v) => setGeneralForm({ ...generalForm, sensory_dimension: v })}>
+            <SelectTrigger><SelectValue placeholder="选择" /></SelectTrigger>
+            <SelectContent>{sensoryOptions.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+        {/* Auto-filled fields from standard */}
+        {matchedItems.length > 0 && (
+          <div className="space-y-2 p-3 rounded-lg bg-muted/30 border border-border">
+            <Label className="text-xs text-muted-foreground">自动带出（来自标准库）</Label>
+            {matchedItems[0].touch_point && (
+              <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-20 shrink-0">触点</span><span>{matchedItems[0].touch_point}</span></div>
+            )}
+            {matchedItems[0].check_requirement && (
+              <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-20 shrink-0">检验范围及具体要求</span><span>{matchedItems[0].check_requirement}</span></div>
+            )}
+            {matchedItems[0].experience_standard && (
+              <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-20 shrink-0">体验标准</span><span>{matchedItems[0].experience_standard}</span></div>
+            )}
+          </div>
+        )}
+        {generalForm.test_phase && generalForm.experience_flow && generalForm.sensory_dimension && matchedItems.length === 0 && (
+          <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-950/20 dark:border-amber-800">
+            <p className="text-xs text-amber-700 dark:text-amber-400">未找到匹配的标准检查项，请手动填写检查结果</p>
+          </div>
+        )}
+        <div className="space-y-1.5">
+          <Label>检查结果</Label>
+          <Textarea placeholder="描述检查结果" value={generalForm.problem_description} onChange={(e) => setGeneralForm({ ...generalForm, problem_description: e.target.value })} rows={2} />
+        </div>
+        <MaterialPicker taskId={taskId} selectedIds={selectedMaterialIds} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
+        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid()}>添加</Button>
+      </div>
+    );
+
+    if (formCategory === '品类标准') return (
+      <div className="space-y-3">
+        {categorySelector}
+        <div className="space-y-1.5">
+          <Label>感官维度</Label>
+          <Select value={categoryForm.sensory_dimension} onValueChange={(v) => setCategoryForm({ ...categoryForm, sensory_dimension: v })}>
+            <SelectTrigger><SelectValue placeholder="选择" /></SelectTrigger>
+            <SelectContent>{sensoryOptions.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5"><Label>检查维度</Label><Input placeholder="如：间隙段差" value={categoryForm.check_dimension} onChange={(e) => setCategoryForm({ ...categoryForm, check_dimension: e.target.value })} /></div>
+          <div className="space-y-1.5"><Label>细分检查维度</Label><Input placeholder="如：间隙" value={categoryForm.sub_check_dimension} onChange={(e) => setCategoryForm({ ...categoryForm, sub_check_dimension: e.target.value })} /></div>
+        </div>
+        <div className="space-y-1.5"><Label>具体检查条目 *</Label><Input placeholder="如：控制面板与外壳间隙" value={categoryForm.check_item} onChange={(e) => setCategoryForm({ ...categoryForm, check_item: e.target.value })} /></div>
+        <div className="space-y-1.5"><Label>检查要求及区域</Label><Textarea placeholder="检查要求和区域说明" value={categoryForm.check_requirement} onChange={(e) => setCategoryForm({ ...categoryForm, check_requirement: e.target.value })} rows={2} /></div>
+        <div className="space-y-1.5"><Label>检查标准</Label><Input placeholder="如：间隙≤0.3mm" value={categoryForm.check_standard} onChange={(e) => setCategoryForm({ ...categoryForm, check_standard: e.target.value })} /></div>
+        <div className="space-y-1.5"><Label>检查结果</Label><Textarea placeholder="描述检查结果" value={categoryForm.problem_description} onChange={(e) => setCategoryForm({ ...categoryForm, problem_description: e.target.value })} rows={2} /></div>
+        <MaterialPicker taskId={taskId} selectedIds={selectedMaterialIds} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
+        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid()}>添加</Button>
+      </div>
+    );
+
+    if (formCategory === '感官评价标准') return (
+      <div className="space-y-3">
+        {categorySelector}
+        <div className="space-y-1.5">
+          <Label>感官维度 *</Label>
+          <Select value={sensoryForm.sensory_dimension} onValueChange={(v) => setSensoryForm({ ...sensoryForm, sensory_dimension: v })}>
+            <SelectTrigger><SelectValue placeholder="选择" /></SelectTrigger>
+            <SelectContent>{sensoryOptions.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5"><Label>感官评价准备</Label><Textarea placeholder="测试环境、人员准备等" value={sensoryForm.evaluation_prep} onChange={(e) => setSensoryForm({ ...sensoryForm, evaluation_prep: e.target.value })} rows={2} /></div>
+        <div className="space-y-1.5">
+          <Label>主观满意度（分值 + 主观感受描述）</Label>
+          <div className="grid grid-cols-[80px_1fr] gap-2">
+            <Input type="number" min={1} max={5} placeholder="1-5分" value={sensoryForm.subjective_score} onChange={(e) => setSensoryForm({ ...sensoryForm, subjective_score: e.target.value })} />
+            <Input placeholder="如：1分-十分不满意-描述..." value={sensoryForm.subjective_rating} onChange={(e) => setSensoryForm({ ...sensoryForm, subjective_rating: e.target.value })} />
+          </div>
+        </div>
+        <div className="space-y-1.5"><Label>检查结果</Label><Textarea placeholder="描述检查结果" value={sensoryForm.problem_description} onChange={(e) => setSensoryForm({ ...sensoryForm, problem_description: e.target.value })} rows={2} /></div>
+        <MaterialPicker taskId={taskId} selectedIds={selectedMaterialIds} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
+        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid()}>添加</Button>
+      </div>
+    );
+
+    return <div className="space-y-3">{categorySelector}<p className="text-sm text-muted-foreground text-center py-4">请选择标准类型</p></div>;
+  };
 
   return (
     <div className="space-y-4">
@@ -513,12 +669,20 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
           <p className="text-xs text-muted-foreground mt-1">点击下方按钮新增</p>
         </CardContent></Card>
       ) : (
-        Object.entries(grouped).map(([dimension, items]) => (
-          <Card key={dimension}>
+        Object.entries(grouped).map(([group, items]) => (
+          <Card key={group}>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <Badge className={cn('text-[10px]', sensoryColors[dimension] || 'bg-muted')}>{dimension}</Badge>
-                <span className="text-muted-foreground text-xs">{items.length} 项</span>
+                {(() => {
+                  const [cat, dim] = group.split(' · ');
+                  return (
+                    <>
+                      <Badge variant="secondary" className="text-[10px]">{cat}</Badge>
+                      <Badge className={cn('text-[10px]', sensoryColors[dim] || 'bg-muted')}>{dim}</Badge>
+                      <span className="text-muted-foreground text-xs">{items.length} 项</span>
+                    </>
+                  );
+                })()}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-1.5">
@@ -538,8 +702,14 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
                         record.evaluation_result === '不合格' ? 'bg-red-500' : 'bg-amber-500'
                       )} />
                       <span className="text-sm flex-1 truncate">{record.check_item}</span>
-                      {record.check_dimension && (
-                        <span className="text-[10px] text-muted-foreground bg-background px-1.5 py-0.5 rounded">{record.check_dimension}</span>
+                      {record.test_phase && (
+                        <span className="text-[10px] text-muted-foreground bg-background px-1.5 py-0.5 rounded">{record.test_phase}</span>
+                      )}
+                      {record.experience_flow && (
+                        <span className="text-[10px] text-muted-foreground bg-background px-1.5 py-0.5 rounded">{record.experience_flow}</span>
+                      )}
+                      {record.touch_point && (
+                        <span className="text-[10px] text-muted-foreground bg-background px-1.5 py-0.5 rounded">{record.touch_point}</span>
                       )}
                       <span className={cn('text-xs font-medium shrink-0',
                         record.evaluation_result === '合格' ? 'text-emerald-600' :
@@ -572,178 +742,16 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
 
       {/* Add button */}
       <div className="sticky bottom-4">
-        <Button className="w-full" onClick={() => setAddDialogOpen(true)}>
+        <Button className="w-full" onClick={() => { resetForms(); setAddDialogOpen(true); }}>
           <Plus className="h-4 w-4 mr-1.5" /> 新增问题点
         </Button>
       </div>
 
       {/* Add dialog */}
-      <Dialog open={addDialogOpen} onOpenChange={(open) => { setAddDialogOpen(open); if (!open) { setSelectedMaterialIds([]); setSelectedMaterials([]); setSelectedStandardItem(null); setForm({ sensory_dimension: '', check_dimension: '', check_item: '', check_requirement: '', measurement_position: '', problem_description: '' }); } }}>
+      <Dialog open={addDialogOpen} onOpenChange={(open) => { setAddDialogOpen(open); if (!open) resetForms(); }}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>新增问题点</DialogTitle></DialogHeader>
-          <div className="space-y-3 mt-2">
-            {/* Standard item reference section */}
-            <div className="space-y-2">
-              <Label className="text-xs text-muted-foreground">从标准库引用</Label>
-              <div className="space-y-2 p-3 rounded-lg bg-muted/30 border border-border">
-                <div className="grid grid-cols-3 gap-2">
-                  <Select value={filterSensory} onValueChange={(v) => setFilterSensory(v === 'all' ? '' : v)}>
-                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="感官维度" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">全部</SelectItem>
-                      <SelectItem value="视觉">视觉</SelectItem>
-                      <SelectItem value="听觉">听觉</SelectItem>
-                      <SelectItem value="触觉">触觉</SelectItem>
-                      <SelectItem value="嗅觉">嗅觉</SelectItem>
-                      <SelectItem value="味觉">味觉</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select value={filterPhase} onValueChange={(v) => setFilterPhase(v === 'all' ? '' : v)}>
-                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="体验阶段" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">全部</SelectItem>
-                      {uniquePhases.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                      <SelectItem value="开箱">开箱</SelectItem>
-                      <SelectItem value="安装">安装</SelectItem>
-                      <SelectItem value="使用">使用</SelectItem>
-                      <SelectItem value="清洁">清洁</SelectItem>
-                      <SelectItem value="收纳">收纳</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select value={filterDimension} onValueChange={(v) => setFilterDimension(v === 'all' ? '' : v)}>
-                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="检查维度" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">全部</SelectItem>
-                      <SelectItem value="间隙">间隙</SelectItem>
-                      <SelectItem value="段差">段差</SelectItem>
-                      <SelectItem value="间隙段差">间隙段差</SelectItem>
-                      <SelectItem value="表面质量">表面质量</SelectItem>
-                      <SelectItem value="色差">色差</SelectItem>
-                      <SelectItem value="结构强度">结构强度</SelectItem>
-                      <SelectItem value="异味">异味</SelectItem>
-                      <SelectItem value="噪音">噪音</SelectItem>
-                      <SelectItem value="安全性能">安全性能</SelectItem>
-                      <SelectItem value="口感">口感</SelectItem>
-                      {uniqueDimensions.map(d => (
-                        !['间隙','段差','间隙段差','表面质量','色差','结构强度','异味','噪音','安全性能','口感'].includes(d) && <SelectItem key={d} value={d}>{d}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                {/* Standard items list */}
-                {standardItems.length > 0 ? (
-                  <div className="max-h-48 overflow-y-auto space-y-1">
-                    {standardItems.slice(0, 50).map((item) => (
-                      <div
-                        key={item.id}
-                        className={cn(
-                          'p-2 rounded-md cursor-pointer text-xs transition-colors border',
-                          selectedStandardItem?.id === item.id
-                            ? 'border-primary bg-primary/5'
-                            : 'border-transparent hover:bg-muted/50'
-                        )}
-                        onClick={() => handleSelectStandardItem(item)}
-                      >
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {item.sensory_dimension && (
-                            <Badge className={cn('text-[9px] h-4', sensoryColors[item.sensory_dimension] || 'bg-muted')}>{item.sensory_dimension}</Badge>
-                          )}
-                          <span className="font-medium">{item.check_item}</span>
-                          {item.check_dimension && (
-                            <span className="text-muted-foreground">{item.check_dimension}</span>
-                          )}
-                        </div>
-                        {item.check_requirement && (
-                          <p className="text-muted-foreground mt-0.5 line-clamp-1">{item.check_requirement}</p>
-                        )}
-                        {item.measurement_position && (
-                          <p className="text-muted-foreground mt-0.5 line-clamp-1 text-[10px]">位置: {item.measurement_position}</p>
-                        )}
-                        {item.standard && (
-                          <p className="text-muted-foreground mt-0.5 text-[10px]">来源: {item.standard.standard_name}</p>
-                        )}
-                      </div>
-                    ))}
-                    {standardItems.length > 50 && (
-                      <p className="text-[10px] text-muted-foreground text-center py-1">还有 {standardItems.length - 50} 项...</p>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground text-center py-2">暂无匹配的标准检查项</p>
-                )}
-              </div>
-              {selectedStandardItem && (
-                <div className="flex items-center gap-2 px-2 py-1.5 bg-primary/5 rounded-md border border-primary/20">
-                  <Badge className="text-[9px] h-4">已引用</Badge>
-                  <span className="text-xs font-medium truncate">{selectedStandardItem.check_item}</span>
-                  {selectedStandardItem.check_requirement && (
-                    <span className="text-[10px] text-muted-foreground truncate">{selectedStandardItem.check_requirement}</span>
-                  )}
-                  <Button variant="ghost" size="sm" className="h-5 w-5 p-0 ml-auto shrink-0" onClick={clearStandardItem}>
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                </div>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>感官维度</Label>
-                <Select value={form.sensory_dimension} onValueChange={(v) => setForm({ ...form, sensory_dimension: v })}>
-                  <SelectTrigger><SelectValue placeholder="选择" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="视觉">视觉</SelectItem>
-                    <SelectItem value="听觉">听觉</SelectItem>
-                    <SelectItem value="触觉">触觉</SelectItem>
-                    <SelectItem value="嗅觉">嗅觉</SelectItem>
-                    <SelectItem value="味觉">味觉</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>检查维度</Label>
-                <Input
-                  placeholder="如：间隙、段差"
-                  value={form.check_dimension}
-                  onChange={(e) => setForm({ ...form, check_dimension: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label>检查条目 *</Label>
-              <Input placeholder="具体检查内容" value={form.check_item} onChange={(e) => setForm({ ...form, check_item: e.target.value })} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>检查要求（合格标准）</Label>
-              <Textarea placeholder="合格判定标准" value={form.check_requirement} onChange={(e) => setForm({ ...form, check_requirement: e.target.value })} rows={2} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>测量位置</Label>
-                <Input
-                  placeholder="检查范围/测量位置"
-                  value={form.measurement_position}
-                  onChange={(e) => setForm({ ...form, measurement_position: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>补充说明</Label>
-                <Input
-                  placeholder="问题补充说明（可选）"
-                  value={form.problem_description}
-                  onChange={(e) => setForm({ ...form, problem_description: e.target.value })}
-                />
-              </div>
-            </div>
-            <MaterialPicker
-              taskId={taskId}
-              selectedIds={selectedMaterialIds}
-              onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }}
-            />
-            <Button onClick={handleAdd} className="w-full" disabled={!form.check_item}>
-              添加
-            </Button>
-          </div>
+          <div className="mt-2">{renderAddForm()}</div>
         </DialogContent>
       </Dialog>
     </div>

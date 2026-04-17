@@ -11,21 +11,27 @@ const storage = new S3Storage({
   region: 'cn-beijing',
 });
 
+// Unified extracted item that covers all standard categories
 interface ExtractedItem {
   sensory_dimension: string | null;
   test_phase: string | null;
+  experience_flow: string | null;
+  touch_point: string | null;
   check_dimension: string | null;
+  sub_check_dimension: string | null;
   check_item: string;
   check_requirement: string | null;
+  experience_standard: string | null;
+  check_standard: string | null;
   measurement_position: string | null;
   check_tool: string | null;
-  standard_a: string | null;
-  standard_b: string | null;
-  standard_c: string | null;
   problem_level: string | null;
+  evaluation_prep: string | null;
+  subjective_score: number | null;
+  subjective_rating: string | null;
 }
 
-async function parsePdfWithLLM(pdfUrl: string, headers: Record<string, string>): Promise<ExtractedItem[]> {
+async function parsePdfWithLLM(pdfUrl: string, headers: Record<string, string>, category: string): Promise<ExtractedItem[]> {
   const fetchConfig = new Config();
   const fetchClient = new FetchClient(fetchConfig, headers);
   const fetchResponse = await fetchClient.fetch(pdfUrl);
@@ -46,28 +52,49 @@ async function parsePdfWithLLM(pdfUrl: string, headers: Record<string, string>):
   const llmConfig = new Config();
   const llmClient = new LLMClient(llmConfig, headers);
 
-  const systemPrompt = `你是中国产品体验标准解析专家。你从标准文档文本中提取检查项，所有输出必须使用中文。
+  // Build category-specific system prompt
+  let systemPrompt = `你是中国产品体验标准解析专家。你从标准文档文本中提取检查项，所有输出必须使用中文。
 规则：
 1. 只输出一个JSON数组，不要输出任何其他文字、解释或markdown标记
 2. 所有字段值必须用中文填写，禁止使用英文
-3. sensory_dimension只允许：视觉/听觉/触觉/嗅觉/味觉，无法确定设为null
-4. test_phase只允许中文：开箱/安装/使用/清洁/收纳/维护等，无法确定设为null
-5. check_dimension用中文：间隙/段差/表面质量/色差/结构强度/装配精度/间隙段差/异味/噪音/安全性能/口感/移位等，无法确定设为null
-6. check_item用中文描述具体检查内容（必填）
-7. check_requirement用中文描述合格判定标准，无法确定设为null
-8. measurement_position用中文描述测量位置/检查范围，无法确定设为null
-9. check_tool用中文：目视/卡尺/塞尺/测力计/噪音仪/手感等，无法确定设为null
-10. problem_level只允许：致命/严重/一般/轻微，无法确定设为"一般"
-11. standard_a/standard_b/standard_c为A/B/C面标准值，无法确定设为null
+3. 无法确定的字段设为null，但check_item不能为空\n`;
+
+  if (category === '通用标准') {
+    systemPrompt += `4. sensory_dimension只允许：视觉/听觉/触觉/嗅觉/味觉
+5. test_phase只允许：开箱/首次安装/产品使用/清洁收纳/其他
+6. experience_flow只允许：拿取外包装/拆开内包装/配件梳理/外观美观/外观缺陷/标识文字/首次安装/放置及组装/操作交互/产品运行/冲水/擦拭/晾干/收纳/其他
+7. touch_point：触点描述，如"外箱手提把手"
+8. check_requirement：检验范围及具体要求
+9. experience_standard：体验标准，如"间隙≤2mm"
+10. check_tool：测量工具，如"目视/卡尺/塞尺"
+11. problem_level只允许：一级/二级/三级
 
 示例输出：
-[{"sensory_dimension":"视觉","test_phase":"开箱","check_dimension":"间隙","check_item":"上盖与机身间隙","check_requirement":"间隙≤2mm，间隙差≤0.3mm","measurement_position":"上盖与机身连接处","check_tool":"目视","standard_a":null,"standard_b":null,"standard_c":null,"problem_level":"一般"}]`;
+[{"sensory_dimension":"视觉","test_phase":"开箱","experience_flow":"拿取外包装","touch_point":"外箱手提把手","check_item":"外箱手提把手","check_requirement":"手提把手牢固，无脱胶","experience_standard":"手提把手承重≥5kg","check_tool":"目视","problem_level":"二级","measurement_position":null,"check_dimension":null,"sub_check_dimension":null,"check_standard":null,"evaluation_prep":null,"subjective_score":null,"subjective_rating":null}]`;
+  } else if (category === '品类标准') {
+    systemPrompt += `4. sensory_dimension只允许：视觉/听觉/触觉/嗅觉/味觉
+5. check_dimension：检查维度，如"间隙段差"
+6. sub_check_dimension：细分检查维度，如"间隙"
+7. check_item：具体检查条目，如"控制面板与外壳间隙段差"
+8. check_requirement：检查要求及区域
+9. check_standard：检查标准，如"间隙≤0.3mm"
 
-  // Split long text into chunks if needed, process first chunk
-  const maxLen = 6000;
+示例输出：
+[{"sensory_dimension":"视觉","check_dimension":"间隙段差","sub_check_dimension":"间隙","check_item":"控制面板与外壳间隙","check_requirement":"控制面板四周","check_standard":"间隙≤0.3mm","test_phase":null,"experience_flow":null,"touch_point":null,"experience_standard":null,"measurement_position":null,"check_tool":null,"problem_level":null,"evaluation_prep":null,"subjective_score":null,"subjective_rating":null}]`;
+  } else if (category === '感官评价标准') {
+    systemPrompt += `4. sensory_dimension只允许：视觉/听觉/触觉/嗅觉/味觉
+5. evaluation_prep：感官评价准备，如"常温、无异味环境"
+6. subjective_score：主观满意度分值(1-5整数)
+7. subjective_rating：主观满意度描述，格式如"1分-十分不满意-描述"
+
+示例输出：
+[{"sensory_dimension":"味觉","evaluation_prep":"常温25°C，无异味环境，评价前清水漱口","subjective_score":1,"subjective_rating":"1分-十分不满意-豆浆口感差，存在较多细小颗粒，入口明显粗糙，顺滑度严重不足，吞咽时伴有明显粘喉感，饮用体验不佳","test_phase":null,"experience_flow":null,"touch_point":null,"check_dimension":null,"sub_check_dimension":null,"check_item":"味觉评价","check_requirement":null,"experience_standard":null,"check_standard":null,"measurement_position":null,"check_tool":null,"problem_level":null}]`;
+  }
+
+  const maxLen = 8000;
   const textChunk = textContent.substring(0, maxLen);
 
-  const userPrompt = `请从以下中文标准文档文本中提取所有检查项。这是一份产品体验标准文档，可能包含表格。每行/每条对应一个检查项。请仔细识别每个检查项的各个字段，确保所有内容都用中文填写。check_item字段不能为空。
+  const userPrompt = `请从以下中文标准文档文本中提取所有检查项。这是一份${category}文档，可能包含表格。每行/每条对应一个检查项。请仔细识别每个检查项的各个字段，确保所有内容都用中文填写。check_item字段不能为空。
 
 文本内容：
 ${textChunk}`;
@@ -105,7 +132,7 @@ ${textChunk}`;
     const items = JSON.parse(jsonStr) as ExtractedItem[];
     return items.filter(item => item.check_item && typeof item.check_item === 'string' && item.check_item.trim().length > 0);
   } catch {
-    // JSON may be truncated (LLM output limit). Try to repair by finding last complete object
+    // JSON may be truncated. Try to repair by finding last complete object
     try {
       const lastBrace = jsonStr.lastIndexOf('}');
       if (lastBrace > 0) {
@@ -129,16 +156,20 @@ function parseExcel(buffer: Buffer): ExtractedItem[] {
 
   const columnMap: Record<string, string[]> = {
     sensory_dimension: ['感官维度', '感官', 'sensory_dimension'],
-    test_phase: ['体验阶段', '产品使用阶段', '使用阶段', '阶段', 'test_phase'],
-    check_dimension: ['检查维度', '检查维度/检查项', '维度', 'check_dimension'],
-    check_item: ['检查条目', '检查项', '检查内容', 'check_item'],
-    check_requirement: ['检查要求', '合格标准', 'b.检查要求', 'check_requirement'],
-    measurement_position: ['测量位置', 'a.检查范围', '检查范围', 'measurement_position'],
-    check_tool: ['检查工具', '测量工具', '工具', 'check_tool'],
-    standard_a: ['A面标准', 'A面', 'standard_a'],
-    standard_b: ['B面标准', 'B面', 'standard_b'],
-    standard_c: ['C面标准', 'C面', 'standard_c'],
+    test_phase: ['产品使用阶段', '体验阶段', '使用阶段', '阶段', 'test_phase'],
+    experience_flow: ['体验流程', '流程', 'experience_flow'],
+    touch_point: ['触点', 'touch_point'],
+    check_dimension: ['检查维度', '维度', 'check_dimension'],
+    sub_check_dimension: ['细分检查维度', '细分维度', 'sub_check_dimension'],
+    check_item: ['检查条目', '具体检查条目', '检查项', '检查内容', 'check_item'],
+    check_requirement: ['检验范围及具体要求', '检查要求', '检查要求及区域', '合格标准', 'check_requirement'],
+    experience_standard: ['体验标准', 'experience_standard'],
+    check_standard: ['检查标准', 'check_standard'],
+    measurement_position: ['测量位置', '检查范围', 'measurement_position'],
+    check_tool: ['测量工具', '检查工具', '工具', 'check_tool'],
     problem_level: ['问题等级', '等级', 'problem_level'],
+    evaluation_prep: ['感官评价准备', '评价准备', 'evaluation_prep'],
+    subjective_rating: ['主观满意度', '主观感受', 'subjective_rating'],
   };
 
   const fieldMapping: Record<string, string> = {};
@@ -164,18 +195,29 @@ function parseExcel(buffer: Buffer): ExtractedItem[] {
         const val = col ? row[col] : '';
         return val && val.toString().trim() ? val.toString().trim() : null;
       };
+      const getNum = (field: string): number | null => {
+        const v = getItem(field);
+        if (!v) return null;
+        const n = parseInt(v);
+        return isNaN(n) ? null : n;
+      };
       return {
         sensory_dimension: getItem('sensory_dimension'),
         test_phase: getItem('test_phase'),
+        experience_flow: getItem('experience_flow'),
+        touch_point: getItem('touch_point'),
         check_dimension: getItem('check_dimension'),
+        sub_check_dimension: getItem('sub_check_dimension'),
         check_item: getItem('check_item') || '',
         check_requirement: getItem('check_requirement'),
+        experience_standard: getItem('experience_standard'),
+        check_standard: getItem('check_standard'),
         measurement_position: getItem('measurement_position'),
         check_tool: getItem('check_tool'),
-        standard_a: getItem('standard_a'),
-        standard_b: getItem('standard_b'),
-        standard_c: getItem('standard_c'),
-        problem_level: getItem('problem_level') || '一般',
+        problem_level: getItem('problem_level'),
+        evaluation_prep: getItem('evaluation_prep'),
+        subjective_score: getNum('subjective_score'),
+        subjective_rating: getItem('subjective_rating'),
       };
     })
     .filter(item => item.check_item.length > 0);
@@ -209,7 +251,7 @@ export async function POST(request: NextRequest) {
       });
       const pdfUrl = await storage.generatePresignedUrl({ key: fileKey, expireTime: 600 });
 
-      items = await parsePdfWithLLM(pdfUrl, customHeaders);
+      items = await parsePdfWithLLM(pdfUrl, customHeaders, category);
     } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv')) {
       const buffer = Buffer.from(await file.arrayBuffer());
       items = parseExcel(buffer);
@@ -239,15 +281,20 @@ export async function POST(request: NextRequest) {
       sort_order: index + 1,
       sensory_dimension: item.sensory_dimension,
       test_phase: item.test_phase,
+      experience_flow: item.experience_flow,
+      touch_point: item.touch_point,
       check_dimension: item.check_dimension,
+      sub_check_dimension: item.sub_check_dimension,
       check_item: item.check_item,
       check_requirement: item.check_requirement,
+      experience_standard: item.experience_standard,
+      check_standard: item.check_standard,
       measurement_position: item.measurement_position,
       check_tool: item.check_tool,
-      standard_a: item.standard_a,
-      standard_b: item.standard_b,
-      standard_c: item.standard_c,
       problem_level: item.problem_level,
+      evaluation_prep: item.evaluation_prep,
+      subjective_score: item.subjective_score,
+      subjective_rating: item.subjective_rating,
     }));
 
     const { error: itemsError } = await client.from('standard_items').insert(standardItems);
