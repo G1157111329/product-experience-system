@@ -280,6 +280,9 @@ export default function IssuesPage() {
                       className="flex items-center gap-2 p-2 rounded-lg bg-background border cursor-pointer hover:bg-muted/30"
                       onClick={() => { setSelectedIssue(issue); setDetailOpen(true); }}>
                       <Badge className={cn('text-[10px] shrink-0', LEVEL_COLORS[issue.level || '二类'] || LEVEL_COLORS['二类'])}>{issue.level || '二类'}</Badge>
+                      {issue.source_type === 'recipe_problem' && (
+                        <Badge variant="outline" className="text-[10px] shrink-0">食谱/功能</Badge>
+                      )}
                       <span className="text-sm flex-1 truncate">{issue.title}</span>
                       <div className="flex gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                         {STATUS_LIST.map(s => (

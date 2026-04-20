@@ -38,7 +38,7 @@ interface CheckRecord {
 interface IssueItem {
   id: string; title: string; description: string | null; level: string | null;
   status: string; source_report_id: string | null; source_type: string | null;
-  improve_plan: string | null; responsible_person: string | null;
+  category: string | null; improve_plan: string | null; responsible_person: string | null;
   [key: string]: unknown;
 }
 
@@ -210,18 +210,26 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
         <div className="space-y-1.5">
           <p className="text-xs font-medium text-muted-foreground">问题清单 ({liveIssues.length})</p>
           {liveIssues.map((issue) => (
-            <div key={issue.id} className="flex items-center gap-2 p-2 rounded bg-muted/30">
-              <Badge className={cn('text-[10px]', LEVEL_COLORS[issue.level || '二类'] || LEVEL_COLORS['二类'])}>
-                {issue.level || '二类'}
-              </Badge>
-              <span className="text-xs flex-1 truncate">{issue.title}</span>
-              <button
-                onClick={() => onStatusClick(issue)}
-                className={cn('text-[10px] px-1.5 py-0.5 rounded cursor-pointer font-medium transition-colors hover:opacity-80',
-                  STATUS_COLORS[issue.status] || STATUS_COLORS['待整改'])}
-              >
-                {issue.status}
-              </button>
+            <div key={issue.id} className="p-2 rounded bg-muted/30 space-y-1">
+              <div className="flex items-center gap-2">
+                <Badge className={cn('text-[10px] shrink-0', LEVEL_COLORS[issue.level || '二类'] || LEVEL_COLORS['二类'])}>
+                  {issue.level || '二类'}
+                </Badge>
+                {issue.source_type === 'recipe_problem' && (
+                  <Badge variant="outline" className="text-[10px] shrink-0">食谱/功能</Badge>
+                )}
+                <span className="text-xs flex-1 truncate">{issue.title}</span>
+                <button
+                  onClick={() => onStatusClick(issue)}
+                  className={cn('text-[10px] px-1.5 py-0.5 rounded cursor-pointer font-medium transition-colors hover:opacity-80 shrink-0',
+                    STATUS_COLORS[issue.status] || STATUS_COLORS['待整改'])}
+                >
+                  {issue.status || '待整改'}
+                </button>
+              </div>
+              {issue.description && (
+                <p className="text-[10px] text-muted-foreground pl-1">{issue.description}</p>
+              )}
             </div>
           ))}
         </div>
@@ -276,35 +284,96 @@ export default function ReportDetailPage() {
           setSiblingReports(siblings);
         }
       }
-      // Fetch live issues for this report
-      await fetchLiveIssues(rpt.id);
+      // Sync issues for this report
+      await syncReportIssues(rpt.id, rpt);
     }
   }, [id]);
 
-  const fetchLiveIssues = async (reportId: string) => {
+  const syncReportIssues = async (reportId: string, reportData?: ReportDetail | null) => {
     const res = await fetch(`/api/issues?limit=500`);
     const data = await res.json();
     const raw = data.data;
     const allIssues: IssueItem[] = Array.isArray(raw) ? raw : (raw?.list || []);
-    // Filter issues by source_report_id
-    const reportIssues = allIssues.filter((i: IssueItem) => i.source_report_id === reportId);
+    let reportIssues = allIssues.filter((i: IssueItem) => i.source_report_id === reportId);
+
+    // If no issues exist yet, auto-create from report content
+    if (reportIssues.length === 0 && reportData?.content) {
+      const content = reportData.content;
+      const records = content.records || [];
+      const recipes = content.recipes || [];
+      const task = content.task as Record<string, unknown> | undefined;
+
+      for (const record of records) {
+        if (record.evaluation_result === '不合格') {
+          const alreadyExists = allIssues.find(i =>
+            i.source_report_id === reportId && i.source_type === 'record_fail' && i.title === record.check_item
+          );
+          if (!alreadyExists) {
+            await fetch('/api/issues', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                task_id: task?.id,
+                title: record.check_item || '不合格检查项',
+                product_model: task?.product_model || null,
+                level: '二类',
+                source: `${reportData.title} - 不合格检查项`,
+                source_report_id: reportId,
+                source_type: 'record_fail',
+                description: [record.check_requirement, record.check_standard, record.problem_description].filter(Boolean).join('\n'),
+              }),
+            });
+          }
+        }
+      }
+
+      for (const recipe of recipes) {
+        for (const step of (recipe.recipe_steps || [])) {
+          if (step.problem_point && step.problem_point.trim()) {
+            const alreadyExists = allIssues.find(i =>
+              i.source_report_id === reportId && i.source_type === 'recipe_problem' && i.title === step.problem_point
+            );
+            if (!alreadyExists) {
+              await fetch('/api/issues', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  task_id: task?.id,
+                  title: step.problem_point.substring(0, 200),
+                  product_model: task?.product_model || null,
+                  level: '二类',
+                  source: `${reportData.title} - 食谱功能问题(${recipe.name || ''})`,
+                  source_report_id: reportId,
+                  source_type: 'recipe_problem',
+                  description: `步骤${step.step_number}: ${step.operation || ''}`,
+                }),
+              });
+            }
+          }
+        }
+      }
+
+      // Re-fetch after auto-creation
+      const res2 = await fetch(`/api/issues?limit=500`);
+      const data2 = await res2.json();
+      const raw2 = data2.data;
+      const allIssues2: IssueItem[] = Array.isArray(raw2) ? raw2 : (raw2?.list || []);
+      reportIssues = allIssues2.filter((i: IssueItem) => i.source_report_id === reportId);
+    }
+
     setLiveIssuesMap(prev => ({ ...prev, [reportId]: reportIssues }));
   };
 
   useEffect(() => { fetchReport().finally(() => setLoading(false)); }, [fetchReport]);
 
-  // Also fetch live issues for sibling reports
+  // Also sync issues for sibling reports
   useEffect(() => {
     siblingReports.forEach(rpt => {
       if (!liveIssuesMap[rpt.id]) {
-        fetch(`/api/issues?limit=500`).then(r => r.json()).then(data => {
-          const raw = data.data;
-          const allIssues: IssueItem[] = Array.isArray(raw) ? raw : (raw?.list || []);
-          const reportIssues = allIssues.filter((i: IssueItem) => i.source_report_id === rpt.id);
-          setLiveIssuesMap(prev => ({ ...prev, [rpt.id]: reportIssues }));
-        });
+        syncReportIssues(rpt.id, rpt);
       }
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siblingReports]);
 
   const handleOpenStatusDialog = (issue: IssueItem) => {
