@@ -259,9 +259,20 @@ export default function ReportDetailPage() {
         const projectType = (rpt.content?.task as Record<string, unknown>)?.project_type as string;
         const shouldMerge = projectType === '自研' || projectType === '改型/降本/优化';
         if (shouldMerge) {
-          const siblings = allReports.filter((r: ReportDetail) =>
-            r.id !== rpt.id && r.product_model === rpt.product_model
-          ).sort((a: ReportDetail, b: ReportDetail) => a.created_at.localeCompare(b.created_at));
+          // Deduplicate: for each task_id, only keep the latest report
+          const byTaskId: Record<string, ReportDetail> = {};
+          for (const r of allReports) {
+            if (r.product_model !== rpt.product_model) continue;
+            const existing = byTaskId[r.task_id];
+            if (!existing || r.created_at > existing.created_at) {
+              byTaskId[r.task_id] = r;
+            }
+          }
+          // Current report's task_id should use current report
+          byTaskId[rpt.task_id] = rpt;
+          const siblings = Object.values(byTaskId)
+            .filter((r: ReportDetail) => r.id !== rpt.id)
+            .sort((a: ReportDetail, b: ReportDetail) => a.created_at.localeCompare(b.created_at));
           setSiblingReports(siblings);
         }
       }

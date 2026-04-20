@@ -61,12 +61,22 @@ export default function ReportsPage() {
 
   // Group reports by product_model for 自研 and 改型/降本/优化
   const mergedGroups: MergedGroup[] = (() => {
-    const groups: Record<string, MergedGroup> = {};
+    // Deduplicate: for each task_id, only keep the latest report
+    const byTaskId: Record<string, Report> = {};
     for (const r of enrichedReports) {
+      const existing = byTaskId[r.task_id];
+      if (!existing || r.created_at > existing.created_at) {
+        byTaskId[r.task_id] = r;
+      }
+    }
+    const dedupedReports = Object.values(byTaskId);
+
+    const groups: Record<string, MergedGroup> = {};
+    for (const r of dedupedReports) {
       const shouldMerge = r.project_type === '自研' || r.project_type === '改型/降本/优化';
       const key = shouldMerge ? r.product_model || r.id : r.id;
       if (!groups[key]) {
-        groups[key] = { product_model: r.product_model || '未命名型号', project_type: r.project_type, project_phase: r.project_phase, reports: [] };
+        groups[key] = { product_model: r.product_model || '未命名型号', project_type: r.project_type ?? null, project_phase: r.project_phase ?? null, reports: [] };
       }
       groups[key].reports.push(r);
     }

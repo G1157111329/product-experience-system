@@ -43,7 +43,7 @@ interface ReportContent {
 
 interface ReportData {
   id: string; title: string; product_model: string | null; status: string; version: number;
-  created_at: string;
+  task_id: string; created_at: string;
   content: ReportContent | null;
 }
 
@@ -237,9 +237,20 @@ function ReportPrintContent() {
           const projectType = (rpt.content?.task as Record<string, unknown>)?.project_type as string;
           const shouldMerge = projectType === '自研' || projectType === '改型/降本/优化';
           if (shouldMerge) {
-            const siblings = allReports.filter((r: ReportData) =>
-              r.id !== rpt.id && r.product_model === rpt.product_model
-            ).sort((a: ReportData, b: ReportData) => a.created_at.localeCompare(b.created_at));
+            // Deduplicate: for each task_id, only keep the latest report
+            const byTaskId: Record<string, ReportData> = {};
+            for (const r of allReports) {
+              if (r.product_model !== rpt.product_model) continue;
+              const existing = byTaskId[r.task_id];
+              if (!existing || r.created_at > existing.created_at) {
+                byTaskId[r.task_id] = r;
+              }
+            }
+            // Current report's task_id should use current report
+            byTaskId[rpt.task_id] = rpt;
+            const siblings = Object.values(byTaskId)
+              .filter((r: ReportData) => r.id !== rpt.id)
+              .sort((a: ReportData, b: ReportData) => a.created_at.localeCompare(b.created_at));
             setSiblingReports(siblings);
           }
         }
