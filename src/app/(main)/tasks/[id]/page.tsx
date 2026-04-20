@@ -1068,6 +1068,16 @@ function RecordDetailCard({ record, taskId, onRefresh, onImageClick }: {
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [tempStatus, setTempStatus] = useState(record.evaluation_result);
 
+  const openStatusDialog = () => {
+    setTempStatus(record.evaluation_result);
+    setStatusDialogOpen(true);
+  };
+
+  const cancelStatusDialog = () => {
+    setTempStatus(record.evaluation_result);
+    setStatusDialogOpen(false);
+  };
+
   const handleSaveStatus = async () => {
     await fetch(`/api/records/${record.id}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -1144,7 +1154,7 @@ function RecordDetailCard({ record, taskId, onRefresh, onImageClick }: {
             )}
           </div>
         )}
-        <div className="flex items-center gap-2 cursor-pointer" onClick={() => { setTempStatus(record.evaluation_result); setStatusDialogOpen(true); }}>
+        <div className="flex items-center gap-2 cursor-pointer" onClick={openStatusDialog}>
           <Badge className={cn('text-xs cursor-pointer',
             record.evaluation_result === '合格' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' :
             record.evaluation_result === '不合格' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
@@ -1188,7 +1198,7 @@ function RecordDetailCard({ record, taskId, onRefresh, onImageClick }: {
         <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
 
         {/* Status Edit Dialog */}
-        <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
+        <Dialog open={statusDialogOpen} onOpenChange={(open) => { if (!open) cancelStatusDialog(); else setStatusDialogOpen(true); }}>
           <DialogContent className="max-w-sm">
             <DialogHeader>
               <DialogTitle className="text-base">修改检查结果</DialogTitle>
@@ -1199,7 +1209,7 @@ function RecordDetailCard({ record, taskId, onRefresh, onImageClick }: {
                 <div className="flex gap-2">
                   {['合格', '不合格', '待定'].map(r => (
                     <button key={r} type="button" onClick={() => setTempStatus(r)}
-                      className={cn('flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors',
+                      className={cn('flex-1 px-3 py-2.5 rounded-lg text-sm font-medium border transition-colors',
                         tempStatus === r
                           ? r === '合格' ? 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-400'
                             : r === '不合格' ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-400'
@@ -1210,8 +1220,8 @@ function RecordDetailCard({ record, taskId, onRefresh, onImageClick }: {
                   ))}
                 </div>
               </div>
-              <div className="flex gap-2 justify-end">
-                <Button variant="outline" onClick={() => setStatusDialogOpen(false)}>取消</Button>
+              <div className="flex gap-2 justify-end pt-2">
+                <Button variant="outline" onClick={cancelStatusDialog}>取消</Button>
                 <Button onClick={handleSaveStatus}>保存</Button>
               </div>
             </div>
