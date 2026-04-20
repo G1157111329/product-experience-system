@@ -951,6 +951,16 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
     return <div className="space-y-3">{categorySelector}<p className="text-sm text-muted-foreground text-center py-4">请选择标准类型</p></div>;
   };
 
+  const handleDeleteRecord = async (record: CheckRecord) => {
+    const res = await fetch(`/api/records/${record.id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.code === 0) {
+      if (selectedRecord?.id === record.id) setSelectedRecord(null);
+      onRefresh();
+      toast.success('问题点已删除');
+    }
+  };
+
   return (
     <div className="space-y-4">
       <PreviewComponent />
@@ -1014,6 +1024,9 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
                         record.evaluation_result === '合格' ? 'text-emerald-600' :
                         record.evaluation_result === '不合格' ? 'text-destructive' : 'text-amber-600'
                       )}>{record.evaluation_result}</span>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={(e) => { e.stopPropagation(); handleDeleteRecord(record); }}>
+                        <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
+                      </Button>
                     </div>
                     {/* Thumbnails per problem point */}
                     {matImages.length > 0 && (
@@ -1366,6 +1379,20 @@ function FunctionsTab({ taskId }: { taskId: string }) {
     }
   };
 
+  const handleDeleteRecipe = async (recipe: Recipe) => {
+    // Delete all steps first
+    for (const step of (recipe.recipe_steps || [])) {
+      await fetch(`/api/recipe-steps/${step.id}`, { method: 'DELETE' });
+    }
+    const res = await fetch(`/api/recipes/${recipe.id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.code === 0) {
+      if (selectedRecipe?.id === recipe.id) setSelectedRecipe(null);
+      fetchRecipes();
+      toast.success('食谱/功能已删除');
+    }
+  };
+
   return (
     <div className="space-y-4">
       <PreviewComponent />
@@ -1394,6 +1421,9 @@ function FunctionsTab({ taskId }: { taskId: string }) {
                     <span>{recipe.recipe_steps?.length || 0} 步骤</span>
                     <span>{recipe.problem_count || 0} 问题</span>
                   </div>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={(e) => { e.stopPropagation(); handleDeleteRecipe(recipe); }}>
+                    <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
+                  </Button>
                 </div>
               </CardContent>
 
