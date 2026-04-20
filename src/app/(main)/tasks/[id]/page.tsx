@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Pencil, Trash2, Check, Upload } from 'lucide-react';
+import { ArrowLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Pencil, Trash2, Check, Upload, Link2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -415,6 +415,12 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
   // ── 感官评价标准 form ──
   const [sensoryForm, setSensoryForm] = useState({ sensory_dimension: '', score: '', result_description: '' });
   const [sensoryRefItems, setSensoryRefItems] = useState<StandardItem[]>([]);
+  const [evaluationResult, setEvaluationResult] = useState('待定');
+
+  // ── Record status edit dialog ──
+  const [statusEditOpen, setStatusEditOpen] = useState(false);
+  const [statusEditRecord, setStatusEditRecord] = useState<CheckRecord | null>(null);
+  const [statusEditValue, setStatusEditValue] = useState('待定');
 
   // ── 通用标准: fetch matching items when 3 selects are chosen ──
   useEffect(() => {
@@ -535,12 +541,13 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
     setCategoryAllItems([]);
     setSensoryForm({ sensory_dimension: '', score: '', result_description: '' });
     setSensoryRefItems([]);
+    setEvaluationResult('待定');
     setSelectedMaterialIds([]);
     setSelectedMaterials([]);
   };
 
   const handleAdd = async () => {
-    let body: Record<string, unknown> = { task_id: taskId, evaluation_result: '待定', sort_order: records.length };
+    let body: Record<string, unknown> = { task_id: taskId, evaluation_result: evaluationResult, sort_order: records.length };
 
     if (formCategory === '通用标准') {
       const selectedItem = generalItems.find(i => i.id === generalForm.selectedItemId);
@@ -739,6 +746,22 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
           <Textarea placeholder="描述检查结果" value={generalForm.problem_description} onChange={(e) => setGeneralForm({ ...generalForm, problem_description: e.target.value })} rows={2} />
         </div>
         <MaterialPicker taskId={taskId} selectedIds={selectedMaterialIds} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
+        <div className="space-y-1.5">
+          <Label>检查结果 *</Label>
+          <div className="flex gap-2">
+            {['合格', '不合格', '待定'].map(r => (
+              <button key={r} type="button" onClick={() => setEvaluationResult(r)}
+                className={cn('flex-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors',
+                  evaluationResult === r
+                    ? r === '合格' ? 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800'
+                      : r === '不合格' ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800'
+                      : 'bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-800'
+                    : 'bg-background border-border hover:bg-muted/50')}>
+                {r}
+              </button>
+            ))}
+          </div>
+        </div>
         <Button onClick={handleAdd} className="w-full" disabled={!isFormValid()}>添加</Button>
       </div>
     );
@@ -837,6 +860,22 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
           <Textarea placeholder="描述检查结果" value={categoryForm.problem_description} onChange={(e) => setCategoryForm({ ...categoryForm, problem_description: e.target.value })} rows={2} />
         </div>
         <MaterialPicker taskId={taskId} selectedIds={selectedMaterialIds} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
+        <div className="space-y-1.5">
+          <Label>检查结果 *</Label>
+          <div className="flex gap-2">
+            {['合格', '不合格', '待定'].map(r => (
+              <button key={r} type="button" onClick={() => setEvaluationResult(r)}
+                className={cn('flex-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors',
+                  evaluationResult === r
+                    ? r === '合格' ? 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800'
+                      : r === '不合格' ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800'
+                      : 'bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-800'
+                    : 'bg-background border-border hover:bg-muted/50')}>
+                {r}
+              </button>
+            ))}
+          </div>
+        </div>
         <Button onClick={handleAdd} className="w-full" disabled={!isFormValid()}>添加</Button>
       </div>
     );
@@ -889,6 +928,22 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
           <Textarea placeholder="描述评价结果" value={sensoryForm.result_description} onChange={(e) => setSensoryForm({ ...sensoryForm, result_description: e.target.value })} rows={2} />
         </div>
         <MaterialPicker taskId={taskId} selectedIds={selectedMaterialIds} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
+        <div className="space-y-1.5">
+          <Label>检查结果 *</Label>
+          <div className="flex gap-2">
+            {['合格', '不合格', '待定'].map(r => (
+              <button key={r} type="button" onClick={() => setEvaluationResult(r)}
+                className={cn('flex-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors',
+                  evaluationResult === r
+                    ? r === '合格' ? 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800'
+                      : r === '不合格' ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800'
+                      : 'bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-800'
+                    : 'bg-background border-border hover:bg-muted/50')}>
+                {r}
+              </button>
+            ))}
+          </div>
+        </div>
         <Button onClick={handleAdd} className="w-full" disabled={!isFormValid()}>添加</Button>
       </div>
     );
@@ -1006,18 +1061,33 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
 function RecordDetailCard({ record, taskId, onRefresh, onImageClick }: {
   record: CheckRecord; taskId: string; onRefresh: () => void; onImageClick: (url: string) => void;
 }) {
-  const [evaluation, setEvaluation] = useState(record.evaluation_result);
   const [description, setDescription] = useState(record.problem_description || '');
   const [referenceIds, setReferenceIds] = useState<string[]>([]);
   const [, setReferenceMats] = useState<Material[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
+  const [tempStatus, setTempStatus] = useState(record.evaluation_result);
 
-  const handleSave = async () => {
+  const handleSaveStatus = async () => {
     await fetch(`/api/records/${record.id}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ evaluation_result: evaluation, problem_description: description }),
+      body: JSON.stringify({ evaluation_result: tempStatus }),
     });
-    // Link referenced materials to this record
+    setStatusDialogOpen(false);
+    onRefresh();
+    toast.success('状态已更新');
+  };
+
+  const handleSaveDescription = async () => {
+    await fetch(`/api/records/${record.id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ problem_description: description }),
+    });
+    onRefresh();
+    toast.success('已保存');
+  };
+
+  const handleLinkMaterials = async () => {
     if (referenceIds.length > 0) {
       for (const matId of referenceIds) {
         await fetch('/api/materials', {
@@ -1027,9 +1097,9 @@ function RecordDetailCard({ record, taskId, onRefresh, onImageClick }: {
       }
       setReferenceIds([]);
       setReferenceMats([]);
+      onRefresh();
+      toast.success('素材已关联');
     }
-    onRefresh();
-    toast.success('已保存');
   };
 
   const handleUpload = async (files: FileList | null) => {
@@ -1074,16 +1144,13 @@ function RecordDetailCard({ record, taskId, onRefresh, onImageClick }: {
             )}
           </div>
         )}
-        <div className="flex gap-2">
-          {['合格', '不合格', '待定'].map((r) => (
-            <Button key={r} size="sm" variant={evaluation === r ? 'default' : 'outline'}
-              className={cn(
-                evaluation === r && r === '合格' && 'bg-emerald-600 hover:bg-emerald-700',
-                evaluation === r && r === '不合格' && 'bg-destructive hover:bg-destructive/90',
-                evaluation === r && r === '待定' && 'bg-amber-500 hover:bg-amber-600',
-              )}
-              onClick={() => setEvaluation(r)}>{r}</Button>
-          ))}
+        <div className="flex items-center gap-2 cursor-pointer" onClick={() => { setTempStatus(record.evaluation_result); setStatusDialogOpen(true); }}>
+          <Badge className={cn('text-xs cursor-pointer',
+            record.evaluation_result === '合格' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' :
+            record.evaluation_result === '不合格' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+            'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+          )}>{record.evaluation_result}</Badge>
+          <span className="text-xs text-muted-foreground">点击修改</span>
         </div>
         <Textarea placeholder="问题描述..." value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
         {/* Materials */}
@@ -1111,9 +1178,45 @@ function RecordDetailCard({ record, taskId, onRefresh, onImageClick }: {
           <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
             <Upload className="h-3.5 w-3.5 mr-1" /> 上传图片
           </Button>
-          <Button size="sm" onClick={handleSave}><Check className="h-3.5 w-3.5 mr-1" /> 保存</Button>
+          <Button size="sm" onClick={handleSaveDescription}><Check className="h-3.5 w-3.5 mr-1" /> 保存描述</Button>
+          {referenceIds.length > 0 && (
+            <Button size="sm" variant="outline" onClick={handleLinkMaterials}>
+              <Link2 className="h-3.5 w-3.5 mr-1" /> 关联素材({referenceIds.length})
+            </Button>
+          )}
         </div>
         <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
+
+        {/* Status Edit Dialog */}
+        <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="text-base">修改检查结果</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>检查结果</Label>
+                <div className="flex gap-2">
+                  {['合格', '不合格', '待定'].map(r => (
+                    <button key={r} type="button" onClick={() => setTempStatus(r)}
+                      className={cn('flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors',
+                        tempStatus === r
+                          ? r === '合格' ? 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-400'
+                            : r === '不合格' ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-400'
+                            : 'bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-400'
+                          : 'bg-background border-border hover:bg-muted/50')}>
+                      {r}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" onClick={() => setStatusDialogOpen(false)}>取消</Button>
+                <Button onClick={handleSaveStatus}>保存</Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   );

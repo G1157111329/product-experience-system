@@ -40,7 +40,10 @@ export default function ReportsPage() {
   const fetchReports = useCallback(async () => {
     const res = await fetch('/api/reports?limit=200');
     const data = await res.json();
-    if (data.code === 0) setReports(data.data || []);
+    if (data.code === 0) {
+      const raw = data.data;
+      setReports(Array.isArray(raw) ? raw : (raw?.list || []));
+    }
   }, []);
 
   useEffect(() => { fetchReports(); }, [fetchReports]);
@@ -145,6 +148,14 @@ export default function ReportsPage() {
                   </div>
                 </CardHeader>
                 <CardContent className="pt-0 space-y-2">
+                  {isMerged && (
+                    <Link href={`/reports/${latestReport.id}`}>
+                      <div className="flex items-center gap-2 p-2 rounded-lg bg-primary/5 border border-primary/20 hover:bg-primary/10 cursor-pointer mb-2">
+                        <span className="text-sm font-medium text-primary flex-1">查看合并报告</span>
+                        <span className="text-xs text-primary">{group.reports.length} 份报告合并</span>
+                      </div>
+                    </Link>
+                  )}
                   {group.reports.map((report) => {
                     const content = report.content as Record<string, unknown> | null;
                     const records = (content?.records || []) as Array<Record<string, unknown>>;

@@ -58,13 +58,19 @@ export default function IssuesPage() {
   const fetchIssues = useCallback(async () => {
     const res = await fetch('/api/issues?limit=500');
     const data = await res.json();
-    if (data.code === 0) setIssues(data.data || []);
+    if (data.code === 0) {
+      const raw = data.data;
+      setIssues(Array.isArray(raw) ? raw : (raw?.list || []));
+    }
   }, []);
 
   const fetchReports = useCallback(async () => {
     const res = await fetch('/api/reports?limit=200');
     const data = await res.json();
-    if (data.code === 0) setReports(data.data || []);
+    if (data.code === 0) {
+      const raw = data.data;
+      setReports(Array.isArray(raw) ? raw : (raw?.list || []));
+    }
   }, []);
 
   useEffect(() => { fetchIssues(); fetchReports(); }, [fetchIssues, fetchReports]);

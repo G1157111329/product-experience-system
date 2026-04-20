@@ -24,59 +24,208 @@ interface Recipe {
 }
 
 interface CheckRecord {
-  id: string; sensory_dimension?: string; check_dimension?: string;
-  check_item: string; evaluation_result: string; problem_description?: string;
+  id: string; sensory_dimension?: string; check_dimension?: string; sub_check_dimension?: string;
+  check_item: string; check_requirement?: string; check_standard?: string;
+  evaluation_result: string; problem_description?: string;
+  standard_category?: string; test_phase?: string; experience_flow?: string; touch_point?: string;
   materials?: Material[];
   [key: string]: unknown;
+}
+
+interface ReportContent {
+  task: Record<string, unknown>;
+  records: CheckRecord[];
+  issues: Array<Record<string, unknown>>;
+  recipes: Recipe[];
+  materials: Material[];
+  generatedAt: string;
 }
 
 interface ReportDetail {
   id: string;
   task_id: string;
   title: string;
+  product_model: string | null;
   status: string;
   version: number;
-  content: {
-    task: Record<string, unknown>;
-    records: CheckRecord[];
-    issues: Array<Record<string, unknown>>;
-    recipes: Recipe[];
-    materials: Material[];
-    generatedAt: string;
-  } | null;
+  content: ReportContent | null;
   created_at: string;
   updated_at: string;
 }
 
-// Task field name mapping: English -> Chinese
 const taskFieldLabels: Record<string, string> = {
-  task_name: '任务名称',
-  product_category: '产品品类',
-  product_model: '产品型号',
-  project_phase: '项目阶段',
-  test_date: '测试日期',
-  organizer: '组织人',
-  target_user: '目标用户',
-  test_purpose: '测试目的',
-  test_method: '测试方法',
-  status: '状态',
-  assigned_to: '负责人',
-  created_at: '创建时间',
-  updated_at: '更新时间',
-  selected_standards: '选择标准',
+  task_name: '任务名称', product_category: '产品品类', product_model: '产品型号',
+  project_type: '项目类型', project_phase: '项目阶段', test_date: '测试日期',
+  organizer: '组织人', target_user: '目标用户', test_purpose: '测试目的',
+  test_method: '测试方法', status: '状态', assigned_to: '负责人',
+  created_at: '创建时间', updated_at: '更新时间', selected_standards: '选择标准',
 };
+
+function ReportSection({ report, open }: { report: ReportDetail; open: (url: string) => void }) {
+  const records = report.content?.records || [];
+  const issues = report.content?.issues || [];
+  const recipes = report.content?.recipes || [];
+  const task = report.content?.task;
+  const passCount = records.filter((r) => r.evaluation_result === '合格').length;
+  const failCount = records.filter((r) => r.evaluation_result === '不合格').length;
+  const recipeProblemCount = recipes.reduce((sum, r) => sum + (r.problem_count || 0), 0);
+
+  return (
+    <div className="space-y-3">
+      {/* Mini stats */}
+      <div className="flex gap-3 text-xs text-muted-foreground flex-wrap">
+        <span>检查项 <strong className="text-foreground">{records.length}</strong></span>
+        <span>合格 <strong className="text-emerald-600">{passCount}</strong></span>
+        <span>不合格 <strong className="text-destructive">{failCount}</strong></span>
+        <span>整改 <strong className="text-amber-600">{issues.length}</strong></span>
+        <span>食谱问题 <strong className="text-orange-600">{recipeProblemCount}</strong></span>
+      </div>
+
+      {/* Task Info */}
+      {task && (
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
+          {Object.entries(task)
+            .filter(([k]) => !['id', 'selected_standards'].includes(k))
+            .map(([key, value]) => (
+              <div key={key}>
+                <span className="text-muted-foreground">{taskFieldLabels[key] || key}: </span>
+                <span className="truncate">{String(value || '-')}</span>
+              </div>
+            ))}
+        </div>
+      )}
+
+      {/* Check Records */}
+      {records.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-xs font-medium text-muted-foreground">检查记录 ({records.length})</p>
+          {records.map((record) => {
+            const recordMats = record.materials || [];
+            const recordImages = recordMats.filter((m) => m.material_type === 'image');
+            const recordVideos = recordMats.filter((m) => m.material_type === 'video');
+            return (
+              <div key={record.id} className="p-2 rounded-lg bg-muted/30 space-y-1.5">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={cn(
+                    'text-[10px] font-medium px-1.5 py-0.5 rounded',
+                    record.evaluation_result === '合格' && 'bg-emerald-100 text-emerald-700',
+                    record.evaluation_result === '不合格' && 'bg-red-100 text-red-700',
+                    record.evaluation_result === '待定' && 'bg-amber-100 text-amber-700',
+                  )}>{record.evaluation_result}</span>
+                  <span className="text-xs font-medium flex-1">{record.check_item}</span>
+                  {record.check_dimension && (
+                    <span className="text-[10px] text-muted-foreground bg-background px-1 py-0.5 rounded">{record.check_dimension}</span>
+                  )}
+                </div>
+                {(record.check_requirement || record.check_standard) && (
+                  <div className="text-[10px] text-muted-foreground space-y-0.5 pl-1">
+                    {record.check_requirement && <div>要求: {record.check_requirement}</div>}
+                    {record.check_standard && <div>标准: {record.check_standard}</div>}
+                  </div>
+                )}
+                {record.problem_description && (
+                  <p className="text-[10px] text-muted-foreground">{record.problem_description}</p>
+                )}
+                {(recordImages.length > 0 || recordVideos.length > 0) && (
+                  <div className="flex gap-1 flex-wrap">
+                    {recordImages.map((mat) => (
+                      <div key={mat.id} className="w-12 h-12 rounded overflow-hidden border cursor-pointer" onClick={() => open(mat.file_url)}>
+                        <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
+                      </div>
+                    ))}
+                    {recordVideos.map((mat) => (
+                      <div key={mat.id} className="w-12 h-12 rounded overflow-hidden border bg-muted flex items-center justify-center">
+                        <Video className="h-3 w-3 text-muted-foreground" />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Recipes */}
+      {recipes.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-muted-foreground">食谱/功能 ({recipes.length})</p>
+          {recipes.map((recipe) => (
+            <div key={recipe.id} className="border rounded-lg p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" className="text-[10px] shrink-0">{recipe.recipe_type}</Badge>
+                <span className="text-xs font-medium flex-1">{recipe.name}</span>
+                <span className="text-[10px] text-muted-foreground">{recipe.problem_count || 0} 问题</span>
+              </div>
+              {recipe.recipe_steps?.map((step) => (
+                <div key={step.id} className="p-2 rounded bg-muted/30 space-y-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-4 h-4 rounded-full bg-primary/10 text-primary text-[9px] flex items-center justify-center font-medium shrink-0">{step.step_number}</span>
+                    <span className="text-xs">{step.operation}</span>
+                  </div>
+                  {step.problem_point && <p className="text-[10px] text-amber-600 ml-5">问题: {step.problem_point}</p>}
+                  {step.materials?.map((mat) => (
+                    mat.material_type === 'image' ? (
+                      <div key={mat.id} className="w-10 h-10 rounded overflow-hidden border cursor-pointer ml-5 inline-block" onClick={() => open(mat.file_url)}>
+                        <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
+                      </div>
+                    ) : null
+                  ))}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Issues */}
+      {issues.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-xs font-medium text-muted-foreground">问题清单 ({issues.length})</p>
+          {issues.map((issue, idx) => (
+            <div key={idx} className="flex items-center gap-2 p-2 rounded bg-muted/30">
+              <Badge className={cn('text-[10px]', (issue.level === '一类') ? 'bg-red-100 text-red-700' : (issue.level === '二类') ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600')}>
+                {String(issue.level || '二类')}
+              </Badge>
+              <span className="text-xs flex-1 truncate">{String(issue.title || '')}</span>
+              <Badge variant="secondary" className="text-[10px]">{String(issue.status || '')}</Badge>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ReportDetailPage() {
   const params = useParams();
   const router = useRouter();
   const id = params.id as string;
   const [report, setReport] = useState<ReportDetail | null>(null);
+  const [siblingReports, setSiblingReports] = useState<ReportDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
 
   useEffect(() => {
-    fetch(`/api/reports/${id}`).then(r => r.json()).then(res => {
-      if (res.code === 0) setReport(res.data);
+    fetch(`/api/reports/${id}`).then(r => r.json()).then(async (res) => {
+      if (res.code === 0) {
+        const rpt = res.data as ReportDetail;
+        setReport(rpt);
+        // Fetch sibling reports with same product_model for 自研/改型降本
+        if (rpt.product_model) {
+          const allRes = await fetch('/api/reports?limit=200');
+          const allData = await allRes.json();
+          const allReports: ReportDetail[] = Array.isArray(allData.data) ? allData.data : (allData.data?.list || []);
+          const projectType = (rpt.content?.task as Record<string, unknown>)?.project_type as string;
+          const shouldMerge = projectType === '自研' || projectType === '改型/降本/优化';
+          if (shouldMerge) {
+            const siblings = allReports.filter((r: ReportDetail) =>
+              r.id !== rpt.id && r.product_model === rpt.product_model
+            ).sort((a: ReportDetail, b: ReportDetail) => a.created_at.localeCompare(b.created_at));
+            setSiblingReports(siblings);
+          }
+        }
+      }
     }).finally(() => setLoading(false));
   }, [id]);
 
@@ -87,14 +236,19 @@ export default function ReportDetailPage() {
   if (loading) return <div className="p-6 animate-pulse space-y-4"><div className="h-8 bg-muted rounded w-64" /></div>;
   if (!report) return <div className="p-6">报告不存在</div>;
 
-  const records = report.content?.records || [];
-  const issues = report.content?.issues || [];
-  const recipes = report.content?.recipes || [];
-  const task = report.content?.task;
-  const passCount = records.filter((r) => r.evaluation_result === '合格').length;
-  const failCount = records.filter((r) => r.evaluation_result === '不合格').length;
-  const recipeProblemCount = recipes.reduce((sum, r) => sum + (r.problem_count || 0), 0);
-  const totalProblemCount = issues.length + recipeProblemCount;
+  const task = report.content?.task as Record<string, unknown> | undefined;
+  const projectType = task?.project_type as string | undefined;
+  const taskPhase = task?.project_phase as string | undefined;
+  const isMerged = siblingReports.length > 0;
+
+  // Combine all reports for merged stats
+  const allReports = isMerged ? [report, ...siblingReports] : [report];
+  const totalRecords = allReports.flatMap(r => r.content?.records || []);
+  const totalIssues = allReports.flatMap(r => r.content?.issues || []);
+  const totalRecipes = allReports.flatMap(r => r.content?.recipes || []);
+  const totalPass = totalRecords.filter(r => r.evaluation_result === '合格').length;
+  const totalFail = totalRecords.filter(r => r.evaluation_result === '不合格').length;
+  const totalRecipePC = totalRecipes.reduce((s, r) => s + (r.problem_count || 0), 0);
 
   return (
     <div className="p-4 lg:p-6 space-y-4">
@@ -104,11 +258,11 @@ export default function ReportDetailPage() {
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="flex-1 min-w-0">
-          <h1 className="text-xl font-semibold truncate">{report.title}</h1>
+          <h1 className="text-xl font-semibold truncate">{report.product_model || report.title} {isMerged && <Badge variant="secondary" className="text-[10px] ml-1">合并 {allReports.length} 份报告</Badge>}</h1>
           <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground flex-wrap">
             <Badge variant="secondary" className="text-[10px]">{report.status}</Badge>
-            <span>V{report.version}</span>
-            {task && <span>{String(task.product_model || '')}</span>}
+            {projectType && <span>{projectType}</span>}
+            {taskPhase && <span>{taskPhase}</span>}
           </div>
         </div>
         <Button size="sm" onClick={handleExportPDF}>
@@ -119,11 +273,11 @@ export default function ReportDetailPage() {
       {/* Summary Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         {[
-          { label: '检查项总数', value: records.length, color: '' },
-          { label: '合格', value: passCount, color: 'text-emerald-600' },
-          { label: '不合格', value: failCount, color: 'text-destructive' },
-          { label: '问题整改', value: issues.length, color: 'text-amber-600' },
-          { label: '食谱/功能问题', value: recipeProblemCount, color: 'text-orange-600' },
+          { label: '检查项总数', value: totalRecords.length, color: '' },
+          { label: '合格', value: totalPass, color: 'text-emerald-600' },
+          { label: '不合格', value: totalFail, color: 'text-destructive' },
+          { label: '问题整改', value: totalIssues.length, color: 'text-amber-600' },
+          { label: '食谱/功能问题', value: totalRecipePC, color: 'text-orange-600' },
         ].map((stat) => (
           <Card key={stat.label}>
             <CardContent className="p-4 text-center">
@@ -134,153 +288,43 @@ export default function ReportDetailPage() {
         ))}
       </div>
 
-      {/* Task Info - Chinese labels */}
-      {task && (
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">任务信息</CardTitle></CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 text-sm">
-              {Object.entries(task)
-                .filter(([k]) => !['id', 'selected_standards'].includes(k))
-                .map(([key, value]) => (
-                  <div key={key}>
-                    <span className="text-xs text-muted-foreground">{taskFieldLabels[key] || key}</span>
-                    <p className="truncate">{String(value || '-')}</p>
-                  </div>
-                ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Check Records - Card layout with thumbnails per record */}
-      <Card>
-        <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">检查记录 ({records.length})</CardTitle></CardHeader>
-        <CardContent className="space-y-2">
-          {records.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">暂无记录</p>
-          ) : (
-            records.map((record) => {
-              const recordMats = record.materials || [];
-              const recordImages = recordMats.filter((m) => m.material_type === 'image');
-              const recordVideos = recordMats.filter((m) => m.material_type === 'video');
-              return (
-                <div key={record.id} className="p-3 rounded-lg bg-muted/30 space-y-2">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className={cn(
-                      'text-xs font-medium px-1.5 py-0.5 rounded',
-                      record.evaluation_result === '合格' && 'bg-emerald-100 text-emerald-700',
-                      record.evaluation_result === '不合格' && 'bg-red-100 text-red-700',
-                      record.evaluation_result === '待定' && 'bg-amber-100 text-amber-700',
-                    )}>{String(record.evaluation_result || '')}</span>
-                    <span className="text-sm font-medium flex-1">{String(record.check_item || '')}</span>
-                    {record.sensory_dimension && (
-                      <Badge variant="secondary" className="text-[10px]">{String(record.sensory_dimension)}</Badge>
-                    )}
-                    {record.check_dimension && (
-                      <span className="text-[10px] text-muted-foreground bg-background px-1.5 py-0.5 rounded">{String(record.check_dimension)}</span>
-                    )}
-                  </div>
-                  {record.problem_description && (
-                    <p className="text-xs text-muted-foreground">{String(record.problem_description)}</p>
+      {/* Report sections - each report is shown completely with a divider */}
+      {allReports.map((rpt, idx) => {
+        const rptTask = rpt.content?.task as Record<string, unknown> | undefined;
+        const rptPhase = rptTask?.project_phase as string | undefined;
+        const rptDate = rptTask?.test_date as string | undefined;
+        const rptType = rptTask?.project_type as string | undefined;
+        return (
+          <Card key={rpt.id}>
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-medium">
+                  {isMerged ? (
+                    <>
+                      {rptPhase && <Badge variant="outline" className="text-[10px] mr-1.5">{rptPhase}</Badge>}
+                      {rpt.title}
+                      {rptDate && <span className="text-muted-foreground font-normal ml-2">({rptDate})</span>}
+                    </>
+                  ) : (
+                    rpt.title
                   )}
-                  {/* Thumbnails per record */}
-                  {(recordImages.length > 0 || recordVideos.length > 0) && (
-                    <div className="flex gap-1.5 flex-wrap">
-                      {recordImages.map((mat) => (
-                        <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border cursor-pointer"
-                          onClick={() => open(mat.file_url)}>
-                          <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
-                        </div>
-                      ))}
-                      {recordVideos.map((mat) => (
-                        <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border bg-muted flex items-center justify-center">
-                          <Video className="h-4 w-4 text-muted-foreground" />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Recipes / Functions List */}
-      {recipes.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">食谱/功能列表 ({recipes.length})</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            {recipes.map((recipe) => (
-              <div key={recipe.id} className="border border-border rounded-lg p-4 space-y-3">
-                <div className="flex items-center gap-3">
-                  <Badge variant="secondary" className="text-[10px] shrink-0">{recipe.recipe_type}</Badge>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium">{recipe.name}</p>
-                    <p className="text-xs text-muted-foreground">{recipe.ingredients || '-'}</p>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
-                    <span>{recipe.recipe_steps?.length || 0} 步骤</span>
-                    <span>{recipe.problem_count || 0} 问题</span>
-                  </div>
-                </div>
-                {recipe.recipe_steps && recipe.recipe_steps.length > 0 && (
-                  <div className="space-y-2">
-                    {recipe.recipe_steps.map((step) => (
-                      <div key={step.id} className="p-3 rounded-lg bg-muted/30 space-y-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] flex items-center justify-center font-medium shrink-0">
-                            {step.step_number}
-                          </span>
-                          <span className="text-sm">{step.operation}</span>
-                        </div>
-                        {step.problem_point && (
-                          <p className="text-xs text-amber-600 ml-7">问题: {step.problem_point}</p>
-                        )}
-                        {step.materials && step.materials.length > 0 && (
-                          <div className="flex gap-1.5 ml-7 flex-wrap">
-                            {step.materials.map((mat) => (
-                              <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border cursor-pointer"
-                                onClick={() => mat.material_type === 'image' && open(mat.file_url)}>
-                                {mat.material_type === 'image' ? (
-                                  <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center bg-muted"><Video className="h-4 w-4 text-muted-foreground" /></div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
+                </CardTitle>
+                {isMerged && idx > 0 && (
+                  <Badge variant="secondary" className="text-[10px]">{rptType || ''}</Badge>
                 )}
               </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Issues */}
-      {issues.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">问题清单 ({issues.length})</CardTitle></CardHeader>
-          <CardContent className="space-y-2">
-            {issues.map((issue, idx) => (
-              <div key={idx} className="flex items-center gap-3 p-2.5 rounded-lg bg-muted/30">
-                <Badge className={cn('text-[10px]',
-                  issue.severity === '致命' ? 'bg-red-100 text-red-700' :
-                  issue.severity === '严重' ? 'bg-amber-100 text-amber-700' :
-                  'bg-blue-100 text-blue-700'
-                )}>{String(issue.severity || '')}</Badge>
-                <span className="text-sm flex-1 truncate">{String(issue.title || '')}</span>
-                <Badge variant="secondary" className="text-[10px]">{String(issue.status || '')}</Badge>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
+            </CardHeader>
+            <CardContent>
+              {idx > 0 && (
+                <div className="border-t border-dashed mb-3 pt-2">
+                  <p className="text-[10px] text-muted-foreground">以下为独立报告内容，与上方报告以分割线区分</p>
+                </div>
+              )}
+              <ReportSection report={rpt} open={open} />
+            </CardContent>
+          </Card>
+        );
+      })}
     </div>
   );
 }
