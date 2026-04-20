@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 
+/** Recalculate and update problem_count for a recipe based on its steps */
+async function updateRecipeProblemCount(client: ReturnType<typeof getSupabaseClient>, recipeId: string) {
+  const { data: steps } = await client.from('recipe_steps').select('problem_point').eq('recipe_id', recipeId);
+  const count = (steps || []).filter((s: { problem_point: string | null }) => s.problem_point && s.problem_point.trim() !== '').length;
+  await client.from('recipes').update({ problem_count: count, updated_at: new Date().toISOString() }).eq('id', recipeId);
+}
+
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
@@ -14,6 +21,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
   const { data, error } = await client.from('recipe_steps').update(updateData).eq('id', id).select().single();
 
+  // Update parent recipe's problem_count if step changed
+  if (!error && data) {
+    const recipeId = (data as Record<string, unknown>).recipe_id as string;
+    if (recipeId) await updateRecipeProblemCount(client, recipeId);
+  }
+
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
   return NextResponse.json({ code: 0, message: '更新成功', data });
 }
@@ -21,7 +34,14 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+
+  // Get recipe_id before deleting, so we can update problem_count
+  const { data: step } = await client.from('recipe_steps').select('recipe_id').eq('id', id).single();
+  const recipeId = (step as Record<string, unknown> | null)?.recipe_id as string | null;
+
   const { error } = await client.from('recipe_steps').delete().eq('id', id);
+
+  if (!error && recipeId) await updateRecipeProblemCount(client, recipeId);
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
   return NextResponse.json({ code: 0, message: '删除成功' });
 }

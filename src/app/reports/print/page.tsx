@@ -170,6 +170,8 @@ function ReportPrintContent() {
 
   const passCount = records.filter((r) => r.evaluation_result === '合格').length;
   const failCount = records.filter((r) => r.evaluation_result === '不合格').length;
+  const recipeProblemCount = recipes.reduce((sum, r) => sum + (r.problem_count || 0), 0);
+  const totalProblemCount = issues.length + recipeProblemCount;
 
   return (
     <div className="print-container" style={{ padding: '40px', maxWidth: '1000px', margin: '0 auto', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif', color: '#1a1a1a', lineHeight: 1.6, fontSize: '14px' }}>
@@ -186,8 +188,8 @@ function ReportPrintContent() {
           { label: '检查项总数', value: records.length, color: '#1a1a1a' },
           { label: '合格', value: passCount, color: '#059669' },
           { label: '不合格', value: failCount, color: '#dc2626' },
-          { label: '问题数', value: issues.length, color: '#d97706' },
-          { label: '食谱/功能', value: recipes.length, color: '#0d9488' },
+          { label: '问题整改', value: issues.length, color: '#d97706' },
+          { label: '食谱/功能问题', value: recipeProblemCount, color: '#ea580c' },
         ].map((stat) => (
           <div key={stat.label} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px', textAlign: 'center', minWidth: '120px', flex: 1 }}>
             <div style={{ fontSize: '28px', fontWeight: 'bold', color: stat.color }}>{stat.value}</div>

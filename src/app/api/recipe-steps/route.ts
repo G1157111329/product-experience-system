@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 
+/** Recalculate and update problem_count for a recipe based on its steps */
+async function updateRecipeProblemCount(client: ReturnType<typeof getSupabaseClient>, recipeId: string) {
+  const { data: steps } = await client.from('recipe_steps').select('problem_point').eq('recipe_id', recipeId);
+  const count = (steps || []).filter((s: { problem_point: string | null }) => s.problem_point && s.problem_point.trim() !== '').length;
+  await client.from('recipes').update({ problem_count: count, updated_at: new Date().toISOString() }).eq('id', recipeId);
+}
+
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
   const { searchParams } = new URL(request.url);
@@ -29,6 +36,7 @@ export async function POST(request: NextRequest) {
     sort_order: body.sort_order || 0,
   }).select().single();
 
+  if (!error && data) await updateRecipeProblemCount(client, body.recipe_id);
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
   return NextResponse.json({ code: 0, message: '创建成功', data });
 }

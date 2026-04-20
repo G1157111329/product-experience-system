@@ -48,11 +48,18 @@ export async function POST(request: NextRequest) {
     })
   );
 
+  // Enrich recipes with computed problem_count from steps
+  const recipesWithCount = (recipesWithSteps || []).map((recipe: Record<string, unknown>) => {
+    const steps = (recipe.recipe_steps || []) as Array<Record<string, unknown>>;
+    const computedProblemCount = steps.filter(s => s.problem_point && String(s.problem_point).trim() !== '').length;
+    return { ...recipe, problem_count: computedProblemCount };
+  });
+
   const reportContent = {
     task: task,
     records: recordsWithMaterials || [],
     issues: issues || [],
-    recipes: recipesWithSteps || [],
+    recipes: recipesWithCount || [],
     materials: materials || [],
     generatedAt: new Date().toISOString(),
   };

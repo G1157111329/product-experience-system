@@ -93,6 +93,8 @@ export default function ReportDetailPage() {
   const task = report.content?.task;
   const passCount = records.filter((r) => r.evaluation_result === '合格').length;
   const failCount = records.filter((r) => r.evaluation_result === '不合格').length;
+  const recipeProblemCount = recipes.reduce((sum, r) => sum + (r.problem_count || 0), 0);
+  const totalProblemCount = issues.length + recipeProblemCount;
 
   return (
     <div className="p-4 lg:p-6 space-y-4">
@@ -115,12 +117,13 @@ export default function ReportDetailPage() {
       </div>
 
       {/* Summary Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         {[
           { label: '检查项总数', value: records.length, color: '' },
           { label: '合格', value: passCount, color: 'text-emerald-600' },
           { label: '不合格', value: failCount, color: 'text-destructive' },
-          { label: '问题数', value: issues.length, color: 'text-amber-600' },
+          { label: '问题整改', value: issues.length, color: 'text-amber-600' },
+          { label: '食谱/功能问题', value: recipeProblemCount, color: 'text-orange-600' },
         ].map((stat) => (
           <Card key={stat.label}>
             <CardContent className="p-4 text-center">
