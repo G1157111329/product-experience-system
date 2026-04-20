@@ -68,6 +68,7 @@ export async function POST(request: NextRequest) {
     task_id: body.task_id,
     template_id: body.template_id || null,
     title: body.title || `${task?.task_name || '体验'}报告`,
+    product_model: task?.product_model || null,
     content: reportContent,
     status: '草稿',
   }).select().single();

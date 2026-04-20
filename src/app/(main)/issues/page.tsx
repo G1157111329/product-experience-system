@@ -1,222 +1,381 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { Search, AlertTriangle, Plus, ChevronRight } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
+import { useState, useEffect, useCallback } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 
 interface Issue {
-  id: string;
-  task_id: string;
-  title: string;
-  product_model: string | null;
-  category: string | null;
-  severity: string;
-  priority: string;
-  status: string;
-  description: string | null;
-  is_improve: boolean | null;
-  responsible_person: string | null;
-  created_at: string;
+  id: string; title: string; product_model: string | null;
+  category: string | null; sub_category: string | null;
+  severity: string | null; priority: string | null; level: string | null;
+  source: string | null; source_report_id: string | null; source_type: string | null;
+  description: string | null; status: string;
+  is_improve: boolean | null; improve_plan: string | null;
+  no_improve_reason: string | null;
+  responsible_person: string | null; plan_complete_date: string | null;
+  actual_complete_date: string | null; verification_note: string | null;
+  task_id: string; created_at: string; updated_at: string;
 }
 
-const severityColors: Record<string, string> = {
-  '致命': 'bg-red-100 text-red-700',
-  '严重': 'bg-amber-100 text-amber-700',
-  '一般': 'bg-blue-100 text-blue-700',
-  '轻微': 'bg-emerald-100 text-emerald-700',
-};
+interface ReportGroup {
+  report_id: string;
+  report_title: string;
+  created_at: string;
+  issues: Issue[];
+}
 
-const statusColors: Record<string, string> = {
-  '待整改': 'bg-amber-100 text-amber-700',
-  '整改中': 'bg-blue-100 text-blue-700',
-  '已验证': 'bg-emerald-100 text-emerald-700',
+const STATUS_LIST = ['待整改', '整改中', '已验证', '不整改'];
+const LEVEL_LIST = ['一类', '二类', '三类'];
+const STATUS_COLORS: Record<string, string> = {
+  '待整改': 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+  '整改中': 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+  '已验证': 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
   '不整改': 'bg-muted text-muted-foreground',
+};
+const LEVEL_COLORS: Record<string, string> = {
+  '一类': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+  '二类': 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+  '三类': 'bg-slate-100 text-slate-600 dark:bg-slate-800/30 dark:text-slate-400',
 };
 
 export default function IssuesPage() {
   const [issues, setIssues] = useState<Issue[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [keyword, setKeyword] = useState('');
+  const [reports, setReports] = useState<{ id: string; title: string; created_at: string; content: Record<string, unknown> }[]>([]);
+  const [reportGroups, setReportGroups] = useState<ReportGroup[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<ReportGroup | null>(null);
+  const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
   const [filterStatus, setFilterStatus] = useState('all');
-  const [filterSeverity, setFilterSeverity] = useState('');
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({
-    task_id: '', title: '', product_model: '', category: '',
-    severity: '一般', priority: 'P2', description: '',
-    is_improve: true, responsible_person: '', plan_complete_date: '',
-  });
+  const [filterLevel, setFilterLevel] = useState('all');
 
-  const fetchIssues = async () => {
-    setLoading(true);
-    const params = new URLSearchParams();
-    if (keyword) params.set('keyword', keyword);
-    if (filterStatus && filterStatus !== 'all') params.set('status', filterStatus);
-    if (filterSeverity) params.set('severity', filterSeverity);
-    const res = await fetch(`/api/issues?${params}`);
+  const fetchIssues = useCallback(async () => {
+    const res = await fetch('/api/issues?limit=500');
     const data = await res.json();
-    if (data.code === 0) setIssues(data.data?.list || []);
-    setLoading(false);
-  };
+    if (data.code === 0) setIssues(data.data || []);
+  }, []);
 
-  useEffect(() => { fetchIssues(); }, [keyword, filterStatus, filterSeverity]);
+  const fetchReports = useCallback(async () => {
+    const res = await fetch('/api/reports?limit=200');
+    const data = await res.json();
+    if (data.code === 0) setReports(data.data || []);
+  }, []);
 
-  const handleCreate = async () => {
-    const res = await fetch('/api/issues', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
+  useEffect(() => { fetchIssues(); fetchReports(); }, [fetchIssues, fetchReports]);
+
+  // Auto-generate issues from reports' failed records & recipe problems
+  useEffect(() => {
+    const syncIssuesFromReports = async () => {
+      let needRefetch = false;
+      for (const report of reports) {
+        const content = report.content as Record<string, unknown>;
+        if (!content) continue;
+        const records = (content.records || []) as Array<Record<string, unknown>>;
+        const recipes = (content.recipes || []) as Array<Record<string, unknown>>;
+
+        // Failed records
+        for (const record of records) {
+          if (record.evaluation_result === '不合格') {
+            const existing = issues.find(i => i.source_report_id === report.id && i.source_type === 'record_fail' && i.title === record.check_item);
+            if (!existing) {
+              await fetch('/api/issues', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  task_id: (content.task as Record<string, unknown>)?.id,
+                  title: record.check_item || '不合格检查项',
+                  product_model: (content.task as Record<string, unknown>)?.product_model,
+                  level: record.problem_level || '二类',
+                  source: `${report.title} - 不合格检查项`,
+                  source_report_id: report.id,
+                  source_type: 'record_fail',
+                  description: [record.check_requirement, record.check_standard, record.problem_description].filter(Boolean).join('\n'),
+                  status: '待整改',
+                }),
+              });
+              needRefetch = true;
+            }
+          }
+        }
+
+        // Recipe problems
+        for (const recipe of recipes) {
+          const steps = (recipe.recipe_steps || []) as Array<Record<string, unknown>>;
+          for (const step of steps) {
+            if (step.problem_point && String(step.problem_point).trim()) {
+              const existing = issues.find(i => i.source_report_id === report.id && i.source_type === 'recipe_problem' && i.title === step.problem_point);
+              if (!existing) {
+                await fetch('/api/issues', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    task_id: (content.task as Record<string, unknown>)?.id,
+                    title: String(step.problem_point).substring(0, 200),
+                    product_model: (content.task as Record<string, unknown>)?.product_model,
+                    level: '二类',
+                    source: `${report.title} - 食谱功能问题(${recipe.name || ''})`,
+                    source_report_id: report.id,
+                    source_type: 'recipe_problem',
+                    description: `步骤${step.step_number}: ${step.operation || ''}`,
+                    status: '待整改',
+                  }),
+                });
+                needRefetch = true;
+              }
+            }
+          }
+        }
+      }
+      if (needRefetch) fetchIssues();
+    };
+    if (reports.length > 0) syncIssuesFromReports();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reports]);
+
+  // Group issues by source_report_id
+  useEffect(() => {
+    const filtered = issues.filter(i => {
+      if (filterStatus !== 'all' && i.status !== filterStatus) return false;
+      if (filterLevel !== 'all' && i.level !== filterLevel) return false;
+      return true;
+    });
+    const groups: Record<string, ReportGroup> = {};
+    for (const issue of filtered) {
+      const key = issue.source_report_id || 'no-report';
+      if (!groups[key]) {
+        groups[key] = {
+          report_id: key,
+          report_title: issue.source?.split(' - ')[0] || '未分类问题',
+          created_at: issue.created_at,
+          issues: [],
+        };
+      }
+      groups[key].issues.push(issue);
+    }
+    setReportGroups(Object.values(groups).sort((a, b) => b.created_at.localeCompare(a.created_at)));
+  }, [issues, filterStatus, filterLevel]);
+
+  const handleStatusChange = async (issueId: string, newStatus: string) => {
+    const res = await fetch(`/api/issues/${issueId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus }),
     });
     const data = await res.json();
     if (data.code === 0) {
-      setDialogOpen(false);
-      fetchIssues();
+      setIssues(prev => prev.map(i => i.id === issueId ? { ...i, status: newStatus } : i));
+      if (selectedIssue?.id === issueId) setSelectedIssue(prev => prev ? { ...prev, status: newStatus } : prev);
     }
   };
 
-  const tabs = ['all', '待整改', '整改中', '已验证'];
+  const handleLevelChange = async (issueId: string, newLevel: string) => {
+    const res = await fetch(`/api/issues/${issueId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ level: newLevel }),
+    });
+    const data = await res.json();
+    if (data.code === 0) {
+      setIssues(prev => prev.map(i => i.id === issueId ? { ...i, level: newLevel } : i));
+      if (selectedIssue?.id === issueId) setSelectedIssue(prev => prev ? { ...prev, level: newLevel } : prev);
+    }
+  };
+
+  const handleUpdateField = async (issueId: string, field: string, value: unknown) => {
+    const res = await fetch(`/api/issues/${issueId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [field]: value }),
+    });
+    const data = await res.json();
+    if (data.code === 0) {
+      setIssues(prev => prev.map(i => i.id === issueId ? { ...i, [field]: value } : i));
+      if (selectedIssue?.id === issueId) setSelectedIssue(prev => prev ? { ...prev, [field]: value } : prev);
+    }
+  };
+
+  const totalIssues = issues.length;
+  const pendingCount = issues.filter(i => i.status === '待整改').length;
+  const inProgressCount = issues.filter(i => i.status === '整改中').length;
+  const verifiedCount = issues.filter(i => i.status === '已验证').length;
 
   return (
-    <div className="p-4 lg:p-6 space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl lg:text-2xl font-semibold">问题管理</h1>
-          <p className="text-sm text-muted-foreground mt-1">跟踪和管理体验问题整改</p>
+          <h1 className="text-xl font-bold">问题管理</h1>
+          <p className="text-sm text-muted-foreground mt-1">不合格检查项与食谱功能问题汇总</p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm"><Plus className="h-4 w-4 mr-1.5" /> 新建问题</Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
-            <DialogHeader><DialogTitle>新建问题</DialogTitle></DialogHeader>
-            <div className="space-y-3 mt-2">
-              <div className="space-y-1.5">
-                <Label>问题标题 *</Label>
-                <Input placeholder="描述问题" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label>严重等级</Label>
-                  <Select value={form.severity} onValueChange={(v) => setForm({ ...form, severity: v })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="致命">致命</SelectItem>
-                      <SelectItem value="严重">严重</SelectItem>
-                      <SelectItem value="一般">一般</SelectItem>
-                      <SelectItem value="轻微">轻微</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>优先级</Label>
-                  <Select value={form.priority} onValueChange={(v) => setForm({ ...form, priority: v })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="P0">P0</SelectItem>
-                      <SelectItem value="P1">P1</SelectItem>
-                      <SelectItem value="P2">P2</SelectItem>
-                      <SelectItem value="P3">P3</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label>产品型号</Label>
-                  <Input value={form.product_model} onChange={(e) => setForm({ ...form, product_model: e.target.value })} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>问题分类</Label>
-                  <Input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label>问题描述</Label>
-                <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>责任人</Label>
-                <Input value={form.responsible_person} onChange={(e) => setForm({ ...form, responsible_person: e.target.value })} />
-              </div>
-              <Button onClick={handleCreate} className="w-full" disabled={!form.title}>
-                创建问题
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
       </div>
 
-      {/* Filters */}
-      <div className="flex gap-1.5 overflow-x-auto pb-1">
-        {tabs.map((tab) => (
-          <button key={tab} onClick={() => setFilterStatus(tab)}
-            className={cn('px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors',
-              filterStatus === tab ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80')}>
-            {tab === 'all' ? '全部' : tab}
-          </button>
+      {/* Stats */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {[
+          { label: '问题总数', value: totalIssues, color: '' },
+          { label: '待整改', value: pendingCount, color: 'text-amber-600' },
+          { label: '整改中', value: inProgressCount, color: 'text-blue-600' },
+          { label: '已验证', value: verifiedCount, color: 'text-emerald-600' },
+        ].map((stat) => (
+          <Card key={stat.label}>
+            <CardContent className="p-4 text-center">
+              <p className={cn('text-2xl font-bold', stat.color)}>{stat.value}</p>
+              <p className="text-xs text-muted-foreground mt-1">{stat.label}</p>
+            </CardContent>
+          </Card>
         ))}
       </div>
 
-      <div className="flex gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="搜索问题..." className="pl-9" value={keyword} onChange={(e) => setKeyword(e.target.value)} />
-        </div>
-        <Select value={filterSeverity} onValueChange={setFilterSeverity}>
+      {/* Filters */}
+      <div className="flex gap-2 flex-wrap">
+        <Select value={filterStatus} onValueChange={setFilterStatus}>
+          <SelectTrigger className="w-28"><SelectValue placeholder="状态" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部状态</SelectItem>
+            {STATUS_LIST.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={filterLevel} onValueChange={setFilterLevel}>
           <SelectTrigger className="w-28"><SelectValue placeholder="等级" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部等级</SelectItem>
-            <SelectItem value="致命">致命</SelectItem>
-            <SelectItem value="严重">严重</SelectItem>
-            <SelectItem value="一般">一般</SelectItem>
-            <SelectItem value="轻微">轻微</SelectItem>
+            {LEVEL_LIST.map(l => <SelectItem key={l} value={l}>{l}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>
 
-      {/* Issues List */}
-      {loading ? (
-        <div className="grid gap-3">{[1, 2, 3].map((i) => <div key={i} className="h-20 bg-muted animate-pulse rounded-lg" />)}</div>
-      ) : issues.length === 0 ? (
-        <Card><CardContent className="flex flex-col items-center py-12 text-center">
-          <AlertTriangle className="h-10 w-10 text-muted-foreground/50 mb-3" />
-          <p className="text-sm text-muted-foreground">暂无问题</p>
-        </CardContent></Card>
+      {/* Report Groups */}
+      {reportGroups.length === 0 ? (
+        <Card>
+          <CardContent className="p-8 text-center text-muted-foreground">
+            <p>暂无问题数据</p>
+            <p className="text-xs mt-1">生成报告后，不合格检查项和食谱功能问题将自动汇总到此处</p>
+          </CardContent>
+        </Card>
       ) : (
-        <div className="grid gap-3">
-          {issues.map((issue) => (
-            <Link key={issue.id} href={`/issues/${issue.id}`}>
-              <Card className="hover:bg-muted/30 transition-colors">
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-sm font-medium truncate">{issue.title}</h3>
-                        <Badge className={cn('text-[10px]', severityColors[issue.severity] || '')}>{issue.severity}</Badge>
-                        <Badge className={cn('text-[10px]', statusColors[issue.status] || '')}>{issue.status}</Badge>
-                      </div>
-                      <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground flex-wrap">
-                        {issue.product_model && <span>{issue.product_model}</span>}
-                        {issue.category && <span>{issue.category}</span>}
-                        {issue.responsible_person && <span>负责人: {issue.responsible_person}</span>}
-                        <span>{issue.priority}</span>
+        <div className="space-y-3">
+          {reportGroups.map((group) => (
+            <Card key={group.report_id} className="overflow-hidden">
+              <CardHeader className="pb-2 cursor-pointer" onClick={() => setSelectedGroup(selectedGroup?.report_id === group.report_id ? null : group)}>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-medium">{group.report_title}</CardTitle>
+                  <Badge variant="secondary" className="text-xs">{group.issues.length}个问题</Badge>
+                </div>
+              </CardHeader>
+              {(selectedGroup?.report_id === group.report_id || reportGroups.length <= 5) && (
+                <CardContent className="pt-0 space-y-2">
+                  {group.issues.map((issue) => (
+                    <div key={issue.id}
+                      className="flex items-center gap-2 p-2 rounded-lg bg-background border cursor-pointer hover:bg-muted/30"
+                      onClick={() => { setSelectedIssue(issue); setDetailOpen(true); }}>
+                      <Badge className={cn('text-[10px] shrink-0', LEVEL_COLORS[issue.level || '二类'] || LEVEL_COLORS['二类'])}>{issue.level || '二类'}</Badge>
+                      <span className="text-sm flex-1 truncate">{issue.title}</span>
+                      <div className="flex gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                        {STATUS_LIST.map(s => (
+                          <button key={s} onClick={() => handleStatusChange(issue.id, s)}
+                            className={cn('px-1.5 py-0.5 rounded text-[10px] transition-colors',
+                              issue.status === s ? STATUS_COLORS[s] + ' font-medium' : 'text-muted-foreground hover:bg-muted/50')}>
+                            {s}
+                          </button>
+                        ))}
                       </div>
                     </div>
-                    <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 mt-1" />
-                  </div>
+                  ))}
                 </CardContent>
-              </Card>
-            </Link>
+              )}
+            </Card>
           ))}
         </div>
       )}
+
+      {/* Issue Detail Dialog */}
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-base">{selectedIssue?.title}</DialogTitle>
+          </DialogHeader>
+          {selectedIssue && (
+            <div className="space-y-4">
+              {/* Level & Status */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>问题点等级</Label>
+                  <div className="flex gap-1">
+                    {LEVEL_LIST.map(l => (
+                      <button key={l} onClick={() => handleLevelChange(selectedIssue.id, l)}
+                        className={cn('flex-1 px-2 py-1.5 rounded text-xs font-medium border transition-colors',
+                          selectedIssue.level === l ? LEVEL_COLORS[l] + ' border-current' : 'bg-background border-border hover:bg-muted/50')}>
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>整改状态</Label>
+                  <div className="flex gap-1">
+                    {STATUS_LIST.map(s => (
+                      <button key={s} onClick={() => handleStatusChange(selectedIssue.id, s)}
+                        className={cn('flex-1 px-1 py-1.5 rounded text-[10px] font-medium border transition-colors',
+                          selectedIssue.status === s ? STATUS_COLORS[s] + ' border-current' : 'bg-background border-border hover:bg-muted/50')}>
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Source */}
+              {selectedIssue.source && (
+                <div className="text-xs text-muted-foreground bg-muted/30 p-2 rounded">
+                  来源: {selectedIssue.source}
+                </div>
+              )}
+
+              {/* Description */}
+              <div className="space-y-1.5">
+                <Label>问题描述</Label>
+                <Textarea value={selectedIssue.description || ''} onChange={(e) => handleUpdateField(selectedIssue.id, 'description', e.target.value)} rows={3} />
+              </div>
+
+              {/* Improve info */}
+              <div className="space-y-1.5">
+                <Label>整改方案</Label>
+                <Textarea value={selectedIssue.improve_plan || ''} onChange={(e) => handleUpdateField(selectedIssue.id, 'improve_plan', e.target.value)} rows={2} placeholder="填写整改方案..." />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>责任人</Label>
+                  <Input value={selectedIssue.responsible_person || ''} onChange={(e) => handleUpdateField(selectedIssue.id, 'responsible_person', e.target.value)} placeholder="责任人" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>计划完成日期</Label>
+                  <Input type="date" value={selectedIssue.plan_complete_date || ''} onChange={(e) => handleUpdateField(selectedIssue.id, 'plan_complete_date', e.target.value)} />
+                </div>
+              </div>
+
+              {selectedIssue.status === '已验证' && (
+                <div className="space-y-1.5">
+                  <Label>验证说明</Label>
+                  <Textarea value={selectedIssue.verification_note || ''} onChange={(e) => handleUpdateField(selectedIssue.id, 'verification_note', e.target.value)} rows={2} />
+                </div>
+              )}
+
+              {selectedIssue.status === '不整改' && (
+                <div className="space-y-1.5">
+                  <Label>不整改原因</Label>
+                  <Textarea value={selectedIssue.no_improve_reason || ''} onChange={(e) => handleUpdateField(selectedIssue.id, 'no_improve_reason', e.target.value)} rows={2} placeholder="说明不整改原因..." />
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

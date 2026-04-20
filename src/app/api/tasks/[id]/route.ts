@@ -45,7 +45,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
   const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
   const allowedFields = [
-    'task_name', 'product_category', 'product_model', 'project_phase',
+    'task_name', 'product_category', 'product_model', 'project_type', 'project_phase',
     'test_date', 'organizer', 'target_user', 'test_purpose', 'test_method',
     'assigned_to', 'selected_standards', 'status',
   ];

@@ -16,7 +16,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
   const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
   const allowedFields = [
-    'title', 'category', 'sub_category', 'severity', 'priority', 'description',
+    'title', 'category', 'sub_category', 'severity', 'priority', 'level',
+    'source', 'source_report_id', 'source_type',
+    'description',
     'is_improve', 'no_improve_reason', 'improve_plan', 'responsible_dept',
     'responsible_person', 'plan_complete_date', 'actual_complete_date',
     'is_closed', 'status', 'verification_note', 'product_model',

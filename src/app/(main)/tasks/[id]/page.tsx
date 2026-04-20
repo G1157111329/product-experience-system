@@ -20,7 +20,7 @@ import { MaterialPicker } from '@/components/material-picker';
 /* ─── Types ─── */
 interface TaskDetail {
   id: string; task_name: string; product_category: string; product_model: string;
-  project_phase: string | null; test_date: string | null; organizer: string | null;
+  project_type: string | null; project_phase: string | null; test_date: string | null; organizer: string | null;
   target_user: string | null; test_purpose: string | null; test_method: string | null;
   status: string; assigned_to: string | null; created_at: string;
   records: CheckRecord[]; issues: Issue[];
@@ -122,7 +122,7 @@ export default function TaskDetailPage() {
               {statusConfig[task.status]?.label || task.status}
             </Badge>
           </div>
-          <p className="text-sm text-muted-foreground mt-1">{task.product_model} | {task.product_category}</p>
+          <p className="text-sm text-muted-foreground mt-1">{task.product_model} | {task.product_category}{task.project_type ? ` | ${task.project_type}` : ''}{task.project_phase ? ` | ${task.project_phase}` : ''}</p>
         </div>
         <Button size="sm" onClick={handleGenerateReport}>
           <FileText className="h-4 w-4 mr-1.5" /> 报告生成
@@ -171,6 +171,7 @@ function BasicInfoTab({ task }: { task: TaskDetail }) {
           { label: '任务名称', value: task.task_name },
           { label: '产品品类', value: task.product_category },
           { label: '产品型号', value: task.product_model },
+          { label: '项目类型', value: task.project_type },
           { label: '项目阶段', value: task.project_phase },
           { label: '体验时间', value: task.test_date },
           { label: '组织人', value: task.organizer },

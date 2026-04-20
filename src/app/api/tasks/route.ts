@@ -38,6 +38,7 @@ export async function POST(request: NextRequest) {
     task_name: body.task_name,
     product_category: body.product_category,
     product_model: body.product_model,
+    project_type: body.project_type || null,
     project_phase: body.project_phase || null,
     test_date: body.test_date || null,
     organizer: body.organizer || null,

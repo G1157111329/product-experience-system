@@ -18,6 +18,7 @@ interface Task {
   task_name: string;
   product_category: string;
   product_model: string;
+  project_type: string | null;
   project_phase: string | null;
   test_date: string | null;
   organizer: string | null;
@@ -42,7 +43,7 @@ export default function TasksPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({
     task_name: '', product_category: '', product_model: '',
-    project_phase: '', test_date: '', organizer: '',
+    project_type: '', project_phase: '', test_date: '', organizer: '',
     target_user: '', test_purpose: '', test_method: '',
   });
 
@@ -67,7 +68,7 @@ export default function TasksPage() {
     const data = await res.json();
     if (data.code === 0) {
       setDialogOpen(false);
-      setForm({ task_name: '', product_category: '', product_model: '', project_phase: '', test_date: '', organizer: '', target_user: '', test_purpose: '', test_method: '' });
+      setForm({ task_name: '', product_category: '', product_model: '', project_type: '', project_phase: '', test_date: '', organizer: '', target_user: '', test_purpose: '', test_method: '' });
       fetchTasks();
     }
   };
@@ -111,28 +112,47 @@ export default function TasksPage() {
                   <Input placeholder="如：PBJ-F10U1" value={form.product_model} onChange={(e) => setForm({ ...form, product_model: e.target.value })} />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label>项目阶段</Label>
-                  <Select value={form.project_phase} onValueChange={(v) => setForm({ ...form, project_phase: v })}>
-                    <SelectTrigger><SelectValue placeholder="选择阶段" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="新品开发">新品开发</SelectItem>
-                      <SelectItem value="竞品对比">竞品对比</SelectItem>
-                      <SelectItem value="问题验证">问题验证</SelectItem>
-                    </SelectContent>
-                  </Select>
+              <div className="space-y-1.5">
+                <Label>项目类型 *</Label>
+                <div className="grid grid-cols-3 gap-2">
+                  {['ODM/OEM', '竞品研究', '自研', '前期研究', '改型/降本/优化', '海外产品'].map((type) => (
+                    <button key={type} type="button" onClick={() => setForm({ ...form, project_type: type, project_phase: type === '自研' ? form.project_phase : '' })}
+                      className={cn('px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors',
+                        form.project_type === type ? 'bg-primary text-primary-foreground border-primary' : 'bg-background border-border hover:bg-muted/50')}>
+                      {type}
+                    </button>
+                  ))}
                 </div>
+              </div>
+              {form.project_type === '自研' && (
+                <div className="space-y-1.5">
+                  <Label>项目阶段 *</Label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {['手板研究', '试制阶段', '试产阶段', '量产阶段'].map((phase) => (
+                      <button key={phase} type="button" onClick={() => setForm({ ...form, project_phase: phase })}
+                        className={cn('px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors',
+                          form.project_phase === phase ? 'bg-primary text-primary-foreground border-primary' : 'bg-background border-border hover:bg-muted/50')}>
+                        {phase}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label>体验时间</Label>
                   <Input type="date" value={form.test_date} onChange={(e) => setForm({ ...form, test_date: e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>组织者</Label>
+                  <Input placeholder="体验负责人" value={form.organizer} onChange={(e) => setForm({ ...form, organizer: e.target.value })} />
                 </div>
               </div>
               <div className="space-y-1.5">
                 <Label>体验目的</Label>
                 <Textarea placeholder="本次体验的目标" value={form.test_purpose} onChange={(e) => setForm({ ...form, test_purpose: e.target.value })} rows={2} />
               </div>
-              <Button onClick={handleCreate} className="w-full" disabled={!form.task_name || !form.product_category || !form.product_model}>
+              <Button onClick={handleCreate} className="w-full" disabled={!form.task_name || !form.product_category || !form.product_model || !form.project_type}>
                 创建任务
               </Button>
             </div>
@@ -190,6 +210,7 @@ export default function TasksPage() {
                       <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground flex-wrap">
                         <span>{task.product_model}</span>
                         {task.product_category && <span>品类: {task.product_category}</span>}
+                        {task.project_type && <span>{task.project_type}</span>}
                         {task.project_phase && <span>{task.project_phase}</span>}
                         {task.test_date && <span>{task.test_date}</span>}
                       </div>

@@ -67,12 +67,12 @@
 |------|------|
 | `standards` | 体验标准库（通用标准/品类标准/感官评价标准/食谱功能标准） |
 | `standard_items` | 标准检查项（含分类特定字段：experience_flow, touch_point, experience_standard, sub_check_dimension, check_standard, evaluation_prep, subjective_score, subjective_rating, reference_images） |
-| `experience_tasks` | 体验任务 |
+| `experience_tasks` | 体验任务（含 project_type: ODM/OEM/竞品研究/自研/前期研究/改型降本优化/海外产品, project_phase: 手板研究/试制阶段/试产阶段/量产阶段） |
 | `check_records` | 检查记录（走查，含 standard_category, check_dimension, sub_check_dimension, check_standard, experience_flow, touch_point, experience_standard） |
 | `materials` | 素材（图片/视频，含 AI 预留字段，可关联record或recipe_step） |
-| `issues` | 问题整改 |
+| `issues` | 问题整改（含 level: 一类/二类/三类, source, source_report_id, source_type: record_fail/recipe_problem） |
 | `report_templates` | 报告模板 |
-| `reports` | 报告 |
+| `reports` | 报告（含 product_model 用于同型号合并） |
 | `recipes` | 食谱/功能 |
 | `recipe_steps` | 食谱步骤 |
 

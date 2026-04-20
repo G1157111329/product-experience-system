@@ -70,7 +70,8 @@ export const experienceTasks = pgTable(
     task_name: varchar("task_name", { length: 200 }).notNull(),
     product_category: varchar("product_category", { length: 50 }).notNull(),
     product_model: varchar("product_model", { length: 50 }).notNull(),
-    project_phase: varchar("project_phase", { length: 50 }), // 新品开发/竞品对比/问题验证
+    project_type: varchar("project_type", { length: 50 }), // 项目类型：ODM/OEM/竞品研究/自研/前期研究/改型降本优化/海外产品
+    project_phase: varchar("project_phase", { length: 50 }), // 项目阶段（自研：手板研究/试制阶段/试产阶段/量产阶段）
     test_date: date("test_date"),
     organizer: varchar("organizer", { length: 50 }),
     target_user: text("target_user"),
@@ -160,8 +161,12 @@ export const issues = pgTable(
     product_model: varchar("product_model", { length: 50 }),
     category: varchar("category", { length: 50 }), // 问题分类
     sub_category: varchar("sub_category", { length: 50 }), // 子分类
-    severity: varchar("severity", { length: 20 }), // 严重等级：致命/严重/一般/轻微
-    priority: varchar("priority", { length: 20 }), // 优先级：P0/P1/P2/P3
+    severity: varchar("severity", { length: 20 }), // 严重等级（兼容旧数据）
+    priority: varchar("priority", { length: 20 }), // 优先级（兼容旧数据）
+    level: varchar("level", { length: 20 }), // 问题点等级：一类/二类/三类（替代severity+priority）
+    source: varchar("source", { length: 50 }), // 来源描述
+    source_report_id: varchar("source_report_id", { length: 36 }), // 来源报告ID
+    source_type: varchar("source_type", { length: 20 }), // record_fail / recipe_problem
     description: text("description"),
     is_improve: boolean("is_improve"), // 是否整改
     no_improve_reason: text("no_improve_reason"), // 不整改原因
@@ -207,6 +212,7 @@ export const reports = pgTable(
     template_id: varchar("template_id", { length: 36 }).references(() => reportTemplates.id),
     title: varchar("title", { length: 200 }),
     content: jsonb("content"), // 报告内容
+    product_model: varchar("product_model", { length: 50 }), // 产品型号（用于同型号合并）
     status: varchar("status", { length: 20 }).default("草稿").notNull(), // 草稿/待审核/已审核
     version: integer("version").default(1),
     created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

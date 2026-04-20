@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   let query = client.from('issues').select('*', { count: 'exact' });
   if (task_id) query = query.eq('task_id', task_id);
   if (status) query = query.eq('status', status);
-  if (severity) query = query.eq('severity', severity);
+  if (severity) query = query.eq('level', severity); // map severity filter to level
   if (keyword) query = query.ilike('title', `%${keyword}%`);
 
   const { data, error, count } = await query.order('created_at', { ascending: false }).limit(100);
@@ -34,6 +34,10 @@ export async function POST(request: NextRequest) {
     sub_category: body.sub_category || null,
     severity: body.severity || '一般',
     priority: body.priority || 'P2',
+    level: body.level || '二类',
+    source: body.source || null,
+    source_report_id: body.source_report_id || null,
+    source_type: body.source_type || null,
     description: body.description || null,
     is_improve: body.is_improve ?? true,
     no_improve_reason: body.no_improve_reason || null,
