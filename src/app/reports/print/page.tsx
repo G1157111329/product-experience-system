@@ -26,6 +26,12 @@ interface CheckRecord {
   [key: string]: unknown;
 }
 
+interface IssueItem {
+  id: string; title: string; description: string | null; level: string | null;
+  status: string; source_report_id: string | null; source_type: string | null;
+  [key: string]: unknown;
+}
+
 interface ReportContent {
   task: Record<string, unknown>;
   records: CheckRecord[];
@@ -64,16 +70,17 @@ async function imageUrlToBase64(url: string): Promise<string> {
   }
 }
 
-function PrintReportSection({ report }: { report: ReportData }) {
+function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIssues: IssueItem[] }) {
   const content = report.content;
   if (!content) return null;
   const task = content.task;
   const records = content.records || [];
-  const issues = content.issues || [];
   const recipes = content.recipes || [];
   const passCount = records.filter(r => r.evaluation_result === '合格').length;
   const failCount = records.filter(r => r.evaluation_result === '不合格').length;
   const recipeProblemCount = recipes.reduce((s, r) => s + (r.problem_count || 0), 0);
+  const STATUS_BG: Record<string, string> = { '待整改': '#fef3c7', '整改中': '#dbeafe', '已验证': '#d1fae5', '不整改': '#e5e7eb' };
+  const STATUS_FG: Record<string, string> = { '待整改': '#92400e', '整改中': '#1e40af', '已验证': '#065f46', '不整改': '#374151' };
 
   return (
     <>
@@ -82,7 +89,7 @@ function PrintReportSection({ report }: { report: ReportData }) {
         <span>检查项 <strong style={{ color: '#1a1a1a' }}>{records.length}</strong></span>
         <span>合格 <strong style={{ color: '#059669' }}>{passCount}</strong></span>
         <span>不合格 <strong style={{ color: '#dc2626' }}>{failCount}</strong></span>
-        <span>整改 <strong style={{ color: '#d97706' }}>{issues.length}</strong></span>
+        <span>整改 <strong style={{ color: '#d97706' }}>{liveIssues.length}</strong></span>
         <span>食谱问题 <strong style={{ color: '#ea580c' }}>{recipeProblemCount}</strong></span>
       </div>
 
@@ -177,18 +184,20 @@ function PrintReportSection({ report }: { report: ReportData }) {
         </>
       )}
 
-      {/* Issues */}
-      {issues.length > 0 && (
+      {/* Issues with live status */}
+      {liveIssues.length > 0 && (
         <>
-          <h3 style={{ fontSize: '15px', margin: '16px 0 8px', color: '#0d9488', borderBottom: '1px solid #0d9488', paddingBottom: '4px' }}>问题清单 ({issues.length})</h3>
-          {issues.map((issue, idx) => (
+          <h3 style={{ fontSize: '15px', margin: '16px 0 8px', color: '#0d9488', borderBottom: '1px solid #0d9488', paddingBottom: '4px' }}>问题清单 ({liveIssues.length})</h3>
+          {liveIssues.map((issue, idx) => (
             <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px', background: '#f9fafb', borderRadius: '3px', margin: '3px 0', fontSize: '12px' }}>
               <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 500,
                 background: issue.level === '一类' ? '#fee2e2' : issue.level === '二类' ? '#fef3c7' : '#e0f2fe',
                 color: issue.level === '一类' ? '#991b1b' : issue.level === '二类' ? '#92400e' : '#0c4a6e'
               }}>{String(issue.level || '二类')}</span>
               <span style={{ flex: 1 }}>{String(issue.title || '')}</span>
-              <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 500, background: '#e0f2fe', color: '#0c4a6e' }}>{String(issue.status || '')}</span>
+              <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 500,
+                background: STATUS_BG[issue.status] || '#fef3c7', color: STATUS_FG[issue.status] || '#92400e'
+              }}>{issue.status}</span>
             </div>
           ))}
         </>
@@ -210,6 +219,7 @@ function ReportPrintContent() {
   const reportId = searchParams.get('id');
   const [report, setReport] = useState<ReportData | null>(null);
   const [siblingReports, setSiblingReports] = useState<ReportData[]>([]);
+  const [liveIssuesMap, setLiveIssuesMap] = useState<Record<string, IssueItem[]>>({});
   const [loading, setLoading] = useState(true);
   const [imagesLoaded, setImagesLoaded] = useState(false);
 
@@ -233,9 +243,30 @@ function ReportPrintContent() {
             setSiblingReports(siblings);
           }
         }
+        // Fetch live issues
+        const issuesRes = await fetch('/api/issues?limit=500');
+        const issuesData = await issuesRes.json();
+        const raw = issuesData.data;
+        const allIssues: IssueItem[] = Array.isArray(raw) ? raw : (raw?.list || []);
+        const reportIssues = allIssues.filter((i: IssueItem) => i.source_report_id === rpt.id);
+        setLiveIssuesMap({ [rpt.id]: reportIssues });
       }
     }).finally(() => setLoading(false));
   }, [reportId]);
+
+  // Fetch live issues for sibling reports
+  useEffect(() => {
+    if (siblingReports.length === 0) return;
+    fetch('/api/issues?limit=500').then(r => r.json()).then(data => {
+      const raw = data.data;
+      const allIssues: IssueItem[] = Array.isArray(raw) ? raw : (raw?.list || []);
+      const map: Record<string, IssueItem[]> = {};
+      siblingReports.forEach(rpt => {
+        map[rpt.id] = allIssues.filter((i: IssueItem) => i.source_report_id === rpt.id);
+      });
+      setLiveIssuesMap(prev => ({ ...prev, ...map }));
+    });
+  }, [siblingReports]);
 
   // Convert images to base64
   useEffect(() => {
@@ -302,7 +333,7 @@ function ReportPrintContent() {
 
   // Total stats
   const totalRecords = allReports.flatMap(r => r.content?.records || []);
-  const totalIssues = allReports.flatMap(r => r.content?.issues || []);
+  const allLiveIssues = allReports.flatMap(r => liveIssuesMap[r.id] || []);
   const totalRecipes = allReports.flatMap(r => r.content?.recipes || []);
   const totalPass = totalRecords.filter(r => r.evaluation_result === '合格').length;
   const totalFail = totalRecords.filter(r => r.evaluation_result === '不合格').length;
@@ -327,7 +358,7 @@ function ReportPrintContent() {
           { label: '检查项总数', value: totalRecords.length, color: '#1a1a1a' },
           { label: '合格', value: totalPass, color: '#059669' },
           { label: '不合格', value: totalFail, color: '#dc2626' },
-          { label: '问题整改', value: totalIssues.length, color: '#d97706' },
+          { label: '问题整改', value: allLiveIssues.length, color: '#d97706' },
           { label: '食谱/功能问题', value: totalRecipePC, color: '#ea580c' },
         ].map((stat) => (
           <div key={stat.label} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px', textAlign: 'center', minWidth: '120px', flex: 1 }}>
@@ -371,7 +402,7 @@ function ReportPrintContent() {
             {!isMerged && idx === 0 && (
               <h2 style={{ fontSize: '18px', margin: '24px 0 12px', color: '#0d9488', borderBottom: '2px solid #0d9488', paddingBottom: '4px' }}>{rpt.title}</h2>
             )}
-            <PrintReportSection report={rpt} />
+            <PrintReportSection report={rpt} liveIssues={liveIssuesMap[rpt.id] || []} />
           </div>
         );
       })}

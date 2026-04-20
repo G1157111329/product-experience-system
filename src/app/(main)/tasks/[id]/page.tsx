@@ -1034,9 +1034,15 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
         ))
       )}
 
-      {/* Record detail expand */}
+      {/* Record detail dialog */}
       {selectedRecord && (
-        <RecordDetailCard record={selectedRecord} taskId={taskId} onRefresh={onRefresh} onImageClick={open} />
+        <RecordDetailCard
+          record={selectedRecord}
+          taskId={taskId}
+          onRefresh={onRefresh}
+          onClose={() => setSelectedRecord(null)}
+          onImageClick={open}
+        />
       )}
 
       {/* Add button */}
@@ -1058,58 +1064,60 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
 }
 
 /* ─── Record Detail Expand ─── */
-function RecordDetailCard({ record, taskId, onRefresh, onImageClick }: {
-  record: CheckRecord; taskId: string; onRefresh: () => void; onImageClick: (url: string) => void;
+function RecordDetailCard({ record, taskId, onRefresh, onClose, onImageClick }: {
+  record: CheckRecord; taskId: string; onRefresh: () => void; onClose: () => void; onImageClick: (url: string) => void;
 }) {
+  const [open, setOpen] = useState(true);
   const [description, setDescription] = useState(record.problem_description || '');
+  const [tempStatus, setTempStatus] = useState(record.evaluation_result);
   const [referenceIds, setReferenceIds] = useState<string[]>([]);
   const [, setReferenceMats] = useState<Material[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
-  const [tempStatus, setTempStatus] = useState(record.evaluation_result);
+  const [saving, setSaving] = useState(false);
 
-  const openStatusDialog = () => {
+  // Reset form when record changes
+  useEffect(() => {
+    setDescription(record.problem_description || '');
     setTempStatus(record.evaluation_result);
-    setStatusDialogOpen(true);
-  };
+    setReferenceIds([]);
+    setReferenceMats([]);
+  }, [record.id, record.problem_description, record.evaluation_result]);
 
-  const cancelStatusDialog = () => {
-    setTempStatus(record.evaluation_result);
-    setStatusDialogOpen(false);
-  };
-
-  const handleSaveStatus = async () => {
-    await fetch(`/api/records/${record.id}`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ evaluation_result: tempStatus }),
-    });
-    setStatusDialogOpen(false);
-    onRefresh();
-    toast.success('状态已更新');
-  };
-
-  const handleSaveDescription = async () => {
-    await fetch(`/api/records/${record.id}`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ problem_description: description }),
-    });
-    onRefresh();
-    toast.success('已保存');
-  };
-
-  const handleLinkMaterials = async () => {
-    if (referenceIds.length > 0) {
-      for (const matId of referenceIds) {
-        await fetch('/api/materials', {
-          method: 'PUT', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: matId, record_id: record.id }),
-        });
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await fetch(`/api/records/${record.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          evaluation_result: tempStatus,
+          problem_description: description,
+        }),
+      });
+      // Link referenced materials
+      if (referenceIds.length > 0) {
+        for (const matId of referenceIds) {
+          await fetch('/api/materials', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: matId, record_id: record.id }),
+          });
+        }
+        setReferenceIds([]);
+        setReferenceMats([]);
       }
-      setReferenceIds([]);
-      setReferenceMats([]);
       onRefresh();
-      toast.success('素材已关联');
+      onClose();
+      toast.success('已保存');
+    } finally {
+      setSaving(false);
     }
+  };
+
+  const handleCancel = () => {
+    setDescription(record.problem_description || '');
+    setTempStatus(record.evaluation_result);
+    setReferenceIds([]);
+    setReferenceMats([]);
+    onClose();
   };
 
   const handleUpload = async (files: FileList | null) => {
@@ -1126,109 +1134,101 @@ function RecordDetailCard({ record, taskId, onRefresh, onImageClick }: {
   };
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium">{record.check_item}</CardTitle>
-        {/* Standard reference tags */}
-        <div className="flex flex-wrap gap-1 mt-1">
-          {record.standard_category && <Badge variant="secondary" className="text-[10px]">{record.standard_category}</Badge>}
-          {record.check_dimension && <Badge variant="outline" className="text-[10px]">{record.check_dimension}</Badge>}
-          {record.sub_check_dimension && <Badge variant="outline" className="text-[10px]">{record.sub_check_dimension}</Badge>}
-          {record.test_phase && <Badge variant="outline" className="text-[10px]">{record.test_phase}</Badge>}
-          {record.experience_flow && <Badge variant="outline" className="text-[10px]">{record.experience_flow}</Badge>}
-          {record.touch_point && <Badge variant="outline" className="text-[10px]">{record.touch_point}</Badge>}
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {/* Check requirement & standard from standard library */}
-        {(record.check_requirement || record.check_standard || record.experience_standard) && (
-          <div className="space-y-1 text-xs bg-muted/40 rounded-md p-2">
-            {record.check_requirement && (
-              <div><span className="text-muted-foreground">检查要求：</span>{record.check_requirement}</div>
-            )}
-            {record.check_standard && (
-              <div><span className="text-muted-foreground">检查标准：</span>{record.check_standard}</div>
-            )}
-            {record.experience_standard && (
-              <div><span className="text-muted-foreground">体验标准：</span>{record.experience_standard}</div>
-            )}
+    <Dialog open={open} onOpenChange={(v) => { if (!v) handleCancel(); else setOpen(v); }}>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="text-base">{record.check_item}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          {/* Standard reference tags */}
+          <div className="flex flex-wrap gap-1">
+            {record.standard_category && <Badge variant="secondary" className="text-[10px]">{record.standard_category}</Badge>}
+            {record.check_dimension && <Badge variant="outline" className="text-[10px]">{record.check_dimension}</Badge>}
+            {record.sub_check_dimension && <Badge variant="outline" className="text-[10px]">{record.sub_check_dimension}</Badge>}
+            {record.test_phase && <Badge variant="outline" className="text-[10px]">{record.test_phase}</Badge>}
+            {record.experience_flow && <Badge variant="outline" className="text-[10px]">{record.experience_flow}</Badge>}
+            {record.touch_point && <Badge variant="outline" className="text-[10px]">{record.touch_point}</Badge>}
           </div>
-        )}
-        <div className="flex items-center gap-2 cursor-pointer" onClick={openStatusDialog}>
-          <Badge className={cn('text-xs cursor-pointer',
-            record.evaluation_result === '合格' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' :
-            record.evaluation_result === '不合格' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
-            'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-          )}>{record.evaluation_result}</Badge>
-          <span className="text-xs text-muted-foreground">点击修改</span>
-        </div>
-        <Textarea placeholder="问题描述..." value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
-        {/* Materials */}
-        {record.materials && record.materials.length > 0 && (
-          <div className="grid grid-cols-3 gap-2">
-            {record.materials.map((mat) => (
-              <div key={mat.id} className="aspect-square rounded-lg overflow-hidden bg-muted cursor-pointer"
-                onClick={() => mat.material_type === 'image' && onImageClick(mat.file_url)}>
-                {mat.material_type === 'image' ? (
-                  <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center"><Video className="h-6 w-6 text-muted-foreground" /></div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-        {/* Reference material picker */}
-        <MaterialPicker
-          taskId={taskId}
-          selectedIds={referenceIds}
-          onSelectionChange={(ids, mats) => { setReferenceIds(ids); setReferenceMats(mats); }}
-        />
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
-            <Upload className="h-3.5 w-3.5 mr-1" /> 上传图片
-          </Button>
-          <Button size="sm" onClick={handleSaveDescription}><Check className="h-3.5 w-3.5 mr-1" /> 保存描述</Button>
-          {referenceIds.length > 0 && (
-            <Button size="sm" variant="outline" onClick={handleLinkMaterials}>
-              <Link2 className="h-3.5 w-3.5 mr-1" /> 关联素材({referenceIds.length})
-            </Button>
-          )}
-        </div>
-        <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
 
-        {/* Status Edit Dialog */}
-        <Dialog open={statusDialogOpen} onOpenChange={(open) => { if (!open) cancelStatusDialog(); else setStatusDialogOpen(true); }}>
-          <DialogContent className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle className="text-base">修改检查结果</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>检查结果</Label>
-                <div className="flex gap-2">
-                  {['合格', '不合格', '待定'].map(r => (
-                    <button key={r} type="button" onClick={() => setTempStatus(r)}
-                      className={cn('flex-1 px-3 py-2.5 rounded-lg text-sm font-medium border transition-colors',
-                        tempStatus === r
-                          ? r === '合格' ? 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-400'
-                            : r === '不合格' ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-400'
-                            : 'bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-400'
-                          : 'bg-background border-border hover:bg-muted/50')}>
-                      {r}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="flex gap-2 justify-end pt-2">
-                <Button variant="outline" onClick={cancelStatusDialog}>取消</Button>
-                <Button onClick={handleSaveStatus}>保存</Button>
+          {/* Check requirement & standard */}
+          {(record.check_requirement || record.check_standard || record.experience_standard) && (
+            <div className="space-y-1 text-xs bg-muted/40 rounded-md p-2">
+              {record.check_requirement && <div><span className="text-muted-foreground">检查要求：</span>{record.check_requirement}</div>}
+              {record.check_standard && <div><span className="text-muted-foreground">检查标准：</span>{record.check_standard}</div>}
+              {record.experience_standard && <div><span className="text-muted-foreground">体验标准：</span>{record.experience_standard}</div>}
+            </div>
+          )}
+
+          {/* Status */}
+          <div className="space-y-2">
+            <Label>检查结果</Label>
+            <div className="flex gap-2">
+              {['合格', '不合格', '待定'].map(r => (
+                <button key={r} type="button" onClick={() => setTempStatus(r)}
+                  className={cn('flex-1 px-3 py-2.5 rounded-lg text-sm font-medium border transition-colors',
+                    tempStatus === r
+                      ? r === '合格' ? 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-400'
+                        : r === '不合格' ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-400'
+                        : 'bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-400'
+                      : 'bg-background border-border hover:bg-muted/50')}>
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Description */}
+          <div className="space-y-2">
+            <Label>问题描述</Label>
+            <Textarea placeholder="填写问题描述..." value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+          </div>
+
+          {/* Existing materials */}
+          {record.materials && record.materials.length > 0 && (
+            <div className="space-y-2">
+              <Label>已有素材</Label>
+              <div className="grid grid-cols-4 gap-2">
+                {record.materials.map((mat) => (
+                  <div key={mat.id} className="aspect-square rounded-lg overflow-hidden bg-muted cursor-pointer border"
+                    onClick={() => mat.material_type === 'image' && onImageClick(mat.file_url)}>
+                    {mat.material_type === 'image' ? (
+                      <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center"><Video className="h-6 w-6 text-muted-foreground" /></div>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
-          </DialogContent>
-        </Dialog>
-      </CardContent>
-    </Card>
+          )}
+
+          {/* Upload & reference materials */}
+          <div className="space-y-2">
+            <Label>素材管理</Label>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+                <Upload className="h-3.5 w-3.5 mr-1" /> 上传图片
+              </Button>
+            </div>
+            <MaterialPicker
+              taskId={taskId}
+              selectedIds={referenceIds}
+              onSelectionChange={(ids, mats) => { setReferenceIds(ids); setReferenceMats(mats); }}
+            />
+            {referenceIds.length > 0 && (
+              <p className="text-xs text-muted-foreground">已选择 {referenceIds.length} 个素材，保存时将自动关联</p>
+            )}
+            <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
+          </div>
+
+          {/* Save / Cancel */}
+          <div className="flex gap-2 justify-end pt-2 border-t">
+            <Button variant="outline" onClick={handleCancel}>取消</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? '保存中...' : '保存'}</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
