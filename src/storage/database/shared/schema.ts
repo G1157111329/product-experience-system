@@ -250,6 +250,7 @@ export const recipeSteps = pgTable(
     step_number: integer("step_number").notNull().default(1),
     operation: text("operation").notNull(),
     problem_point: text("problem_point"),
+    problem_points: jsonb("problem_points").default([]),
     sort_order: integer("sort_order").default(0),
     created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),

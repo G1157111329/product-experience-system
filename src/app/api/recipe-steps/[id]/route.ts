@@ -3,8 +3,16 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 /** Recalculate and update problem_count for a recipe based on its steps */
 async function updateRecipeProblemCount(client: ReturnType<typeof getSupabaseClient>, recipeId: string) {
-  const { data: steps } = await client.from('recipe_steps').select('problem_point').eq('recipe_id', recipeId);
-  const count = (steps || []).filter((s: { problem_point: string | null }) => s.problem_point && s.problem_point.trim() !== '').length;
+  const { data: steps } = await client.from('recipe_steps').select('problem_point, problem_points').eq('recipe_id', recipeId);
+  let count = 0;
+  for (const s of (steps || [])) {
+    const pp = s.problem_points;
+    if (Array.isArray(pp) && pp.length > 0) {
+      count += pp.filter((p: { text: string }) => p.text && p.text.trim() !== '').length;
+    } else if (s.problem_point && s.problem_point.trim() !== '') {
+      count += 1;
+    }
+  }
   await client.from('recipes').update({ problem_count: count, updated_at: new Date().toISOString() }).eq('id', recipeId);
 }
 
@@ -17,6 +25,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (body.step_number !== undefined) updateData.step_number = body.step_number;
   if (body.operation !== undefined) updateData.operation = body.operation;
   if (body.problem_point !== undefined) updateData.problem_point = body.problem_point;
+  if (body.problem_points !== undefined) updateData.problem_points = body.problem_points;
   if (body.sort_order !== undefined) updateData.sort_order = body.sort_order;
 
   const { data, error } = await client.from('recipe_steps').update(updateData).eq('id', id).select().single();

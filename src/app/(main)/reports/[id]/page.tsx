@@ -16,8 +16,14 @@ interface Material {
   id: string; material_type: string; file_name: string; file_url: string; file_size: number;
 }
 
+interface ProblemPoint {
+  text: string;
+  material_ids?: string[];
+}
+
 interface RecipeStep {
   id: string; step_number: number; operation: string; problem_point: string | null;
+  problem_points?: ProblemPoint[];
   materials?: Material[];
 }
 
@@ -190,7 +196,22 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
                     <span className="w-4 h-4 rounded-full bg-primary/10 text-primary text-[9px] flex items-center justify-center font-medium shrink-0">{step.step_number}</span>
                     <span className="text-xs">{step.operation}</span>
                   </div>
-                  {step.problem_point && <p className="text-[10px] text-amber-600 ml-5">问题: {step.problem_point}</p>}
+                  {(() => {
+                    const pps = step.problem_points && step.problem_points.length > 0
+                      ? step.problem_points.filter(p => p.text && p.text.trim())
+                      : step.problem_point ? [{ text: step.problem_point }] : [];
+                    if (pps.length === 0) return null;
+                    return (
+                      <div className="ml-5 space-y-0.5">
+                        {pps.map((pp, ppIdx) => (
+                          <p key={ppIdx} className="text-[10px] text-amber-600">
+                            {pps.length > 1 && <span className="font-medium">问题{ppIdx + 1}: </span>}
+                            {pp.text}
+                          </p>
+                        ))}
+                      </div>
+                    );
+                  })()}
                   {step.materials?.map((mat) => (
                     mat.material_type === 'image' ? (
                       <div key={mat.id} className="w-10 h-10 rounded overflow-hidden border cursor-pointer ml-5 inline-block">
@@ -329,9 +350,21 @@ export default function ReportDetailPage() {
 
       for (const recipe of recipes) {
         for (const step of (recipe.recipe_steps || [])) {
-          if (step.problem_point && step.problem_point.trim()) {
+          // Collect all problem points from this step
+          const problemPoints: Array<{ text: string; idx: number }> = [];
+          const pp = step.problem_points;
+          if (Array.isArray(pp) && pp.length > 0) {
+            (pp as Array<{ text: string }>).forEach((p, idx) => {
+              if (p.text && p.text.trim()) problemPoints.push({ text: p.text, idx });
+            });
+          } else if (step.problem_point && step.problem_point.trim()) {
+            problemPoints.push({ text: step.problem_point, idx: 0 });
+          }
+
+          for (const ppItem of problemPoints) {
+            const stepDesc = `步骤${step.step_number}: ${step.operation || ''}`;
             const alreadyExists = allIssues.find(i =>
-              i.source_report_id === reportId && i.source_type === 'recipe_problem' && i.title === step.problem_point
+              i.source_report_id === reportId && i.source_type === 'recipe_problem' && i.title === ppItem.text && i.description === stepDesc
             );
             if (!alreadyExists) {
               await fetch('/api/issues', {
@@ -339,13 +372,13 @@ export default function ReportDetailPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   task_id: task?.id,
-                  title: step.problem_point.substring(0, 200),
+                  title: ppItem.text.substring(0, 200),
                   product_model: task?.product_model || null,
                   level: '二类',
                   source: `${reportData.title} - 食谱功能问题(${recipe.name || ''})`,
                   source_report_id: reportId,
                   source_type: 'recipe_problem',
-                  description: `步骤${step.step_number}: ${step.operation || ''}`,
+                  description: stepDesc,
                 }),
               });
             }

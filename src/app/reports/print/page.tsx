@@ -8,8 +8,10 @@ interface Material {
   id: string; material_type: string; file_name: string; file_url: string; file_size: number;
 }
 
+interface ProblemPoint { text: string; material_ids?: string[]; }
 interface RecipeStep {
   id: string; step_number: number; operation: string; problem_point: string | null;
+  problem_points?: ProblemPoint[];
   materials?: Material[];
 }
 
@@ -168,7 +170,22 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
                       <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '18px', height: '18px', borderRadius: '50%', background: '#ccfbf1', color: '#0d9488', fontSize: '10px', fontWeight: 600, marginRight: '6px' }}>{step.step_number}</span>
                       <span style={{ fontSize: '12px' }}>{step.operation}</span>
                     </div>
-                    {step.problem_point && <div style={{ color: '#d97706', fontSize: '11px', marginLeft: '24px' }}>问题: {step.problem_point}</div>}
+                    {(() => {
+                      const pps = step.problem_points && step.problem_points.length > 0
+                        ? step.problem_points.filter((p: { text: string }) => p.text && p.text.trim())
+                        : step.problem_point ? [{ text: step.problem_point }] : [];
+                      if (pps.length === 0) return null;
+                      return (
+                        <div style={{ marginLeft: '24px' }}>
+                          {pps.map((pp: { text: string }, ppIdx: number) => (
+                            <div key={ppIdx} style={{ color: '#d97706', fontSize: '11px' }}>
+                              {pps.length > 1 && <span style={{ fontWeight: 600 }}>问题{ppIdx + 1}: </span>}
+                              {pp.text}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
                     {stepImages.length > 0 && (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px', marginLeft: '24px' }}>
                         {stepImages.map(mat => (

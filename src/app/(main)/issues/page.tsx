@@ -110,25 +110,38 @@ export default function IssuesPage() {
           }
         }
 
-        // Recipe problems
+        // Recipe problems - iterate over problem_points array (new) or fallback to problem_point (legacy)
         for (const recipe of recipes) {
           const steps = (recipe.recipe_steps || []) as Array<Record<string, unknown>>;
           for (const step of steps) {
-            if (step.problem_point && String(step.problem_point).trim()) {
-              const existing = issues.find(i => i.source_report_id === report.id && i.source_type === 'recipe_problem' && i.title === step.problem_point);
+            const stepDesc = `步骤${step.step_number}: ${step.operation || ''}`;
+            // Collect all problem points from this step
+            const problemPoints: Array<{ text: string; idx: number }> = [];
+            const pp = step.problem_points;
+            if (Array.isArray(pp) && pp.length > 0) {
+              pp.forEach((p: { text: string }, idx: number) => {
+                if (p.text && p.text.trim()) problemPoints.push({ text: p.text, idx });
+              });
+            } else if (step.problem_point && String(step.problem_point).trim()) {
+              problemPoints.push({ text: String(step.problem_point), idx: 0 });
+            }
+
+            for (const ppItem of problemPoints) {
+              const title = ppItem.text.substring(0, 200);
+              const existing = issues.find(i => i.source_report_id === report.id && i.source_type === 'recipe_problem' && i.title === title && i.description === stepDesc);
               if (!existing) {
                 await fetch('/api/issues', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
                     task_id: (content.task as Record<string, unknown>)?.id,
-                    title: String(step.problem_point).substring(0, 200),
+                    title,
                     product_model: (content.task as Record<string, unknown>)?.product_model,
                     level: '二类',
                     source: `${report.title} - 食谱功能问题(${recipe.name || ''})`,
                     source_report_id: report.id,
                     source_type: 'recipe_problem',
-                    description: `步骤${step.step_number}: ${step.operation || ''}`,
+                    description: stepDesc,
                     status: '待整改',
                   }),
                 });

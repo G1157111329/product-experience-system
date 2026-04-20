@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Pencil, Trash2, Check, Upload, Link2 } from 'lucide-react';
+import { ArrowLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Pencil, Trash2, Check, Upload, Link2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -50,8 +50,14 @@ interface Recipe {
   problem_count: number; recipe_steps: RecipeStep[];
 }
 
+interface ProblemPoint {
+  text: string;
+  material_ids?: string[];
+}
+
 interface RecipeStep {
   id: string; step_number: number; operation: string; problem_point: string | null;
+  problem_points?: ProblemPoint[];
   materials?: Material[];
 }
 
@@ -1255,10 +1261,10 @@ function FunctionsTab({ taskId }: { taskId: string }) {
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [editingStep, setEditingStep] = useState<RecipeStep | null>(null);
   const [newRecipe, setNewRecipe] = useState({ name: '', ingredients: '', recipe_type: '食谱' });
-  const [newStep, setNewStep] = useState({ operation: '', problem_point: '' });
+  const [newStep, setNewStep] = useState({ operation: '', problem_points: [{ text: '', material_ids: [] as string[] }] });
   const [stepMaterialIds, setStepMaterialIds] = useState<string[]>([]);
   const [, setStepMaterials] = useState<Material[]>([]);
-  const [editStepForm, setEditStepForm] = useState({ operation: '', problem_point: '' });
+  const [editStepForm, setEditStepForm] = useState({ operation: '', problem_points: [{ text: '', material_ids: [] as string[] }] });
   const [editStepMaterialIds, setEditStepMaterialIds] = useState<string[]>([]);
   const [, setEditStepMaterials] = useState<Material[]>([]);
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
@@ -1309,9 +1315,18 @@ function FunctionsTab({ taskId }: { taskId: string }) {
     const countData = await countRes.json();
     const currentSteps = countData.data || [];
     const stepNum = currentSteps.length + 1;
+    // Build legacy problem_point from first non-empty problem point
+    const validPPs = newStep.problem_points.filter(p => p.text.trim());
+    const legacyPP = validPPs.length > 0 ? validPPs.map(p => p.text).join('；') : null;
     const res = await fetch('/api/recipe-steps', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipe_id: selectedRecipe.id, step_number: stepNum, ...newStep }),
+      body: JSON.stringify({
+        recipe_id: selectedRecipe.id,
+        step_number: stepNum,
+        operation: newStep.operation,
+        problem_point: legacyPP,
+        problem_points: validPPs.map(p => ({ text: p.text, material_ids: p.material_ids || [] })),
+      }),
     });
     const data = await res.json();
     if (data.code === 0) {
@@ -1324,8 +1339,21 @@ function FunctionsTab({ taskId }: { taskId: string }) {
           });
         }
       }
+      // Link per-problem-point materials
+      if (stepId) {
+        for (const pp of validPPs) {
+          if (pp.material_ids && pp.material_ids.length > 0) {
+            for (const matId of pp.material_ids) {
+              await fetch('/api/materials', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: matId, recipe_step_id: stepId }),
+              });
+            }
+          }
+        }
+      }
       setAddStepDialogOpen(false);
-      setNewStep({ operation: '', problem_point: '' });
+      setNewStep({ operation: '', problem_points: [{ text: '', material_ids: [] }] });
       setStepMaterialIds([]);
       setStepMaterials([]);
       fetchRecipes();
@@ -1335,19 +1363,28 @@ function FunctionsTab({ taskId }: { taskId: string }) {
 
   const handleEditStep = (step: RecipeStep) => {
     setEditingStep(step);
-    setEditStepForm({ operation: step.operation, problem_point: step.problem_point || '' });
+    // Convert problem_points to form state, or fallback from legacy problem_point
+    const pps = step.problem_points && step.problem_points.length > 0
+      ? step.problem_points.map(p => ({ text: p.text || '', material_ids: p.material_ids || [] }))
+      : step.problem_point
+        ? [{ text: step.problem_point, material_ids: [] as string[] }]
+        : [{ text: '', material_ids: [] as string[] }];
+    setEditStepForm({ operation: step.operation, problem_points: pps });
     setEditStepMaterialIds([]);
-    setEditStepMaterialIds([]);
+    setEditStepMaterials([]);
     setEditStepDialogOpen(true);
   };
 
   const handleSaveEditStep = async () => {
     if (!editingStep) return;
+    const validPPs = editStepForm.problem_points.filter(p => p.text.trim());
+    const legacyPP = validPPs.length > 0 ? validPPs.map(p => p.text).join('；') : null;
     const res = await fetch(`/api/recipe-steps/${editingStep.id}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         operation: editStepForm.operation,
-        problem_point: editStepForm.problem_point || null,
+        problem_point: legacyPP,
+        problem_points: validPPs.map(p => ({ text: p.text, material_ids: p.material_ids || [] })),
       }),
     });
     const data = await res.json();
@@ -1359,6 +1396,17 @@ function FunctionsTab({ taskId }: { taskId: string }) {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id: matId, recipe_step_id: editingStep.id }),
           });
+        }
+      }
+      // Link per-problem-point materials
+      for (const pp of validPPs) {
+        if (pp.material_ids && pp.material_ids.length > 0) {
+          for (const matId of pp.material_ids) {
+            await fetch('/api/materials', {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: matId, recipe_step_id: editingStep.id }),
+            });
+          }
         }
       }
       setEditStepDialogOpen(false);
@@ -1443,9 +1491,25 @@ function FunctionsTab({ taskId }: { taskId: string }) {
                         </Button>
                         <Pencil className="h-3 w-3 text-muted-foreground shrink-0" />
                       </div>
-                      {step.problem_point && (
-                        <p className="text-xs text-amber-600 ml-7">问题: {step.problem_point}</p>
-                      )}
+                      {/* Problem points display */}
+                      {(() => {
+                        const pps = step.problem_points && step.problem_points.length > 0
+                          ? step.problem_points.filter(p => p.text && p.text.trim())
+                          : step.problem_point
+                            ? [{ text: step.problem_point, material_ids: [] as string[] }]
+                            : [];
+                        if (pps.length === 0) return null;
+                        return (
+                          <div className="ml-7 space-y-1">
+                            {pps.map((pp, ppIdx) => (
+                              <div key={ppIdx} className="flex items-start gap-1.5">
+                                {pps.length > 1 && <span className="text-[10px] text-amber-600 font-medium shrink-0">问题{ppIdx + 1}:</span>}
+                                <p className="text-xs text-amber-600">{pp.text}</p>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
                       {step.materials && step.materials.length > 0 && (
                         <div className="flex gap-1.5 ml-7 flex-wrap">
                           {step.materials.map((mat) => (
@@ -1510,7 +1574,7 @@ function FunctionsTab({ taskId }: { taskId: string }) {
       </Dialog>
 
       {/* Add step dialog */}
-      <Dialog open={addStepDialogOpen} onOpenChange={(open) => { setAddStepDialogOpen(open); if (!open) { setStepMaterialIds([]); setStepMaterials([]); } }}>
+      <Dialog open={addStepDialogOpen} onOpenChange={(open) => { setAddStepDialogOpen(open); if (!open) { setStepMaterialIds([]); setStepMaterials([]); setNewStep({ operation: '', problem_points: [{ text: '', material_ids: [] }] }); } }}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>新增步骤 - {selectedRecipe?.name}</DialogTitle></DialogHeader>
           <div className="space-y-3 mt-2">
@@ -1519,16 +1583,47 @@ function FunctionsTab({ taskId }: { taskId: string }) {
               <Textarea placeholder="描述该步骤的操作" value={newStep.operation}
                 onChange={(e) => setNewStep({ ...newStep, operation: e.target.value })} rows={3} />
             </div>
-            <div className="space-y-1.5">
-              <Label>问题点</Label>
-              <Textarea placeholder="发现的问题（可选）" value={newStep.problem_point}
-                onChange={(e) => setNewStep({ ...newStep, problem_point: e.target.value })} rows={2} />
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>问题点</Label>
+                <Button type="button" variant="ghost" size="sm" className="h-6 text-xs text-primary"
+                  onClick={() => setNewStep({ ...newStep, problem_points: [...newStep.problem_points, { text: '', material_ids: [] }] })}>
+                  <Plus className="h-3 w-3 mr-1" /> 添加问题点
+                </Button>
+              </div>
+              {newStep.problem_points.map((pp, idx) => (
+                <div key={idx} className="p-2 rounded-lg border bg-muted/20 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-muted-foreground font-medium shrink-0">问题{idx + 1}</span>
+                    {newStep.problem_points.length > 1 && (
+                      <Button type="button" variant="ghost" size="icon" className="h-5 w-5 ml-auto"
+                        onClick={() => setNewStep({ ...newStep, problem_points: newStep.problem_points.filter((_, i) => i !== idx) })}>
+                        <X className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+                  <Textarea placeholder="描述问题点..." value={pp.text}
+                    onChange={(e) => {
+                      const updated = [...newStep.problem_points];
+                      updated[idx] = { ...updated[idx], text: e.target.value };
+                      setNewStep({ ...newStep, problem_points: updated });
+                    }} rows={2} />
+                  <MaterialPicker
+                    taskId={taskId}
+                    selectedIds={pp.material_ids || []}
+                    onSelectionChange={(ids, mats) => {
+                      const updated = [...newStep.problem_points];
+                      updated[idx] = { ...updated[idx], material_ids: ids };
+                      setNewStep({ ...newStep, problem_points: updated });
+                      // Also update global step materials
+                      const allIds = newStep.problem_points.flatMap((p, i) => i === idx ? ids : (p.material_ids || []));
+                      setStepMaterialIds(allIds);
+                      setStepMaterials(mats);
+                    }}
+                  />
+                </div>
+              ))}
             </div>
-            <MaterialPicker
-              taskId={taskId}
-              selectedIds={stepMaterialIds}
-              onSelectionChange={(ids, mats) => { setStepMaterialIds(ids); setStepMaterials(mats); }}
-            />
             <Button onClick={handleAddStep} className="w-full" disabled={!newStep.operation}>保存步骤</Button>
           </div>
         </DialogContent>
@@ -1544,10 +1639,44 @@ function FunctionsTab({ taskId }: { taskId: string }) {
               <Textarea placeholder="描述该步骤的操作" value={editStepForm.operation}
                 onChange={(e) => setEditStepForm({ ...editStepForm, operation: e.target.value })} rows={3} />
             </div>
-            <div className="space-y-1.5">
-              <Label>问题点</Label>
-              <Textarea placeholder="发现的问题（可选）" value={editStepForm.problem_point}
-                onChange={(e) => setEditStepForm({ ...editStepForm, problem_point: e.target.value })} rows={2} />
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>问题点</Label>
+                <Button type="button" variant="ghost" size="sm" className="h-6 text-xs text-primary"
+                  onClick={() => setEditStepForm({ ...editStepForm, problem_points: [...editStepForm.problem_points, { text: '', material_ids: [] }] })}>
+                  <Plus className="h-3 w-3 mr-1" /> 添加问题点
+                </Button>
+              </div>
+              {editStepForm.problem_points.map((pp, idx) => (
+                <div key={idx} className="p-2 rounded-lg border bg-muted/20 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-muted-foreground font-medium shrink-0">问题{idx + 1}</span>
+                    {editStepForm.problem_points.length > 1 && (
+                      <Button type="button" variant="ghost" size="icon" className="h-5 w-5 ml-auto"
+                        onClick={() => setEditStepForm({ ...editStepForm, problem_points: editStepForm.problem_points.filter((_, i) => i !== idx) })}>
+                        <X className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+                  <Textarea placeholder="描述问题点..." value={pp.text}
+                    onChange={(e) => {
+                      const updated = [...editStepForm.problem_points];
+                      updated[idx] = { ...updated[idx], text: e.target.value };
+                      setEditStepForm({ ...editStepForm, problem_points: updated });
+                    }} rows={2} />
+                  <MaterialPicker
+                    taskId={taskId}
+                    selectedIds={pp.material_ids || []}
+                    onSelectionChange={(ids, mats) => {
+                      const updated = [...editStepForm.problem_points];
+                      updated[idx] = { ...updated[idx], material_ids: ids };
+                      setEditStepForm({ ...editStepForm, problem_points: updated });
+                      setEditStepMaterialIds(ids);
+                      setEditStepMaterials(mats);
+                    }}
+                  />
+                </div>
+              ))}
             </div>
             {/* Existing materials preview */}
             {editingStep?.materials && editingStep.materials.length > 0 && (
@@ -1567,11 +1696,6 @@ function FunctionsTab({ taskId }: { taskId: string }) {
                 </div>
               </div>
             )}
-            <MaterialPicker
-              taskId={taskId}
-              selectedIds={editStepMaterialIds}
-              onSelectionChange={(ids, mats) => { setEditStepMaterialIds(ids); setEditStepMaterials(mats); }}
-            />
             <Button onClick={handleSaveEditStep} className="w-full" disabled={!editStepForm.operation}>保存修改</Button>
           </div>
         </DialogContent>
