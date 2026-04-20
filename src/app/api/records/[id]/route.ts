@@ -10,7 +10,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const allowedFields = [
     'evaluation_result', 'problem_description', 'measurement_value',
     'tester', 'sort_order', 'sensory_dimension', 'test_phase',
-    'check_dimension', 'check_item', 'check_requirement',
+    'check_dimension', 'sub_check_dimension', 'check_item', 'check_requirement', 'check_standard',
     'standard_category', 'experience_flow', 'touch_point', 'experience_standard',
   ];
 

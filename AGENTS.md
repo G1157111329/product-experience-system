@@ -36,7 +36,7 @@
 │   │   │   ├── standard-items/  # 标准检查项 CRUD（含新字段：experience_flow, touch_point等）
 │   │   │   │   └── search/      # 标准检查项跨标准搜索（支持standard_category/experience_flow筛选）
 │   │   │   ├── tasks/           # 体验任务 CRUD
-│   │   │   ├── records/         # 检查记录 CRUD（含standard_category, experience_flow, touch_point, experience_standard）
+│   │   │   ├── records/         # 检查记录 CRUD（含standard_category, check_dimension, sub_check_dimension, check_standard, experience_flow, touch_point, experience_standard）
 │   │   │   ├── materials/       # 素材管理（上传/删除/重命名/关联）
 │   │   │   ├── issues/          # 问题整改 CRUD
 │   │   │   ├── reports/         # 报告生成/CRUD
@@ -68,7 +68,7 @@
 | `standards` | 体验标准库（通用标准/品类标准/感官评价标准/食谱功能标准） |
 | `standard_items` | 标准检查项（含分类特定字段：experience_flow, touch_point, experience_standard, sub_check_dimension, check_standard, evaluation_prep, subjective_score, subjective_rating, reference_images） |
 | `experience_tasks` | 体验任务 |
-| `check_records` | 检查记录（走查，含 standard_category, experience_flow, touch_point, experience_standard） |
+| `check_records` | 检查记录（走查，含 standard_category, check_dimension, sub_check_dimension, check_standard, experience_flow, touch_point, experience_standard） |
 | `materials` | 素材（图片/视频，含 AI 预留字段，可关联record或recipe_step） |
 | `issues` | 问题整改 |
 | `report_templates` | 报告模板 |

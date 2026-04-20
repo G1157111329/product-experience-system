@@ -102,8 +102,10 @@ export const checkRecords = pgTable(
     experience_flow: varchar("experience_flow", { length: 100 }), // 体验流程（通用标准）
     touch_point: varchar("touch_point", { length: 200 }), // 触点（通用标准）
     check_dimension: varchar("check_dimension", { length: 50 }),
+    sub_check_dimension: varchar("sub_check_dimension", { length: 100 }), // 细分检查维度（品类标准）
     check_item: varchar("check_item", { length: 200 }).notNull(),
     check_requirement: text("check_requirement"),
+    check_standard: text("check_standard"), // 检查标准（品类标准）
     experience_standard: text("experience_standard"), // 体验标准（通用标准）
     evaluation_result: varchar("evaluation_result", { length: 20 }), // 合格/不合格/待定
     problem_description: text("problem_description"),

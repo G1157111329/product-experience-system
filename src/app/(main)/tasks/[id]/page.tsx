@@ -28,6 +28,7 @@ interface TaskDetail {
 
 interface CheckRecord {
   id: string; sensory_dimension: string | null; check_dimension: string | null;
+  sub_check_dimension: string | null; check_standard: string | null;
   check_item: string; check_requirement: string | null; evaluation_result: string;
   problem_description: string | null; measurement_value: string | null;
   standard_category: string | null; test_phase: string | null;
@@ -436,36 +437,54 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
     fetchItems();
   }, [formCategory, generalForm.test_phase, generalForm.experience_flow, generalForm.sensory_dimension, taskProductCategory]);
 
-  // ── 品类标准: fetch dimensions list when form is active ──
+  // ── 品类标准 form ──
+  const [categoryLoading, setCategoryLoading] = useState(false);
+  const [categoryAllItems, setCategoryAllItems] = useState<StandardItem[]>([]);
+
+  // ── 品类标准: fetch ALL items when category is active ──
   useEffect(() => {
     if (formCategory !== '品类标准') return;
+    setCategoryLoading(true);
     const fetchDimensions = async () => {
       const params = new URLSearchParams();
       params.set('category', '品类标准');
       if (categoryForm.sensory_dimension && categoryForm.sensory_dimension !== 'all') params.set('sensory_dimension', categoryForm.sensory_dimension);
       if (taskProductCategory) params.set('product_category', taskProductCategory);
-      const res = await fetch(`/api/standard-items/search?${params}`);
-      const data = await res.json();
-      if (data.code === 0) {
-        const items: StandardItem[] = data.data || [];
-        // Extract unique check_dimensions
-        const dims = [...new Set(items.map(i => i.check_dimension).filter(Boolean) as string[])];
-        setCategoryDimensions(dims);
-        // If a check_dimension is selected, extract sub_dimensions
-        if (categoryForm.check_dimension) {
-          const subDims = [...new Set(items.filter(i => i.check_dimension === categoryForm.check_dimension).map(i => i.sub_check_dimension).filter(Boolean) as string[])];
-          setCategorySubDimensions(subDims);
-          // Also store matching items for auto-fill
-          const matched = items.filter(i => i.check_dimension === categoryForm.check_dimension && (!categoryForm.sub_check_dimension || categoryForm.sub_check_dimension === 'all' || i.sub_check_dimension === categoryForm.sub_check_dimension));
-          setCategoryItems(matched);
+      try {
+        const res = await fetch(`/api/standard-items/search?${params}`);
+        const data = await res.json();
+        if (data.code === 0) {
+          const items: StandardItem[] = data.data || [];
+          setCategoryAllItems(items);
+          const dims = [...new Set(items.map(i => i.check_dimension).filter(Boolean) as string[])];
+          setCategoryDimensions(dims);
         } else {
-          setCategorySubDimensions([]);
-          setCategoryItems([]);
+          setCategoryAllItems([]);
+          setCategoryDimensions([]);
         }
+      } catch {
+        setCategoryAllItems([]);
+        setCategoryDimensions([]);
       }
+      setCategoryLoading(false);
     };
     fetchDimensions();
-  }, [formCategory, categoryForm.sensory_dimension, categoryForm.check_dimension, categoryForm.sub_check_dimension, taskProductCategory]);
+  }, [formCategory, categoryForm.sensory_dimension, taskProductCategory]);
+
+  // ── 品类标准: derive sub-dimensions and items when check_dimension changes ──
+  useEffect(() => {
+    if (formCategory !== '品类标准') return;
+    if (!categoryForm.check_dimension) {
+      setCategorySubDimensions([]);
+      setCategoryItems([]);
+      return;
+    }
+    const filtered = categoryAllItems.filter(i => i.check_dimension === categoryForm.check_dimension);
+    const subDims = [...new Set(filtered.map(i => i.sub_check_dimension).filter(Boolean) as string[])];
+    setCategorySubDimensions(subDims);
+    const matched = filtered.filter(i => !categoryForm.sub_check_dimension || categoryForm.sub_check_dimension === 'all' || i.sub_check_dimension === categoryForm.sub_check_dimension);
+    setCategoryItems(matched);
+  }, [formCategory, categoryForm.check_dimension, categoryForm.sub_check_dimension, categoryAllItems]);
 
   // ── 感官评价标准: fetch reference items when sensory dimension selected ──
   useEffect(() => {
@@ -511,6 +530,8 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
     setCategoryDimensions([]);
     setCategorySubDimensions([]);
     setCategoryItems([]);
+    setCategoryLoading(false);
+    setCategoryAllItems([]);
     setSensoryForm({ sensory_dimension: '', score: '', result_description: '' });
     setSensoryRefItems([]);
     setSelectedMaterialIds([]);
@@ -541,6 +562,7 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
         standard_category: '品类标准',
         sensory_dimension: categoryForm.sensory_dimension || null,
         check_dimension: categoryForm.check_dimension || null,
+        sub_check_dimension: selectedItem?.sub_check_dimension || categoryForm.sub_check_dimension || null,
         check_item: selectedItem?.check_item || '',
         check_requirement: selectedItem?.check_requirement || null,
         check_standard: selectedItem?.check_standard || null,
@@ -554,6 +576,7 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
         sensory_dimension: sensoryForm.sensory_dimension || null,
         check_item: `${sensoryForm.sensory_dimension}评价`,
         check_requirement: refItem?.evaluation_prep || null,
+        check_standard: refItem?.subjective_rating || null,
         problem_description: sensoryForm.result_description || null,
         measurement_value: sensoryForm.score || null,
       };
@@ -723,6 +746,15 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
     if (formCategory === '品类标准') return (
       <div className="space-y-3">
         {categorySelector}
+        {/* Show no-data warning if product has no 品类标准 */}
+        {categoryDimensions.length === 0 && !categoryLoading && (
+          <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-950/20 dark:border-amber-800">
+            <p className="text-xs text-amber-700 dark:text-amber-400">当前产品品类「{taskProductCategory || '未指定'}」暂无品类标准数据，请先在标准管理中导入对应品类的标准</p>
+          </div>
+        )}
+        {categoryLoading && (
+          <div className="text-xs text-muted-foreground animate-pulse">正在加载品类标准...</div>
+        )}
         <div className="space-y-1.5">
           <Label>感官维度</Label>
           <Select value={categoryForm.sensory_dimension} onValueChange={(v) => setCategoryForm({ ...categoryForm, sensory_dimension: v, check_dimension: '', sub_check_dimension: '', selectedItemId: '' })}>
@@ -734,9 +766,9 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
           </Select>
         </div>
         <div className="space-y-1.5">
-          <Label>检查维度 *</Label>
+          <Label>检查维度 * {categoryDimensions.length > 0 && `(${categoryDimensions.length}个)`}</Label>
           <Select value={categoryForm.check_dimension} onValueChange={(v) => setCategoryForm({ ...categoryForm, check_dimension: v, sub_check_dimension: '', selectedItemId: '' })}>
-            <SelectTrigger><SelectValue placeholder="从标准库选择" /></SelectTrigger>
+            <SelectTrigger><SelectValue placeholder={categoryDimensions.length > 0 ? "从标准库选择" : "暂无数据"} /></SelectTrigger>
             <SelectContent>
               {categoryDimensions.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
             </SelectContent>
@@ -907,6 +939,12 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
                         record.evaluation_result === '不合格' ? 'bg-red-500' : 'bg-amber-500'
                       )} />
                       <span className="text-sm flex-1 truncate">{record.check_item}</span>
+                      {record.check_dimension && (
+                        <span className="text-[10px] text-muted-foreground bg-background px-1.5 py-0.5 rounded">{record.check_dimension}</span>
+                      )}
+                      {record.sub_check_dimension && (
+                        <span className="text-[10px] text-muted-foreground bg-background px-1.5 py-0.5 rounded">{record.sub_check_dimension}</span>
+                      )}
                       {record.test_phase && (
                         <span className="text-[10px] text-muted-foreground bg-background px-1.5 py-0.5 rounded">{record.test_phase}</span>
                       )}
@@ -1010,8 +1048,31 @@ function RecordDetailCard({ record, taskId, onRefresh, onImageClick }: {
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-medium">{record.check_item}</CardTitle>
+        {/* Standard reference tags */}
+        <div className="flex flex-wrap gap-1 mt-1">
+          {record.standard_category && <Badge variant="secondary" className="text-[10px]">{record.standard_category}</Badge>}
+          {record.check_dimension && <Badge variant="outline" className="text-[10px]">{record.check_dimension}</Badge>}
+          {record.sub_check_dimension && <Badge variant="outline" className="text-[10px]">{record.sub_check_dimension}</Badge>}
+          {record.test_phase && <Badge variant="outline" className="text-[10px]">{record.test_phase}</Badge>}
+          {record.experience_flow && <Badge variant="outline" className="text-[10px]">{record.experience_flow}</Badge>}
+          {record.touch_point && <Badge variant="outline" className="text-[10px]">{record.touch_point}</Badge>}
+        </div>
       </CardHeader>
       <CardContent className="space-y-3">
+        {/* Check requirement & standard from standard library */}
+        {(record.check_requirement || record.check_standard || record.experience_standard) && (
+          <div className="space-y-1 text-xs bg-muted/40 rounded-md p-2">
+            {record.check_requirement && (
+              <div><span className="text-muted-foreground">检查要求：</span>{record.check_requirement}</div>
+            )}
+            {record.check_standard && (
+              <div><span className="text-muted-foreground">检查标准：</span>{record.check_standard}</div>
+            )}
+            {record.experience_standard && (
+              <div><span className="text-muted-foreground">体验标准：</span>{record.experience_standard}</div>
+            )}
+          </div>
+        )}
         <div className="flex gap-2">
           {['合格', '不合格', '待定'].map((r) => (
             <Button key={r} size="sm" variant={evaluation === r ? 'default' : 'outline'}
