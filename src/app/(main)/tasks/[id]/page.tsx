@@ -399,6 +399,7 @@ const standardCategoryOptions = ['通用标准', '品类标准', '感官评价�
 
 function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId: string; records: CheckRecord[]; taskProductCategory?: string; onRefresh: () => void }) {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [savingRecord, setSavingRecord] = useState(false);
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
   const [, setSelectedMaterials] = useState<Material[]>([]);
   const [selectedRecord, setSelectedRecord] = useState<CheckRecord | null>(null);
@@ -553,67 +554,73 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
   };
 
   const handleAdd = async () => {
-    let body: Record<string, unknown> = { task_id: taskId, evaluation_result: evaluationResult, sort_order: records.length };
+    if (savingRecord) return;
+    setSavingRecord(true);
+    try {
+      let body: Record<string, unknown> = { task_id: taskId, evaluation_result: evaluationResult, sort_order: records.length };
 
-    if (formCategory === '通用标准') {
-      const selectedItem = generalItems.find(i => i.id === generalForm.selectedItemId);
-      body = {
-        ...body,
-        standard_category: '通用标准',
-        sensory_dimension: generalForm.sensory_dimension || null,
-        test_phase: generalForm.test_phase || null,
-        experience_flow: generalForm.experience_flow || null,
-        touch_point: selectedItem?.touch_point || null,
-        check_item: selectedItem?.touch_point || selectedItem?.check_item || generalForm.experience_flow || '',
-        check_requirement: selectedItem?.check_requirement || null,
-        experience_standard: selectedItem?.experience_standard || null,
-        problem_description: generalForm.problem_description || null,
-      };
-    } else if (formCategory === '品类标准') {
-      const selectedItem = categoryItems.find(i => i.id === categoryForm.selectedItemId);
-      body = {
-        ...body,
-        standard_category: '品类标准',
-        sensory_dimension: categoryForm.sensory_dimension || null,
-        check_dimension: categoryForm.check_dimension || null,
-        sub_check_dimension: selectedItem?.sub_check_dimension || categoryForm.sub_check_dimension || null,
-        check_item: selectedItem?.check_item || '',
-        check_requirement: selectedItem?.check_requirement || null,
-        check_standard: selectedItem?.check_standard || null,
-        problem_description: categoryForm.problem_description || null,
-      };
-    } else if (formCategory === '感官评价标准') {
-      const refItem = sensoryRefItems[0];
-      body = {
-        ...body,
-        standard_category: '感官评价标准',
-        sensory_dimension: sensoryForm.sensory_dimension || null,
-        check_item: `${sensoryForm.sensory_dimension}评价`,
-        check_requirement: refItem?.evaluation_prep || null,
-        check_standard: refItem?.subjective_rating || null,
-        problem_description: sensoryForm.result_description || null,
-        measurement_value: sensoryForm.score || null,
-      };
-    }
-
-    const res = await fetch('/api/records', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    });
-    const data = await res.json();
-    if (data.code === 0) {
-      const recordId = data.data?.id;
-      if (recordId && selectedMaterialIds.length > 0) {
-        for (const matId of selectedMaterialIds) {
-          await fetch('/api/materials', {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: matId, record_id: recordId }),
-          });
-        }
+      if (formCategory === '通用标准') {
+        const selectedItem = generalItems.find(i => i.id === generalForm.selectedItemId);
+        body = {
+          ...body,
+          standard_category: '通用标准',
+          sensory_dimension: generalForm.sensory_dimension || null,
+          test_phase: generalForm.test_phase || null,
+          experience_flow: generalForm.experience_flow || null,
+          touch_point: selectedItem?.touch_point || null,
+          check_item: selectedItem?.touch_point || selectedItem?.check_item || generalForm.experience_flow || '',
+          check_requirement: selectedItem?.check_requirement || null,
+          experience_standard: selectedItem?.experience_standard || null,
+          problem_description: generalForm.problem_description || null,
+        };
+      } else if (formCategory === '品类标准') {
+        const selectedItem = categoryItems.find(i => i.id === categoryForm.selectedItemId);
+        body = {
+          ...body,
+          standard_category: '品类标准',
+          sensory_dimension: categoryForm.sensory_dimension || null,
+          check_dimension: categoryForm.check_dimension || null,
+          sub_check_dimension: selectedItem?.sub_check_dimension || categoryForm.sub_check_dimension || null,
+          check_item: selectedItem?.check_item || '',
+          check_requirement: selectedItem?.check_requirement || null,
+          check_standard: selectedItem?.check_standard || null,
+          problem_description: categoryForm.problem_description || null,
+        };
+      } else if (formCategory === '感官评价标准') {
+        const refItem = sensoryRefItems[0];
+        body = {
+          ...body,
+          standard_category: '感官评价标准',
+          sensory_dimension: sensoryForm.sensory_dimension || null,
+          check_item: `${sensoryForm.sensory_dimension}评价`,
+          check_requirement: refItem?.evaluation_prep || null,
+          check_standard: refItem?.subjective_rating || null,
+          problem_description: sensoryForm.result_description || null,
+          measurement_value: sensoryForm.score || null,
+        };
       }
-      setAddDialogOpen(false);
-      resetForms();
-      onRefresh();
-      toast.success('问题点已添加');
+
+      const res = await fetch('/api/records', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (data.code === 0) {
+        const recordId = data.data?.id;
+        if (recordId && selectedMaterialIds.length > 0) {
+          for (const matId of selectedMaterialIds) {
+            await fetch('/api/materials', {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: matId, record_id: recordId }),
+            });
+          }
+        }
+        setAddDialogOpen(false);
+        resetForms();
+        onRefresh();
+        toast.success('问题点已添加');
+      }
+    } finally {
+      setSavingRecord(false);
     }
   };
 
@@ -768,7 +775,7 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
             ))}
           </div>
         </div>
-        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid()}>添加</Button>
+        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid() || savingRecord}>{savingRecord ? '添加中...' : '添加'}</Button>
       </div>
     );
 
@@ -882,7 +889,7 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
             ))}
           </div>
         </div>
-        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid()}>添加</Button>
+        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid() || savingRecord}>{savingRecord ? '添加中...' : '添加'}</Button>
       </div>
     );
 
@@ -950,7 +957,7 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
             ))}
           </div>
         </div>
-        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid()}>添加</Button>
+        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid() || savingRecord}>{savingRecord ? '添加中...' : '添加'}</Button>
       </div>
     );
 
@@ -1255,6 +1262,9 @@ function RecordDetailCard({ record, taskId, onRefresh, onClose, onImageClick }: 
 function FunctionsTab({ taskId }: { taskId: string }) {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
+  const [savingRecipe, setSavingRecipe] = useState(false);
+  const [savingStep, setSavingStep] = useState(false);
+  const [savingEditStep, setSavingEditStep] = useState(false);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addStepDialogOpen, setAddStepDialogOpen] = useState(false);
   const [editStepDialogOpen, setEditStepDialogOpen] = useState(false);
@@ -1273,10 +1283,16 @@ function FunctionsTab({ taskId }: { taskId: string }) {
     const res = await fetch(`/api/recipes?task_id=${taskId}`);
     const data = await res.json();
     if (data.code === 0) {
-      // For each recipe, fetch step materials
-      const recipesData = data.data || [];
+      // For each recipe, fetch step materials (deduplicate by id as safety net)
+      const recipesData: Recipe[] = (data.data || []);
+      const seen = new Set<string>();
+      const deduped = recipesData.filter(r => {
+        if (seen.has(r.id)) return false;
+        seen.add(r.id);
+        return true;
+      });
       const enriched = await Promise.all(
-        recipesData.map(async (recipe: Recipe) => {
+        deduped.map(async (recipe: Recipe) => {
           const stepsWithMats = await Promise.all(
             (recipe.recipe_steps || []).map(async (step) => {
               const matRes = await fetch(`/api/materials?recipe_step_id=${step.id}`);
@@ -1295,69 +1311,79 @@ function FunctionsTab({ taskId }: { taskId: string }) {
   useEffect(() => { fetchRecipes(); }, [fetchRecipes]);
 
   const handleAddRecipe = async () => {
-    const res = await fetch('/api/recipes', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ task_id: taskId, ...newRecipe }),
-    });
-    const data = await res.json();
-    if (data.code === 0) {
-      setAddDialogOpen(false);
-      setNewRecipe({ name: '', ingredients: '', recipe_type: '食谱' });
-      fetchRecipes();
-      toast.success('食谱/功能已添加');
+    if (savingRecipe) return;
+    setSavingRecipe(true);
+    try {
+      const res = await fetch('/api/recipes', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: taskId, ...newRecipe }),
+      });
+      const data = await res.json();
+      if (data.code === 0) {
+        setAddDialogOpen(false);
+        setNewRecipe({ name: '', ingredients: '', recipe_type: '食谱' });
+        fetchRecipes();
+        toast.success('食谱/功能已添加');
+      }
+    } finally {
+      setSavingRecipe(false);
     }
   };
 
   const handleAddStep = async () => {
-    if (!selectedRecipe) return;
-    // Query current step count from DB to avoid stale client state
-    const countRes = await fetch(`/api/recipe-steps?recipe_id=${selectedRecipe.id}`);
-    const countData = await countRes.json();
-    const currentSteps = countData.data || [];
-    const stepNum = currentSteps.length + 1;
-    // Build legacy problem_point from first non-empty problem point
-    const validPPs = newStep.problem_points.filter(p => p.text.trim());
-    const legacyPP = validPPs.length > 0 ? validPPs.map(p => p.text).join('；') : null;
-    const res = await fetch('/api/recipe-steps', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        recipe_id: selectedRecipe.id,
-        step_number: stepNum,
-        operation: newStep.operation,
-        problem_point: legacyPP,
-        problem_points: validPPs.map(p => ({ text: p.text, material_ids: p.material_ids || [] })),
-      }),
-    });
-    const data = await res.json();
-    if (data.code === 0) {
-      const stepId = data.data?.id;
-      if (stepId && stepMaterialIds.length > 0) {
-        for (const matId of stepMaterialIds) {
-          await fetch('/api/materials', {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: matId, recipe_step_id: stepId }),
-          });
+    if (!selectedRecipe || savingStep) return;
+    setSavingStep(true);
+    try {
+      const countRes = await fetch(`/api/recipe-steps?recipe_id=${selectedRecipe.id}`);
+      const countData = await countRes.json();
+      const currentSteps = countData.data || [];
+      const stepNum = currentSteps.length + 1;
+      // Build legacy problem_point from first non-empty problem point
+      const validPPs = newStep.problem_points.filter(p => p.text.trim());
+      const legacyPP = validPPs.length > 0 ? validPPs.map(p => p.text).join('；') : null;
+      const res = await fetch('/api/recipe-steps', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipe_id: selectedRecipe.id,
+          step_number: stepNum,
+          operation: newStep.operation,
+          problem_point: legacyPP,
+          problem_points: validPPs.map(p => ({ text: p.text, material_ids: p.material_ids || [] })),
+        }),
+      });
+      const data = await res.json();
+      if (data.code === 0) {
+        const stepId = data.data?.id;
+        if (stepId && stepMaterialIds.length > 0) {
+          for (const matId of stepMaterialIds) {
+            await fetch('/api/materials', {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: matId, recipe_step_id: stepId }),
+            });
+          }
         }
-      }
-      // Link per-problem-point materials
-      if (stepId) {
-        for (const pp of validPPs) {
-          if (pp.material_ids && pp.material_ids.length > 0) {
-            for (const matId of pp.material_ids) {
-              await fetch('/api/materials', {
-                method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: matId, recipe_step_id: stepId }),
-              });
+        // Link per-problem-point materials
+        if (stepId) {
+          for (const pp of validPPs) {
+            if (pp.material_ids && pp.material_ids.length > 0) {
+              for (const matId of pp.material_ids) {
+                await fetch('/api/materials', {
+                  method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ id: matId, recipe_step_id: stepId }),
+                });
+              }
             }
           }
         }
+        setAddStepDialogOpen(false);
+        setNewStep({ operation: '', problem_points: [{ text: '', material_ids: [] }] });
+        setStepMaterialIds([]);
+        setStepMaterials([]);
+        fetchRecipes();
+        toast.success('步骤已添加');
       }
-      setAddStepDialogOpen(false);
-      setNewStep({ operation: '', problem_points: [{ text: '', material_ids: [] }] });
-      setStepMaterialIds([]);
-      setStepMaterials([]);
-      fetchRecipes();
-      toast.success('步骤已添加');
+    } finally {
+      setSavingStep(false);
     }
   };
 
@@ -1376,45 +1402,50 @@ function FunctionsTab({ taskId }: { taskId: string }) {
   };
 
   const handleSaveEditStep = async () => {
-    if (!editingStep) return;
-    const validPPs = editStepForm.problem_points.filter(p => p.text.trim());
-    const legacyPP = validPPs.length > 0 ? validPPs.map(p => p.text).join('；') : null;
-    const res = await fetch(`/api/recipe-steps/${editingStep.id}`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        operation: editStepForm.operation,
-        problem_point: legacyPP,
-        problem_points: validPPs.map(p => ({ text: p.text, material_ids: p.material_ids || [] })),
-      }),
-    });
-    const data = await res.json();
-    if (data.code === 0) {
-      // Link new materials
-      if (editStepMaterialIds.length > 0) {
-        for (const matId of editStepMaterialIds) {
-          await fetch('/api/materials', {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: matId, recipe_step_id: editingStep.id }),
-          });
-        }
-      }
-      // Link per-problem-point materials
-      for (const pp of validPPs) {
-        if (pp.material_ids && pp.material_ids.length > 0) {
-          for (const matId of pp.material_ids) {
+    if (!editingStep || savingEditStep) return;
+    setSavingEditStep(true);
+    try {
+      const validPPs = editStepForm.problem_points.filter(p => p.text.trim());
+      const legacyPP = validPPs.length > 0 ? validPPs.map(p => p.text).join('；') : null;
+      const res = await fetch(`/api/recipe-steps/${editingStep.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operation: editStepForm.operation,
+          problem_point: legacyPP,
+          problem_points: validPPs.map(p => ({ text: p.text, material_ids: p.material_ids || [] })),
+        }),
+      });
+      const data = await res.json();
+      if (data.code === 0) {
+        // Link new materials
+        if (editStepMaterialIds.length > 0) {
+          for (const matId of editStepMaterialIds) {
             await fetch('/api/materials', {
               method: 'PUT', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ id: matId, recipe_step_id: editingStep.id }),
             });
           }
         }
+        // Link per-problem-point materials
+        for (const pp of validPPs) {
+          if (pp.material_ids && pp.material_ids.length > 0) {
+            for (const matId of pp.material_ids) {
+              await fetch('/api/materials', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: matId, recipe_step_id: editingStep.id }),
+              });
+            }
+          }
+        }
+        setEditStepDialogOpen(false);
+        setEditingStep(null);
+        setEditStepMaterialIds([]);
+        setEditStepMaterials([]);
+        fetchRecipes();
+        toast.success('步骤已更新');
       }
-      setEditStepDialogOpen(false);
-      setEditingStep(null);
-      setEditStepMaterialIds([]);
-      setEditStepMaterials([]);
-      fetchRecipes();
-      toast.success('步骤已更新');
+    } finally {
+      setSavingEditStep(false);
     }
   };
 
@@ -1568,7 +1599,7 @@ function FunctionsTab({ taskId }: { taskId: string }) {
               <Textarea placeholder={newRecipe.recipe_type === '食谱' ? '填写食材' : '填写功能参数'}
                 value={newRecipe.ingredients} onChange={(e) => setNewRecipe({ ...newRecipe, ingredients: e.target.value })} rows={2} />
             </div>
-            <Button onClick={handleAddRecipe} className="w-full" disabled={!newRecipe.name}>保存</Button>
+            <Button onClick={handleAddRecipe} className="w-full" disabled={!newRecipe.name || savingRecipe}>{savingRecipe ? '保存中...' : '保存'}</Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -1624,7 +1655,7 @@ function FunctionsTab({ taskId }: { taskId: string }) {
                 </div>
               ))}
             </div>
-            <Button onClick={handleAddStep} className="w-full" disabled={!newStep.operation}>保存步骤</Button>
+            <Button onClick={handleAddStep} className="w-full" disabled={!newStep.operation || savingStep}>{savingStep ? '保存中...' : '保存步骤'}</Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -1696,7 +1727,7 @@ function FunctionsTab({ taskId }: { taskId: string }) {
                 </div>
               </div>
             )}
-            <Button onClick={handleSaveEditStep} className="w-full" disabled={!editStepForm.operation}>保存修改</Button>
+            <Button onClick={handleSaveEditStep} className="w-full" disabled={!editStepForm.operation || savingEditStep}>{savingEditStep ? '保存中...' : '保存修改'}</Button>
           </div>
         </DialogContent>
       </Dialog>
