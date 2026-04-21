@@ -118,10 +118,33 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
 
   const filtered = filterType === 'all' ? materials : materials.filter(m => m.material_type === filterType);
 
-  // If no controlled open, render inline trigger
+  // If no controlled open, render inline trigger button + dialog
   if (controlledOpen === undefined && onOpenChange === undefined) {
     return (
       <>
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => handleOpen(true)}>
+              <Plus className="h-3.5 w-3.5" /> 选择素材
+            </Button>
+            {selected.length > 0 && (
+              <span className="text-xs text-muted-foreground">已选 {selected.length} 项</span>
+            )}
+          </div>
+          {selected.length > 0 && (
+            <div className="flex gap-1.5 flex-wrap">
+              {materials.filter(m => selected.includes(m.id)).map(m => (
+                <div key={m.id} className="relative w-12 h-12 rounded-md overflow-hidden border border-border group">
+                  <MediaThumbnail url={m.file_url} type={m.material_type as 'image' | 'video'} size="sm" />
+                  <button type="button" className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center text-[8px] opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={(e) => { e.stopPropagation(); handleSelect(m); }}>
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <Dialog open={isOpen} onOpenChange={handleOpen}>
           <DialogContent className="max-w-lg max-h-[85vh]">
             <DialogHeader>
