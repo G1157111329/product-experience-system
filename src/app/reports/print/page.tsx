@@ -163,7 +163,9 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
                 <span style={{ color: '#666', fontSize: '11px', marginLeft: 'auto' }}>{recipe.recipe_steps?.length || 0} 步骤 | {recipe.problem_count || 0} 问题</span>
               </div>
               {recipe.recipe_steps?.map(step => {
-                const stepImages = (step.materials || []).filter(m => m.material_type === 'image');
+                const stepMats = step.materials || [];
+                const stepImages = stepMats.filter(m => m.material_type === 'image');
+                const stepVideos = stepMats.filter(m => m.material_type === 'video');
                 return (
                   <div key={step.id} style={{ padding: '6px', margin: '3px 0', background: '#f9fafb', borderRadius: '3px' }}>
                     <div>
@@ -186,10 +188,18 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
                         </div>
                       );
                     })()}
-                    {stepImages.length > 0 && (
+                    {(stepImages.length > 0 || stepVideos.length > 0) && (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px', marginLeft: '24px' }}>
                         {stepImages.map(mat => (
                           <img key={mat.id} src={mat.file_url} alt={mat.file_name} style={{ width: '50px', height: '50px', borderRadius: '3px', objectFit: 'cover', border: '1px solid #e5e7eb' }} crossOrigin="anonymous" />
+                        ))}
+                        {stepVideos.map(mat => (
+                          <div key={mat.id} style={{ width: '50px', height: '50px', borderRadius: '3px', overflow: 'hidden', border: '1px solid #e5e7eb', position: 'relative', background: '#e5e7eb' }}>
+                            <video src={mat.file_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
+                            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)' }}>
+                              <span style={{ color: 'white', fontSize: '16px' }}>&#9654;</span>
+                            </div>
+                          </div>
                         ))}
                       </div>
                     )}

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { FileText, Printer, BarChart3, Users, User as UserIcon, ChevronRight, Trash2, Loader2 } from 'lucide-react';
+import { FileText, Printer, BarChart3, Users, User as UserIcon, ChevronRight, Trash2, Loader2, Share2, Copy, Clock, Infinity, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -35,6 +35,11 @@ export default function ReportsPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [compareIds, setCompareIds] = useState<string[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
+  const [shareReportId, setShareReportId] = useState<string | null>(null);
+  const [shareDuration, setShareDuration] = useState<'7d' | '30d' | 'permanent'>('30d');
+  const [shareCreating, setShareCreating] = useState(false);
+  const [shareLink, setShareLink] = useState<string | null>(null);
+  const [shareLinks, setShareLinks] = useState<Array<{ id: string; share_token: string; expires_at: string | null; is_expired: boolean; created_at: string }>>([]);
 
   const fetchReports = useCallback(async () => {
     setLoading(true);
@@ -63,6 +68,56 @@ export default function ReportsPage() {
 
   const handlePrint = (id: string) => {
     window.open(`/reports/print?id=${id}`, '_blank');
+  };
+
+  const openShareDialog = async (reportId: string) => {
+    setShareReportId(reportId);
+    setShareLink(null);
+    setShareDuration('30d');
+    // Fetch existing share links
+    try {
+      const res = await fetch(`/api/reports/share/list?report_id=${reportId}`);
+      const data = await res.json();
+      if (data.code === 0) setShareLinks(data.data || []);
+    } catch { setShareLinks([]); }
+  };
+
+  const handleCreateShare = async () => {
+    if (!shareReportId) return;
+    setShareCreating(true);
+    try {
+      const res = await fetch('/api/reports/share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ report_id: shareReportId, duration: shareDuration, created_by: user?.id }),
+      });
+      const data = await res.json();
+      if (data.code === 0) {
+        const token = data.data.share_token;
+        const domain = window.location.origin;
+        setShareLink(`${domain}/reports/share/${token}`);
+        toast.success('分享链接已创建');
+        // Refresh share links
+        const listRes = await fetch(`/api/reports/share/list?report_id=${shareReportId}`);
+        const listData = await listRes.json();
+        if (listData.code === 0) setShareLinks(listData.data || []);
+      } else {
+        toast.error(data.message);
+      }
+    } finally { setShareCreating(false); }
+  };
+
+  const handleCopyLink = (link: string) => {
+    navigator.clipboard.writeText(link).then(() => toast.success('链接已复制')).catch(() => toast.error('复制失败'));
+  };
+
+  const handleRevokeShare = async (id: string) => {
+    const res = await fetch(`/api/reports/share/list?id=${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.code === 0) {
+      toast.success('已撤销');
+      setShareLinks(prev => prev.filter(s => s.id !== id));
+    }
   };
 
   // Group by product_model for merged types
@@ -143,9 +198,14 @@ export default function ReportsPage() {
                         <Badge variant="secondary" className="text-[10px]">{group.reports.length} 份报告</Badge>
                       </div>
                     </div>
-                    <Button variant="outline" size="sm" className="shrink-0 text-xs gap-1" onClick={() => handlePrint(latestReport.id)}>
-                      <Printer className="h-3 w-3" /> 打印
-                    </Button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openShareDialog(latestReport.id)}>
+                        <Share2 className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button variant="outline" size="sm" className="shrink-0 text-xs gap-1" onClick={() => handlePrint(latestReport.id)}>
+                        <Printer className="h-3 w-3" /> 打印
+                      </Button>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="pt-0">
@@ -193,6 +253,9 @@ export default function ReportsPage() {
                   <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
                     <input type="checkbox" checked={compareIds.includes(r.id)} onChange={() => toggleCompare(r.id)}
                       className="h-3.5 w-3.5 rounded border-border" />
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openShareDialog(r.id)}>
+                      <Share2 className="h-3.5 w-3.5" />
+                    </Button>
                     <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handlePrint(r.id)}>
                       <Printer className="h-3.5 w-3.5" />
                     </Button>
@@ -251,6 +314,94 @@ export default function ReportsPage() {
               ))}
             </div>
           </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
+      {/* Share dialog */}
+      <Dialog open={!!shareReportId} onOpenChange={() => setShareReportId(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>分享报告</DialogTitle>
+            <DialogDescription>生成分享链接，其他人可以通过链接查看报告</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Duration selection */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">链接有效期</label>
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  { value: '7d' as const, label: '7天', icon: Clock },
+                  { value: '30d' as const, label: '30天', icon: Clock },
+                  { value: 'permanent' as const, label: '永久', icon: Infinity },
+                ]).map(opt => (
+                  <Button key={opt.value} type="button" variant={shareDuration === opt.value ? 'default' : 'outline'}
+                    size="sm" className="gap-1" onClick={() => setShareDuration(opt.value)}>
+                    <opt.icon className="h-3.5 w-3.5" /> {opt.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            {/* Create button */}
+            {!shareLink && (
+              <Button type="button" className="w-full" onClick={handleCreateShare} disabled={shareCreating}>
+                {shareCreating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Share2 className="h-4 w-4 mr-2" />}
+                生成分享链接
+              </Button>
+            )}
+
+            {/* Generated link */}
+            {shareLink && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">分享链接</label>
+                <div className="flex gap-2">
+                  <input readOnly value={shareLink} className="flex-1 text-xs bg-muted rounded-md px-3 py-2 border border-border truncate" onClick={(e) => (e.target as HTMLInputElement).select()} />
+                  <Button type="button" size="sm" variant="outline" onClick={() => handleCopyLink(shareLink)}>
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  {shareDuration === 'permanent' ? '此链接永久有效' : `此链接${shareDuration === '7d' ? '7天' : '30天'}内有效`}
+                </p>
+              </div>
+            )}
+
+            {/* Existing share links */}
+            {shareLinks.length > 0 && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">已创建的链接</label>
+                <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                  {shareLinks.map(s => {
+                    const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/reports/share/${s.share_token}`;
+                    return (
+                      <div key={s.id} className="flex items-center gap-2 p-2 bg-muted/50 rounded-md text-xs">
+                        <div className="flex-1 min-w-0">
+                          <div className="truncate text-muted-foreground">{link}</div>
+                          <div className="flex gap-2 mt-0.5">
+                            {s.is_expired ? (
+                              <span className="text-destructive">已过期</span>
+                            ) : s.expires_at ? (
+                              <span className="text-muted-foreground">有效期至 {new Date(s.expires_at).toLocaleDateString('zh-CN')}</span>
+                            ) : (
+                              <span className="text-muted-foreground">永久有效</span>
+                            )}
+                          </div>
+                        </div>
+                        {!s.is_expired && (
+                          <Button type="button" variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => handleCopyLink(link)}>
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        )}
+                        <Button type="button" variant="ghost" size="icon" className="h-6 w-6 shrink-0 text-destructive" onClick={() => handleRevokeShare(s.id)}>
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

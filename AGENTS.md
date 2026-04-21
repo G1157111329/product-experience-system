@@ -32,6 +32,7 @@
 │   │   │   ├── reports/         # 报告中心（含 [id] 详情）
 │   │   │   └── analysis/        # 数据分析
 │   │   ├── reports/print/       # 报告打印/PDF导出页面
+│   │   ├── reports/share/[token]/ # 报告分享公开页面（无需登录，只读）
 │   │   ├── api/                 # 后端 API 路由
 │   │   │   ├── auth/            # 认证相关 API
 │   │   │   │   ├── login/       # 登录
@@ -49,7 +50,8 @@
 │   │   │   ├── materials/       # 素材管理（上传/删除/重命名/关联）
 │   │   │   ├── issues/          # 问题整改 CRUD
 │   │   │   ├── reports/         # 报告生成/CRUD
-│   │   │   │   └── export-pdf/  # PDF导出API
+│   │   │   │   ├── export-pdf/  # PDF导出API
+│   │   │   │   └── share/       # 报告分享API（创建/验证/列表/撤销）
 │   │   │   ├── recipes/         # 食谱/功能 CRUD
 │   │   │   ├── recipe-steps/    # 食谱步骤 CRUD
 │   │   │   └── dashboard/       # 仪表盘数据
@@ -84,6 +86,7 @@
 | `issues` | 问题整改（含 level: 一类/二类/三类, source, source_report_id, source_type: record_fail/recipe_problem） |
 | `report_templates` | 报告模板 |
 | `reports` | 报告（含 product_model 用于同型号合并） |
+| `report_shares` | 报告分享（share_token, expires_at, created_by，支持7天/30天/永久有效期） |
 | `recipes` | 食谱/功能 |
 | `recipe_steps` | 食谱步骤 |
 
@@ -138,6 +141,10 @@
 | GET/POST | `/api/reports` | 报告列表/生成（含食谱/素材数据） |
 | GET/PUT/DELETE | `/api/reports/[id]` | 报告详情/更新/删除 |
 | POST | `/api/reports/export-pdf` | PDF导出辅助API |
+| POST | `/api/reports/share` | 创建分享链接（7天/30天/永久） |
+| GET | `/api/reports/share?token=xxx` | 验证分享令牌并获取报告（公开接口） |
+| GET | `/api/reports/share/list?report_id=xxx` | 获取报告的分享链接列表 |
+| DELETE | `/api/reports/share/list?id=xxx` | 撤销分享链接 |
 | GET/POST | `/api/recipes` | 食谱/功能列表/创建 |
 | GET/PUT/DELETE | `/api/recipes/[id]` | 食谱详情/更新/删除 |
 | GET/POST | `/api/recipe-steps` | 步骤列表/创建 |
@@ -187,6 +194,7 @@ pnpm build
 18. **数据隔离**: 体验计划和问题管理按用户隔离（experience_tasks.created_by字段），工作台数据按用户过滤；标准管理和报告中心保持平台共享（因同型号不同阶段可能不同账号承接）；管理账号(admin)可查看所有数据
 19. **非管理员待申请**: 非管理员工作台"待审核"改为"待申请"，显示该账号的密码/名称修改待审核列表（排除注册记录），可用叉图标取消申请
 20. **数据分析**: 所有账号可浏览数据分析页面，核心指标为任务数/完成率/问题总数/整改率；支持按品类/项目类型/任务人/问题点分类/时间范围多维筛选；保留任务状态分布/问题等级分布(一类/二类/三类)/问题整改进度(按状态×等级)；管理账号可导出数据
+21. **报告分享**: 报告中心和报告详情页可生成分享链接，设置有效期（7天/30天/永久）；公开页面 `/reports/share/[token]` 无需登录，只读查看，支持导出PDF、图片放大、视频播放；可查看已创建的分享链接列表并撤销
 
 ## 代码风格
 

@@ -1006,7 +1006,6 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
             <CardContent className="space-y-1.5">
               {items.map((record) => {
                 const mats = recordMaterials[record.id] || [];
-                const matImages = mats.filter(m => m.material_type === 'image');
                 return (
                   <div
                     key={record.id}
@@ -1044,12 +1043,21 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
                       </Button>
                     </div>
                     {/* Thumbnails per problem point */}
-                    {matImages.length > 0 && (
+                    {mats.length > 0 && (
                       <div className="flex gap-1.5 ml-5 mt-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
-                        {matImages.map((mat) => (
-                          <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border cursor-pointer"
+                        {mats.map((mat) => (
+                          <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border cursor-pointer relative"
                             onClick={() => open(mat.file_url)}>
-                            <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
+                            {mat.material_type === 'image' ? (
+                              <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
+                            ) : (
+                              <>
+                                <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
+                                <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                                  <Play className="h-3.5 w-3.5 text-white fill-white" />
+                                </div>
+                              </>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1262,10 +1270,10 @@ function FunctionsTab({ taskId }: { taskId: string }) {
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [editingStep, setEditingStep] = useState<RecipeStep | null>(null);
   const [newRecipe, setNewRecipe] = useState({ name: '', ingredients: '', recipe_type: '食谱' });
-  const [newStep, setNewStep] = useState({ operation: '', problem_points: [{ text: '', material_ids: [] as string[] }] });
+  const [newStep, setNewStep] = useState({ operation: '', step_material_ids: [] as string[], problem_points: [{ text: '', material_ids: [] as string[] }] });
   const [stepMaterialIds, setStepMaterialIds] = useState<string[]>([]);
   const [, setStepMaterials] = useState<Material[]>([]);
-  const [editStepForm, setEditStepForm] = useState({ operation: '', problem_points: [{ text: '', material_ids: [] as string[] }] });
+  const [editStepForm, setEditStepForm] = useState({ operation: '', step_material_ids: [] as string[], problem_points: [{ text: '', material_ids: [] as string[] }] });
   const [editStepMaterialIds, setEditStepMaterialIds] = useState<string[]>([]);
   const [, setEditStepMaterials] = useState<Material[]>([]);
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
@@ -1340,6 +1348,7 @@ function FunctionsTab({ taskId }: { taskId: string }) {
           operation: newStep.operation,
           problem_point: legacyPP,
           problem_points: validPPs.map(p => ({ text: p.text, material_ids: p.material_ids || [] })),
+          step_material_ids: newStep.step_material_ids || [],
         }),
       });
       const data = await res.json();
@@ -1355,6 +1364,14 @@ function FunctionsTab({ taskId }: { taskId: string }) {
         }
         // Link per-problem-point materials
         if (stepId) {
+          // Link step-level materials
+          for (const matId of (newStep.step_material_ids || [])) {
+            await fetch('/api/materials', {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: matId, recipe_step_id: stepId }),
+            });
+          }
+          // Link per-problem-point materials
           for (const pp of validPPs) {
             if (pp.material_ids && pp.material_ids.length > 0) {
               for (const matId of pp.material_ids) {
@@ -1367,7 +1384,7 @@ function FunctionsTab({ taskId }: { taskId: string }) {
           }
         }
         setAddStepDialogOpen(false);
-        setNewStep({ operation: '', problem_points: [{ text: '', material_ids: [] }] });
+        setNewStep({ operation: '', step_material_ids: [], problem_points: [{ text: '', material_ids: [] }] });
         setStepMaterialIds([]);
         setStepMaterials([]);
         fetchRecipes();
@@ -1386,7 +1403,11 @@ function FunctionsTab({ taskId }: { taskId: string }) {
       : step.problem_point
         ? [{ text: step.problem_point, material_ids: [] as string[] }]
         : [{ text: '', material_ids: [] as string[] }];
-    setEditStepForm({ operation: step.operation, problem_points: pps });
+    // Collect step-level material IDs (materials linked to this step but not to any problem_point)
+    const ppMaterialIds = new Set(pps.flatMap(p => p.material_ids || []));
+    const stepMats = (step as unknown as Record<string, unknown>).materials as Material[] | undefined;
+    const stepMatIds = stepMats ? stepMats.filter(m => !ppMaterialIds.has(m.id)).map(m => m.id) : [];
+    setEditStepForm({ operation: step.operation, step_material_ids: stepMatIds, problem_points: pps });
     setEditStepMaterialIds([]);
     setEditStepMaterials([]);
     setEditStepDialogOpen(true);
@@ -1404,13 +1425,14 @@ function FunctionsTab({ taskId }: { taskId: string }) {
           operation: editStepForm.operation,
           problem_point: legacyPP,
           problem_points: validPPs.map(p => ({ text: p.text, material_ids: p.material_ids || [] })),
+          step_material_ids: editStepForm.step_material_ids || [],
         }),
       });
       const data = await res.json();
       if (data.code === 0) {
-        // Link new materials
-        if (editStepMaterialIds.length > 0) {
-          for (const matId of editStepMaterialIds) {
+        // Link step-level materials
+        if (editStepForm.step_material_ids && editStepForm.step_material_ids.length > 0) {
+          for (const matId of editStepForm.step_material_ids) {
             await fetch('/api/materials', {
               method: 'PUT', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ id: matId, recipe_step_id: editingStep.id }),
@@ -1601,7 +1623,7 @@ function FunctionsTab({ taskId }: { taskId: string }) {
       </Dialog>
 
       {/* Add step dialog */}
-      <Dialog open={addStepDialogOpen} onOpenChange={(open) => { setAddStepDialogOpen(open); if (!open) { setStepMaterialIds([]); setStepMaterials([]); setNewStep({ operation: '', problem_points: [{ text: '', material_ids: [] }] }); } }}>
+      <Dialog open={addStepDialogOpen} onOpenChange={(open) => { setAddStepDialogOpen(open); if (!open) { setStepMaterialIds([]); setStepMaterials([]); setNewStep({ operation: '', step_material_ids: [], problem_points: [{ text: '', material_ids: [] }] }); } }}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>新增步骤 - {selectedRecipe?.name}</DialogTitle></DialogHeader>
           <div className="space-y-3 mt-2">
@@ -1609,6 +1631,19 @@ function FunctionsTab({ taskId }: { taskId: string }) {
               <Label>具体操作 *</Label>
               <Textarea placeholder="描述该步骤的操作" value={newStep.operation}
                 onChange={(e) => setNewStep({ ...newStep, operation: e.target.value })} rows={3} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>步骤素材</Label>
+              <p className="text-[11px] text-muted-foreground">附录该步骤的效果图片或视频（如食物成品效果），与问题点素材独立</p>
+              <MaterialPicker
+                taskId={taskId}
+                selectedIds={newStep.step_material_ids || []}
+                onSelectionChange={(ids, mats) => {
+                  setNewStep({ ...newStep, step_material_ids: ids });
+                  setStepMaterialIds(prev => [...new Set([...prev, ...ids])]);
+                  setStepMaterials(mats);
+                }}
+              />
             </div>
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -1665,6 +1700,19 @@ function FunctionsTab({ taskId }: { taskId: string }) {
               <Label>具体操作 *</Label>
               <Textarea placeholder="描述该步骤的操作" value={editStepForm.operation}
                 onChange={(e) => setEditStepForm({ ...editStepForm, operation: e.target.value })} rows={3} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>步骤素材</Label>
+              <p className="text-[11px] text-muted-foreground">附录该步骤的效果图片或视频（如食物成品效果），与问题点素材独立</p>
+              <MaterialPicker
+                taskId={taskId}
+                selectedIds={editStepForm.step_material_ids || []}
+                onSelectionChange={(ids, mats) => {
+                  setEditStepForm({ ...editStepForm, step_material_ids: ids });
+                  setEditStepMaterialIds(ids);
+                  setEditStepMaterials(mats);
+                }}
+              />
             </div>
             <div className="space-y-2">
               <div className="flex items-center justify-between">

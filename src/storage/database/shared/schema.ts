@@ -314,6 +314,23 @@ export const platformCategories = pgTable(
   }
 );
 
+// 报告分享
+export const reportShares = pgTable(
+  "report_shares",
+  {
+    id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+    report_id: varchar("report_id", { length: 36 }).notNull().references(() => reports.id, { onDelete: "cascade" }),
+    share_token: varchar("share_token", { length: 64 }).notNull().unique(),
+    expires_at: timestamp("expires_at", { withTimezone: true }),
+    created_by: varchar("created_by", { length: 36 }).references(() => platformUsers.id),
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("report_shares_share_token_idx").on(table.share_token),
+    index("report_shares_report_id_idx").on(table.report_id),
+  ]
+);
+
 // 产品配置
 export const platformProducts = pgTable(
   "platform_products",

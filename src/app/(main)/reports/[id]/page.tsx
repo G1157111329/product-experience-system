@@ -2,11 +2,11 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Download, Video, Play } from 'lucide-react';
+import { ArrowLeft, Download, Video, Play, Share2, Copy, Clock, Infinity, X, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { useImagePreview } from '@/components/image-preview';
@@ -283,6 +283,11 @@ export default function ReportDetailPage() {
   const [tempStatus, setTempStatus] = useState('');
   const [tempLevel, setTempLevel] = useState('');
   const [saving, setSaving] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareDuration, setShareDuration] = useState<'7d' | '30d' | 'permanent'>('30d');
+  const [shareCreating, setShareCreating] = useState(false);
+  const [shareLink, setShareLink] = useState<string | null>(null);
+  const [shareLinks, setShareLinks] = useState<Array<{ id: string; share_token: string; expires_at: string | null; is_expired: boolean; created_at: string }>>([]);
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
 
   const fetchReport = useCallback(async () => {
@@ -346,20 +351,25 @@ export default function ReportDetailPage() {
       const recipes = content.recipes || [];
       const task = content.task as Record<string, unknown> | undefined;
 
+      // Track created issue keys to prevent duplicates within this session
+      const createdKeys = new Set<string>();
+
       for (const record of records) {
         if (record.evaluation_result === '不合格') {
+          const issueKey = `record_fail::${record.check_item || '不合格检查项'}`;
+          // Check if we already created this issue in this session
+          if (createdKeys.has(issueKey)) continue;
           // Check if this exact issue already exists for THIS report
           const alreadyInReport = allIssues.find(i =>
             i.source_report_id === reportId && i.source_type === 'record_fail' && i.title === record.check_item
           );
-          if (alreadyInReport) continue;
+          if (alreadyInReport) { createdKeys.add(issueKey); continue; }
 
-          // Check if a similar issue exists from another report (same title + source_type + task)
+          // Check if a similar issue exists from another report (same title + source_type)
           const existingFromOtherReport = allIssues.find(i =>
             i.source_type === 'record_fail' && i.title === (record.check_item || '不合格检查项') && i.source_report_id !== reportId
           );
           if (existingFromOtherReport) {
-            // Re-link the existing issue to the current report
             await fetch(`/api/issues/${existingFromOtherReport.id}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
@@ -369,7 +379,6 @@ export default function ReportDetailPage() {
               }),
             });
           } else {
-            // Create a new issue
             await fetch('/api/issues', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -385,12 +394,12 @@ export default function ReportDetailPage() {
               }),
             });
           }
+          createdKeys.add(issueKey);
         }
       }
 
       for (const recipe of recipes) {
         for (const step of (recipe.recipe_steps || [])) {
-          // Collect all problem points from this step
           const problemPoints: Array<{ text: string; idx: number }> = [];
           const pp = step.problem_points;
           if (Array.isArray(pp) && pp.length > 0) {
@@ -403,18 +412,17 @@ export default function ReportDetailPage() {
 
           for (const ppItem of problemPoints) {
             const stepDesc = `步骤${step.step_number}: ${step.operation || ''}`;
-            // Check if this exact issue already exists for THIS report
+            const issueKey = `recipe_problem::${ppItem.text.substring(0, 200)}`;
+            if (createdKeys.has(issueKey)) continue;
             const alreadyInReport = allIssues.find(i =>
-              i.source_report_id === reportId && i.source_type === 'recipe_problem' && i.title === ppItem.text && i.description === stepDesc
+              i.source_report_id === reportId && i.source_type === 'recipe_problem' && i.title === ppItem.text
             );
-            if (alreadyInReport) continue;
+            if (alreadyInReport) { createdKeys.add(issueKey); continue; }
 
-            // Check if a similar issue exists from another report
             const existingFromOtherReport = allIssues.find(i =>
               i.source_type === 'recipe_problem' && i.title === ppItem.text.substring(0, 200) && i.source_report_id !== reportId
             );
             if (existingFromOtherReport) {
-              // Re-link the existing issue to the current report
               await fetch(`/api/issues/${existingFromOtherReport.id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -424,7 +432,6 @@ export default function ReportDetailPage() {
                 }),
               });
             } else {
-              // Create a new issue
               await fetch('/api/issues', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -440,6 +447,7 @@ export default function ReportDetailPage() {
                 }),
               });
             }
+            createdKeys.add(issueKey);
           }
         }
       }
@@ -504,6 +512,53 @@ export default function ReportDetailPage() {
     window.open(`/reports/print?id=${id}`, '_blank');
   };
 
+  const openShareDialog = async () => {
+    setShareOpen(true);
+    setShareLink(null);
+    setShareDuration('30d');
+    try {
+      const res = await fetch(`/api/reports/share/list?report_id=${id}`);
+      const data = await res.json();
+      if (data.code === 0) setShareLinks(data.data || []);
+    } catch { setShareLinks([]); }
+  };
+
+  const handleCreateShare = async () => {
+    setShareCreating(true);
+    try {
+      const res = await fetch('/api/reports/share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ report_id: id, duration: shareDuration }),
+      });
+      const data = await res.json();
+      if (data.code === 0) {
+        const token = data.data.share_token;
+        const domain = window.location.origin;
+        setShareLink(`${domain}/reports/share/${token}`);
+        toast.success('分享链接已创建');
+        const listRes = await fetch(`/api/reports/share/list?report_id=${id}`);
+        const listData = await listRes.json();
+        if (listData.code === 0) setShareLinks(listData.data || []);
+      } else {
+        toast.error(data.message);
+      }
+    } finally { setShareCreating(false); }
+  };
+
+  const handleCopyLink = (link: string) => {
+    navigator.clipboard.writeText(link).then(() => toast.success('链接已复制')).catch(() => toast.error('复制失败'));
+  };
+
+  const handleRevokeShare = async (shareId: string) => {
+    const res = await fetch(`/api/reports/share/list?id=${shareId}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.code === 0) {
+      toast.success('已撤销');
+      setShareLinks(prev => prev.filter(s => s.id !== shareId));
+    }
+  };
+
   if (loading) return <div className="p-6 animate-pulse space-y-4"><div className="h-8 bg-muted rounded w-64" /></div>;
   if (!report) return (
     <div className="p-6 space-y-3">
@@ -543,6 +598,9 @@ export default function ReportDetailPage() {
         </div>
         <Button size="sm" onClick={handleExportPDF}>
           <Download className="h-4 w-4 mr-1.5" /> 导出PDF
+        </Button>
+        <Button size="sm" variant="outline" onClick={openShareDialog}>
+          <Share2 className="h-4 w-4 mr-1.5" /> 分享
         </Button>
       </div>
 
@@ -659,6 +717,87 @@ export default function ReportDetailPage() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Share dialog */}
+      <Dialog open={shareOpen} onOpenChange={setShareOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>分享报告</DialogTitle>
+            <DialogDescription>生成分享链接，其他人可以通过链接查看报告</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">链接有效期</label>
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  { value: '7d' as const, label: '7天', icon: Clock },
+                  { value: '30d' as const, label: '30天', icon: Clock },
+                  { value: 'permanent' as const, label: '永久', icon: Infinity },
+                ]).map(opt => (
+                  <Button key={opt.value} type="button" variant={shareDuration === opt.value ? 'default' : 'outline'}
+                    size="sm" className="gap-1" onClick={() => setShareDuration(opt.value)}>
+                    <opt.icon className="h-3.5 w-3.5" /> {opt.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            {!shareLink && (
+              <Button type="button" className="w-full" onClick={handleCreateShare} disabled={shareCreating}>
+                {shareCreating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Share2 className="h-4 w-4 mr-2" />}
+                生成分享链接
+              </Button>
+            )}
+            {shareLink && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">分享链接</label>
+                <div className="flex gap-2">
+                  <input readOnly value={shareLink} className="flex-1 text-xs bg-muted rounded-md px-3 py-2 border border-border truncate" onClick={(e) => (e.target as HTMLInputElement).select()} />
+                  <Button type="button" size="sm" variant="outline" onClick={() => handleCopyLink(shareLink)}>
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  {shareDuration === 'permanent' ? '此链接永久有效' : `此链接${shareDuration === '7d' ? '7天' : '30天'}内有效`}
+                </p>
+              </div>
+            )}
+            {shareLinks.length > 0 && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">已创建的链接</label>
+                <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                  {shareLinks.map(s => {
+                    const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/reports/share/${s.share_token}`;
+                    return (
+                      <div key={s.id} className="flex items-center gap-2 p-2 bg-muted/50 rounded-md text-xs">
+                        <div className="flex-1 min-w-0">
+                          <div className="truncate text-muted-foreground">{link}</div>
+                          <div className="mt-0.5">
+                            {s.is_expired ? (
+                              <span className="text-destructive">已过期</span>
+                            ) : s.expires_at ? (
+                              <span className="text-muted-foreground">有效期至 {new Date(s.expires_at).toLocaleDateString('zh-CN')}</span>
+                            ) : (
+                              <span className="text-muted-foreground">永久有效</span>
+                            )}
+                          </div>
+                        </div>
+                        {!s.is_expired && (
+                          <Button type="button" variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => handleCopyLink(link)}>
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        )}
+                        <Button type="button" variant="ghost" size="icon" className="h-6 w-6 shrink-0 text-destructive" onClick={() => handleRevokeShare(s.id)}>
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>
