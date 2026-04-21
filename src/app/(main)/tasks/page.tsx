@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { Plus, Search, ClipboardList, ChevronRight, Trash2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -15,17 +15,17 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 
+interface CategoryWithProducts {
+  id: string; name: string; sort_order: number;
+  products: Array<{ id: string; name: string; category_id: string; sort_order: number }>;
+}
+
 interface Task {
-  id: string;
-  task_name: string;
-  product_category: string;
-  product_model: string;
-  project_type: string | null;
-  project_phase: string | null;
-  test_date: string | null;
-  organizer: string | null;
-  status: string;
-  created_at: string;
+  id: string; task_name: string; product_category: string;
+  product: string | null; product_model: string;
+  project_type: string | null; project_phase: string | null;
+  test_date: string | null; organizer: string | null;
+  status: string; created_at: string;
 }
 
 const statusConfig: Record<string, { label: string; color: string }> = {
@@ -35,6 +35,8 @@ const statusConfig: Record<string, { label: string; color: string }> = {
   '已完成': { label: '已完成', color: 'bg-emerald-100 text-emerald-700' },
   '已驳回': { label: '已驳回', color: 'bg-destructive/10 text-destructive' },
 };
+
+const PROJECT_TYPES = ['ODM/OEM', '竞品研究', '自研', '前期研究', '改型/降本/优化', '海外产品'];
 
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -47,13 +49,23 @@ export default function TasksPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingTask, setDeletingTask] = useState<Task | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [categories, setCategories] = useState<CategoryWithProducts[]>([]);
   const [form, setForm] = useState({
-    task_name: '', product_category: '', product_model: '',
+    task_name: '', product_category: '', product: '', product_model: '',
     project_type: '', project_phase: '', test_date: '', organizer: '',
     target_user: '', test_purpose: '', test_method: '',
   });
 
-  // Set default organizer from current user's name
+  // Fetch categories
+  const fetchCategories = useCallback(async () => {
+    const res = await fetch('/api/categories');
+    const data = await res.json();
+    if (data.code === 0) setCategories(data.data || []);
+  }, []);
+
+  useEffect(() => { fetchCategories(); }, [fetchCategories]);
+
+  // Set default organizer
   useEffect(() => {
     if (dialogOpen && !form.organizer && user?.name) {
       setForm(f => ({ ...f, organizer: user.name || '' }));
@@ -74,6 +86,14 @@ export default function TasksPage() {
 
   useEffect(() => { if (user?.id) fetchTasks(); }, [keyword, filterStatus, user?.id]);
 
+  // Get products for selected category
+  const selectedCategoryData = categories.find(c => c.name === form.product_category);
+  const availableProducts = selectedCategoryData?.products || [];
+
+  const handleCategoryChange = (catName: string) => {
+    setForm(f => ({ ...f, product_category: catName, product: '' }));
+  };
+
   const handleCreate = async () => {
     const res = await fetch('/api/tasks', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -82,7 +102,7 @@ export default function TasksPage() {
     const data = await res.json();
     if (data.code === 0) {
       setDialogOpen(false);
-      setForm({ task_name: '', product_category: '', product_model: '', project_type: '', project_phase: '', test_date: '', organizer: '', target_user: '', test_purpose: '', test_method: '' });
+      setForm({ task_name: '', product_category: '', product: '', product_model: '', project_type: '', project_phase: '', test_date: '', organizer: '', target_user: '', test_purpose: '', test_method: '' });
       fetchTasks();
     }
   };
@@ -94,16 +114,10 @@ export default function TasksPage() {
       const res = await fetch(`/api/tasks/${deletingTask.id}`, { method: 'DELETE' });
       const data = await res.json();
       if (data.code === 0) {
-        setDeleteDialogOpen(false);
-        setDeletingTask(null);
-        fetchTasks();
+        setDeleteDialogOpen(false); setDeletingTask(null); fetchTasks();
         toast.success('任务已删除');
-      } else {
-        toast.error(data.message || '删除失败');
-      }
-    } finally {
-      setDeleting(false);
-    }
+      } else { toast.error(data.message || '删除失败'); }
+    } finally { setDeleting(false); }
   };
 
   const tabs = ['all', '待执行', '进行中', '待审核', '已完成'];
@@ -129,26 +143,35 @@ export default function TasksPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label>产品品类 *</Label>
-                  <Select value={form.product_category} onValueChange={(v) => setForm({ ...form, product_category: v })}>
+                  <Select value={form.product_category} onValueChange={handleCategoryChange}>
                     <SelectTrigger><SelectValue placeholder="选择品类" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="破壁机">破壁机</SelectItem>
-                      <SelectItem value="电饭煲">电饭煲</SelectItem>
-                      <SelectItem value="电水壶">电水壶</SelectItem>
-                      <SelectItem value="空气炸锅">空气炸锅</SelectItem>
-                      <SelectItem value="其他">其他</SelectItem>
+                      {categories.map(cat => (
+                        <SelectItem key={cat.id} value={cat.name}>{cat.name}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-1.5">
-                  <Label>产品型号 *</Label>
-                  <Input placeholder="如：PBJ-F10U1" value={form.product_model} onChange={(e) => setForm({ ...form, product_model: e.target.value })} />
+                  <Label>产品 *</Label>
+                  <Select value={form.product} onValueChange={(v) => setForm({ ...form, product: v })} disabled={!form.product_category}>
+                    <SelectTrigger><SelectValue placeholder={form.product_category ? '选择产品' : '请先选择品类'} /></SelectTrigger>
+                    <SelectContent>
+                      {availableProducts.map(prod => (
+                        <SelectItem key={prod.id} value={prod.name}>{prod.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>产品型号 *</Label>
+                <Input placeholder="如：PBJ-F10U1" value={form.product_model} onChange={(e) => setForm({ ...form, product_model: e.target.value })} />
               </div>
               <div className="space-y-1.5">
                 <Label>项目类型 *</Label>
                 <div className="grid grid-cols-3 gap-2">
-                  {['ODM/OEM', '竞品研究', '自研', '前期研究', '改型/降本/优化', '海外产品'].map((type) => (
+                  {PROJECT_TYPES.map((type) => (
                     <button key={type} type="button" onClick={() => setForm({ ...form, project_type: type, project_phase: type === '自研' ? form.project_phase : '' })}
                       className={cn('px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors',
                         form.project_type === type ? 'bg-primary text-primary-foreground border-primary' : 'bg-background border-border hover:bg-muted/50')}>
@@ -185,7 +208,7 @@ export default function TasksPage() {
                 <Label>体验目的</Label>
                 <Textarea placeholder="本次体验的目标" value={form.test_purpose} onChange={(e) => setForm({ ...form, test_purpose: e.target.value })} rows={2} />
               </div>
-              <Button onClick={handleCreate} className="w-full" disabled={!form.task_name || !form.product_category || !form.product_model || !form.project_type}>
+              <Button onClick={handleCreate} className="w-full" disabled={!form.task_name || !form.product_category || !form.product || !form.product_model || !form.project_type}>
                 创建任务
               </Button>
             </div>
@@ -196,14 +219,9 @@ export default function TasksPage() {
       {/* Status Tabs */}
       <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
         {tabs.map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setFilterStatus(tab)}
-            className={cn(
-              'px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors',
-              filterStatus === tab ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'
-            )}
-          >
+          <button key={tab} onClick={() => setFilterStatus(tab)}
+            className={cn('px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors',
+              filterStatus === tab ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80')}>
             {tab === 'all' ? '全部' : tab}
           </button>
         ))}
@@ -240,8 +258,8 @@ export default function TasksPage() {
                       </Badge>
                     </div>
                     <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground flex-wrap">
+                      <span>{task.product_category}{task.product ? ` - ${task.product}` : ''}</span>
                       <span>{task.product_model}</span>
-                      {task.product_category && <span>品类: {task.product_category}</span>}
                       {task.project_type && <span>{task.project_type}</span>}
                       {task.project_phase && <span>{task.project_phase}</span>}
                       {task.test_date && <span>{task.test_date}</span>}
@@ -268,7 +286,7 @@ export default function TasksPage() {
           <DialogHeader>
             <DialogTitle>确认删除任务</DialogTitle>
             <DialogDescription>
-              删除后该任务及其所有关联数据（检查记录、素材、问题、报告、食谱/功能）将无法恢复，确认删除「{deletingTask?.task_name}」？
+              删除后该任务及其所有关联数据将无法恢复，确认删除「{deletingTask?.task_name}」？
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">

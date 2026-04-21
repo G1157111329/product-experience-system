@@ -11,7 +11,6 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
@@ -20,8 +19,12 @@ interface CoreMetrics {
   totalTasks: number; completedTasks: number; completionRate: number;
   totalIssues: number; rectifiedIssues: number; rectificationRate: number;
 }
-interface FilterOptions { categories: string[]; projectTypes: string[]; organizers: string[]; }
-interface BreakdownItem { tasks: number; completedTasks: number; issues: number; rectifiedIssues: number; }
+interface FilterOptions {
+  categories: Array<{ id: string; name: string; products: Array<{ id: string; name: string }> }>;
+  projectTypes: string[];
+  organizers: string[];
+}
+interface BreakdownItem { tasks: number; completedTasks: number; issues: number; rectifiedIssues: number }
 
 const STATUS_COLORS: Record<string, string> = {
   '待执行': 'bg-slate-400', '进行中': 'bg-primary', '待审核': 'bg-amber-400',
@@ -45,20 +48,25 @@ export default function AnalysisPage() {
   const [taskStatusDist, setTaskStatusDist] = useState<Record<string, number>>({});
   const [issueLevelDist, setIssueLevelDist] = useState<Record<string, number>>({});
   const [rectGrid, setRectGrid] = useState<Record<string, Record<string, number>>>({});
-  const [byCategory, setByCategory] = useState<Record<string, BreakdownItem>>({});
+  const [byCategoryProduct, setByCategoryProduct] = useState<Record<string, BreakdownItem>>({});
   const [byProjectType, setByProjectType] = useState<Record<string, BreakdownItem>>({});
   const [byOrganizer, setByOrganizer] = useState<Record<string, BreakdownItem>>({});
-  const [byIssueType, setByIssueType] = useState<Record<string, number>>({});
+  const [byIssueLevel, setByIssueLevel] = useState<Record<string, number>>({});
   const [monthTrend, setMonthTrend] = useState<Record<string, BreakdownItem>>({});
   const [filterOptions, setFilterOptions] = useState<FilterOptions>({ categories: [], projectTypes: [], organizers: [] });
 
   // Filters
   const [fCategory, setFCategory] = useState('all');
+  const [fProduct, setFProduct] = useState('all');
   const [fProjectType, setFProjectType] = useState('all');
   const [fOrganizer, setFOrganizer] = useState('all');
-  const [fIssueType, setFIssueType] = useState('all');
+  const [fIssueLevel, setFIssueLevel] = useState('all');
   const [fDateFrom, setFDateFrom] = useState('');
   const [fDateTo, setFDateTo] = useState('');
+
+  // Derived: available products for selected category
+  const selectedCatData = filterOptions.categories.find(c => c.name === fCategory);
+  const availableProducts = selectedCatData?.products || [];
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -66,9 +74,10 @@ export default function AnalysisPage() {
     if (!isAdmin && user?.id) params.set('created_by', user.id);
     if (isAdmin) params.set('is_admin', 'true');
     if (fCategory !== 'all') params.set('product_category', fCategory);
+    if (fProduct !== 'all') params.set('product', fProduct);
     if (fProjectType !== 'all') params.set('project_type', fProjectType);
     if (fOrganizer !== 'all') params.set('organizer', fOrganizer);
-    if (fIssueType !== 'all') params.set('issue_source_type', fIssueType);
+    if (fIssueLevel !== 'all') params.set('issue_level', fIssueLevel);
     if (fDateFrom) params.set('date_from', fDateFrom);
     if (fDateTo) params.set('date_to', fDateTo);
 
@@ -80,17 +89,17 @@ export default function AnalysisPage() {
         setTaskStatusDist(data.data.taskStatusDist);
         setIssueLevelDist(data.data.issueLevelDist);
         setRectGrid(data.data.issueRectificationGrid);
-        setByCategory(data.data.byCategory);
+        setByCategoryProduct(data.data.byCategoryProduct);
         setByProjectType(data.data.byProjectType);
         setByOrganizer(data.data.byOrganizer);
-        setByIssueType(data.data.byIssueType);
+        setByIssueLevel(data.data.byIssueLevel);
         setMonthTrend(data.data.monthTrend);
         setFilterOptions(data.data.filterOptions);
       }
     } finally {
       setLoading(false);
     }
-  }, [isAdmin, user?.id, fCategory, fProjectType, fOrganizer, fIssueType, fDateFrom, fDateTo]);
+  }, [isAdmin, user?.id, fCategory, fProduct, fProjectType, fOrganizer, fIssueLevel, fDateFrom, fDateTo]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -103,9 +112,7 @@ export default function AnalysisPage() {
       });
       const data = await res.json();
       if (data.code === 0) {
-        // Download tasks CSV
         downloadCsv(data.data.tasksCsv, '体验任务数据.csv');
-        // Download issues CSV after a short delay
         setTimeout(() => downloadCsv(data.data.issuesCsv, '问题点数据.csv'), 500);
         toast.success('数据导出成功');
       }
@@ -126,13 +133,14 @@ export default function AnalysisPage() {
   };
 
   const resetFilters = () => {
-    setFCategory('all'); setFProjectType('all'); setFOrganizer('all');
-    setFIssueType('all'); setFDateFrom(''); setFDateTo('');
+    setFCategory('all'); setFProduct('all'); setFProjectType('all');
+    setFOrganizer('all'); setFIssueLevel('all'); setFDateFrom(''); setFDateTo('');
   };
 
-  // Helper: max value for bar scaling
-  const maxVal = (obj: Record<string, number>) => Math.max(...Object.values(obj), 1);
-  const maxBreakdownVal = (obj: Record<string, BreakdownItem>) => Math.max(...Object.values(obj).map(v => v.tasks + v.issues), 1);
+  const handleCategoryChange = (val: string) => {
+    setFCategory(val);
+    setFProduct('all'); // Reset product when category changes
+  };
 
   if (loading && !metrics) {
     return (
@@ -170,14 +178,24 @@ export default function AnalysisPage() {
             <span className="text-sm font-medium">筛选条件</span>
             <Button variant="ghost" size="sm" className="ml-auto text-xs h-7" onClick={resetFilters}>重置</Button>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
             <div className="space-y-1">
               <Label className="text-xs">品类</Label>
-              <Select value={fCategory} onValueChange={setFCategory}>
+              <Select value={fCategory} onValueChange={handleCategoryChange}>
                 <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">全部品类</SelectItem>
-                  {filterOptions.categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  {filterOptions.categories.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">产品</Label>
+              <Select value={fProduct} onValueChange={setFProduct} disabled={fCategory === 'all'}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部产品</SelectItem>
+                  {availableProducts.map(p => <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -203,12 +221,13 @@ export default function AnalysisPage() {
             </div>
             <div className="space-y-1">
               <Label className="text-xs">问题点分类</Label>
-              <Select value={fIssueType} onValueChange={setFIssueType}>
+              <Select value={fIssueLevel} onValueChange={setFIssueLevel}>
                 <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">全部</SelectItem>
-                  <SelectItem value="record_fail">不合格检查项</SelectItem>
-                  <SelectItem value="recipe_problem">食谱/功能问题</SelectItem>
+                  <SelectItem value="一类">一类</SelectItem>
+                  <SelectItem value="二类">二类</SelectItem>
+                  <SelectItem value="三类">三类</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -290,9 +309,7 @@ export default function AnalysisPage() {
                     </div>
                   );
                 })}
-                {Object.keys(taskStatusDist).length === 0 && (
-                  <p className="text-center text-muted-foreground text-sm py-4">暂无数据</p>
-                )}
+                {Object.keys(taskStatusDist).length === 0 && <p className="text-center text-muted-foreground text-sm py-4">暂无数据</p>}
               </CardContent>
             </Card>
 
@@ -347,9 +364,7 @@ export default function AnalysisPage() {
                       const rowTotal = (row['一类'] || 0) + (row['二类'] || 0) + (row['三类'] || 0);
                       return (
                         <tr key={status} className="border-b last:border-0">
-                          <td className="py-2 px-3">
-                            <Badge variant="secondary" className={cn('text-xs', RECT_STATUS_COLORS[status])}>{status}</Badge>
-                          </td>
+                          <td className="py-2 px-3"><Badge variant="secondary" className={cn('text-xs', RECT_STATUS_COLORS[status])}>{status}</Badge></td>
                           <td className="text-center py-2 px-3">{row['一类'] || 0}</td>
                           <td className="text-center py-2 px-3">{row['二类'] || 0}</td>
                           <td className="text-center py-2 px-3">{row['三类'] || 0}</td>
@@ -371,22 +386,22 @@ export default function AnalysisPage() {
           </Card>
 
           <div className="grid lg:grid-cols-2 gap-4">
-            {/* By Category */}
+            {/* By Category + Product */}
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium">按品类分布</CardTitle>
+                <CardTitle className="text-sm font-medium">按品类-产品分布</CardTitle>
               </CardHeader>
               <CardContent>
-                {Object.keys(byCategory).length === 0 ? (
+                {Object.keys(byCategoryProduct).length === 0 ? (
                   <p className="text-center text-muted-foreground text-sm py-4">暂无数据</p>
                 ) : (
                   <div className="space-y-2">
-                    {Object.entries(byCategory).sort((a, b) => b[1].tasks - a[1].tasks).map(([cat, item]) => {
+                    {Object.entries(byCategoryProduct).sort((a, b) => b[1].tasks - a[1].tasks).map(([key, item]) => {
                       const rate = item.tasks > 0 ? Math.round((item.completedTasks / item.tasks) * 100) : 0;
                       const iRate = item.issues > 0 ? Math.round((item.rectifiedIssues / item.issues) * 100) : 0;
                       return (
-                        <div key={cat} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/30">
-                          <span className="text-sm w-20 shrink-0 truncate" title={cat}>{cat}</span>
+                        <div key={key} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/30">
+                          <span className="text-sm w-28 shrink-0 truncate" title={key}>{key}</span>
                           <div className="flex-1 grid grid-cols-4 gap-2 text-xs text-center">
                             <div><p className="font-medium text-sm">{item.tasks}</p>任务</div>
                             <div><p className="font-medium text-sm text-emerald-600">{rate}%</p>完成率</div>
@@ -416,7 +431,7 @@ export default function AnalysisPage() {
                       const iRate = item.issues > 0 ? Math.round((item.rectifiedIssues / item.issues) * 100) : 0;
                       return (
                         <div key={pt} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/30">
-                          <span className="text-sm w-20 shrink-0 truncate" title={pt}>{pt}</span>
+                          <span className="text-sm w-24 shrink-0 truncate" title={pt}>{pt}</span>
                           <div className="flex-1 grid grid-cols-4 gap-2 text-xs text-center">
                             <div><p className="font-medium text-sm">{item.tasks}</p>任务</div>
                             <div><p className="font-medium text-sm text-emerald-600">{rate}%</p>完成率</div>
@@ -461,31 +476,26 @@ export default function AnalysisPage() {
               </CardContent>
             </Card>
 
-            {/* By Issue Type */}
+            {/* By Issue Level */}
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium">按问题点分类分布</CardTitle>
+                <CardTitle className="text-sm font-medium">问题点分类分布</CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {[
-                    { key: 'record_fail', label: '不合格检查项', color: 'bg-amber-500' },
-                    { key: 'recipe_problem', label: '食谱/功能问题', color: 'bg-blue-500' },
-                  ].map(item => {
-                    const count = byIssueType[item.key] || 0;
-                    const pct = metrics.totalIssues > 0 ? Math.round((count / metrics.totalIssues) * 100) : 0;
-                    return (
-                      <div key={item.key} className="flex items-center gap-3">
-                        <span className="text-sm w-24 shrink-0">{item.label}</span>
-                        <div className="flex-1 h-6 bg-muted/50 rounded-full overflow-hidden">
-                          <div className={cn('h-full rounded-full transition-all', item.color)} style={{ width: `${pct}%` }} />
-                        </div>
-                        <span className="text-sm font-medium w-8 text-right">{count}</span>
-                        <span className="text-xs text-muted-foreground w-10 text-right">{pct}%</span>
+              <CardContent className="space-y-3">
+                {['一类', '二类', '三类'].map(level => {
+                  const count = byIssueLevel[level] || 0;
+                  const pct = metrics.totalIssues > 0 ? Math.round((count / metrics.totalIssues) * 100) : 0;
+                  return (
+                    <div key={level} className="flex items-center gap-3">
+                      <span className={cn('text-sm w-16 shrink-0 font-medium', LEVEL_TEXT_COLORS[level])}>{level}</span>
+                      <div className="flex-1 h-6 bg-muted/50 rounded-full overflow-hidden">
+                        <div className={cn('h-full rounded-full transition-all', LEVEL_COLORS[level])} style={{ width: `${pct}%` }} />
                       </div>
-                    );
-                  })}
-                </div>
+                      <span className="text-sm font-medium w-8 text-right">{count}</span>
+                      <span className="text-xs text-muted-foreground w-10 text-right">{pct}%</span>
+                    </div>
+                  );
+                })}
               </CardContent>
             </Card>
           </div>

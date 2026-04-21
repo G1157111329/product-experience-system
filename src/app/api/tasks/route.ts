@@ -6,6 +6,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const status = searchParams.get('status');
   const product_category = searchParams.get('product_category');
+  const product = searchParams.get('product');
   const keyword = searchParams.get('keyword');
   const created_by = searchParams.get('created_by');
   const page = parseInt(searchParams.get('page') || '1');
@@ -15,6 +16,7 @@ export async function GET(request: NextRequest) {
 
   if (status) query = query.eq('status', status);
   if (product_category) query = query.eq('product_category', product_category);
+  if (product) query = query.eq('product', product);
   if (keyword) query = query.or(`task_name.ilike.%${keyword}%,product_model.ilike.%${keyword}%`);
   if (created_by) query = query.eq('created_by', created_by);
 
@@ -39,6 +41,7 @@ export async function POST(request: NextRequest) {
   const { data, error } = await client.from('experience_tasks').insert({
     task_name: body.task_name,
     product_category: body.product_category,
+    product: body.product || null,
     product_model: body.product_model,
     project_type: body.project_type || null,
     project_phase: body.project_phase || null,

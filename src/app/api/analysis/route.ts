@@ -6,19 +6,21 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
 
   // Filters
-  const created_by = searchParams.get('created_by'); // user isolation
+  const created_by = searchParams.get('created_by');
   const is_admin = searchParams.get('is_admin') === 'true';
   const product_category = searchParams.get('product_category');
+  const product = searchParams.get('product');
   const project_type = searchParams.get('project_type');
   const organizer = searchParams.get('organizer');
-  const issue_source_type = searchParams.get('issue_source_type'); // record_fail/recipe_problem
-  const date_from = searchParams.get('date_from'); // YYYY-MM-DD
-  const date_to = searchParams.get('date_to'); // YYYY-MM-DD
+  const issue_level = searchParams.get('issue_level'); // 一类/二类/三类
+  const date_from = searchParams.get('date_from');
+  const date_to = searchParams.get('date_to');
 
   // 1. Fetch tasks with filters
-  let taskQuery = client.from('experience_tasks').select('id, task_name, product_category, product_model, project_type, project_phase, organizer, status, created_by, created_at');
+  let taskQuery = client.from('experience_tasks').select('id, task_name, product_category, product, product_model, project_type, project_phase, organizer, status, created_by, created_at');
   if (!is_admin && created_by) taskQuery = taskQuery.eq('created_by', created_by);
   if (product_category) taskQuery = taskQuery.eq('product_category', product_category);
+  if (product) taskQuery = taskQuery.eq('product', product);
   if (project_type) taskQuery = taskQuery.eq('project_type', project_type);
   if (organizer) taskQuery = taskQuery.eq('organizer', organizer);
   if (date_from) taskQuery = taskQuery.gte('created_at', date_from);
@@ -33,7 +35,7 @@ export async function GET(request: NextRequest) {
   if (taskIds.length > 0) {
     let issueQuery = client.from('issues').select('id, title, level, status, source_type, task_id, product_model, created_at');
     issueQuery = issueQuery.in('task_id', taskIds);
-    if (issue_source_type) issueQuery = issueQuery.eq('source_type', issue_source_type);
+    if (issue_level) issueQuery = issueQuery.eq('level', issue_level);
 
     const { data: issues } = await issueQuery;
     issueList = (issues || []) as Array<Record<string, unknown>>;
@@ -81,22 +83,21 @@ export async function GET(request: NextRequest) {
     issueRectificationGrid[status][level] = (issueRectificationGrid[status][level] || 0) + 1;
   }
 
-  // 7. By product_category breakdown
-  const byCategory: Record<string, { tasks: number; completedTasks: number; issues: number; rectifiedIssues: number }> = {};
+  // 7. By product_category + product breakdown
+  const byCategoryProduct: Record<string, { tasks: number; completedTasks: number; issues: number; rectifiedIssues: number }> = {};
   for (const t of taskList) {
-    const cat = t.product_category || '未分类';
-    if (!byCategory[cat]) byCategory[cat] = { tasks: 0, completedTasks: 0, issues: 0, rectifiedIssues: 0 };
-    byCategory[cat].tasks++;
-    if (t.status === '已完成') byCategory[cat].completedTasks++;
+    const key = t.product_category ? `${t.product_category}${t.product ? ' - ' + t.product : ''}` : '未分类';
+    if (!byCategoryProduct[key]) byCategoryProduct[key] = { tasks: 0, completedTasks: 0, issues: 0, rectifiedIssues: 0 };
+    byCategoryProduct[key].tasks++;
+    if (t.status === '已完成') byCategoryProduct[key].completedTasks++;
   }
-  // Count issues by task's category
-  const taskCategoryMap: Record<string, string> = {};
-  for (const t of taskList) taskCategoryMap[t.id] = t.product_category || '未分类';
+  const taskCatMap: Record<string, string> = {};
+  for (const t of taskList) taskCatMap[t.id] = t.product_category ? `${t.product_category}${t.product ? ' - ' + t.product : ''}` : '未分类';
   for (const i of issueList) {
-    const cat = taskCategoryMap[i.task_id as string] || '未分类';
-    if (!byCategory[cat]) byCategory[cat] = { tasks: 0, completedTasks: 0, issues: 0, rectifiedIssues: 0 };
-    byCategory[cat].issues++;
-    if ((i.status as string) === '已验证') byCategory[cat].rectifiedIssues++;
+    const key = taskCatMap[i.task_id as string] || '未分类';
+    if (!byCategoryProduct[key]) byCategoryProduct[key] = { tasks: 0, completedTasks: 0, issues: 0, rectifiedIssues: 0 };
+    byCategoryProduct[key].issues++;
+    if ((i.status as string) === '已验证') byCategoryProduct[key].rectifiedIssues++;
   }
 
   // 8. By project_type breakdown
@@ -107,10 +108,10 @@ export async function GET(request: NextRequest) {
     byProjectType[pt].tasks++;
     if (t.status === '已完成') byProjectType[pt].completedTasks++;
   }
-  const taskProjectTypeMap: Record<string, string> = {};
-  for (const t of taskList) taskProjectTypeMap[t.id] = t.project_type || '未分类';
+  const taskPtMap: Record<string, string> = {};
+  for (const t of taskList) taskPtMap[t.id] = t.project_type || '未分类';
   for (const i of issueList) {
-    const pt = taskProjectTypeMap[i.task_id as string] || '未分类';
+    const pt = taskPtMap[i.task_id as string] || '未分类';
     if (!byProjectType[pt]) byProjectType[pt] = { tasks: 0, completedTasks: 0, issues: 0, rectifiedIssues: 0 };
     byProjectType[pt].issues++;
     if ((i.status as string) === '已验证') byProjectType[pt].rectifiedIssues++;
@@ -124,26 +125,26 @@ export async function GET(request: NextRequest) {
     byOrganizer[org].tasks++;
     if (t.status === '已完成') byOrganizer[org].completedTasks++;
   }
-  const taskOrganizerMap: Record<string, string> = {};
-  for (const t of taskList) taskOrganizerMap[t.id] = t.organizer || '未指定';
+  const taskOrgMap: Record<string, string> = {};
+  for (const t of taskList) taskOrgMap[t.id] = t.organizer || '未指定';
   for (const i of issueList) {
-    const org = taskOrganizerMap[i.task_id as string] || '未指定';
+    const org = taskOrgMap[i.task_id as string] || '未指定';
     if (!byOrganizer[org]) byOrganizer[org] = { tasks: 0, completedTasks: 0, issues: 0, rectifiedIssues: 0 };
     byOrganizer[org].issues++;
     if ((i.status as string) === '已验证') byOrganizer[org].rectifiedIssues++;
   }
 
-  // 10. By issue source_type breakdown
-  const byIssueType: Record<string, number> = { record_fail: 0, recipe_problem: 0 };
+  // 10. By issue level breakdown (一类/二类/三类)
+  const byIssueLevel: Record<string, number> = { '一类': 0, '二类': 0, '三类': 0 };
   for (const i of issueList) {
-    const st = (i.source_type as string) || 'record_fail';
-    byIssueType[st] = (byIssueType[st] || 0) + 1;
+    const level = (i.level as string) || '二类';
+    byIssueLevel[level] = (byIssueLevel[level] || 0) + 1;
   }
 
-  // 11. By month trend (tasks + issues)
+  // 11. By month trend
   const monthTrend: Record<string, { tasks: number; completedTasks: number; issues: number; rectifiedIssues: number }> = {};
   for (const t of taskList) {
-    const month = (t.created_at as string).substring(0, 7); // YYYY-MM
+    const month = (t.created_at as string).substring(0, 7);
     if (!monthTrend[month]) monthTrend[month] = { tasks: 0, completedTasks: 0, issues: 0, rectifiedIssues: 0 };
     monthTrend[month].tasks++;
     if (t.status === '已完成') monthTrend[month].completedTasks++;
@@ -157,11 +158,15 @@ export async function GET(request: NextRequest) {
     if ((i.status as string) === '已验证') monthTrend[month].rectifiedIssues++;
   }
 
-  // 12. Available filter options (for dropdowns)
-  const { data: allTasks } = await client.from('experience_tasks').select('product_category, project_type, organizer');
-  const categories = [...new Set((allTasks || []).map(t => t.product_category).filter(Boolean))];
-  const projectTypes = [...new Set((allTasks || []).map(t => t.project_type).filter(Boolean))];
-  const organizers = [...new Set((allTasks || []).map(t => t.organizer).filter(Boolean))];
+  // 12. Available filter options from platform config
+  const { data: catData } = await client.from('platform_categories').select('id, name, sort_order').order('sort_order');
+  const { data: prodData } = await client.from('platform_products').select('id, name, category_id, sort_order').order('sort_order');
+  const categories = (catData || []).map(c => ({
+    ...c,
+    products: (prodData || []).filter(p => p.category_id === c.id),
+  }));
+  const projectTypes = ['ODM/OEM', '竞品研究', '自研', '前期研究', '改型/降本/优化', '海外产品'];
+  const organizers = [...new Set(taskList.map(t => t.organizer).filter(Boolean))];
 
   return NextResponse.json({
     code: 0,
@@ -171,10 +176,10 @@ export async function GET(request: NextRequest) {
       taskStatusDist,
       issueLevelDist,
       issueRectificationGrid,
-      byCategory,
+      byCategoryProduct,
       byProjectType,
       byOrganizer,
-      byIssueType,
+      byIssueLevel,
       monthTrend,
       filterOptions: { categories, projectTypes, organizers },
     },
@@ -189,16 +194,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ code: 1, message: '仅管理员可导出数据' }, { status: 403 });
   }
 
-  // Reuse GET logic but return raw data for export
   const client = getSupabaseClient();
   const { data: tasks } = await client.from('experience_tasks').select('*');
   const { data: issues } = await client.from('issues').select('*');
 
   if (format === 'csv') {
-    // Generate CSV for tasks
-    const taskHeaders = '任务名称,品类,型号,项目类型,项目阶段,组织者,状态,创建时间\n';
+    const taskHeaders = '任务名称,品类,产品,型号,项目类型,项目阶段,组织者,状态,创建时间\n';
     const taskRows = (tasks || []).map(t =>
-      `"${t.task_name}","${t.product_category}","${t.product_model}","${t.project_type || ''}","${t.project_phase || ''}","${t.organizer || ''}","${t.status}","${t.created_at}"`
+      `"${t.task_name}","${t.product_category || ''}","${t.product || ''}","${t.product_model}","${t.project_type || ''}","${t.project_phase || ''}","${t.organizer || ''}","${t.status}","${t.created_at}"`
     ).join('\n');
 
     const issueHeaders = '问题标题,等级,状态,来源类型,产品型号,整改方案,责任人,创建时间\n';
@@ -208,10 +211,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       code: 0,
-      data: {
-        tasksCsv: taskHeaders + taskRows,
-        issuesCsv: issueHeaders + issueRows,
-      },
+      data: { tasksCsv: taskHeaders + taskRows, issuesCsv: issueHeaders + issueRows },
     });
   }
 

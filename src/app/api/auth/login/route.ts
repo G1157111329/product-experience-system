@@ -11,9 +11,9 @@ function hashPassword(password: string): string {
 // Ensure initial admin account exists
 async function ensureAdminAccount() {
   const supabase = createClient();
-  const { data } = await supabase.from('users').select('id').eq('account', 'bear2026').maybeSingle();
+  const { data } = await supabase.from('platform_users').select('id').eq('account', 'bear2026').maybeSingle();
   if (!data) {
-    await supabase.from('users').insert({
+    await supabase.from('platform_users').insert({
       account: 'bear2026',
       password_hash: hashPassword('bear2026'),
       name: '管理员',

@@ -15,6 +15,7 @@ export const standards = pgTable(
     standard_name: varchar("standard_name", { length: 200 }).notNull(),
     category: varchar("category", { length: 50 }).notNull(), // 通用标准/品类标准/感官评价标准/食谱功能标准
     product_category: varchar("product_category", { length: 50 }), // 关联品类（品类专用标准用）
+    product: varchar("product", { length: 200 }), // 关联产品（品类专用标准用）
     version: varchar("version", { length: 20 }).default("V1.0"),
     is_active: boolean("is_active").default(true).notNull(),
     description: text("description"),
@@ -68,7 +69,8 @@ export const experienceTasks = pgTable(
   {
     id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
     task_name: varchar("task_name", { length: 200 }).notNull(),
-    product_category: varchar("product_category", { length: 50 }).notNull(),
+    product_category: varchar("product_category", { length: 50 }).notNull(), // 品类
+    product: varchar("product", { length: 200 }), // 产品
     product_model: varchar("product_model", { length: 50 }).notNull(),
     project_type: varchar("project_type", { length: 50 }), // 项目类型：ODM/OEM/竞品研究/自研/前期研究/改型降本优化/海外产品
     project_phase: varchar("project_phase", { length: 50 }), // 项目阶段（自研：手板研究/试制阶段/试产阶段/量产阶段）
@@ -298,5 +300,31 @@ export const platformAuditRequests = pgTable(
   (table) => [
     index("platform_audit_requests_user_id_idx").on(table.user_id),
     index("platform_audit_requests_status_idx").on(table.status),
+  ]
+);
+
+// 品类配置
+export const platformCategories = pgTable(
+  "platform_categories",
+  {
+    id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+    name: varchar("name", { length: 100 }).notNull().unique(),
+    sort_order: integer("sort_order").default(0),
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  }
+);
+
+// 产品配置
+export const platformProducts = pgTable(
+  "platform_products",
+  {
+    id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+    name: varchar("name", { length: 100 }).notNull(),
+    category_id: varchar("category_id", { length: 36 }).notNull(),
+    sort_order: integer("sort_order").default(0),
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("platform_products_category_id_idx").on(table.category_id),
   ]
 );

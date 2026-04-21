@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { Search, BookOpen, ChevronRight, Upload, FileUp, Loader2, Trash2, Plus } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -20,11 +20,17 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth-context';
 
+interface CategoryWithProducts {
+  id: string; name: string; sort_order: number;
+  products: Array<{ id: string; name: string; category_id: string; sort_order: number }>;
+}
+
 interface Standard {
   id: string;
   standard_name: string;
   category: string;
   product_category: string | null;
+  product: string | null;
   version: string;
   description: string | null;
   standard_items: Array<{ count: number }>;
@@ -51,8 +57,20 @@ export default function StandardsPage() {
   const [deleting, setDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [createCategory, setCreateCategory] = useState('通用标准');
-  const [importForm, setImportForm] = useState({ category: '通用标准', product_category: '', description: '' });
+  const [createProductCategory, setCreateProductCategory] = useState('');
+  const [createProduct, setCreateProduct] = useState('');
+  const [importForm, setImportForm] = useState({ category: '通用标准', product_category: '', product: '', description: '' });
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [categories, setCategories] = useState<CategoryWithProducts[]>([]);
+
+  // Fetch categories for cascade
+  const fetchCategories = useCallback(async () => {
+    const res = await fetch('/api/categories');
+    const data = await res.json();
+    if (data.code === 0) setCategories(data.data || []);
+  }, []);
+
+  useEffect(() => { fetchCategories(); }, [fetchCategories]);
 
   const fetchStandards = async () => {
     setLoading(true);
@@ -69,15 +87,19 @@ export default function StandardsPage() {
 
   const handleCreate = async () => {
     const name = categoryConfig[createCategory]?.label || createCategory;
+    const body: Record<string, string> = { standard_name: name, category: createCategory };
+    if (createCategory === '品类标准' && createProductCategory) body.product_category = createProductCategory;
+    if (createCategory === '品类标准' && createProduct) body.product = createProduct;
     const res = await fetch('/api/standards', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ standard_name: name, category: createCategory }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     if (data.code === 0) {
       setCreateDialogOpen(false);
-      // Navigate to the new standard's detail page
+      setCreateProductCategory('');
+      setCreateProduct('');
       window.location.href = `/standards/${data.data.id}`;
     }
   };
@@ -91,13 +113,14 @@ export default function StandardsPage() {
       formData.append('standard_name', categoryConfig[importForm.category]?.label || importForm.category);
       formData.append('category', importForm.category);
       if (importForm.product_category) formData.append('product_category', importForm.product_category);
+      if (importForm.product) formData.append('product', importForm.product);
       if (importForm.description) formData.append('description', importForm.description);
       const res = await fetch('/api/standards/import', { method: 'POST', body: formData });
       const data = await res.json();
       if (data.code === 0) {
         toast.success(data.message || '导入成功');
         setImportDialogOpen(false);
-        setImportForm({ category: '通用标准', product_category: '', description: '' });
+        setImportForm({ category: '通用标准', product_category: '', product: '', description: '' });
         setSelectedFile(null);
         fetchStandards();
       } else {
@@ -171,7 +194,7 @@ export default function StandardsPage() {
                               'p-3 rounded-lg border-2 cursor-pointer transition-colors',
                               createCategory === key ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/30'
                             )}
-                            onClick={() => setCreateCategory(key)}
+                            onClick={() => { setCreateCategory(key); setCreateProductCategory(''); setCreateProduct(''); }}
                           >
                             <div className="flex items-center gap-2">
                               <Badge className={cn('text-[10px]', cfg.color)}>{cfg.label}</Badge>
@@ -182,7 +205,31 @@ export default function StandardsPage() {
                         ))}
                       </div>
                     </div>
-                    <Button onClick={handleCreate} className="w-full" disabled={createCategory === '食谱功能标准'}>
+                    {createCategory === '品类标准' && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label>品类 *</Label>
+                          <Select value={createProductCategory} onValueChange={(v) => { setCreateProductCategory(v); setCreateProduct(''); }}>
+                            <SelectTrigger><SelectValue placeholder="选择品类" /></SelectTrigger>
+                            <SelectContent>
+                              {categories.map(cat => <SelectItem key={cat.id} value={cat.name}>{cat.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>产品 *</Label>
+                          <Select value={createProduct} onValueChange={setCreateProduct} disabled={!createProductCategory}>
+                            <SelectTrigger><SelectValue placeholder={createProductCategory ? '选择产品' : '请先选择品类'} /></SelectTrigger>
+                            <SelectContent>
+                              {(categories.find(c => c.name === createProductCategory)?.products || []).map(p => (
+                                <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    )}
+                    <Button onClick={handleCreate} className="w-full" disabled={createCategory === '食谱功能标准' || (createCategory === '品类标准' && (!createProductCategory || !createProduct))}>
                       创建并编辑
                     </Button>
                   </div>
@@ -234,7 +281,7 @@ export default function StandardsPage() {
                         <Badge variant="secondary" className={cn('text-[10px]', categoryConfig[std.category]?.color)}>
                           {categoryConfig[std.category]?.label || std.category}
                         </Badge>
-                        {std.product_category && <span className="text-[10px] text-muted-foreground">{std.product_category}</span>}
+                        {std.product_category && <span className="text-[10px] text-muted-foreground">{std.product_category}{std.product ? ` - ${std.product}` : ''}</span>}
                       </div>
                       <span className="text-xs text-muted-foreground">{std.standard_items?.[0]?.count || 0} 项检查项</span>
                     </div>
@@ -264,9 +311,27 @@ export default function StandardsPage() {
               </Select>
             </div>
             {importForm.category === '品类标准' && (
-              <div className="space-y-1.5">
-                <Label>关联品类</Label>
-                <Input placeholder="如：破壁机" value={importForm.product_category} onChange={(e) => setImportForm({ ...importForm, product_category: e.target.value })} />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>品类</Label>
+                  <Select value={importForm.product_category} onValueChange={(v) => setImportForm({ ...importForm, product_category: v, product: '' })}>
+                    <SelectTrigger><SelectValue placeholder="选择品类" /></SelectTrigger>
+                    <SelectContent>
+                      {categories.map(cat => <SelectItem key={cat.id} value={cat.name}>{cat.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>产品</Label>
+                  <Select value={importForm.product} onValueChange={(v) => setImportForm({ ...importForm, product: v })} disabled={!importForm.product_category}>
+                    <SelectTrigger><SelectValue placeholder={importForm.product_category ? '选择产品' : '请先选择品类'} /></SelectTrigger>
+                    <SelectContent>
+                      {(categories.find(c => c.name === importForm.product_category)?.products || []).map(p => (
+                        <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             )}
             <div className="space-y-1.5">

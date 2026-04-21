@@ -15,7 +15,8 @@ function loadEnv(): void {
 
   try {
     try {
-      require('dotenv').config();
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('dotenv').config();
       if (process.env.COZE_SUPABASE_URL && process.env.COZE_SUPABASE_ANON_KEY) {
         envLoaded = true;
         return;

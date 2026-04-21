@@ -26,7 +26,10 @@ export default function LoginPage() {
   const [fpLoading, setFpLoading] = useState(false);
 
   const handleLogin = async () => {
-    if (!account || !password) {
+    // Trim whitespace before validation
+    const acc = account.trim();
+    const pwd = password.trim();
+    if (!acc || !pwd) {
       toast.error('请输入账号和密码');
       return;
     }
@@ -35,7 +38,7 @@ export default function LoginPage() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ account, password }),
+        body: JSON.stringify({ account: acc, password: pwd }),
       });
       const data = await res.json();
       if (data.code === 0) {
@@ -45,6 +48,8 @@ export default function LoginPage() {
       } else {
         toast.error(data.message);
       }
+    } catch {
+      toast.error('网络错误，请重试');
     } finally {
       setLoading(false);
     }

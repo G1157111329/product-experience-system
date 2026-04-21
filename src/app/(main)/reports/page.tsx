@@ -18,6 +18,8 @@ interface Report {
   project_type?: string | null;
   project_phase?: string | null;
   task_name?: string;
+  product_category?: string | null;
+  product?: string | null;
 }
 
 interface MergedGroup {
@@ -56,6 +58,8 @@ export default function ReportsPage() {
       project_type: task?.project_type as string | null || null,
       project_phase: task?.project_phase as string | null || null,
       task_name: task?.task_name as string || '',
+      product_category: task?.product_category as string | null || null,
+      product: task?.product as string | null || null,
     };
   });
 
@@ -153,7 +157,7 @@ export default function ReportsPage() {
                     </CardTitle>
                     <div className="flex gap-1">
                       {group.project_type && <Badge variant="outline" className="text-[10px]">{group.project_type}</Badge>}
-                      {group.project_phase && <Badge variant="outline" className="text-[10px]">{group.project_phase}</Badge>}
+                      {latestReport.product_category && <Badge variant="outline" className="text-[10px]">{latestReport.product_category}{latestReport.product ? ` - ${latestReport.product}` : ''}</Badge>}
                     </div>
                   </div>
                 </CardHeader>

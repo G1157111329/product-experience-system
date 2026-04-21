@@ -19,7 +19,7 @@ import { MaterialPicker } from '@/components/material-picker';
 
 /* ─── Types ─── */
 interface TaskDetail {
-  id: string; task_name: string; product_category: string; product_model: string;
+  id: string; task_name: string; product_category: string; product: string | null; product_model: string;
   project_type: string | null; project_phase: string | null; test_date: string | null; organizer: string | null;
   target_user: string | null; test_purpose: string | null; test_method: string | null;
   status: string; assigned_to: string | null; created_at: string;
@@ -128,7 +128,7 @@ export default function TaskDetailPage() {
               {statusConfig[task.status]?.label || task.status}
             </Badge>
           </div>
-          <p className="text-sm text-muted-foreground mt-1">{task.product_model} | {task.product_category}{task.project_type ? ` | ${task.project_type}` : ''}{task.project_phase ? ` | ${task.project_phase}` : ''}</p>
+          <p className="text-sm text-muted-foreground mt-1">{task.product_model} | {task.product_category}{task.product ? ` - ${task.product}` : ''}{task.project_type ? ` | ${task.project_type}` : ''}{task.project_phase ? ` | ${task.project_phase}` : ''}</p>
         </div>
         <Button size="sm" onClick={handleGenerateReport}>
           <FileText className="h-4 w-4 mr-1.5" /> 报告生成
@@ -162,7 +162,7 @@ export default function TaskDetailPage() {
       {/* Tab Content */}
       {activeTab === 'info' && <BasicInfoTab task={task} />}
       {activeTab === 'materials' && <MaterialsTab taskId={id} />}
-      {activeTab === 'senses' && <SensesTab taskId={id} records={task.records || []} taskProductCategory={task.product_category} onRefresh={fetchTask} />}
+      {activeTab === 'senses' && <SensesTab taskId={id} records={task.records || []} taskProductCategory={task.product_category} taskProduct={task.product} onRefresh={fetchTask} />}
       {activeTab === 'functions' && <FunctionsTab taskId={id} />}
     </div>
   );
@@ -176,6 +176,7 @@ function BasicInfoTab({ task }: { task: TaskDetail }) {
         {[
           { label: '任务名称', value: task.task_name },
           { label: '产品品类', value: task.product_category },
+          { label: '产品', value: task.product || '-' },
           { label: '产品型号', value: task.product_model },
           { label: '项目类型', value: task.project_type },
           { label: '项目阶段', value: task.project_phase },
@@ -397,7 +398,7 @@ const flowByPhase: Record<string, string[]> = {
 };
 const standardCategoryOptions = ['通用标准', '品类标准', '感官评价标准'];
 
-function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId: string; records: CheckRecord[]; taskProductCategory?: string; onRefresh: () => void }) {
+function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefresh }: { taskId: string; records: CheckRecord[]; taskProductCategory?: string; taskProduct?: string | null; onRefresh: () => void }) {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [savingRecord, setSavingRecord] = useState(false);
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
@@ -464,6 +465,7 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
       params.set('category', '品类标准');
       if (categoryForm.sensory_dimension && categoryForm.sensory_dimension !== 'all') params.set('sensory_dimension', categoryForm.sensory_dimension);
       if (taskProductCategory) params.set('product_category', taskProductCategory);
+      if (taskProduct) params.set('product', taskProduct);
       try {
         const res = await fetch(`/api/standard-items/search?${params}`);
         const data = await res.json();
@@ -483,7 +485,7 @@ function SensesTab({ taskId, records, taskProductCategory, onRefresh }: { taskId
       setCategoryLoading(false);
     };
     fetchDimensions();
-  }, [formCategory, categoryForm.sensory_dimension, taskProductCategory]);
+  }, [formCategory, categoryForm.sensory_dimension, taskProductCategory, taskProduct]);
 
   // ── 品类标准: derive sub-dimensions and items when check_dimension changes ──
   useEffect(() => {
