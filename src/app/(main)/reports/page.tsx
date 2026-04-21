@@ -191,10 +191,11 @@ export default function ReportsPage() {
                 <CardHeader className="pb-2">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <CardTitle className="text-base sm:text-lg">{group.model}</CardTitle>
+                      <CardTitle className="text-base sm:text-lg truncate">{group.model}</CardTitle>
                       <div className="flex gap-1 mt-1.5 flex-wrap">
                         {group.project_type && <Badge variant="outline" className="text-[10px]">{group.project_type}</Badge>}
-                        {latestReport.product_category && <Badge variant="outline" className="text-[10px]">{latestReport.product_category}{latestReport.product ? ` - ${latestReport.product}` : ''}</Badge>}
+                        {latestReport.product_category && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{latestReport.product_category}</Badge>}
+                        {latestReport.product && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{latestReport.product}</Badge>}
                         <Badge variant="secondary" className="text-[10px]">{group.reports.length} 份报告</Badge>
                       </div>
                     </div>
@@ -241,11 +242,12 @@ export default function ReportsPage() {
                   <div className="flex-1 min-w-0">
                     <div className="font-medium text-sm truncate">{r.title}</div>
                     <div className="flex gap-1 mt-1 flex-wrap">
-                      {r.product_category && <Badge variant="outline" className="text-[10px]">{r.product_category}{r.product ? ` - ${r.product}` : ''}</Badge>}
+                      {r.product_category && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{r.product_category}</Badge>}
+                      {r.product && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{r.product}</Badge>}
                       {r.project_type && <Badge variant="outline" className="text-[10px]">{r.project_type}</Badge>}
                       <Badge variant={r.status === '已审核' ? 'default' : 'secondary'} className="text-[10px]">{r.status}</Badge>
                     </div>
-                    <div className="text-[10px] text-muted-foreground mt-1">
+                    <div className="text-[10px] text-muted-foreground mt-1 truncate">
                       {r.task_name && <span>{r.task_name}</span>}
                       <span className="ml-2">{new Date(r.created_at).toLocaleDateString('zh-CN')}</span>
                     </div>

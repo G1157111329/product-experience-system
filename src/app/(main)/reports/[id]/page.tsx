@@ -120,9 +120,9 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
           {Object.entries(task)
             .filter(([k]) => !['id', 'selected_standards'].includes(k))
             .map(([key, value]) => (
-              <div key={key}>
+              <div key={key} className="min-w-0">
                 <span className="text-muted-foreground">{taskFieldLabels[key] || key}: </span>
-                <span className="truncate">{String(value || '-')}</span>
+                <span className="break-all">{String(value || '-')}</span>
               </div>
             ))}
         </div>
@@ -157,7 +157,7 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
                   </div>
                 )}
                 {record.problem_description && (
-                  <p className="text-[10px] text-muted-foreground">{record.problem_description}</p>
+                  <p className="text-[10px] text-muted-foreground break-all">{record.problem_description}</p>
                 )}
                 {(recordImages.length > 0 || recordVideos.length > 0) && (
                   <div className="flex gap-1 flex-wrap">
@@ -310,6 +310,9 @@ export default function ReportDetailPage() {
             const byTaskId: Record<string, ReportDetail> = {};
             for (const r of allReports) {
               if (r.product_model !== rpt.product_model) continue;
+              // Only merge reports of the same merge-eligible project type
+              const rProjectType = (r as unknown as Record<string, unknown>).project_type as string || (r.content?.task as Record<string, unknown>)?.project_type as string;
+              if (rProjectType !== '自研' && rProjectType !== '改型/降本/优化') continue;
               const existing = byTaskId[r.task_id];
               if (!existing || r.created_at > existing.created_at) {
                 byTaskId[r.task_id] = r;
@@ -464,7 +467,7 @@ export default function ReportDetailPage() {
   return (
     <div className="p-4 lg:p-6 space-y-4">
       <PreviewComponent />
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-3 flex-wrap">
         <Button variant="ghost" size="icon" className="shrink-0" onClick={() => router.back()}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -476,12 +479,14 @@ export default function ReportDetailPage() {
             {taskPhase && <span>{taskPhase}</span>}
           </div>
         </div>
-        <Button size="sm" onClick={handleExportPDF}>
-          <Download className="h-4 w-4 mr-1.5" /> 导出PDF
-        </Button>
-        <Button size="sm" variant="outline" onClick={openShareDialog}>
-          <Share2 className="h-4 w-4 mr-1.5" /> 分享
-        </Button>
+        <div className="flex gap-2 shrink-0">
+          <Button size="sm" onClick={handleExportPDF}>
+            <Download className="h-4 w-4 mr-1.5" /> 导出PDF
+          </Button>
+          <Button size="sm" variant="outline" onClick={openShareDialog}>
+            <Share2 className="h-4 w-4 mr-1.5" /> 分享
+          </Button>
+        </div>
       </div>
 
       {/* Summary Stats */}
@@ -511,8 +516,8 @@ export default function ReportDetailPage() {
         return (
           <Card key={rpt.id}>
             <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-medium">
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-sm font-medium min-w-0 break-all">
                   {isMerged ? (
                     <>
                       {rptPhase && <Badge variant="outline" className="text-[10px] mr-1.5">{rptPhase}</Badge>}
@@ -554,9 +559,9 @@ export default function ReportDetailPage() {
           {editingIssue && (
             <div className="space-y-4">
               {/* Issue title */}
-              <div className="text-sm font-medium">{editingIssue.title}</div>
+              <div className="text-sm font-medium break-all">{editingIssue.title}</div>
               {editingIssue.description && (
-                <p className="text-xs text-muted-foreground">{editingIssue.description}</p>
+                <p className="text-xs text-muted-foreground break-all">{editingIssue.description}</p>
               )}
 
               {/* Level */}

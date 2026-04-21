@@ -91,6 +91,9 @@ export async function GET(request: NextRequest) {
       if (projectType === '自研' || projectType === '改型/降本/优化') {
         const byTaskId: Record<string, Record<string, unknown>> = {};
         for (const r of allReports) {
+          // Only merge reports of the same merge-eligible project type
+          const rProjectType = (r.content?.task as Record<string, unknown>)?.project_type as string;
+          if (rProjectType !== '自研' && rProjectType !== '改型/降本/优化') continue;
           const existing = byTaskId[r.task_id as string];
           if (!existing || (r.created_at as string) > (existing.created_at as string)) {
             byTaskId[r.task_id as string] = r;

@@ -232,9 +232,9 @@ export default function ShareReportPage() {
                       {Object.entries(rptTask)
                         .filter(([k]) => !['id', 'selected_standards'].includes(k))
                         .map(([key, value]) => (
-                          <div key={key} className="text-xs p-2 bg-muted/30 rounded">
+                          <div key={key} className="text-xs p-2 bg-muted/30 rounded min-w-0">
                             <div className="text-muted-foreground text-[10px]">{taskFieldLabels[key] || key}</div>
-                            <div className="font-medium truncate">{String(value || '-')}</div>
+                            <div className="font-medium break-all">{String(value || '-')}</div>
                           </div>
                         ))}
                     </div>
