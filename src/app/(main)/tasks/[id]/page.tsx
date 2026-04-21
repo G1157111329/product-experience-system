@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Pencil, Trash2, Check, Upload, Link2, X } from 'lucide-react';
+import { ArrowLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Pencil, Trash2, Check, Upload, Link2, X, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -272,7 +272,7 @@ function MaterialsTab({ taskId }: { taskId: string }) {
       <input ref={videoInputRef} type="file" accept="video/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
 
       {loading ? (
-        <div className="grid grid-cols-3 gap-2">{[1,2,3].map(i => <div key={i} className="aspect-square bg-muted animate-pulse rounded-lg" />)}</div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{[1,2,3].map(i => <div key={i} className="aspect-square bg-muted animate-pulse rounded-lg" />)}</div>
       ) : materials.length === 0 ? (
         <Card><CardContent className="flex flex-col items-center py-12 text-center">
           <Package className="h-10 w-10 text-muted-foreground/50 mb-3" />
@@ -654,7 +654,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
     const categorySelector = (
       <div className="space-y-1.5">
         <Label>标准类型</Label>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {standardCategoryOptions.map((cat) => (
             <button
               key={cat}
@@ -1101,6 +1101,7 @@ function RecordDetailCard({ record, taskId, onRefresh, onClose, onImageClick }: 
   const [referenceIds, setReferenceIds] = useState<string[]>([]);
   const [, setReferenceMats] = useState<Material[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
   const [saving, setSaving] = useState(false);
 
   // Reset form when record changes
@@ -1218,11 +1219,16 @@ function RecordDetailCard({ record, taskId, onRefresh, onClose, onImageClick }: 
               <div className="grid grid-cols-4 gap-2">
                 {record.materials.map((mat) => (
                   <div key={mat.id} className="aspect-square rounded-lg overflow-hidden bg-muted cursor-pointer border"
-                    onClick={() => mat.material_type === 'image' && onImageClick(mat.file_url)}>
+                    onClick={() => onImageClick(mat.file_url)}>
                     {mat.material_type === 'image' ? (
                       <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center"><Video className="h-6 w-6 text-muted-foreground" /></div>
+                      <div className="w-full h-full flex items-center justify-center relative">
+                        <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                          <Play className="h-5 w-5 text-white fill-white" />
+                        </div>
+                      </div>
                     )}
                   </div>
                 ))}
@@ -1233,9 +1239,12 @@ function RecordDetailCard({ record, taskId, onRefresh, onClose, onImageClick }: 
           {/* Upload & reference materials */}
           <div className="space-y-2">
             <Label>素材管理</Label>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
                 <Upload className="h-3.5 w-3.5 mr-1" /> 上传图片
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => videoInputRef?.current?.click()}>
+                <Video className="h-3.5 w-3.5 mr-1" /> 上传视频
               </Button>
             </div>
             <MaterialPicker
@@ -1247,6 +1256,7 @@ function RecordDetailCard({ record, taskId, onRefresh, onClose, onImageClick }: 
               <p className="text-xs text-muted-foreground">已选择 {referenceIds.length} 个素材，保存时将自动关联</p>
             )}
             <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
+            <input ref={videoInputRef} type="file" accept="video/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
           </div>
 
           {/* Save / Cancel */}
@@ -1547,11 +1557,16 @@ function FunctionsTab({ taskId }: { taskId: string }) {
                         <div className="flex gap-1.5 ml-7 flex-wrap">
                           {step.materials.map((mat) => (
                             <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border cursor-pointer"
-                              onClick={(e) => { e.stopPropagation(); mat.material_type === 'image' && open(mat.file_url); }}>
+                              onClick={(e) => { e.stopPropagation(); open(mat.file_url); }}>
                               {mat.material_type === 'image' ? (
                                 <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
                               ) : (
-                                <div className="w-full h-full flex items-center justify-center bg-muted"><Video className="h-4 w-4 text-muted-foreground" /></div>
+                                <div className="w-full h-full flex items-center justify-center bg-muted relative">
+                                  <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
+                                  <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                                    <Play className="h-4 w-4 text-white fill-white" />
+                                  </div>
+                                </div>
                               )}
                             </div>
                           ))}
@@ -1718,11 +1733,16 @@ function FunctionsTab({ taskId }: { taskId: string }) {
                 <div className="flex gap-1.5 flex-wrap">
                   {editingStep.materials.map((mat) => (
                     <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border cursor-pointer"
-                      onClick={() => mat.material_type === 'image' && open(mat.file_url)}>
+                      onClick={() => open(mat.file_url)}>
                       {mat.material_type === 'image' ? (
                         <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center bg-muted"><Video className="h-4 w-4 text-muted-foreground" /></div>
+                        <div className="w-full h-full flex items-center justify-center bg-muted relative">
+                          <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                            <Play className="h-4 w-4 text-white fill-white" />
+                          </div>
+                        </div>
                       )}
                     </div>
                   ))}

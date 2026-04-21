@@ -170,7 +170,7 @@ export default function TasksPage() {
               </div>
               <div className="space-y-1.5">
                 <Label>项目类型 *</Label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {PROJECT_TYPES.map((type) => (
                     <button key={type} type="button" onClick={() => setForm({ ...form, project_type: type, project_phase: type === '自研' ? form.project_phase : '' })}
                       className={cn('px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors',

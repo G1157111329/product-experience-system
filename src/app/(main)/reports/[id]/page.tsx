@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Download, Video } from 'lucide-react';
+import { ArrowLeft, Download, Video, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -167,8 +167,11 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
                       </div>
                     ))}
                     {recordVideos.map((mat) => (
-                      <div key={mat.id} className="w-12 h-12 rounded overflow-hidden border bg-muted flex items-center justify-center">
-                        <Video className="h-3 w-3 text-muted-foreground" />
+                      <div key={mat.id} className="w-12 h-12 rounded overflow-hidden border cursor-pointer relative" onClick={() => open(mat.file_url)}>
+                        <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                          <Play className="h-3 w-3 text-white fill-white" />
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -214,10 +217,17 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
                   })()}
                   {step.materials?.map((mat) => (
                     mat.material_type === 'image' ? (
-                      <div key={mat.id} className="w-10 h-10 rounded overflow-hidden border cursor-pointer ml-5 inline-block">
+                      <div key={mat.id} className="w-10 h-10 rounded overflow-hidden border cursor-pointer ml-5 inline-block" onClick={() => open(mat.file_url)}>
                         <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
                       </div>
-                    ) : null
+                    ) : (
+                      <div key={mat.id} className="w-10 h-10 rounded overflow-hidden border cursor-pointer ml-5 inline-block relative" onClick={() => open(mat.file_url)}>
+                        <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                          <Play className="h-2.5 w-2.5 text-white fill-white" />
+                        </div>
+                      </div>
+                    )
                   ))}
                 </div>
               ))}

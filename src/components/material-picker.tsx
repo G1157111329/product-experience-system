@@ -1,134 +1,222 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
-import { Camera, Image as ImageIcon, X, Check } from 'lucide-react';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { Plus, Loader2, Film, Image as ImageIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { MediaThumbnail } from './image-preview';
+import { toast } from 'sonner';
 
 interface Material {
-  id: string; material_type: string; file_name: string; file_url: string; file_size: number;
+  id: string; material_type: string; file_name: string; file_url: string;
+  file_size: number; record_id: string | null; recipe_step_id: string | null;
 }
 
 interface MaterialPickerProps {
   taskId: string;
-  selectedIds: string[];
-  onSelectionChange: (ids: string[], materials: Material[]) => void;
-  maxSelect?: number;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  onSelect?: (material: Material) => void;
+  recordId?: string;
+  recipeStepId?: string;
+  // Legacy API (used by tasks/[id])
+  selectedIds?: string[];
+  onSelectionChange?: (ids: string[], materials: Material[]) => void;
 }
 
-export function MaterialPicker({ taskId, selectedIds, onSelectionChange, maxSelect = 9 }: MaterialPickerProps) {
+export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onSelect, recordId, recipeStepId, selectedIds, onSelectionChange }: MaterialPickerProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
   const [materials, setMaterials] = useState<Material[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [filterType, setFilterType] = useState<'all' | 'image' | 'video'>('all');
+  const [selected, setSelected] = useState<string[]>(selectedIds || []);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    fetch(`/api/materials?task_id=${taskId}`)
-      .then(r => r.json())
-      .then(res => {
-        if (res.code === 0) setMaterials((res.data || []).filter((m: Material) => m.material_type === 'image'));
-      })
-      .finally(() => setLoading(false));
-  }, [taskId]);
+  const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const setIsOpen = onOpenChange || setInternalOpen;
 
-  const handleUpload = async (files: FileList | null) => {
-    if (!files) return;
-    for (const file of Array.from(files)) {
-      if (file.size > 100 * 1024 * 1024) continue;
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('task_id', taskId);
-      try {
+  // Sync selected with external prop
+  useEffect(() => {
+    if (selectedIds) setSelected(selectedIds);
+  }, [selectedIds]);
+
+  const fetchMaterials = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ task_id: taskId, limit: '200' });
+      const res = await fetch(`/api/materials?${params}`);
+      const data = await res.json();
+      if (data.code === 0) {
+        let list: Material[] = Array.isArray(data.data) ? data.data : (data.data?.list || []);
+        // For single-select mode (onSelect), filter unassociated
+        if (onSelect && !onSelectionChange) {
+          list = list.filter(m => {
+            if (recordId && m.record_id === recordId) return true;
+            if (recipeStepId && m.recipe_step_id === recipeStepId) return true;
+            return !m.record_id && !m.recipe_step_id;
+          });
+        }
+        setMaterials(list);
+      }
+    } finally { setLoading(false); }
+  }, [taskId, recordId, recipeStepId, onSelect, onSelectionChange]);
+
+  const handleOpen = (v: boolean) => {
+    setIsOpen(v);
+    if (v) fetchMaterials();
+  };
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('task_id', taskId);
+        if (recordId) formData.append('record_id', recordId);
+        if (recipeStepId) formData.append('recipe_step_id', recipeStepId);
         const res = await fetch('/api/materials/upload', { method: 'POST', body: formData });
         const data = await res.json();
-        if (data.code === 0) {
-          const newMat = data.data as Material;
-          if (newMat.material_type === 'image') {
-            setMaterials(prev => [newMat, ...prev]);
-          }
+        if (data.code !== 0) { toast.error(data.message); return; }
+        const newMat = data.data as Material;
+        if (onSelect && !onSelectionChange) {
+          onSelect(newMat);
+        } else if (onSelectionChange) {
+          const newSelected = [...selected, newMat.id];
+          setSelected(newSelected);
+          const newMats = materials.filter(m => newSelected.includes(m.id));
+          newMats.push(newMat);
+          onSelectionChange(newSelected, newMats);
         }
-      } catch { /* ignore */ }
+      }
+      fetchMaterials();
+      toast.success('上传成功');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
-  const toggleSelect = (mat: Material) => {
-    if (selectedIds.includes(mat.id)) {
-      const newIds = selectedIds.filter(id => id !== mat.id);
-      const newMats = materials.filter(m => newIds.includes(m.id));
-      onSelectionChange(newIds, newMats);
-    } else if (selectedIds.length < maxSelect) {
-      const newIds = [...selectedIds, mat.id];
-      const newMats = materials.filter(m => newIds.includes(m.id));
-      onSelectionChange(newIds, newMats);
+  const handleSelect = (m: Material) => {
+    if (onSelect && !onSelectionChange) {
+      // Single select mode
+      onSelect(m);
+      setIsOpen(false);
+    } else {
+      // Multi-select mode
+      const newSelected = selected.includes(m.id) ? selected.filter(x => x !== m.id) : [...selected, m.id];
+      setSelected(newSelected);
+      if (onSelectionChange) {
+        onSelectionChange(newSelected, materials.filter(mat => newSelected.includes(mat.id)));
+      }
     }
   };
 
-  const images = materials;
+  const filtered = filterType === 'all' ? materials : materials.filter(m => m.material_type === filterType);
 
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-muted-foreground">
-          引用素材图片 {selectedIds.length > 0 && `(${selectedIds.length}/${maxSelect})`}
-        </span>
-        <Button variant="outline" size="sm" className="h-6 text-[10px]" onClick={() => fileInputRef.current?.click()}>
-          <Camera className="h-3 w-3 mr-1" /> 上传新图片
-        </Button>
-      </div>
-      <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
-
-      {loading ? (
-        <div className="grid grid-cols-4 gap-1.5">{[1,2,3,4].map(i => <div key={i} className="aspect-square bg-muted animate-pulse rounded" />)}</div>
-      ) : images.length === 0 ? (
-        <div className="text-center py-4 text-xs text-muted-foreground border border-dashed border-border rounded-lg">
-          暂无图片素材，请先上传
-        </div>
-      ) : (
-        <div className="grid grid-cols-4 gap-1.5 max-h-40 overflow-y-auto">
-          {images.map((mat) => {
-            const isSelected = selectedIds.includes(mat.id);
-            return (
-              <div
-                key={mat.id}
-                className={cn(
-                  'relative aspect-square rounded-md overflow-hidden cursor-pointer border-2 transition-all',
-                  isSelected ? 'border-primary ring-1 ring-primary/30' : 'border-transparent hover:border-muted-foreground/30'
-                )}
-                onClick={() => toggleSelect(mat)}
-              >
-                <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
-                {isSelected && (
-                  <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
-                    <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center">
-                      <Check className="h-3 w-3 text-primary-foreground" />
-                    </div>
+  // If no controlled open, render inline trigger
+  if (controlledOpen === undefined && onOpenChange === undefined) {
+    return (
+      <>
+        <Dialog open={isOpen} onOpenChange={handleOpen}>
+          <DialogContent className="max-w-lg max-h-[85vh]">
+            <DialogHeader>
+              <DialogTitle>选择素材</DialogTitle>
+              <DialogDescription>从素材库选择或上传新的图片/视频</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button size="sm" className="gap-1" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+                  {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                  {uploading ? '上传中...' : '上传素材'}
+                </Button>
+                <input ref={fileInputRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={handleUpload} />
+                <div className="flex gap-1 ml-auto">
+                  {([['all', '全部'], ['image', '图片'], ['video', '视频']] as const).map(([val, label]) => (
+                    <Button key={val} size="sm" variant={filterType === val ? 'default' : 'outline'} className="h-7 text-xs px-2"
+                      onClick={() => setFilterType(val)}>{label}</Button>
+                  ))}
+                </div>
+              </div>
+              <ScrollArea className="h-[50vh]">
+                {loading ? (
+                  <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin" /></div>
+                ) : filtered.length === 0 ? (
+                  <div className="text-center py-8 text-sm text-muted-foreground">暂无素材，请先上传</div>
+                ) : (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                    {filtered.map(m => (
+                      <div key={m.id} className="relative cursor-pointer" onClick={() => handleSelect(m)}>
+                        <MediaThumbnail url={m.file_url} type={m.material_type as 'image' | 'video'} size="lg" />
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate rounded-b-lg">
+                          {m.material_type === 'video' ? <Film className="h-2.5 w-2.5 inline mr-0.5" /> : <ImageIcon className="h-2.5 w-2.5 inline mr-0.5" />}
+                          {m.file_name}
+                        </div>
+                        {selected.includes(m.id) && (
+                          <div className="absolute top-1 right-1 w-4 h-4 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[8px]">✓</div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )}
-              </div>
-            );
-          })}
-        </div>
-      )}
+              </ScrollArea>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </>
+    );
+  }
 
-      {/* Preview selected thumbnails */}
-      {selectedIds.length > 0 && (
-        <div className="flex gap-1.5 flex-wrap">
-          {selectedIds.map(id => {
-            const mat = materials.find(m => m.id === id);
-            if (!mat) return null;
-            return (
-              <div key={id} className="relative w-12 h-12 rounded-md overflow-hidden border border-border">
-                <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
-                <button
-                  className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center"
-                  onClick={(e) => { e.stopPropagation(); toggleSelect(mat); }}
-                >
-                  <X className="h-2.5 w-2.5" />
-                </button>
+  // Controlled mode (open/onOpenChange provided)
+  return (
+    <Dialog open={isOpen} onOpenChange={handleOpen}>
+      <DialogContent className="max-w-lg max-h-[85vh]">
+        <DialogHeader>
+          <DialogTitle>选择素材</DialogTitle>
+          <DialogDescription>从素材库选择或上传新的图片/视频</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button size="sm" className="gap-1" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+              {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+              {uploading ? '上传中...' : '上传素材'}
+            </Button>
+            <input ref={fileInputRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={handleUpload} />
+            <div className="flex gap-1 ml-auto">
+              {([['all', '全部'], ['image', '图片'], ['video', '视频']] as const).map(([val, label]) => (
+                <Button key={val} size="sm" variant={filterType === val ? 'default' : 'outline'} className="h-7 text-xs px-2"
+                  onClick={() => setFilterType(val)}>{label}</Button>
+              ))}
+            </div>
+          </div>
+          <ScrollArea className="h-[50vh]">
+            {loading ? (
+              <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin" /></div>
+            ) : filtered.length === 0 ? (
+              <div className="text-center py-8 text-sm text-muted-foreground">暂无素材，请先上传</div>
+            ) : (
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                {filtered.map(m => (
+                  <div key={m.id} className="relative cursor-pointer" onClick={() => handleSelect(m)}>
+                    <MediaThumbnail url={m.file_url} type={m.material_type as 'image' | 'video'} size="lg" />
+                    <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate rounded-b-lg">
+                      {m.material_type === 'video' ? <Film className="h-2.5 w-2.5 inline mr-0.5" /> : <ImageIcon className="h-2.5 w-2.5 inline mr-0.5" />}
+                      {m.file_name}
+                    </div>
+                    {selected.includes(m.id) && (
+                      <div className="absolute top-1 right-1 w-4 h-4 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[8px]">✓</div>
+                    )}
+                  </div>
+                ))}
               </div>
-            );
-          })}
+            )}
+          </ScrollArea>
         </div>
-      )}
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -50,7 +50,7 @@ interface ReportData {
 }
 
 const taskFieldLabels: Record<string, string> = {
-  task_name: '任务名称', product_category: '产品品类', product_model: '产品型号',
+  task_name: '任务名称', product_category: '产品品类', product: '产品', product_model: '产品型号',
   project_type: '项目类型', project_phase: '项目阶段',
   test_date: '测试日期', organizer: '组织人', target_user: '目标用户',
   test_purpose: '测试目的', test_method: '测试方法', status: '状态',
@@ -143,7 +143,7 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
                   <img key={mat.id} src={mat.file_url} alt={mat.file_name} style={{ width: '50px', height: '50px', borderRadius: '3px', objectFit: 'cover', border: '1px solid #e5e7eb' }} crossOrigin="anonymous" />
                 ))}
                 {recordVideos.map(mat => (
-                  <div key={mat.id} style={{ width: '50px', height: '50px', borderRadius: '3px', background: '#e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', border: '1px solid #e5e7eb' }}>&#9654;</div>
+                  <div key={mat.id} style={{ width: '50px', height: '50px', borderRadius: '3px', overflow: 'hidden', border: '1px solid #e5e7eb', position: 'relative', background: '#e5e7eb' }}><video src={mat.file_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" /><div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)' }}><span style={{ color: 'white', fontSize: '16px' }}>&#9654;</span></div></div>
                 ))}
               </div>
             )}
