@@ -202,7 +202,7 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
           </div>
           {renderSelectedThumbnails()}
         </div>
-        <Dialog open={isOpen} onOpenChange={handleOpen}>
+        <Dialog modal={false} open={isOpen} onOpenChange={handleOpen}>
           <DialogContent className="max-w-lg max-h-[85vh]">
             <DialogHeader>
               <DialogTitle>选择素材</DialogTitle>
@@ -210,14 +210,14 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
             </DialogHeader>
             <div className="space-y-3">
               <div className="flex items-center gap-2 flex-wrap">
-                <Button size="sm" className="gap-1" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+                <Button type="button" size="sm" className="gap-1" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
                   {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
                   {uploading ? '上传中...' : '上传素材'}
                 </Button>
                 <input ref={fileInputRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={handleUpload} />
                 <div className="flex gap-1 ml-auto">
                   {([['all', '全部'], ['image', '图片'], ['video', '视频']] as const).map(([val, label]) => (
-                    <Button key={val} size="sm" variant={filterType === val ? 'default' : 'outline'} className="h-7 text-xs px-2"
+                    <Button key={val} type="button" size="sm" variant={filterType === val ? 'default' : 'outline'} className="h-7 text-xs px-2"
                       onClick={() => setFilterType(val)}>{label}</Button>
                   ))}
                 </div>
@@ -253,7 +253,7 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
 
   // Controlled mode (open/onOpenChange provided)
   return (
-    <Dialog open={isOpen} onOpenChange={handleOpen}>
+    <Dialog modal={false} open={isOpen} onOpenChange={handleOpen}>
       <DialogContent className="max-w-lg max-h-[85vh]">
         <DialogHeader>
           <DialogTitle>选择素材</DialogTitle>
@@ -261,7 +261,7 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
         </DialogHeader>
         <div className="space-y-3">
           <div className="flex items-center gap-2 flex-wrap">
-            <Button size="sm" className="gap-1" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+            <Button type="button" size="sm" className="gap-1" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
               {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
               {uploading ? '上传中...' : '上传素材'}
             </Button>

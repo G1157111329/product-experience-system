@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { X, ZoomIn, ZoomOut, Play } from 'lucide-react';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 interface ImagePreviewProps {
   url: string | null;
@@ -19,6 +19,9 @@ export function ImagePreview({ url, onClose }: ImagePreviewProps) {
   return (
     <Dialog open={!!url} onOpenChange={(open) => { if (!open) { setZoomed(false); onClose(); } }}>
       <DialogContent className="max-w-[95vw] max-h-[95vh] p-0 overflow-hidden border-0 bg-black/90 flex items-center justify-center">
+        <DialogHeader className="sr-only">
+          <DialogTitle>预览</DialogTitle>
+        </DialogHeader>
         <div className="relative w-full h-full flex items-center justify-center">
           {isVideo ? (
             <video

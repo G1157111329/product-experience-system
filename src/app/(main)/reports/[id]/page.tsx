@@ -277,6 +277,7 @@ export default function ReportDetailPage() {
   const [siblingReports, setSiblingReports] = useState<ReportDetail[]>([]);
   const [liveIssuesMap, setLiveIssuesMap] = useState<Record<string, IssueItem[]>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [editingIssue, setEditingIssue] = useState<IssueItem | null>(null);
   const [tempStatus, setTempStatus] = useState('');
@@ -285,38 +286,48 @@ export default function ReportDetailPage() {
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
 
   const fetchReport = useCallback(async () => {
-    const res = await fetch(`/api/reports/${id}`);
-    const data = await res.json();
-    if (data.code === 0) {
-      const rpt = data.data as ReportDetail;
-      setReport(rpt);
-      // Fetch sibling reports
-      if (rpt.product_model) {
-        const allRes = await fetch('/api/reports?limit=200');
-        const allData = await allRes.json();
-        const allReports: ReportDetail[] = Array.isArray(allData.data) ? allData.data : (allData.data?.list || []);
-        const projectType = (rpt.content?.task as Record<string, unknown>)?.project_type as string;
-        const shouldMerge = projectType === '自研' || projectType === '改型/降本/优化';
-        if (shouldMerge) {
-          // Deduplicate: for each task_id, only keep the latest report
-          const byTaskId: Record<string, ReportDetail> = {};
-          for (const r of allReports) {
-            if (r.product_model !== rpt.product_model) continue;
-            const existing = byTaskId[r.task_id];
-            if (!existing || r.created_at > existing.created_at) {
-              byTaskId[r.task_id] = r;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const res = await fetch(`/api/reports/${id}`);
+      const data = await res.json();
+      if (data.code === 0) {
+        const rpt = data.data as ReportDetail;
+        setReport(rpt);
+        // Fetch sibling reports
+        if (rpt.product_model) {
+          const allRes = await fetch('/api/reports?limit=200');
+          const allData = await allRes.json();
+          const allReports: ReportDetail[] = Array.isArray(allData.data) ? allData.data : (allData.data?.list || []);
+          const projectType = (rpt.content?.task as Record<string, unknown>)?.project_type as string;
+          const shouldMerge = projectType === '自研' || projectType === '改型/降本/优化';
+          if (shouldMerge) {
+            // Deduplicate: for each task_id, only keep the latest report
+            const byTaskId: Record<string, ReportDetail> = {};
+            for (const r of allReports) {
+              if (r.product_model !== rpt.product_model) continue;
+              const existing = byTaskId[r.task_id];
+              if (!existing || r.created_at > existing.created_at) {
+                byTaskId[r.task_id] = r;
+              }
             }
+            // Current report's task_id should use current report
+            byTaskId[rpt.task_id] = rpt;
+            const siblings = Object.values(byTaskId)
+              .filter((r: ReportDetail) => r.id !== rpt.id)
+              .sort((a: ReportDetail, b: ReportDetail) => a.created_at.localeCompare(b.created_at));
+            setSiblingReports(siblings);
           }
-          // Current report's task_id should use current report
-          byTaskId[rpt.task_id] = rpt;
-          const siblings = Object.values(byTaskId)
-            .filter((r: ReportDetail) => r.id !== rpt.id)
-            .sort((a: ReportDetail, b: ReportDetail) => a.created_at.localeCompare(b.created_at));
-          setSiblingReports(siblings);
         }
+        // Sync issues for this report
+        await syncReportIssues(rpt.id, rpt);
+      } else {
+        setLoadError(data.message || '报告加载失败');
       }
-      // Sync issues for this report
-      await syncReportIssues(rpt.id, rpt);
+    } catch {
+      setLoadError('网络错误，请重试');
+    } finally {
+      setLoading(false);
     }
   }, [id]);
 
@@ -327,7 +338,8 @@ export default function ReportDetailPage() {
     const allIssues: IssueItem[] = Array.isArray(raw) ? raw : (raw?.list || []);
     let reportIssues = allIssues.filter((i: IssueItem) => i.source_report_id === reportId);
 
-    // If no issues exist yet, auto-create from report content
+    // If no issues exist yet for this report, auto-create from report content
+    // But check for duplicates across ALL reports of the same task
     if (reportIssues.length === 0 && reportData?.content) {
       const content = reportData.content;
       const records = content.records || [];
@@ -336,10 +348,28 @@ export default function ReportDetailPage() {
 
       for (const record of records) {
         if (record.evaluation_result === '不合格') {
-          const alreadyExists = allIssues.find(i =>
+          // Check if this exact issue already exists for THIS report
+          const alreadyInReport = allIssues.find(i =>
             i.source_report_id === reportId && i.source_type === 'record_fail' && i.title === record.check_item
           );
-          if (!alreadyExists) {
+          if (alreadyInReport) continue;
+
+          // Check if a similar issue exists from another report (same title + source_type + task)
+          const existingFromOtherReport = allIssues.find(i =>
+            i.source_type === 'record_fail' && i.title === (record.check_item || '不合格检查项') && i.source_report_id !== reportId
+          );
+          if (existingFromOtherReport) {
+            // Re-link the existing issue to the current report
+            await fetch(`/api/issues/${existingFromOtherReport.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                source_report_id: reportId,
+                source: `${reportData.title} - 不合格检查项`,
+              }),
+            });
+          } else {
+            // Create a new issue
             await fetch('/api/issues', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -373,10 +403,28 @@ export default function ReportDetailPage() {
 
           for (const ppItem of problemPoints) {
             const stepDesc = `步骤${step.step_number}: ${step.operation || ''}`;
-            const alreadyExists = allIssues.find(i =>
+            // Check if this exact issue already exists for THIS report
+            const alreadyInReport = allIssues.find(i =>
               i.source_report_id === reportId && i.source_type === 'recipe_problem' && i.title === ppItem.text && i.description === stepDesc
             );
-            if (!alreadyExists) {
+            if (alreadyInReport) continue;
+
+            // Check if a similar issue exists from another report
+            const existingFromOtherReport = allIssues.find(i =>
+              i.source_type === 'recipe_problem' && i.title === ppItem.text.substring(0, 200) && i.source_report_id !== reportId
+            );
+            if (existingFromOtherReport) {
+              // Re-link the existing issue to the current report
+              await fetch(`/api/issues/${existingFromOtherReport.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  source_report_id: reportId,
+                  source: `${reportData.title} - 食谱功能问题(${recipe.name || ''})`,
+                }),
+              });
+            } else {
+              // Create a new issue
               await fetch('/api/issues', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -396,7 +444,7 @@ export default function ReportDetailPage() {
         }
       }
 
-      // Re-fetch after auto-creation
+      // Re-fetch after auto-creation/re-linking
       const res2 = await fetch(`/api/issues?limit=500`);
       const data2 = await res2.json();
       const raw2 = data2.data;
@@ -457,7 +505,12 @@ export default function ReportDetailPage() {
   };
 
   if (loading) return <div className="p-6 animate-pulse space-y-4"><div className="h-8 bg-muted rounded w-64" /></div>;
-  if (!report) return <div className="p-6">报告不存在</div>;
+  if (!report) return (
+    <div className="p-6 space-y-3">
+      <p className="text-muted-foreground">{loadError || '报告不存在'}</p>
+      <Button variant="outline" onClick={() => fetchReport()}>重试</Button>
+    </div>
+  );
 
   const task = report.content?.task as Record<string, unknown> | undefined;
   const projectType = task?.project_type as string | undefined;

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Pencil, Trash2, Check, Upload, Link2, X, Play } from 'lucide-react';
+import { ArrowLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Pencil, Trash2, Check, Link2, X, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -1101,10 +1101,7 @@ function RecordDetailCard({ record, taskId, existingMaterials, onRefresh, onClos
   const [tempStatus, setTempStatus] = useState(record.evaluation_result);
   const [referenceIds, setReferenceIds] = useState<string[]>([]);
   const [localMaterials, setLocalMaterials] = useState<Material[]>(existingMaterials);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const videoInputRef = useRef<HTMLInputElement>(null);
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
 
   // Sync localMaterials when existingMaterials changes (e.g. after onRefresh)
   useEffect(() => {
@@ -1151,31 +1148,6 @@ function RecordDetailCard({ record, taskId, existingMaterials, onRefresh, onClos
     setTempStatus(record.evaluation_result);
     setReferenceIds([]);
     onClose();
-  };
-
-  const handleDirectUpload = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    setUploading(true);
-    try {
-      for (const file of Array.from(files)) {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('task_id', taskId);
-        formData.append('record_id', record.id);
-        const res = await fetch('/api/materials/upload', { method: 'POST', body: formData });
-        const data = await res.json();
-        if (data.code === 0 && data.data) {
-          // Immediately add to local materials and reference ids
-          const newMat = data.data as Material;
-          setLocalMaterials(prev => [...prev, newMat]);
-          setReferenceIds(prev => [...prev, newMat.id]);
-        }
-      }
-      toast.success('素材已上传并关联');
-      onRefresh();
-    } finally {
-      setUploading(false);
-    }
   };
 
   return (
@@ -1252,27 +1224,18 @@ function RecordDetailCard({ record, taskId, existingMaterials, onRefresh, onClos
             </div>
           )}
 
-          {/* Upload & reference materials */}
+          {/* Upload & reference materials - use MaterialPicker only */}
           <div className="space-y-2">
             <Label>素材管理</Label>
-            <div className="flex gap-2 flex-wrap">
-              <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-                <Upload className="h-3.5 w-3.5 mr-1" /> {uploading ? '上传中...' : '上传图片'}
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => videoInputRef?.current?.click()} disabled={uploading}>
-                <Video className="h-3.5 w-3.5 mr-1" /> {uploading ? '上传中...' : '上传视频'}
-              </Button>
-            </div>
             <MaterialPicker
               taskId={taskId}
+              recordId={record.id}
               selectedIds={referenceIds}
               onSelectionChange={(ids, mats) => { setReferenceIds(ids); setLocalMaterials(mats); }}
             />
             {referenceIds.length > 0 && (
               <p className="text-xs text-muted-foreground">已选择 {referenceIds.length} 个素材，保存时将自动关联</p>
             )}
-            <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleDirectUpload(e.target.files)} />
-            <input ref={videoInputRef} type="file" accept="video/*" multiple className="hidden" onChange={(e) => handleDirectUpload(e.target.files)} />
           </div>
 
           {/* Save / Cancel */}
