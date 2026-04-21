@@ -5,14 +5,14 @@ import { usePathname } from 'next/navigation';
 import { useState, useEffect, useCallback } from 'react';
 import {
   LayoutDashboard, BookOpen, ClipboardList, AlertTriangle, FileText,
-  BarChart3, Menu, ChevronRight, User, LogOut, Key, Pencil, Shield,
-  Settings, Plus, Minus, Check, X,
+  BarChart3, Menu, ChevronRight, User, LogOut, Key, Pencil,
+  Settings, Plus, Minus,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -73,17 +73,8 @@ function NavContent({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
-function UserSection() {
-  const { user, isAdmin, logout } = useAuth();
-  const [profileOpen, setProfileOpen] = useState(false);
-  const [editField, setEditField] = useState<'name' | 'password' | null>(null);
-  const [editValue, setEditValue] = useState('');
-  const [editLoading, setEditLoading] = useState(false);
-  const [allUsers, setAllUsers] = useState<Array<{ id: string; account: string; name: string; role: string }>>([]);
-  const [roleLoading, setRoleLoading] = useState(false);
-
-  // Settings states
-  const [settingsOpen, setSettingsOpen] = useState(false);
+/* ── Shared Settings Dialog (used by both desktop & mobile) ── */
+function CategoryProductSettings({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const [categories, setCategories] = useState<CategoryWithProducts[]>([]);
   const [selectedCatId, setSelectedCatId] = useState<string>('');
   const [newCatName, setNewCatName] = useState('');
@@ -93,15 +84,6 @@ function UserSection() {
   const [deletingCatId, setDeletingCatId] = useState<string | null>(null);
   const [deletingProdId, setDeletingProdId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (profileOpen && isAdmin && user?.id) {
-      fetch(`/api/auth/users?admin_user_id=${user.id}`)
-        .then(res => res.json())
-        .then(data => { if (data.code === 0) setAllUsers(data.data || []); })
-        .catch(() => {});
-    }
-  }, [profileOpen, isAdmin, user?.id]);
-
   const fetchCategories = useCallback(async () => {
     const res = await fetch('/api/categories');
     const data = await res.json();
@@ -109,42 +91,20 @@ function UserSection() {
   }, []);
 
   useEffect(() => {
-    if (settingsOpen) fetchCategories();
-  }, [settingsOpen, fetchCategories]);
+    if (open) fetchCategories();
+  }, [open, fetchCategories]);
 
-  const handleProfileEdit = async () => {
-    if (!user?.id || !editField || !editValue) return;
-    setEditLoading(true);
-    try {
-      const res = await fetch('/api/auth/profile', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id, field: editField, value: editValue }),
-      });
-      const data = await res.json();
-      if (data.code === 0) { toast.success(data.message); setEditField(null); setEditValue(''); }
-      else toast.error(data.message);
-    } finally { setEditLoading(false); }
-  };
+  // Reset state when dialog closes
+  useEffect(() => {
+    if (!open) {
+      setDeletingCatId(null);
+      setDeletingProdId(null);
+      setNewCatName('');
+      setNewProdName('');
+      setSelectedCatId('');
+    }
+  }, [open]);
 
-  const handleRoleChange = async (targetUserId: string, action: 'upgrade' | 'downgrade') => {
-    if (!user?.id) return;
-    setRoleLoading(true);
-    try {
-      const res = await fetch('/api/auth/users', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ admin_user_id: user.id, target_user_id: targetUserId, action }),
-      });
-      const data = await res.json();
-      if (data.code === 0) {
-        toast.success(data.message);
-        const usersRes = await fetch(`/api/auth/users?admin_user_id=${user.id}`);
-        const usersData = await usersRes.json();
-        if (usersData.code === 0) setAllUsers(usersData.data || []);
-      } else toast.error(data.message);
-    } finally { setRoleLoading(false); }
-  };
-
-  // Category/Product CRUD handlers
   const handleAddCategory = async () => {
     if (!newCatName.trim()) return;
     setAddingCat(true);
@@ -192,6 +152,158 @@ function UserSection() {
   const selectedCat = categories.find(c => c.id === selectedCatId);
 
   return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg max-h-[85vh]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Settings className="h-5 w-5" /> 品类与产品设置
+          </DialogTitle>
+          <DialogDescription>管理品类和产品选项，修改后全局生效</DialogDescription>
+        </DialogHeader>
+        <ScrollArea className="max-h-[65vh]">
+          <div className="space-y-6 pr-3">
+            {/* Category Management */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <Badge variant="secondary" className="text-[10px]">品类</Badge> 品类管理
+              </h3>
+              <div className="space-y-1.5">
+                {categories.map(cat => (
+                  <div key={cat.id} className="flex items-center gap-2 p-2 rounded-lg border">
+                    <span className="text-sm flex-1">{cat.name}</span>
+                    <Badge variant="outline" className="text-[10px]">{cat.products.length}个产品</Badge>
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-red-700 hover:bg-red-50"
+                      onClick={() => setDeletingCatId(cat.id)}>
+                      <Minus className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+                {categories.length === 0 && <p className="text-xs text-muted-foreground text-center py-2">暂无品类</p>}
+              </div>
+              <div className="flex gap-2">
+                <Input placeholder="输入品类名称" value={newCatName} onChange={e => setNewCatName(e.target.value)}
+                  className="h-8 text-sm" onKeyDown={e => { if (e.key === 'Enter') handleAddCategory(); }} />
+                <Button size="sm" className="h-8 gap-1" onClick={handleAddCategory} disabled={addingCat || !newCatName.trim()}>
+                  <Plus className="h-3.5 w-3.5" /> 新增
+                </Button>
+              </div>
+              {deletingCatId && (
+                <div className="flex items-center gap-2 p-2 rounded-lg bg-destructive/5 border border-destructive/20">
+                  <span className="text-xs text-destructive flex-1">确认删除「{categories.find(c => c.id === deletingCatId)?.name}」及其所有产品？</span>
+                  <Button size="sm" variant="destructive" className="h-6 text-xs" onClick={() => handleDeleteCategory(deletingCatId)}>确认</Button>
+                  <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setDeletingCatId(null)}>取消</Button>
+                </div>
+              )}
+            </div>
+
+            <Separator />
+
+            {/* Product Management */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <Badge variant="secondary" className="text-[10px]">产品</Badge> 产品管理
+              </h3>
+              <div className="space-y-1.5">
+                <Label className="text-xs">选择品类</Label>
+                <Select value={selectedCatId} onValueChange={setSelectedCatId}>
+                  <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="选择品类查看产品" /></SelectTrigger>
+                  <SelectContent>
+                    {categories.map(cat => <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              {selectedCat && (
+                <>
+                  <div className="space-y-1.5">
+                    {selectedCat.products.map(prod => (
+                      <div key={prod.id} className="flex items-center gap-2 p-2 rounded-lg border">
+                        <span className="text-sm flex-1">{prod.name}</span>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-red-700 hover:bg-red-50"
+                          onClick={() => setDeletingProdId(prod.id)}>
+                          <Minus className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                    {selectedCat.products.length === 0 && (
+                      <p className="text-xs text-muted-foreground text-center py-2">该品类暂无产品</p>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <Input placeholder="输入产品名称" value={newProdName} onChange={e => setNewProdName(e.target.value)}
+                      className="h-8 text-sm" onKeyDown={e => { if (e.key === 'Enter') handleAddProduct(); }} />
+                    <Button size="sm" className="h-8 gap-1" onClick={handleAddProduct} disabled={addingProd || !newProdName.trim()}>
+                      <Plus className="h-3.5 w-3.5" /> 新增
+                    </Button>
+                  </div>
+                  {deletingProdId && (
+                    <div className="flex items-center gap-2 p-2 rounded-lg bg-destructive/5 border border-destructive/20">
+                      <span className="text-xs text-destructive flex-1">确认删除产品「{selectedCat.products.find(p => p.id === deletingProdId)?.name}」？</span>
+                      <Button size="sm" variant="destructive" className="h-6 text-xs" onClick={() => handleDeleteProduct(deletingProdId)}>确认</Button>
+                      <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setDeletingProdId(null)}>取消</Button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </ScrollArea>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function UserSection() {
+  const { user, isAdmin, logout } = useAuth();
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [editField, setEditField] = useState<'name' | 'password' | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [editLoading, setEditLoading] = useState(false);
+  const [allUsers, setAllUsers] = useState<Array<{ id: string; account: string; name: string; role: string }>>([]);
+  const [roleLoading, setRoleLoading] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  useEffect(() => {
+    if (profileOpen && isAdmin && user?.id) {
+      fetch(`/api/auth/users?admin_user_id=${user.id}`)
+        .then(res => res.json())
+        .then(data => { if (data.code === 0) setAllUsers(data.data || []); })
+        .catch(() => {});
+    }
+  }, [profileOpen, isAdmin, user?.id]);
+
+  const handleProfileEdit = async () => {
+    if (!user?.id || !editField || !editValue) return;
+    setEditLoading(true);
+    try {
+      const res = await fetch('/api/auth/profile', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.id, field: editField, value: editValue }),
+      });
+      const data = await res.json();
+      if (data.code === 0) { toast.success(data.message); setEditField(null); setEditValue(''); }
+      else toast.error(data.message);
+    } finally { setEditLoading(false); }
+  };
+
+  const handleRoleChange = async (targetUserId: string, action: 'upgrade' | 'downgrade') => {
+    if (!user?.id) return;
+    setRoleLoading(true);
+    try {
+      const res = await fetch('/api/auth/users', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin_user_id: user.id, target_user_id: targetUserId, action }),
+      });
+      const data = await res.json();
+      if (data.code === 0) {
+        toast.success(data.message);
+        const usersRes = await fetch(`/api/auth/users?admin_user_id=${user.id}`);
+        const usersData = await usersRes.json();
+        if (usersData.code === 0) setAllUsers(usersData.data || []);
+      } else toast.error(data.message);
+    } finally { setRoleLoading(false); }
+  };
+
+  return (
     <>
       <div className="flex items-center gap-2">
         <button onClick={() => setProfileOpen(true)}
@@ -207,6 +319,12 @@ function UserSection() {
             </div>
           </div>
         </button>
+        {/* Admin: Settings icon directly in sidebar footer */}
+        {isAdmin && (
+          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setSettingsOpen(true)} title="品类与产品设置">
+            <Settings className="h-3.5 w-3.5" />
+          </Button>
+        )}
         <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={logout}>
           <LogOut className="h-3.5 w-3.5" />
         </Button>
@@ -257,17 +375,17 @@ function UserSection() {
 
             <Separator />
 
-            {/* Admin: Settings */}
-            {isAdmin && (
-              <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setSettingsOpen(true); }}>
-                <Settings className="h-4 w-4" /> 品类与产品设置
-              </Button>
-            )}
-
             <div className="flex items-center gap-2">
               <Label className="text-xs text-muted-foreground">角色</Label>
               <Badge variant={isAdmin ? 'default' : 'secondary'} className="text-xs">{isAdmin ? '管理账号' : '使用账号'}</Badge>
             </div>
+
+            {/* Admin: Settings button in profile dialog */}
+            {isAdmin && (
+              <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setSettingsOpen(true), 100); }}>
+                <Settings className="h-4 w-4" /> 品类与产品设置
+              </Button>
+            )}
 
             {isAdmin && allUsers.length > 0 && (
               <>
@@ -301,105 +419,8 @@ function UserSection() {
         </DialogContent>
       </Dialog>
 
-      {/* Settings Dialog - Category & Product Management (Admin only) */}
-      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-        <DialogContent className="max-w-lg max-h-[85vh]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Settings className="h-5 w-5" /> 品类与产品设置
-            </DialogTitle>
-            <DialogDescription>管理品类和产品选项，修改后全局生效</DialogDescription>
-          </DialogHeader>
-          <ScrollArea className="max-h-[65vh]">
-            <div className="space-y-6 pr-3">
-              {/* Category Management */}
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold flex items-center gap-2">
-                  <Badge variant="secondary" className="text-[10px]">品类</Badge> 品类管理
-                </h3>
-                <div className="space-y-1.5">
-                  {categories.map(cat => (
-                    <div key={cat.id} className="flex items-center gap-2 p-2 rounded-lg border">
-                      <span className="text-sm flex-1">{cat.name}</span>
-                      <Badge variant="outline" className="text-[10px]">{cat.products.length}个产品</Badge>
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-red-700 hover:bg-red-50"
-                        onClick={() => setDeletingCatId(cat.id)}>
-                        <Minus className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-                {/* Add category */}
-                <div className="flex gap-2">
-                  <Input placeholder="输入品类名称" value={newCatName} onChange={e => setNewCatName(e.target.value)}
-                    className="h-8 text-sm" onKeyDown={e => { if (e.key === 'Enter') handleAddCategory(); }} />
-                  <Button size="sm" className="h-8 gap-1" onClick={handleAddCategory} disabled={addingCat || !newCatName.trim()}>
-                    <Plus className="h-3.5 w-3.5" /> 新增
-                  </Button>
-                </div>
-                {/* Delete category confirmation */}
-                {deletingCatId && (
-                  <div className="flex items-center gap-2 p-2 rounded-lg bg-destructive/5 border border-destructive/20">
-                    <span className="text-xs text-destructive flex-1">确认删除「{categories.find(c => c.id === deletingCatId)?.name}」及其所有产品？</span>
-                    <Button size="sm" variant="destructive" className="h-6 text-xs" onClick={() => handleDeleteCategory(deletingCatId)}>确认</Button>
-                    <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setDeletingCatId(null)}>取消</Button>
-                  </div>
-                )}
-              </div>
-
-              <Separator />
-
-              {/* Product Management */}
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold flex items-center gap-2">
-                  <Badge variant="secondary" className="text-[10px]">产品</Badge> 产品管理
-                </h3>
-                <div className="space-y-1.5">
-                  <Label className="text-xs">选择品类</Label>
-                  <Select value={selectedCatId} onValueChange={setSelectedCatId}>
-                    <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="选择品类查看产品" /></SelectTrigger>
-                    <SelectContent>
-                      {categories.map(cat => <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                {selectedCat && (
-                  <>
-                    <div className="space-y-1.5">
-                      {selectedCat.products.map(prod => (
-                        <div key={prod.id} className="flex items-center gap-2 p-2 rounded-lg border">
-                          <span className="text-sm flex-1">{prod.name}</span>
-                          <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-red-700 hover:bg-red-50"
-                            onClick={() => setDeletingProdId(prod.id)}>
-                            <Minus className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      ))}
-                      {selectedCat.products.length === 0 && (
-                        <p className="text-xs text-muted-foreground text-center py-2">该品类暂无产品</p>
-                      )}
-                    </div>
-                    <div className="flex gap-2">
-                      <Input placeholder="输入产品名称" value={newProdName} onChange={e => setNewProdName(e.target.value)}
-                        className="h-8 text-sm" onKeyDown={e => { if (e.key === 'Enter') handleAddProduct(); }} />
-                      <Button size="sm" className="h-8 gap-1" onClick={handleAddProduct} disabled={addingProd || !newProdName.trim()}>
-                        <Plus className="h-3.5 w-3.5" /> 新增
-                      </Button>
-                    </div>
-                    {deletingProdId && (
-                      <div className="flex items-center gap-2 p-2 rounded-lg bg-destructive/5 border border-destructive/20">
-                        <span className="text-xs text-destructive flex-1">确认删除产品「{selectedCat.products.find(p => p.id === deletingProdId)?.name}」？</span>
-                        <Button size="sm" variant="destructive" className="h-6 text-xs" onClick={() => handleDeleteProduct(deletingProdId)}>确认</Button>
-                        <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setDeletingProdId(null)}>取消</Button>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-          </ScrollArea>
-        </DialogContent>
-      </Dialog>
+      {/* Settings Dialog (Admin only) */}
+      <CategoryProductSettings open={settingsOpen} onOpenChange={setSettingsOpen} />
     </>
   );
 }
@@ -439,6 +460,8 @@ export function MobileNav() {
 function MobileUserIcon() {
   const { user, isAdmin, logout } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
   if (!user) return null;
   return (
     <>
@@ -447,19 +470,29 @@ function MobileUserIcon() {
       </button>
       <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>个人信息</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>个人信息</DialogTitle>
+            <DialogDescription>查看和管理您的账号信息</DialogDescription>
+          </DialogHeader>
           <div className="space-y-3 py-2">
             <div><span className="text-xs text-muted-foreground">账号：</span><span className="text-sm">{user.account}</span></div>
             <div><span className="text-xs text-muted-foreground">名称：</span><span className="text-sm">{user.name}</span></div>
             <div><span className="text-xs text-muted-foreground">角色：</span><Badge variant={isAdmin ? 'default' : 'secondary'} className="text-xs">{isAdmin ? '管理账号' : '使用账号'}</Badge></div>
             <Separator />
+            {/* Admin: Settings button in mobile profile */}
+            {isAdmin && (
+              <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setSettingsOpen(true), 100); }}>
+                <Settings className="h-4 w-4" /> 品类与产品设置
+              </Button>
+            )}
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => setProfileOpen(false)}>关闭</Button>
-              <Button variant="outline" size="sm" className="gap-1" onClick={logout}><LogOut className="h-3 w-3" /> 退出登录</Button>
+              <Button variant="outline" size="sm" className="flex-1" onClick={() => setProfileOpen(false)}>关闭</Button>
+              <Button variant="outline" size="sm" className="flex-1 gap-1" onClick={logout}><LogOut className="h-3 w-3" /> 退出</Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
+      <CategoryProductSettings open={settingsOpen} onOpenChange={setSettingsOpen} />
     </>
   );
 }

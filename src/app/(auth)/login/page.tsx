@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,6 +15,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Use refs to always read latest DOM values (prevents autofill desync)
+  const accountRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+
   // Register dialog
   const [regDialogOpen, setRegDialogOpen] = useState(false);
   const [regForm, setRegForm] = useState({ account: '', password: '', name: '' });
@@ -25,14 +29,22 @@ export default function LoginPage() {
   const [fpForm, setFpForm] = useState({ account: '', new_password: '' });
   const [fpLoading, setFpLoading] = useState(false);
 
-  const handleLogin = async () => {
-    // Trim whitespace before validation
-    const acc = account.trim();
-    const pwd = password.trim();
+  const handleLogin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+
+    // Read values from both state AND DOM to handle autofill
+    const acc = (accountRef.current?.value || account).trim();
+    const pwd = (passwordRef.current?.value || password).trim();
+
     if (!acc || !pwd) {
       toast.error('请输入账号和密码');
       return;
     }
+
+    // Sync state in case values came from autofill
+    setAccount(acc);
+    setPassword(pwd);
+
     setLoading(true);
     try {
       const res = await fetch('/api/auth/login', {
@@ -122,39 +134,49 @@ export default function LoginPage() {
           <CardHeader className="pb-4">
             <CardTitle className="text-base">账号登录</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="account">账号</Label>
-              <Input
-                id="account"
-                placeholder="请输入账号"
-                value={account}
-                onChange={(e) => setAccount(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">密码</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="请输入密码"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-              />
-            </div>
-            <Button className="w-full" onClick={handleLogin} disabled={loading}>
-              {loading ? '登录中...' : '登录'}
-            </Button>
-            <div className="flex justify-between">
-              <Button variant="link" className="px-0 h-auto text-xs" onClick={() => setRegDialogOpen(true)}>
-                注册新账号
+          <CardContent>
+            <form onSubmit={handleLogin} className="space-y-4" autoComplete="off">
+              <div className="space-y-2">
+                <Label htmlFor="account">账号</Label>
+                <Input
+                  ref={accountRef}
+                  id="account"
+                  name="login-account"
+                  placeholder="请输入账号"
+                  value={account}
+                  onChange={(e) => setAccount(e.target.value)}
+                  autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="password">密码</Label>
+                <Input
+                  ref={passwordRef}
+                  id="password"
+                  name="login-password"
+                  type="password"
+                  placeholder="请输入密码"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
+                />
+              </div>
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? '登录中...' : '登录'}
               </Button>
-              <Button variant="link" className="px-0 h-auto text-xs" onClick={() => setFpDialogOpen(true)}>
-                忘记密码
-              </Button>
-            </div>
+              <div className="flex justify-between">
+                <Button type="button" variant="link" className="px-0 h-auto text-xs" onClick={() => setRegDialogOpen(true)}>
+                  注册新账号
+                </Button>
+                <Button type="button" variant="link" className="px-0 h-auto text-xs" onClick={() => setFpDialogOpen(true)}>
+                  忘记密码
+                </Button>
+              </div>
+            </form>
           </CardContent>
         </Card>
 
