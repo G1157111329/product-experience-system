@@ -22,7 +22,9 @@
 ```
 ├── src/
 │   ├── app/
-│   │   ├── (main)/              # 主布局路由组
+│   │   ├── (auth)/              # 认证路由组
+│   │   │   └── login/           # 登录页（含注册/忘记密码弹窗）
+│   │   ├── (main)/              # 主布局路由组（需认证）
 │   │   │   ├── dashboard/       # 工作台
 │   │   │   ├── standards/       # 标准管理（含 [id] 详情、批量导入）
 │   │   │   ├── tasks/           # 体验计划（含 [id] 详情，五感体验关联标准项）
@@ -31,6 +33,13 @@
 │   │   │   └── analysis/        # 数据分析
 │   │   ├── reports/print/       # 报告打印/PDF导出页面
 │   │   ├── api/                 # 后端 API 路由
+│   │   │   ├── auth/            # 认证相关 API
+│   │   │   │   ├── login/       # 登录
+│   │   │   │   ├── register/    # 注册（需管理员审核）
+│   │   │   │   ├── forgot-password/ # 忘记密码（需管理员审核）
+│   │   │   │   ├── profile/     # 个人信息查看/修改（名称/密码修改需审核）
+│   │   │   │   ├── audit/       # 审核管理（管理员审核注册/密码/名称修改请求）
+│   │   │   │   └── users/       # 用户列表/角色管理（管理员升级/降级）
 │   │   │   ├── standards/       # 标准 CRUD
 │   │   │   │   └── import/      # 标准批量导入（PDF/Excel，按分类不同LLM prompt）
 │   │   │   ├── standard-items/  # 标准检查项 CRUD（含新字段：experience_flow, touch_point等）
@@ -44,7 +53,7 @@
 │   │   │   ├── recipes/         # 食谱/功能 CRUD
 │   │   │   ├── recipe-steps/    # 食谱步骤 CRUD
 │   │   │   └── dashboard/       # 仪表盘数据
-│   │   ├── layout.tsx           # 根布局（含 Toaster + AuthProvider）
+│   │   ├── layout.tsx           # 根布局（含 Toaster + AuthProvider + suppressHydrationWarning）
 │   │   └── page.tsx             # 首页重定向到 /dashboard
 │   ├── components/
 │   │   ├── navigation.tsx       # 导航组件（桌面侧栏 + 移动端底部/顶部 + RoleSwitcher）
@@ -65,6 +74,8 @@
 
 | 表名 | 说明 |
 |------|------|
+| `platform_users` | 用户账号（admin/user角色，pending/approved/rejected状态） |
+| `platform_audit_requests` | 用户审核请求（注册/密码重置/名称修改/角色升级） |
 | `standards` | 体验标准库（通用标准/品类标准/感官评价标准/食谱功能标准） |
 | `standard_items` | 标准检查项（含分类特定字段：experience_flow, touch_point, experience_standard, sub_check_dimension, check_standard, evaluation_prep, subjective_score, subjective_rating, reference_images） |
 | `experience_tasks` | 体验任务（含 project_type: ODM/OEM/竞品研究/自研/前期研究/改型降本优化/海外产品, project_phase: 手板研究/试制阶段/试产阶段/量产阶段） |
@@ -101,6 +112,15 @@
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
+| POST | `/api/auth/login` | 登录（返回用户信息） |
+| POST | `/api/auth/register` | 注册（需管理员审核） |
+| POST | `/api/auth/forgot-password` | 忘记密码（验证账号存在，需管理员审核） |
+| GET | `/api/auth/profile` | 获取用户信息 |
+| PUT | `/api/auth/profile` | 修改名称/密码（需管理员审核） |
+| GET | `/api/auth/audit` | 获取待审核请求列表（管理员） |
+| PUT | `/api/auth/audit` | 审核通过/拒绝（管理员） |
+| GET | `/api/auth/users` | 获取用户列表（管理员） |
+| POST | `/api/auth/users` | 升级/降级用户角色（管理员） |
 | GET/POST | `/api/standards` | 标准列表/创建 |
 | GET/PUT/DELETE | `/api/standards/[id]` | 标准详情/更新/删除 |
 | POST | `/api/standards/import` | 标准批量导入（PDF/Excel，按分类不同LLM prompt） |
@@ -170,10 +190,18 @@ pnpm build
 - 所有 API 返回统一结构 `{ code, message, data }`
 - React 组件使用 'use client' 标注客户端组件
 - 禁止 Hydration 错误：不在 JSX 中使用 typeof window/Date.now() 等
-- 权限系统：管理账号(admin)可编辑标准、批量导入/删除；使用账号(user)只读
-- 侧边栏底部有角色切换按钮，角色存储在 localStorage('user_role')
+- 权限系统：基于数据库 `platform_users.role` 字段，管理账号(admin)可编辑标准、批量导入/删除、审核账号；使用账号(user)只读；`useAuth()` hook 获取当前用户信息
 
 ## 权限说明
+
+### 账号体系
+- **初始管理账号**: bear2026 / bear2026
+- **注册流程**: 填写账号/密码/名称 → 提交审核 → 管理员审核通过后可登录
+- **忘记密码**: 验证账号存在 → 填写新密码 → 提交审核 → 管理员审核通过后生效
+- **修改信息**: 名称/密码修改需提交审核 → 管理员审核通过后生效
+- **角色管理**: 管理员可将普通用户升级为管理账号，或降级管理账号为普通用户
+
+### 操作权限
 
 | 操作 | 管理账号(admin) | 使用账号(user) |
 |------|:-:|:-:|
@@ -185,3 +213,5 @@ pnpm build
 | 查看标准 | ✅ | ✅ |
 | 新增问题点（选择标准类型） | ✅ | ✅ |
 | 标准引用到五感体验 | ✅ | ✅ |
+| 审核账号注册/密码/名称 | ✅ | ❌ |
+| 升级/降级用户角色 | ✅ | ❌ |

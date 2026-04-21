@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 
 interface Task {
@@ -39,6 +40,7 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
   const [keyword, setKeyword] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -50,6 +52,13 @@ export default function TasksPage() {
     project_type: '', project_phase: '', test_date: '', organizer: '',
     target_user: '', test_purpose: '', test_method: '',
   });
+
+  // Set default organizer from current user's name
+  useEffect(() => {
+    if (dialogOpen && !form.organizer && user?.name) {
+      setForm(f => ({ ...f, organizer: user.name || '' }));
+    }
+  }, [dialogOpen]);
 
   const fetchTasks = async () => {
     setLoading(true);

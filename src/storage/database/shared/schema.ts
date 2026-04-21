@@ -259,3 +259,43 @@ export const recipeSteps = pgTable(
     index("recipe_steps_recipe_id_idx").on(table.recipe_id),
   ]
 );
+
+// 用户账号
+export const platformUsers = pgTable(
+  "platform_users",
+  {
+    id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+    account: varchar("account", { length: 50 }).notNull().unique(),
+    password_hash: varchar("password_hash", { length: 200 }).notNull(),
+    name: varchar("name", { length: 50 }),
+    role: varchar("role", { length: 20 }).notNull().default("user"), // admin/user
+    status: varchar("status", { length: 20 }).notNull().default("pending"), // pending/approved/rejected
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("platform_users_account_idx").on(table.account),
+    index("platform_users_status_idx").on(table.status),
+  ]
+);
+
+// 用户审核请求
+export const platformAuditRequests = pgTable(
+  "platform_audit_requests",
+  {
+    id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+    user_id: varchar("user_id", { length: 36 }).notNull().references(() => platformUsers.id, { onDelete: "cascade" }),
+    request_type: varchar("request_type", { length: 30 }).notNull(), // register/password_reset/name_change/role_upgrade
+    status: varchar("status", { length: 20 }).notNull().default("pending"), // pending/approved/rejected
+    old_value: text("old_value"),
+    new_value: text("new_value"),
+    target_user_id: varchar("target_user_id", { length: 36 }),
+    reviewed_by: varchar("reviewed_by", { length: 36 }).references(() => platformUsers.id),
+    reviewed_at: timestamp("reviewed_at", { withTimezone: true }),
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("platform_audit_requests_user_id_idx").on(table.user_id),
+    index("platform_audit_requests_status_idx").on(table.status),
+  ]
+);
