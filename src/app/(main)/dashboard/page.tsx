@@ -145,14 +145,15 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const params = new URLSearchParams();
-    if (user?.id) params.set('created_by', user.id);
+    // Admin sees all data; non-admin sees only own data
+    if (user?.id && !isAdmin) params.set('created_by', user.id);
     fetch(`/api/dashboard?${params.toString()}`)
       .then((r) => r.json())
       .then((res) => {
         if (res.code === 0) setData(res.data);
       })
       .finally(() => setLoading(false));
-  }, [user?.id]);
+  }, [user?.id, isAdmin]);
 
   useEffect(() => {
     if (auditOpen && isAdmin) {

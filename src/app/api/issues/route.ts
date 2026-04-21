@@ -8,14 +8,20 @@ export async function GET(request: NextRequest) {
   const status = searchParams.get('status');
   const severity = searchParams.get('severity');
   const keyword = searchParams.get('keyword');
+  const task_ids = searchParams.get('task_ids'); // comma-separated, for user data isolation
+  const limit = parseInt(searchParams.get('limit') || '500');
 
   let query = client.from('issues').select('*', { count: 'exact' });
   if (task_id) query = query.eq('task_id', task_id);
   if (status) query = query.eq('status', status);
-  if (severity) query = query.eq('level', severity); // map severity filter to level
+  if (severity) query = query.eq('level', severity);
   if (keyword) query = query.ilike('title', `%${keyword}%`);
+  if (task_ids) {
+    const ids = task_ids.split(',').filter(Boolean);
+    if (ids.length > 0) query = query.in('task_id', ids);
+  }
 
-  const { data, error, count } = await query.order('created_at', { ascending: false }).limit(100);
+  const { data, error, count } = await query.order('created_at', { ascending: false }).limit(limit);
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
 
   return NextResponse.json({ code: 0, message: 'success', data: { list: data, total: count } });

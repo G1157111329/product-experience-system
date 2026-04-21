@@ -2,13 +2,12 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 
@@ -55,12 +54,12 @@ export default function IssuesPage() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterLevel, setFilterLevel] = useState('all');
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const [userTaskIds, setUserTaskIds] = useState<string[]>([]);
 
-  // Fetch current user's task IDs
+  // Fetch current user's task IDs (for non-admin filtering)
   useEffect(() => {
-    if (user?.id) {
+    if (user?.id && !isAdmin) {
       fetch(`/api/tasks?created_by=${user.id}&pageSize=200`)
         .then(r => r.json())
         .then(data => {
@@ -70,16 +69,25 @@ export default function IssuesPage() {
           }
         });
     }
-  }, [user?.id]);
+  }, [user?.id, isAdmin]);
 
   const fetchIssues = useCallback(async () => {
-    const res = await fetch('/api/issues?limit=500');
+    const params = new URLSearchParams({ limit: '500' });
+    // Non-admin: only fetch issues belonging to user's tasks
+    if (!isAdmin && userTaskIds.length > 0) {
+      params.set('task_ids', userTaskIds.join(','));
+    } else if (!isAdmin) {
+      // No tasks yet, nothing to fetch
+      setIssues([]);
+      return;
+    }
+    const res = await fetch(`/api/issues?${params}`);
     const data = await res.json();
     if (data.code === 0) {
       const raw = data.data;
       setIssues(Array.isArray(raw) ? raw : (raw?.list || []));
     }
-  }, []);
+  }, [isAdmin, userTaskIds]);
 
   const fetchReports = useCallback(async () => {
     const reportsRes = await fetch('/api/reports?limit=200');
@@ -90,15 +98,21 @@ export default function IssuesPage() {
     }
   }, []);
 
-  useEffect(() => { fetchIssues(); fetchReports(); }, [fetchIssues, fetchReports]);
+  useEffect(() => {
+    if (isAdmin || userTaskIds.length > 0) {
+      fetchIssues();
+      fetchReports();
+    }
+  }, [isAdmin, userTaskIds, fetchIssues, fetchReports]);
 
   // Auto-generate issues from reports' failed records & recipe problems
-  // Only process reports that belong to the current user's tasks
   useEffect(() => {
     const syncIssuesFromReports = async () => {
       let needRefetch = false;
-      // Only process user's own reports
-      const userReports = reports.filter(r => userTaskIds.length === 0 || userTaskIds.includes(r.task_id));
+      // Admin: process all reports; Non-admin: process only user's reports
+      const userReports = isAdmin
+        ? reports
+        : reports.filter(r => userTaskIds.includes(r.task_id));
 
       for (const report of userReports) {
         const content = report.content as Record<string, unknown>;
@@ -106,7 +120,6 @@ export default function IssuesPage() {
         const records = (content.records || []) as Array<Record<string, unknown>>;
         const recipes = (content.recipes || []) as Array<Record<string, unknown>>;
 
-        // Failed records
         for (const record of records) {
           if (record.evaluation_result === '不合格') {
             const existing = issues.find(i => i.source_report_id === report.id && i.source_type === 'record_fail' && i.title === record.check_item);
@@ -131,7 +144,6 @@ export default function IssuesPage() {
           }
         }
 
-        // Recipe problems
         for (const recipe of recipes) {
           const steps = (recipe.recipe_steps || []) as Array<Record<string, unknown>>;
           for (const step of steps) {
@@ -173,21 +185,13 @@ export default function IssuesPage() {
       }
       if (needRefetch) fetchIssues();
     };
-    if (reports.length > 0 && userTaskIds.length > 0) syncIssuesFromReports();
+    if (reports.length > 0 && (isAdmin || userTaskIds.length > 0)) syncIssuesFromReports();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reports, userTaskIds]);
+  }, [reports, userTaskIds, isAdmin]);
 
-  // Group issues by source_report_id, filtered by user's tasks
+  // Group issues by source_report_id with status/level filters
   useEffect(() => {
-    // Build set of report IDs that belong to user's tasks
-    const userReportIds = new Set(
-      reports.filter(r => userTaskIds.includes(r.task_id)).map(r => r.id)
-    );
     const filtered = issues.filter(i => {
-      // Only show issues from user's own task reports
-      if (userTaskIds.length > 0 && i.source_report_id && !userReportIds.has(i.source_report_id)) return false;
-      // Also filter by task_id directly for issues without report
-      if (userTaskIds.length > 0 && i.task_id && !userTaskIds.includes(i.task_id)) return false;
       if (filterStatus !== 'all' && i.status !== filterStatus) return false;
       if (filterLevel !== 'all' && i.level !== filterLevel) return false;
       return true;
@@ -206,7 +210,7 @@ export default function IssuesPage() {
       groups[key].issues.push(issue);
     }
     setReportGroups(Object.values(groups).sort((a, b) => b.created_at.localeCompare(a.created_at)));
-  }, [issues, reports, userTaskIds, filterStatus, filterLevel]);
+  }, [issues, filterStatus, filterLevel]);
 
   const handleStatusChange = async (issueId: string, newStatus: string) => {
     const res = await fetch(`/api/issues/${issueId}`, {
@@ -247,19 +251,10 @@ export default function IssuesPage() {
     }
   };
 
-  // Compute stats from filtered issues (same filter as reportGroups)
-  const userReportIds = new Set(
-    reports.filter(r => userTaskIds.includes(r.task_id)).map(r => r.id)
-  );
-  const displayIssues = issues.filter(i => {
-    if (userTaskIds.length > 0 && i.source_report_id && !userReportIds.has(i.source_report_id)) return false;
-    if (userTaskIds.length > 0 && i.task_id && !userTaskIds.includes(i.task_id)) return false;
-    return true;
-  });
-  const totalIssues = displayIssues.length;
-  const pendingCount = displayIssues.filter(i => i.status === '待整改').length;
-  const inProgressCount = displayIssues.filter(i => i.status === '整改中').length;
-  const verifiedCount = displayIssues.filter(i => i.status === '已验证').length;
+  const totalIssues = issues.length;
+  const pendingCount = issues.filter(i => i.status === '待整改').length;
+  const inProgressCount = issues.filter(i => i.status === '整改中').length;
+  const verifiedCount = issues.filter(i => i.status === '已验证').length;
 
   return (
     <div className="space-y-4">
@@ -360,7 +355,6 @@ export default function IssuesPage() {
           </DialogHeader>
           {selectedIssue && (
             <div className="space-y-4">
-              {/* Level & Status */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label>问题点等级</Label>
@@ -388,20 +382,17 @@ export default function IssuesPage() {
                 </div>
               </div>
 
-              {/* Source */}
               {selectedIssue.source && (
                 <div className="text-xs text-muted-foreground bg-muted/30 p-2 rounded">
                   来源: {selectedIssue.source}
                 </div>
               )}
 
-              {/* Description */}
               <div className="space-y-1.5">
                 <Label>问题描述</Label>
                 <Textarea value={selectedIssue.description || ''} onChange={(e) => handleUpdateField(selectedIssue.id, 'description', e.target.value)} rows={3} />
               </div>
 
-              {/* Improve info */}
               <div className="space-y-1.5">
                 <Label>整改方案</Label>
                 <Textarea value={selectedIssue.improve_plan || ''} onChange={(e) => handleUpdateField(selectedIssue.id, 'improve_plan', e.target.value)} rows={2} placeholder="填写整改方案..." />

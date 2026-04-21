@@ -1,158 +1,539 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { BarChart3, TrendingUp, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { useEffect, useState, useCallback } from 'react';
+import {
+  ClipboardList, CheckCircle2, AlertTriangle, TrendingUp,
+  Download, Filter, BarChart3,
+} from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/lib/auth-context';
+import { toast } from 'sonner';
 
-interface AnalysisData {
-  taskStats: {
-    total: number;
-    pending: number;
-    inProgress: number;
-    review: number;
-    completed: number;
-  };
-  issueStats: {
-    total: number;
-    pending: number;
-    inProgress: number;
-    verified: number;
-    noImprove: number;
-    bySeverity: { fatal: number; serious: number; normal: number; minor: number };
-  };
-  recentTasks: Array<Record<string, string>>;
+interface CoreMetrics {
+  totalTasks: number; completedTasks: number; completionRate: number;
+  totalIssues: number; rectifiedIssues: number; rectificationRate: number;
 }
+interface FilterOptions { categories: string[]; projectTypes: string[]; organizers: string[]; }
+interface BreakdownItem { tasks: number; completedTasks: number; issues: number; rectifiedIssues: number; }
+
+const STATUS_COLORS: Record<string, string> = {
+  '待执行': 'bg-slate-400', '进行中': 'bg-primary', '待审核': 'bg-amber-400',
+  '已完成': 'bg-emerald-500', '已驳回': 'bg-destructive',
+};
+const LEVEL_COLORS: Record<string, string> = {
+  '一类': 'bg-red-500', '二类': 'bg-amber-500', '三类': 'bg-blue-400',
+};
+const LEVEL_TEXT_COLORS: Record<string, string> = {
+  '一类': 'text-red-600', '二类': 'text-amber-600', '三类': 'text-blue-600',
+};
+const RECT_STATUS_COLORS: Record<string, string> = {
+  '待整改': 'bg-amber-100 text-amber-700', '整改中': 'bg-blue-100 text-blue-700',
+  '已验证': 'bg-emerald-100 text-emerald-700', '不整改': 'bg-muted text-muted-foreground',
+};
 
 export default function AnalysisPage() {
-  const [data, setData] = useState<AnalysisData | null>(null);
+  const { user, isAdmin } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [metrics, setMetrics] = useState<CoreMetrics | null>(null);
+  const [taskStatusDist, setTaskStatusDist] = useState<Record<string, number>>({});
+  const [issueLevelDist, setIssueLevelDist] = useState<Record<string, number>>({});
+  const [rectGrid, setRectGrid] = useState<Record<string, Record<string, number>>>({});
+  const [byCategory, setByCategory] = useState<Record<string, BreakdownItem>>({});
+  const [byProjectType, setByProjectType] = useState<Record<string, BreakdownItem>>({});
+  const [byOrganizer, setByOrganizer] = useState<Record<string, BreakdownItem>>({});
+  const [byIssueType, setByIssueType] = useState<Record<string, number>>({});
+  const [monthTrend, setMonthTrend] = useState<Record<string, BreakdownItem>>({});
+  const [filterOptions, setFilterOptions] = useState<FilterOptions>({ categories: [], projectTypes: [], organizers: [] });
 
-  useEffect(() => {
-    fetch('/api/dashboard').then(r => r.json()).then(res => {
-      if (res.code === 0) setData(res.data);
-    }).finally(() => setLoading(false));
-  }, []);
+  // Filters
+  const [fCategory, setFCategory] = useState('all');
+  const [fProjectType, setFProjectType] = useState('all');
+  const [fOrganizer, setFOrganizer] = useState('all');
+  const [fIssueType, setFIssueType] = useState('all');
+  const [fDateFrom, setFDateFrom] = useState('');
+  const [fDateTo, setFDateTo] = useState('');
 
-  if (loading) {
-    return <div className="p-6 animate-pulse space-y-4"><div className="h-8 bg-muted rounded w-48" /><div className="grid grid-cols-2 gap-4"><div className="h-40 bg-muted rounded-lg" /><div className="h-40 bg-muted rounded-lg" /></div></div>;
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (!isAdmin && user?.id) params.set('created_by', user.id);
+    if (isAdmin) params.set('is_admin', 'true');
+    if (fCategory !== 'all') params.set('product_category', fCategory);
+    if (fProjectType !== 'all') params.set('project_type', fProjectType);
+    if (fOrganizer !== 'all') params.set('organizer', fOrganizer);
+    if (fIssueType !== 'all') params.set('issue_source_type', fIssueType);
+    if (fDateFrom) params.set('date_from', fDateFrom);
+    if (fDateTo) params.set('date_to', fDateTo);
+
+    try {
+      const res = await fetch(`/api/analysis?${params}`);
+      const data = await res.json();
+      if (data.code === 0) {
+        setMetrics(data.data.coreMetrics);
+        setTaskStatusDist(data.data.taskStatusDist);
+        setIssueLevelDist(data.data.issueLevelDist);
+        setRectGrid(data.data.issueRectificationGrid);
+        setByCategory(data.data.byCategory);
+        setByProjectType(data.data.byProjectType);
+        setByOrganizer(data.data.byOrganizer);
+        setByIssueType(data.data.byIssueType);
+        setMonthTrend(data.data.monthTrend);
+        setFilterOptions(data.data.filterOptions);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [isAdmin, user?.id, fCategory, fProjectType, fOrganizer, fIssueType, fDateFrom, fDateTo]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const handleExport = async () => {
+    try {
+      const res = await fetch('/api/analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_admin: true, format: 'csv' }),
+      });
+      const data = await res.json();
+      if (data.code === 0) {
+        // Download tasks CSV
+        downloadCsv(data.data.tasksCsv, '体验任务数据.csv');
+        // Download issues CSV after a short delay
+        setTimeout(() => downloadCsv(data.data.issuesCsv, '问题点数据.csv'), 500);
+        toast.success('数据导出成功');
+      }
+    } catch {
+      toast.error('导出失败');
+    }
+  };
+
+  const downloadCsv = (csvContent: string, filename: string) => {
+    const BOM = '\uFEFF';
+    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const resetFilters = () => {
+    setFCategory('all'); setFProjectType('all'); setFOrganizer('all');
+    setFIssueType('all'); setFDateFrom(''); setFDateTo('');
+  };
+
+  // Helper: max value for bar scaling
+  const maxVal = (obj: Record<string, number>) => Math.max(...Object.values(obj), 1);
+  const maxBreakdownVal = (obj: Record<string, BreakdownItem>) => Math.max(...Object.values(obj).map(v => v.tasks + v.issues), 1);
+
+  if (loading && !metrics) {
+    return (
+      <div className="p-4 lg:p-6 space-y-6">
+        <div className="animate-pulse space-y-4">
+          <div className="h-8 bg-muted rounded w-48" />
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map(i => <div key={i} className="h-28 bg-muted rounded-lg" />)}
+          </div>
+        </div>
+      </div>
+    );
   }
 
-  if (!data) return <div className="p-6">加载失败</div>;
-
-  const taskCompletionRate = data.taskStats.total > 0
-    ? Math.round((data.taskStats.completed / data.taskStats.total) * 100) : 0;
-  const issueResolutionRate = data.issueStats.total > 0
-    ? Math.round(((data.issueStats.verified + data.issueStats.inProgress) / data.issueStats.total) * 100) : 0;
-
   return (
-    <div className="p-4 lg:p-6 space-y-6">
-      <div>
-        <h1 className="text-xl lg:text-2xl font-semibold">数据分析</h1>
-        <p className="text-sm text-muted-foreground mt-1">体验质量数据概览与趋势</p>
+    <div className="p-4 lg:p-6 space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-xl lg:text-2xl font-semibold">数据分析</h1>
+          <p className="text-sm text-muted-foreground mt-1">产品体验核心数据看板</p>
+        </div>
+        {isAdmin && (
+          <Button variant="outline" size="sm" onClick={handleExport} className="gap-1.5">
+            <Download className="h-4 w-4" /> 导出数据
+          </Button>
+        )}
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {[
-          { label: '任务完成率', value: `${taskCompletionRate}%`, icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-100' },
-          { label: '问题整改率', value: `${issueResolutionRate}%`, icon: TrendingUp, color: 'text-primary', bg: 'bg-primary/10' },
-          { label: '问题总数', value: data.issueStats.total, icon: AlertTriangle, color: 'text-amber-600', bg: 'bg-amber-100' },
-          { label: '任务总数', value: data.taskStats.total, icon: BarChart3, color: 'text-blue-600', bg: 'bg-blue-100' },
-        ].map((card) => (
-          <Card key={card.label}>
-            <CardContent className="p-4">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground">{card.label}</p>
-                  <p className="text-2xl font-bold mt-1">{card.value}</p>
+      {/* Filters */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Filter className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-medium">筛选条件</span>
+            <Button variant="ghost" size="sm" className="ml-auto text-xs h-7" onClick={resetFilters}>重置</Button>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs">品类</Label>
+              <Select value={fCategory} onValueChange={setFCategory}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部品类</SelectItem>
+                  {filterOptions.categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">项目类型</Label>
+              <Select value={fProjectType} onValueChange={setFProjectType}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部类型</SelectItem>
+                  {filterOptions.projectTypes.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">任务人</Label>
+              <Select value={fOrganizer} onValueChange={setFOrganizer}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部</SelectItem>
+                  {filterOptions.organizers.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">问题点分类</Label>
+              <Select value={fIssueType} onValueChange={setFIssueType}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部</SelectItem>
+                  <SelectItem value="record_fail">不合格检查项</SelectItem>
+                  <SelectItem value="recipe_problem">食谱/功能问题</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">开始日期</Label>
+              <Input type="date" value={fDateFrom} onChange={e => setFDateFrom(e.target.value)} className="h-8 text-xs" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">结束日期</Label>
+              <Input type="date" value={fDateTo} onChange={e => setFDateTo(e.target.value)} className="h-8 text-xs" />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {metrics && (
+        <>
+          {/* Core Metrics */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="rounded-lg p-1.5 bg-primary/10"><ClipboardList className="h-4 w-4 text-primary" /></div>
+                  <span className="text-xs text-muted-foreground">任务总数</span>
                 </div>
-                <div className={cn('rounded-lg p-2', card.bg)}>
-                  <card.icon className={cn('h-4 w-4', card.color)} />
+                <p className="text-3xl font-bold">{metrics.totalTasks}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="rounded-lg p-1.5 bg-emerald-100"><CheckCircle2 className="h-4 w-4 text-emerald-600" /></div>
+                  <span className="text-xs text-muted-foreground">完成率</span>
                 </div>
+                <p className="text-3xl font-bold text-emerald-600">{metrics.completionRate}%</p>
+                <p className="text-xs text-muted-foreground mt-1">{metrics.completedTasks}/{metrics.totalTasks} 已完成</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="rounded-lg p-1.5 bg-amber-100"><AlertTriangle className="h-4 w-4 text-amber-600" /></div>
+                  <span className="text-xs text-muted-foreground">问题总数</span>
+                </div>
+                <p className="text-3xl font-bold">{metrics.totalIssues}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="rounded-lg p-1.5 bg-blue-100"><TrendingUp className="h-4 w-4 text-blue-600" /></div>
+                  <span className="text-xs text-muted-foreground">问题整改率</span>
+                </div>
+                <p className="text-3xl font-bold text-blue-600">{metrics.rectificationRate}%</p>
+                <p className="text-xs text-muted-foreground mt-1">{metrics.rectifiedIssues}/{metrics.totalIssues} 已验证</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid lg:grid-cols-2 gap-4">
+            {/* Task Status Distribution */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4 text-muted-foreground" /> 任务状态分布
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {Object.entries(taskStatusDist).sort((a, b) => b[1] - a[1]).map(([status, count]) => {
+                  const pct = metrics.totalTasks > 0 ? Math.round((count / metrics.totalTasks) * 100) : 0;
+                  return (
+                    <div key={status} className="flex items-center gap-3">
+                      <span className="text-sm w-16 shrink-0">{status}</span>
+                      <div className="flex-1 h-6 bg-muted/50 rounded-full overflow-hidden">
+                        <div className={cn('h-full rounded-full transition-all', STATUS_COLORS[status] || 'bg-muted')} style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="text-sm font-medium w-8 text-right">{count}</span>
+                      <span className="text-xs text-muted-foreground w-10 text-right">{pct}%</span>
+                    </div>
+                  );
+                })}
+                {Object.keys(taskStatusDist).length === 0 && (
+                  <p className="text-center text-muted-foreground text-sm py-4">暂无数据</p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Issue Level Distribution */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-muted-foreground" /> 问题等级分布
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {['一类', '二类', '三类'].map(level => {
+                  const count = issueLevelDist[level] || 0;
+                  const pct = metrics.totalIssues > 0 ? Math.round((count / metrics.totalIssues) * 100) : 0;
+                  return (
+                    <div key={level} className="flex items-center gap-3">
+                      <span className={cn('text-sm w-16 shrink-0 font-medium', LEVEL_TEXT_COLORS[level])}>{level}</span>
+                      <div className="flex-1 h-6 bg-muted/50 rounded-full overflow-hidden">
+                        <div className={cn('h-full rounded-full transition-all', LEVEL_COLORS[level])} style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="text-sm font-medium w-8 text-right">{count}</span>
+                      <span className="text-xs text-muted-foreground w-10 text-right">{pct}%</span>
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Issue Rectification Progress Grid */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 text-muted-foreground" /> 问题整改进度（按状态 × 等级分布）
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-left py-2 px-3 text-muted-foreground font-medium">整改状态</th>
+                      <th className="text-center py-2 px-3 text-red-600 font-medium">一类</th>
+                      <th className="text-center py-2 px-3 text-amber-600 font-medium">二类</th>
+                      <th className="text-center py-2 px-3 text-blue-600 font-medium">三类</th>
+                      <th className="text-center py-2 px-3 text-muted-foreground font-medium">合计</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {['待整改', '整改中', '已验证', '不整改'].map(status => {
+                      const row = rectGrid[status] || {};
+                      const rowTotal = (row['一类'] || 0) + (row['二类'] || 0) + (row['三类'] || 0);
+                      return (
+                        <tr key={status} className="border-b last:border-0">
+                          <td className="py-2 px-3">
+                            <Badge variant="secondary" className={cn('text-xs', RECT_STATUS_COLORS[status])}>{status}</Badge>
+                          </td>
+                          <td className="text-center py-2 px-3">{row['一类'] || 0}</td>
+                          <td className="text-center py-2 px-3">{row['二类'] || 0}</td>
+                          <td className="text-center py-2 px-3">{row['三类'] || 0}</td>
+                          <td className="text-center py-2 px-3 font-medium">{rowTotal}</td>
+                        </tr>
+                      );
+                    })}
+                    <tr className="font-medium">
+                      <td className="py-2 px-3">合计</td>
+                      <td className="text-center py-2 px-3">{(rectGrid['待整改']?.['一类'] || 0) + (rectGrid['整改中']?.['一类'] || 0) + (rectGrid['已验证']?.['一类'] || 0) + (rectGrid['不整改']?.['一类'] || 0)}</td>
+                      <td className="text-center py-2 px-3">{(rectGrid['待整改']?.['二类'] || 0) + (rectGrid['整改中']?.['二类'] || 0) + (rectGrid['已验证']?.['二类'] || 0) + (rectGrid['不整改']?.['二类'] || 0)}</td>
+                      <td className="text-center py-2 px-3">{(rectGrid['待整改']?.['三类'] || 0) + (rectGrid['整改中']?.['三类'] || 0) + (rectGrid['已验证']?.['三类'] || 0) + (rectGrid['不整改']?.['三类'] || 0)}</td>
+                      <td className="text-center py-2 px-3">{metrics.totalIssues}</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </CardContent>
           </Card>
-        ))}
-      </div>
 
-      <div className="grid lg:grid-cols-2 gap-4">
-        {/* Task Status Distribution */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium">任务状态分布</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {[
-              { label: '待执行', value: data.taskStats.pending, color: 'bg-muted' },
-              { label: '进行中', value: data.taskStats.inProgress, color: 'bg-primary' },
-              { label: '待审核', value: data.taskStats.review, color: 'bg-amber-500' },
-              { label: '已完成', value: data.taskStats.completed, color: 'bg-emerald-500' },
-            ].map((item) => (
-              <div key={item.label} className="flex items-center gap-3">
-                <span className="text-sm w-16 shrink-0">{item.label}</span>
-                <div className="flex-1 h-6 bg-muted/50 rounded overflow-hidden">
-                  <div
-                    className={cn('h-full rounded transition-all', item.color)}
-                    style={{ width: data.taskStats.total > 0 ? `${(item.value / data.taskStats.total) * 100}%` : '0%' }}
-                  />
-                </div>
-                <span className="text-sm font-medium w-8 text-right">{item.value}</span>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+          <div className="grid lg:grid-cols-2 gap-4">
+            {/* By Category */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium">按品类分布</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {Object.keys(byCategory).length === 0 ? (
+                  <p className="text-center text-muted-foreground text-sm py-4">暂无数据</p>
+                ) : (
+                  <div className="space-y-2">
+                    {Object.entries(byCategory).sort((a, b) => b[1].tasks - a[1].tasks).map(([cat, item]) => {
+                      const rate = item.tasks > 0 ? Math.round((item.completedTasks / item.tasks) * 100) : 0;
+                      const iRate = item.issues > 0 ? Math.round((item.rectifiedIssues / item.issues) * 100) : 0;
+                      return (
+                        <div key={cat} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/30">
+                          <span className="text-sm w-20 shrink-0 truncate" title={cat}>{cat}</span>
+                          <div className="flex-1 grid grid-cols-4 gap-2 text-xs text-center">
+                            <div><p className="font-medium text-sm">{item.tasks}</p>任务</div>
+                            <div><p className="font-medium text-sm text-emerald-600">{rate}%</p>完成率</div>
+                            <div><p className="font-medium text-sm">{item.issues}</p>问题</div>
+                            <div><p className="font-medium text-sm text-blue-600">{iRate}%</p>整改率</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
 
-        {/* Issue Severity Distribution */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium">问题等级分布</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {[
-              { label: '致命', value: data.issueStats.bySeverity.fatal, color: 'bg-red-500', textColor: 'text-red-600' },
-              { label: '严重', value: data.issueStats.bySeverity.serious, color: 'bg-amber-500', textColor: 'text-amber-600' },
-              { label: '一般', value: data.issueStats.bySeverity.normal, color: 'bg-blue-500', textColor: 'text-blue-600' },
-              { label: '轻微', value: data.issueStats.bySeverity.minor, color: 'bg-emerald-500', textColor: 'text-emerald-600' },
-            ].map((item) => (
-              <div key={item.label} className="flex items-center gap-3">
-                <div className={cn('w-2.5 h-2.5 rounded-full', item.color)} />
-                <span className="text-sm flex-1">{item.label}</span>
-                <span className={cn('text-sm font-medium', item.textColor)}>{item.value}</span>
-                <div className="w-24 h-5 bg-muted/50 rounded overflow-hidden">
-                  <div
-                    className={cn('h-full rounded', item.color)}
-                    style={{ width: data.issueStats.total > 0 ? `${(item.value / data.issueStats.total) * 100}%` : '0%' }}
-                  />
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+            {/* By Project Type */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium">按项目类型分布</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {Object.keys(byProjectType).length === 0 ? (
+                  <p className="text-center text-muted-foreground text-sm py-4">暂无数据</p>
+                ) : (
+                  <div className="space-y-2">
+                    {Object.entries(byProjectType).sort((a, b) => b[1].tasks - a[1].tasks).map(([pt, item]) => {
+                      const rate = item.tasks > 0 ? Math.round((item.completedTasks / item.tasks) * 100) : 0;
+                      const iRate = item.issues > 0 ? Math.round((item.rectifiedIssues / item.issues) * 100) : 0;
+                      return (
+                        <div key={pt} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/30">
+                          <span className="text-sm w-20 shrink-0 truncate" title={pt}>{pt}</span>
+                          <div className="flex-1 grid grid-cols-4 gap-2 text-xs text-center">
+                            <div><p className="font-medium text-sm">{item.tasks}</p>任务</div>
+                            <div><p className="font-medium text-sm text-emerald-600">{rate}%</p>完成率</div>
+                            <div><p className="font-medium text-sm">{item.issues}</p>问题</div>
+                            <div><p className="font-medium text-sm text-blue-600">{iRate}%</p>整改率</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
 
-        {/* Issue Status */}
-        <Card className="lg:col-span-2">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium">问题整改进度</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-4 gap-4">
-              {[
-                { label: '待整改', value: data.issueStats.pending, color: 'bg-amber-100 text-amber-700', border: 'border-amber-200' },
-                { label: '整改中', value: data.issueStats.inProgress, color: 'bg-blue-100 text-blue-700', border: 'border-blue-200' },
-                { label: '已验证', value: data.issueStats.verified, color: 'bg-emerald-100 text-emerald-700', border: 'border-emerald-200' },
-                { label: '不整改', value: data.issueStats.noImprove, color: 'bg-muted text-muted-foreground', border: 'border-border' },
-              ].map((item) => (
-                <div key={item.label} className={cn('rounded-lg p-4 text-center border', item.border)}>
-                  <p className="text-2xl font-bold">{item.value}</p>
-                  <Badge className={cn('text-[10px] mt-1', item.color)}>{item.label}</Badge>
+            {/* By Organizer */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium">按任务人分布</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {Object.keys(byOrganizer).length === 0 ? (
+                  <p className="text-center text-muted-foreground text-sm py-4">暂无数据</p>
+                ) : (
+                  <div className="space-y-2">
+                    {Object.entries(byOrganizer).sort((a, b) => b[1].tasks - a[1].tasks).map(([org, item]) => {
+                      const rate = item.tasks > 0 ? Math.round((item.completedTasks / item.tasks) * 100) : 0;
+                      const iRate = item.issues > 0 ? Math.round((item.rectifiedIssues / item.issues) * 100) : 0;
+                      return (
+                        <div key={org} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/30">
+                          <span className="text-sm w-20 shrink-0 truncate" title={org}>{org}</span>
+                          <div className="flex-1 grid grid-cols-4 gap-2 text-xs text-center">
+                            <div><p className="font-medium text-sm">{item.tasks}</p>任务</div>
+                            <div><p className="font-medium text-sm text-emerald-600">{rate}%</p>完成率</div>
+                            <div><p className="font-medium text-sm">{item.issues}</p>问题</div>
+                            <div><p className="font-medium text-sm text-blue-600">{iRate}%</p>整改率</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* By Issue Type */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium">按问题点分类分布</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {[
+                    { key: 'record_fail', label: '不合格检查项', color: 'bg-amber-500' },
+                    { key: 'recipe_problem', label: '食谱/功能问题', color: 'bg-blue-500' },
+                  ].map(item => {
+                    const count = byIssueType[item.key] || 0;
+                    const pct = metrics.totalIssues > 0 ? Math.round((count / metrics.totalIssues) * 100) : 0;
+                    return (
+                      <div key={item.key} className="flex items-center gap-3">
+                        <span className="text-sm w-24 shrink-0">{item.label}</span>
+                        <div className="flex-1 h-6 bg-muted/50 rounded-full overflow-hidden">
+                          <div className={cn('h-full rounded-full transition-all', item.color)} style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className="text-sm font-medium w-8 text-right">{count}</span>
+                        <span className="text-xs text-muted-foreground w-10 text-right">{pct}%</span>
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Monthly Trend */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 text-muted-foreground" /> 月度趋势
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {Object.keys(monthTrend).length === 0 ? (
+                <p className="text-center text-muted-foreground text-sm py-4">暂无数据</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left py-2 px-3 text-muted-foreground font-medium">月份</th>
+                        <th className="text-center py-2 px-3 font-medium">任务数</th>
+                        <th className="text-center py-2 px-3 font-medium text-emerald-600">完成率</th>
+                        <th className="text-center py-2 px-3 font-medium">问题数</th>
+                        <th className="text-center py-2 px-3 font-medium text-blue-600">整改率</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(monthTrend).sort((a, b) => a[0].localeCompare(b[0])).map(([month, item]) => {
+                        const rate = item.tasks > 0 ? Math.round((item.completedTasks / item.tasks) * 100) : 0;
+                        const iRate = item.issues > 0 ? Math.round((item.rectifiedIssues / item.issues) * 100) : 0;
+                        return (
+                          <tr key={month} className="border-b last:border-0">
+                            <td className="py-2 px-3">{month}</td>
+                            <td className="text-center py-2 px-3">{item.tasks}</td>
+                            <td className="text-center py-2 px-3 text-emerald-600">{rate}%</td>
+                            <td className="text-center py-2 px-3">{item.issues}</td>
+                            <td className="text-center py-2 px-3 text-blue-600">{iRate}%</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
     </div>
   );
 }

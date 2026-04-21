@@ -40,7 +40,7 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const [keyword, setKeyword] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -65,7 +65,7 @@ export default function TasksPage() {
     const params = new URLSearchParams();
     if (keyword) params.set('keyword', keyword);
     if (filterStatus && filterStatus !== 'all') params.set('status', filterStatus);
-    if (user?.id) params.set('created_by', user.id);
+    if (user?.id && !isAdmin) params.set('created_by', user.id);
     const res = await fetch(`/api/tasks?${params}`);
     const data = await res.json();
     if (data.code === 0) { setTasks(data.data?.list || []); setTotal(data.data?.total || 0); }
