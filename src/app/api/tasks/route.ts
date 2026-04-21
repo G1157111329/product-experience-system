@@ -7,6 +7,7 @@ export async function GET(request: NextRequest) {
   const status = searchParams.get('status');
   const product_category = searchParams.get('product_category');
   const keyword = searchParams.get('keyword');
+  const created_by = searchParams.get('created_by');
   const page = parseInt(searchParams.get('page') || '1');
   const pageSize = parseInt(searchParams.get('pageSize') || '20');
 
@@ -15,6 +16,7 @@ export async function GET(request: NextRequest) {
   if (status) query = query.eq('status', status);
   if (product_category) query = query.eq('product_category', product_category);
   if (keyword) query = query.or(`task_name.ilike.%${keyword}%,product_model.ilike.%${keyword}%`);
+  if (created_by) query = query.eq('created_by', created_by);
 
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
@@ -42,6 +44,7 @@ export async function POST(request: NextRequest) {
     project_phase: body.project_phase || null,
     test_date: body.test_date || null,
     organizer: body.organizer || null,
+    created_by: body.created_by || null,
     target_user: body.target_user || null,
     test_purpose: body.test_purpose || null,
     test_method: body.test_method || null,

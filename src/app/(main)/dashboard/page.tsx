@@ -14,6 +14,7 @@ import {
   KeyRound,
   Pencil,
   Shield,
+  FileText,
 } from 'lucide-react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -94,14 +95,21 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const { user, isAdmin } = useAuth();
 
-  // Audit states
+  // Audit states (admin)
   const [auditOpen, setAuditOpen] = useState(false);
   const [auditRequests, setAuditRequests] = useState<AuditRequest[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
   const [actioningId, setActioningId] = useState<string | null>(null);
 
+  // My requests states (non-admin)
+  const [myRequestsOpen, setMyRequestsOpen] = useState(false);
+  const [myRequests, setMyRequests] = useState<AuditRequest[]>([]);
+  const [myRequestsLoading, setMyRequestsLoading] = useState(false);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+
   const fetchAuditRequests = useCallback(async () => {
     if (!user?.id) return;
+    setAuditLoading(true);
     try {
       const res = await fetch(`/api/auth/audit?admin_user_id=${user.id}`);
       const data = await res.json();
@@ -110,23 +118,60 @@ export default function DashboardPage() {
       }
     } catch {
       // silently fail
+    } finally {
+      setAuditLoading(false);
+    }
+  }, [user?.id]);
+
+  const fetchMyRequests = useCallback(async () => {
+    if (!user?.id) return;
+    setMyRequestsLoading(true);
+    try {
+      const res = await fetch(`/api/auth/audit?user_id=${user.id}`);
+      const data = await res.json();
+      if (data.code === 0) {
+        // Filter: exclude register type, only show pending
+        const filtered = (data.data || []).filter(
+          (r: AuditRequest) => r.request_type !== 'register' && r.status === 'pending'
+        );
+        setMyRequests(filtered);
+      }
+    } catch {
+      // silently fail
+    } finally {
+      setMyRequestsLoading(false);
     }
   }, [user?.id]);
 
   useEffect(() => {
-    fetch('/api/dashboard')
+    const params = new URLSearchParams();
+    if (user?.id) params.set('created_by', user.id);
+    fetch(`/api/dashboard?${params.toString()}`)
       .then((r) => r.json())
       .then((res) => {
         if (res.code === 0) setData(res.data);
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     if (auditOpen && isAdmin) {
       fetchAuditRequests();
     }
   }, [auditOpen, isAdmin, fetchAuditRequests]);
+
+  useEffect(() => {
+    if (myRequestsOpen && !isAdmin) {
+      fetchMyRequests();
+    }
+  }, [myRequestsOpen, isAdmin, fetchMyRequests]);
+
+  // Prefetch my requests count for non-admin users on mount
+  useEffect(() => {
+    if (!isAdmin && user?.id) {
+      fetchMyRequests();
+    }
+  }, [isAdmin, user?.id, fetchMyRequests]);
 
   const handleAuditAction = async (requestId: string, action: 'approve' | 'reject') => {
     if (!user?.id) return;
@@ -149,7 +194,28 @@ export default function DashboardPage() {
     }
   };
 
-  // Group audit requests by type
+  const handleCancelRequest = async (requestId: string) => {
+    if (!user?.id) return;
+    setCancellingId(requestId);
+    try {
+      const res = await fetch('/api/auth/audit', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_id: requestId, user_id: user.id, action: 'cancel' }),
+      });
+      const data = await res.json();
+      if (data.code === 0) {
+        toast.success('已取消申请');
+        fetchMyRequests();
+      } else {
+        toast.error(data.message);
+      }
+    } finally {
+      setCancellingId(null);
+    }
+  };
+
+  // Group audit requests by type (admin)
   const groupedRequests = auditRequests.reduce((acc, req) => {
     const type = req.request_type;
     if (!acc[type]) acc[type] = [];
@@ -204,13 +270,13 @@ export default function DashboardPage() {
       bg: 'bg-emerald-100',
     },
     {
-      label: '待审核',
-      value: isAdmin ? auditRequests.length : data.taskStats.review,
-      icon: isAdmin ? Shield : Clock,
-      sub: isAdmin ? '账号审核' : `${data.issueStats.verified} 已验证`,
+      label: isAdmin ? '待审核' : '待申请',
+      value: isAdmin ? auditRequests.length : myRequests.length,
+      icon: isAdmin ? Shield : FileText,
+      sub: isAdmin ? '账号审核' : `${myRequests.length} 条待审核`,
       color: isAdmin ? 'text-primary' : 'text-blue-600',
       bg: isAdmin ? 'bg-primary/10' : 'bg-blue-100',
-      onClick: isAdmin ? () => setAuditOpen(true) : undefined,
+      onClick: isAdmin ? () => setAuditOpen(true) : () => setMyRequestsOpen(true),
     },
   ];
 
@@ -259,9 +325,9 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             {[
-              { label: '致命', value: data.issueStats.bySeverity.fatal, color: 'bg-red-500' },
-              { label: '严重', value: data.issueStats.bySeverity.serious, color: 'bg-amber-500' },
-              { label: '一般', value: data.issueStats.bySeverity.normal, color: 'bg-blue-500' },
+              { label: '一类', value: data.issueStats.bySeverity.fatal, color: 'bg-red-500' },
+              { label: '二类', value: data.issueStats.bySeverity.serious, color: 'bg-amber-500' },
+              { label: '三类', value: data.issueStats.bySeverity.normal, color: 'bg-blue-500' },
               { label: '轻微', value: data.issueStats.bySeverity.minor, color: 'bg-emerald-500' },
             ].map((item) => (
               <div key={item.label} className="flex items-center gap-3">
@@ -338,7 +404,9 @@ export default function DashboardPage() {
             <DialogDescription>审核账号注册、密码修改、名称修改等申请</DialogDescription>
           </DialogHeader>
           <ScrollArea className="max-h-[60vh]">
-            {auditRequests.length === 0 ? (
+            {auditLoading ? (
+              <div className="text-center py-10 text-muted-foreground text-sm">加载中...</div>
+            ) : auditRequests.length === 0 ? (
               <div className="text-center py-10 text-muted-foreground text-sm">暂无待审核请求</div>
             ) : (
               <div className="space-y-5">
@@ -399,6 +467,63 @@ export default function DashboardPage() {
                         ))}
                       </div>
                       <Separator className="mt-4" />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
+      {/* My Requests Dialog (Non-admin only) */}
+      <Dialog open={myRequestsOpen} onOpenChange={setMyRequestsOpen}>
+        <DialogContent className="max-w-lg max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-blue-600" />
+              我的申请
+            </DialogTitle>
+            <DialogDescription>查看并管理您的待审核申请</DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[60vh]">
+            {myRequestsLoading ? (
+              <div className="text-center py-10 text-muted-foreground text-sm">加载中...</div>
+            ) : myRequests.length === 0 ? (
+              <div className="text-center py-10 text-muted-foreground text-sm">暂无待审核申请</div>
+            ) : (
+              <div className="space-y-2">
+                {myRequests.map((req) => {
+                  const config = requestTypeConfig[req.request_type] || { label: req.request_type, icon: FileText, color: 'text-muted-foreground' };
+                  return (
+                    <div key={req.id} className="border rounded-lg p-3 flex items-center gap-3">
+                      <div className={cn('rounded-lg p-2 bg-muted', config.color)}>
+                        <config.icon className="h-4 w-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium">{config.label}</div>
+                        <div className="text-xs text-muted-foreground mt-0.5 space-x-2">
+                          {req.request_type === 'name_change' && (
+                            <>
+                              <span>原名称: {req.old_value}</span>
+                              <span>→ 新名称: {req.new_value}</span>
+                            </>
+                          )}
+                          {(req.request_type === 'password_reset' || req.request_type === 'password_change') && (
+                            <span>新密码已填写</span>
+                          )}
+                          <span>{new Date(req.created_at).toLocaleDateString()}</span>
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-destructive hover:text-red-700 hover:bg-red-50 shrink-0"
+                        onClick={() => handleCancelRequest(req.id)}
+                        disabled={cancellingId === req.id}
+                      >
+                        <XCircle className="h-5 w-5" />
+                      </Button>
                     </div>
                   );
                 })}

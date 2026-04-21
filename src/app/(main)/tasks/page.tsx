@@ -65,18 +65,19 @@ export default function TasksPage() {
     const params = new URLSearchParams();
     if (keyword) params.set('keyword', keyword);
     if (filterStatus && filterStatus !== 'all') params.set('status', filterStatus);
+    if (user?.id) params.set('created_by', user.id);
     const res = await fetch(`/api/tasks?${params}`);
     const data = await res.json();
     if (data.code === 0) { setTasks(data.data?.list || []); setTotal(data.data?.total || 0); }
     setLoading(false);
   };
 
-  useEffect(() => { fetchTasks(); }, [keyword, filterStatus]);
+  useEffect(() => { if (user?.id) fetchTasks(); }, [keyword, filterStatus, user?.id]);
 
   const handleCreate = async () => {
     const res = await fetch('/api/tasks', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
+      body: JSON.stringify({ ...form, created_by: user?.id }),
     });
     const data = await res.json();
     if (data.code === 0) {

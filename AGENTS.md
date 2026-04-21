@@ -78,7 +78,7 @@
 | `platform_audit_requests` | 用户审核请求（注册/密码重置/名称修改/角色升级） |
 | `standards` | 体验标准库（通用标准/品类标准/感官评价标准/食谱功能标准） |
 | `standard_items` | 标准检查项（含分类特定字段：experience_flow, touch_point, experience_standard, sub_check_dimension, check_standard, evaluation_prep, subjective_score, subjective_rating, reference_images） |
-| `experience_tasks` | 体验任务（含 project_type: ODM/OEM/竞品研究/自研/前期研究/改型降本优化/海外产品, project_phase: 手板研究/试制阶段/试产阶段/量产阶段） |
+| `experience_tasks` | 体验任务（含 created_by 用户隔离字段, project_type: ODM/OEM/竞品研究/自研/前期研究/改型降本优化/海外产品, project_phase: 手板研究/试制阶段/试产阶段/量产阶段） |
 | `check_records` | 检查记录（走查，含 standard_category, check_dimension, sub_check_dimension, check_standard, experience_flow, touch_point, experience_standard） |
 | `materials` | 素材（图片/视频，含 AI 预留字段，可关联record或recipe_step） |
 | `issues` | 问题整改（含 level: 一类/二类/三类, source, source_report_id, source_type: record_fail/recipe_problem） |
@@ -117,8 +117,8 @@
 | POST | `/api/auth/forgot-password` | 忘记密码（验证账号存在，需管理员审核） |
 | GET | `/api/auth/profile` | 获取用户信息 |
 | PUT | `/api/auth/profile` | 修改名称/密码（需管理员审核） |
-| GET | `/api/auth/audit` | 获取待审核请求列表（管理员） |
-| PUT | `/api/auth/audit` | 审核通过/拒绝（管理员） |
+| GET | `/api/auth/audit` | 获取审核请求（admin_user_id: 管理员查所有; user_id: 普通用户查自己的） |
+| PUT | `/api/auth/audit` | 审核（approve/reject，管理员）；取消申请（cancel，用户自己） |
 | GET | `/api/auth/users` | 获取用户列表（管理员） |
 | POST | `/api/auth/users` | 升级/降级用户角色（管理员） |
 | GET/POST | `/api/standards` | 标准列表/创建 |
@@ -142,7 +142,7 @@
 | GET/PUT/DELETE | `/api/recipes/[id]` | 食谱详情/更新/删除 |
 | GET/POST | `/api/recipe-steps` | 步骤列表/创建 |
 | PUT/DELETE | `/api/recipe-steps/[id]` | 步骤更新/删除 |
-| GET | `/api/dashboard` | 仪表盘统计数据 |
+| GET | `/api/dashboard` | 仪表盘统计数据（支持created_by按用户过滤） |
 
 ## 构建与运行
 
@@ -182,6 +182,8 @@ pnpm build
 15. **报告内容级合并**: 自研和改型/降本/优化类型的报告，在报告详情页和打印页中，同product_model的所有报告按时间排序合并展示，每份报告连续完整，用分割线和阶段/时间标注区分
 16. **体验计划项目类型**: 新建时选择项目类型（ODM/OEM/竞品研究/自研/前期研究/改型降本优化/海外产品），自研可选项目阶段（手板研究/试制阶段/试产阶段/量产阶段）
 17. **检查记录状态编辑**: RecordDetailCard使用Dialog弹窗模式编辑状态，新增问题时可编辑检查结果（合格/不合格/待定）
+18. **数据隔离**: 体验计划和问题管理按用户隔离（experience_tasks.created_by字段），工作台数据按用户过滤；标准管理和报告中心保持平台共享（因同型号不同阶段可能不同账号承接）
+19. **非管理员待申请**: 非管理员工作台"待审核"改为"待申请"，显示该账号的密码/名称修改待审核列表（排除注册记录），可用叉图标取消申请
 
 ## 代码风格
 

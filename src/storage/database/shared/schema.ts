@@ -74,6 +74,7 @@ export const experienceTasks = pgTable(
     project_phase: varchar("project_phase", { length: 50 }), // 项目阶段（自研：手板研究/试制阶段/试产阶段/量产阶段）
     test_date: date("test_date"),
     organizer: varchar("organizer", { length: 50 }),
+    created_by: varchar("created_by", { length: 36 }), // 创建者用户ID
     target_user: text("target_user"),
     test_purpose: text("test_purpose"),
     test_method: text("test_method"),

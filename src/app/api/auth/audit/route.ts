@@ -8,36 +8,46 @@ function hashPassword(password: string): string {
   return crypto.createHash('sha256').update(HASH_SALT + password).digest('hex');
 }
 
-// GET: list pending audit requests (admin only)
+// GET: list pending audit requests
+// - admin_user_id: admin sees all pending requests
+// - user_id: non-admin sees their own pending requests
 export async function GET(request: NextRequest) {
   try {
     const adminUserId = request.nextUrl.searchParams.get('admin_user_id');
-    if (!adminUserId) {
-      return NextResponse.json({ code: 1, message: '缺少管理员ID' });
+    const userId = request.nextUrl.searchParams.get('user_id');
+
+    if (!adminUserId && !userId) {
+      return NextResponse.json({ code: 1, message: '缺少用户ID' });
     }
 
     const supabase = createClient();
 
-    // Verify admin
-    const { data: admin } = await supabase
-      .from('platform_users')
-      .select('role')
-      .eq('id', adminUserId)
-      .maybeSingle();
-
-    if (!admin || admin.role !== 'admin') {
-      return NextResponse.json({ code: 1, message: '无权限' });
-    }
-
-    // Fetch all pending requests with user info
-    const { data: requests, error } = await supabase
+    let query = supabase
       .from('platform_audit_requests')
       .select(`
         id, user_id, request_type, status, old_value, new_value,
         target_user_id, reviewed_by, reviewed_at, created_at
-      `)
-      .eq('status', 'pending')
-      .order('created_at', { ascending: true });
+      `);
+
+    if (adminUserId) {
+      // Admin mode: verify admin, show all pending
+      const { data: admin } = await supabase
+        .from('platform_users')
+        .select('role')
+        .eq('id', adminUserId)
+        .maybeSingle();
+
+      if (!admin || admin.role !== 'admin') {
+        return NextResponse.json({ code: 1, message: '无权限' });
+      }
+
+      query = query.eq('status', 'pending').order('created_at', { ascending: true });
+    } else {
+      // Non-admin mode: show own requests (all statuses for context)
+      query = query.eq('user_id', userId!).order('created_at', { ascending: false });
+    }
+
+    const { data: requests, error } = await query;
 
     if (error) {
       return NextResponse.json({ code: 1, message: '查询失败' });
@@ -77,28 +87,23 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// PUT: approve or reject a request (admin only)
+// PUT: approve, reject, or cancel a request
+// - admin: approve/reject
+// - user: cancel own pending request
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { request_id, admin_user_id, action } = body; // action: 'approve' | 'reject'
+    const { request_id, admin_user_id, user_id, action } = body; // action: 'approve' | 'reject' | 'cancel'
 
-    if (!request_id || !admin_user_id || !action) {
+    if (!request_id || !action) {
       return NextResponse.json({ code: 1, message: '参数不完整' });
     }
 
-    const supabase = createClient();
-
-    // Verify admin
-    const { data: admin } = await supabase
-      .from('platform_users')
-      .select('role')
-      .eq('id', admin_user_id)
-      .maybeSingle();
-
-    if (!admin || admin.role !== 'admin') {
-      return NextResponse.json({ code: 1, message: '无权限' });
+    if (!admin_user_id && !user_id) {
+      return NextResponse.json({ code: 1, message: '缺少用户标识' });
     }
+
+    const supabase = createClient();
 
     // Get the request
     const { data: auditReq } = await supabase
@@ -113,6 +118,35 @@ export async function PUT(request: NextRequest) {
 
     if (auditReq.status !== 'pending') {
       return NextResponse.json({ code: 1, message: '该请求已处理' });
+    }
+
+    // Cancel action: user cancels own request
+    if (action === 'cancel') {
+      if (!user_id || auditReq.user_id !== user_id) {
+        return NextResponse.json({ code: 1, message: '只能取消自己的申请' });
+      }
+
+      await supabase
+        .from('platform_audit_requests')
+        .update({ status: 'cancelled' })
+        .eq('id', request_id);
+
+      return NextResponse.json({ code: 0, message: '已取消申请' });
+    }
+
+    // Admin actions: approve/reject
+    if (!admin_user_id) {
+      return NextResponse.json({ code: 1, message: '需要管理员ID' });
+    }
+
+    const { data: admin } = await supabase
+      .from('platform_users')
+      .select('role')
+      .eq('id', admin_user_id)
+      .maybeSingle();
+
+    if (!admin || admin.role !== 'admin') {
+      return NextResponse.json({ code: 1, message: '无权限' });
     }
 
     const newStatus = action === 'approve' ? 'approved' : 'rejected';
@@ -131,23 +165,19 @@ export async function PUT(request: NextRequest) {
     if (action === 'approve') {
       switch (auditReq.request_type) {
         case 'register':
-          // Approve user registration
           await supabase.from('platform_users').update({ status: 'approved' }).eq('id', auditReq.user_id);
           break;
 
         case 'password_reset':
         case 'password_change':
-          // Update password
           await supabase.from('platform_users').update({ password_hash: auditReq.new_value }).eq('id', auditReq.user_id);
           break;
 
         case 'name_change':
-          // Update name
           await supabase.from('platform_users').update({ name: auditReq.new_value }).eq('id', auditReq.user_id);
           break;
 
         case 'role_upgrade':
-          // Upgrade target user to admin
           if (auditReq.target_user_id) {
             await supabase.from('platform_users').update({ role: 'admin' }).eq('id', auditReq.target_user_id);
           }

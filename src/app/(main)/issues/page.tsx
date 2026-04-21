@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/lib/auth-context';
 
 interface Issue {
   id: string; title: string; product_model: string | null;
@@ -47,13 +48,29 @@ const LEVEL_COLORS: Record<string, string> = {
 
 export default function IssuesPage() {
   const [issues, setIssues] = useState<Issue[]>([]);
-  const [reports, setReports] = useState<{ id: string; title: string; created_at: string; content: Record<string, unknown> }[]>([]);
+  const [reports, setReports] = useState<{ id: string; title: string; task_id: string; created_at: string; content: Record<string, unknown> }[]>([]);
   const [reportGroups, setReportGroups] = useState<ReportGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<ReportGroup | null>(null);
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterLevel, setFilterLevel] = useState('all');
+  const { user } = useAuth();
+  const [userTaskIds, setUserTaskIds] = useState<string[]>([]);
+
+  // Fetch current user's task IDs
+  useEffect(() => {
+    if (user?.id) {
+      fetch(`/api/tasks?created_by=${user.id}&pageSize=200`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.code === 0) {
+            const taskIds = (data.data?.list || []).map((t: { id: string }) => t.id);
+            setUserTaskIds(taskIds);
+          }
+        });
+    }
+  }, [user?.id]);
 
   const fetchIssues = useCallback(async () => {
     const res = await fetch('/api/issues?limit=500');
@@ -65,8 +82,8 @@ export default function IssuesPage() {
   }, []);
 
   const fetchReports = useCallback(async () => {
-    const res = await fetch('/api/reports?limit=200');
-    const data = await res.json();
+    const reportsRes = await fetch('/api/reports?limit=200');
+    const data = await reportsRes.json();
     if (data.code === 0) {
       const raw = data.data;
       setReports(Array.isArray(raw) ? raw : (raw?.list || []));
@@ -76,10 +93,14 @@ export default function IssuesPage() {
   useEffect(() => { fetchIssues(); fetchReports(); }, [fetchIssues, fetchReports]);
 
   // Auto-generate issues from reports' failed records & recipe problems
+  // Only process reports that belong to the current user's tasks
   useEffect(() => {
     const syncIssuesFromReports = async () => {
       let needRefetch = false;
-      for (const report of reports) {
+      // Only process user's own reports
+      const userReports = reports.filter(r => userTaskIds.length === 0 || userTaskIds.includes(r.task_id));
+
+      for (const report of userReports) {
         const content = report.content as Record<string, unknown>;
         if (!content) continue;
         const records = (content.records || []) as Array<Record<string, unknown>>;
@@ -110,12 +131,11 @@ export default function IssuesPage() {
           }
         }
 
-        // Recipe problems - iterate over problem_points array (new) or fallback to problem_point (legacy)
+        // Recipe problems
         for (const recipe of recipes) {
           const steps = (recipe.recipe_steps || []) as Array<Record<string, unknown>>;
           for (const step of steps) {
             const stepDesc = `步骤${step.step_number}: ${step.operation || ''}`;
-            // Collect all problem points from this step
             const problemPoints: Array<{ text: string; idx: number }> = [];
             const pp = step.problem_points;
             if (Array.isArray(pp) && pp.length > 0) {
@@ -153,13 +173,21 @@ export default function IssuesPage() {
       }
       if (needRefetch) fetchIssues();
     };
-    if (reports.length > 0) syncIssuesFromReports();
+    if (reports.length > 0 && userTaskIds.length > 0) syncIssuesFromReports();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reports]);
+  }, [reports, userTaskIds]);
 
-  // Group issues by source_report_id
+  // Group issues by source_report_id, filtered by user's tasks
   useEffect(() => {
+    // Build set of report IDs that belong to user's tasks
+    const userReportIds = new Set(
+      reports.filter(r => userTaskIds.includes(r.task_id)).map(r => r.id)
+    );
     const filtered = issues.filter(i => {
+      // Only show issues from user's own task reports
+      if (userTaskIds.length > 0 && i.source_report_id && !userReportIds.has(i.source_report_id)) return false;
+      // Also filter by task_id directly for issues without report
+      if (userTaskIds.length > 0 && i.task_id && !userTaskIds.includes(i.task_id)) return false;
       if (filterStatus !== 'all' && i.status !== filterStatus) return false;
       if (filterLevel !== 'all' && i.level !== filterLevel) return false;
       return true;
@@ -178,7 +206,7 @@ export default function IssuesPage() {
       groups[key].issues.push(issue);
     }
     setReportGroups(Object.values(groups).sort((a, b) => b.created_at.localeCompare(a.created_at)));
-  }, [issues, filterStatus, filterLevel]);
+  }, [issues, reports, userTaskIds, filterStatus, filterLevel]);
 
   const handleStatusChange = async (issueId: string, newStatus: string) => {
     const res = await fetch(`/api/issues/${issueId}`, {
@@ -219,10 +247,19 @@ export default function IssuesPage() {
     }
   };
 
-  const totalIssues = issues.length;
-  const pendingCount = issues.filter(i => i.status === '待整改').length;
-  const inProgressCount = issues.filter(i => i.status === '整改中').length;
-  const verifiedCount = issues.filter(i => i.status === '已验证').length;
+  // Compute stats from filtered issues (same filter as reportGroups)
+  const userReportIds = new Set(
+    reports.filter(r => userTaskIds.includes(r.task_id)).map(r => r.id)
+  );
+  const displayIssues = issues.filter(i => {
+    if (userTaskIds.length > 0 && i.source_report_id && !userReportIds.has(i.source_report_id)) return false;
+    if (userTaskIds.length > 0 && i.task_id && !userTaskIds.includes(i.task_id)) return false;
+    return true;
+  });
+  const totalIssues = displayIssues.length;
+  const pendingCount = displayIssues.filter(i => i.status === '待整改').length;
+  const inProgressCount = displayIssues.filter(i => i.status === '整改中').length;
+  const verifiedCount = displayIssues.filter(i => i.status === '已验证').length;
 
   return (
     <div className="space-y-4">
