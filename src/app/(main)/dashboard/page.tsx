@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   ClipboardList,
   AlertTriangle,
@@ -8,11 +8,23 @@ import {
   Clock,
   TrendingUp,
   ArrowRight,
+  CheckCircle,
+  XCircle,
+  UserPlus,
+  KeyRound,
+  Pencil,
+  Shield,
 } from 'lucide-react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/lib/auth-context';
+import { toast } from 'sonner';
 
 interface DashboardData {
   taskStats: {
@@ -45,7 +57,23 @@ interface DashboardData {
   }>;
 }
 
-const statusMap: Record<string, { label: string; color: string }> = {
+interface AuditRequest {
+  id: string;
+  user_id: string;
+  request_type: string;
+  status: string;
+  old_value: string | null;
+  new_value: string | null;
+  target_user_id: string | null;
+  created_at: string;
+  user_account?: string;
+  user_name?: string;
+  user_role?: string;
+  target_user_account?: string;
+  target_user_name?: string;
+}
+
+const taskStatusMap: Record<string, { label: string; color: string }> = {
   '待执行': { label: '待执行', color: 'bg-muted text-muted-foreground' },
   '进行中': { label: '进行中', color: 'bg-primary/10 text-primary' },
   '待审核': { label: '待审核', color: 'bg-amber-100 text-amber-700' },
@@ -53,9 +81,37 @@ const statusMap: Record<string, { label: string; color: string }> = {
   '已驳回': { label: '已驳回', color: 'bg-destructive/10 text-destructive' },
 };
 
+const requestTypeConfig: Record<string, { label: string; icon: typeof UserPlus; color: string }> = {
+  register: { label: '账号注册', icon: UserPlus, color: 'text-primary' },
+  password_reset: { label: '密码重置', icon: KeyRound, color: 'text-amber-600' },
+  password_change: { label: '密码修改', icon: KeyRound, color: 'text-amber-600' },
+  name_change: { label: '名称修改', icon: Pencil, color: 'text-blue-600' },
+  role_upgrade: { label: '角色升级', icon: Shield, color: 'text-emerald-600' },
+};
+
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const { user, isAdmin } = useAuth();
+
+  // Audit states
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [auditRequests, setAuditRequests] = useState<AuditRequest[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [actioningId, setActioningId] = useState<string | null>(null);
+
+  const fetchAuditRequests = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const res = await fetch(`/api/auth/audit?admin_user_id=${user.id}`);
+      const data = await res.json();
+      if (data.code === 0) {
+        setAuditRequests(data.data || []);
+      }
+    } catch {
+      // silently fail
+    }
+  }, [user?.id]);
 
   useEffect(() => {
     fetch('/api/dashboard')
@@ -65,6 +121,45 @@ export default function DashboardPage() {
       })
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (auditOpen && isAdmin) {
+      fetchAuditRequests();
+    }
+  }, [auditOpen, isAdmin, fetchAuditRequests]);
+
+  const handleAuditAction = async (requestId: string, action: 'approve' | 'reject') => {
+    if (!user?.id) return;
+    setActioningId(requestId);
+    try {
+      const res = await fetch('/api/auth/audit', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_id: requestId, admin_user_id: user.id, action }),
+      });
+      const data = await res.json();
+      if (data.code === 0) {
+        toast.success(data.message);
+        fetchAuditRequests();
+      } else {
+        toast.error(data.message);
+      }
+    } finally {
+      setActioningId(null);
+    }
+  };
+
+  // Group audit requests by type
+  const groupedRequests = auditRequests.reduce((acc, req) => {
+    const type = req.request_type;
+    if (!acc[type]) acc[type] = [];
+    acc[type].push(req);
+    return acc;
+  }, {} as Record<string, AuditRequest[]>);
+
+  // Type order: register first, then password changes, then name changes
+  const typeOrder = ['register', 'password_reset', 'password_change', 'name_change', 'role_upgrade'];
+  const sortedTypes = Object.keys(groupedRequests).sort((a, b) => typeOrder.indexOf(a) - typeOrder.indexOf(b));
 
   if (loading) {
     return (
@@ -110,11 +205,12 @@ export default function DashboardPage() {
     },
     {
       label: '待审核',
-      value: data.taskStats.review,
-      icon: Clock,
-      sub: `${data.issueStats.verified} 已验证`,
-      color: 'text-blue-600',
-      bg: 'bg-blue-100',
+      value: isAdmin ? auditRequests.length : data.taskStats.review,
+      icon: isAdmin ? Shield : Clock,
+      sub: isAdmin ? '账号审核' : `${data.issueStats.verified} 已验证`,
+      color: isAdmin ? 'text-primary' : 'text-blue-600',
+      bg: isAdmin ? 'bg-primary/10' : 'bg-blue-100',
+      onClick: isAdmin ? () => setAuditOpen(true) : undefined,
     },
   ];
 
@@ -131,7 +227,11 @@ export default function DashboardPage() {
       {/* Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
         {statCards.map((card) => (
-          <Card key={card.label} className="relative overflow-hidden">
+          <Card
+            key={card.label}
+            className={cn('relative overflow-hidden', card.onClick && 'cursor-pointer hover:shadow-md transition-shadow')}
+            onClick={card.onClick}
+          >
             <CardContent className="p-4">
               <div className="flex items-start justify-between">
                 <div>
@@ -215,9 +315,9 @@ export default function DashboardPage() {
                     </div>
                     <Badge
                       variant="secondary"
-                      className={cn('text-[10px] shrink-0 ml-2', statusMap[task.status]?.color)}
+                      className={cn('text-[10px] shrink-0 ml-2', taskStatusMap[task.status]?.color)}
                     >
-                      {statusMap[task.status]?.label || task.status}
+                      {taskStatusMap[task.status]?.label || task.status}
                     </Badge>
                   </Link>
                 ))}
@@ -226,6 +326,87 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Audit Dialog (Admin only) */}
+      <Dialog open={auditOpen} onOpenChange={setAuditOpen}>
+        <DialogContent className="max-w-lg max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Shield className="h-5 w-5 text-primary" />
+              账号审核
+            </DialogTitle>
+            <DialogDescription>审核账号注册、密码修改、名称修改等申请</DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[60vh]">
+            {auditRequests.length === 0 ? (
+              <div className="text-center py-10 text-muted-foreground text-sm">暂无待审核请求</div>
+            ) : (
+              <div className="space-y-5">
+                {sortedTypes.map((type) => {
+                  const config = requestTypeConfig[type] || { label: type, icon: Shield, color: 'text-muted-foreground' };
+                  const requests = groupedRequests[type];
+                  return (
+                    <div key={type}>
+                      {/* Section header */}
+                      <div className="flex items-center gap-2 mb-3">
+                        <config.icon className={cn('h-4 w-4', config.color)} />
+                        <span className="text-sm font-semibold">{config.label}</span>
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{requests.length}</Badge>
+                      </div>
+                      {/* Request items */}
+                      <div className="space-y-2">
+                        {requests.map((req) => (
+                          <div key={req.id} className="border rounded-lg p-3 flex items-center gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium">{req.user_name || req.user_account}</div>
+                              <div className="text-xs text-muted-foreground mt-0.5 space-x-2">
+                                <span>账号: {req.user_account}</span>
+                                {req.request_type === 'name_change' && (
+                                  <>
+                                    <span>原名称: {req.old_value}</span>
+                                    <span>→ 新名称: {req.new_value}</span>
+                                  </>
+                                )}
+                                {req.request_type === 'register' && (() => {
+                                  try {
+                                    const v = JSON.parse(req.new_value || '{}');
+                                    return <span>名称: {v.name || '-'}</span>;
+                                  } catch { return null; }
+                                })()}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                                onClick={() => handleAuditAction(req.id, 'approve')}
+                                disabled={actioningId === req.id}
+                              >
+                                <CheckCircle className="h-5 w-5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-destructive hover:text-red-700 hover:bg-red-50"
+                                onClick={() => handleAuditAction(req.id, 'reject')}
+                                disabled={actioningId === req.id}
+                              >
+                                <XCircle className="h-5 w-5" />
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <Separator className="mt-4" />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

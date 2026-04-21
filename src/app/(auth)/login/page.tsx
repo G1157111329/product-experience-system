@@ -41,7 +41,7 @@ export default function LoginPage() {
       if (data.code === 0) {
         localStorage.setItem('current_user', JSON.stringify(data.data));
         toast.success('登录成功');
-        router.push('/dashboard');
+        window.location.href = '/dashboard';
       } else {
         toast.error(data.message);
       }
