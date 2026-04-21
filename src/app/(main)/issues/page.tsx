@@ -351,7 +351,7 @@ export default function IssuesPage() {
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-base">{selectedIssue?.title}</DialogTitle>
+            <DialogTitle className="text-base break-all">{selectedIssue?.title}</DialogTitle>
           </DialogHeader>
           {selectedIssue && (
             <div className="space-y-4">
@@ -383,7 +383,7 @@ export default function IssuesPage() {
               </div>
 
               {selectedIssue.source && (
-                <div className="text-xs text-muted-foreground bg-muted/30 p-2 rounded">
+                <div className="text-xs text-muted-foreground bg-muted/30 p-2 rounded break-all">
                   来源: {selectedIssue.source}
                 </div>
               )}

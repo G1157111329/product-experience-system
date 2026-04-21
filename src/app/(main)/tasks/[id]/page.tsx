@@ -1529,7 +1529,7 @@ function FunctionsTab({ taskId }: { taskId: string }) {
                         <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] flex items-center justify-center font-medium">
                           {stepIdx + 1}
                         </span>
-                        <span className="text-sm flex-1">{step.operation}</span>
+                        <span className="text-sm flex-1 min-w-0 break-all">{step.operation}</span>
                         <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={(e) => { e.stopPropagation(); handleDeleteStep(step); }}>
                           <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
                         </Button>

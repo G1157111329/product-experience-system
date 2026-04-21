@@ -261,17 +261,17 @@ export default function ShareReportPage() {
                             record.evaluation_result === '不合格' ? 'bg-red-100 text-red-700' :
                             'bg-amber-100 text-amber-700'
                           )}>{record.evaluation_result}</span>
-                          <span className="text-sm font-medium flex-1">{record.check_item}</span>
+                          <span className="text-sm font-medium flex-1 min-w-0 truncate">{record.check_item}</span>
                           {record.sensory_dimension && <Badge variant="outline" className="text-[9px]">{record.sensory_dimension}</Badge>}
                           {record.check_dimension && <span className="text-[10px] text-muted-foreground">{record.check_dimension}</span>}
                         </div>
                         {(record.check_requirement || record.check_standard) && (
-                          <div className="text-[10px] text-muted-foreground mt-1 ml-1">
+                          <div className="text-[10px] text-muted-foreground mt-1 ml-1 space-y-0.5 break-all">
                             {record.check_requirement && <div>要求: {record.check_requirement}</div>}
                             {record.check_standard && <div>标准: {record.check_standard}</div>}
                           </div>
                         )}
-                        {record.problem_description && <div className="text-xs text-muted-foreground mt-1 ml-1">{record.problem_description}</div>}
+                        {record.problem_description && <div className="text-xs text-muted-foreground mt-1 ml-1 break-all">{record.problem_description}</div>}
                         {recordMats.length > 0 && (
                           <div className="flex gap-1.5 mt-2 ml-1 flex-wrap">
                             {recordMats.map(mat => (
@@ -318,7 +318,7 @@ export default function ShareReportPage() {
                             <div key={step.id} className="ml-2 py-1.5 border-t last:border-0">
                               <div className="flex items-start gap-2">
                                 <span className="shrink-0 w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-semibold flex items-center justify-center">{step.step_number}</span>
-                                <span className="text-sm">{step.operation}</span>
+                                <span className="text-sm break-all">{step.operation}</span>
                               </div>
                               {(() => {
                                 const pps = step.problem_points?.length ? step.problem_points.filter(p => p.text?.trim()) : step.problem_point ? [{ text: step.problem_point }] : [];
@@ -326,7 +326,7 @@ export default function ShareReportPage() {
                                 return (
                                   <div className="ml-7 mt-1">
                                     {pps.map((pp, i) => (
-                                      <div key={i} className="text-xs text-amber-600">
+                                      <div key={i} className="text-xs text-amber-600 break-all">
                                         {pps.length > 1 && <span className="font-semibold">问题{i + 1}: </span>}{pp.text}
                                       </div>
                                     ))}
@@ -377,7 +377,7 @@ export default function ShareReportPage() {
                             issue.level === '二类' ? 'bg-amber-100 text-amber-700' :
                             'bg-blue-100 text-blue-700'
                           )}>{issue.level || '二类'}</span>
-                          <span className="flex-1">{issue.title}</span>
+                          <span className="flex-1 min-w-0 truncate">{issue.title}</span>
                           <span className={cn('text-[10px] font-medium px-1.5 py-0.5 rounded')}
                             style={{
                               background: STATUS_BG[issue.status] || '#fef3c7',

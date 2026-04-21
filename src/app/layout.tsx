@@ -22,7 +22,7 @@ export default function RootLayout({
 
   return (
     <html lang="zh-CN" suppressHydrationWarning>
-      <body className="antialiased bg-background text-foreground" suppressHydrationWarning>
+      <body className="antialiased bg-background text-foreground overflow-x-hidden" suppressHydrationWarning>
         <AuthProvider>
           {isDev && <Inspector />}
           {children}

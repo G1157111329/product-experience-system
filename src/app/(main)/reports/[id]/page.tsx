@@ -145,13 +145,13 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
                     record.evaluation_result === '不合格' && 'bg-red-100 text-red-700',
                     record.evaluation_result === '待定' && 'bg-amber-100 text-amber-700',
                   )}>{record.evaluation_result}</span>
-                  <span className="text-xs font-medium flex-1">{record.check_item}</span>
+                  <span className="text-xs font-medium flex-1 min-w-0 truncate">{record.check_item}</span>
                   {record.check_dimension && (
                     <span className="text-[10px] text-muted-foreground bg-background px-1 py-0.5 rounded">{record.check_dimension}</span>
                   )}
                 </div>
                 {(record.check_requirement || record.check_standard) && (
-                  <div className="text-[10px] text-muted-foreground space-y-0.5 pl-1">
+                  <div className="text-[10px] text-muted-foreground space-y-0.5 pl-1 break-all">
                     {record.check_requirement && <div>要求: {record.check_requirement}</div>}
                     {record.check_standard && <div>标准: {record.check_standard}</div>}
                   </div>
@@ -190,14 +190,14 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
             <div key={recipe.id} className="border rounded-lg p-3 space-y-2">
               <div className="flex items-center gap-2">
                 <Badge variant="secondary" className="text-[10px] shrink-0">{recipe.recipe_type}</Badge>
-                <span className="text-xs font-medium flex-1">{recipe.name}</span>
+                <span className="text-xs font-medium flex-1 min-w-0 truncate">{recipe.name}</span>
                 <span className="text-[10px] text-muted-foreground">{recipe.problem_count || 0} 问题</span>
               </div>
               {recipe.recipe_steps?.map((step) => (
                 <div key={step.id} className="p-2 rounded bg-muted/30 space-y-1">
                   <div className="flex items-center gap-1.5">
                     <span className="w-4 h-4 rounded-full bg-primary/10 text-primary text-[9px] flex items-center justify-center font-medium shrink-0">{step.step_number}</span>
-                    <span className="text-xs">{step.operation}</span>
+                    <span className="text-xs break-all">{step.operation}</span>
                   </div>
                   {(() => {
                     const pps = step.problem_points && step.problem_points.length > 0
@@ -207,7 +207,7 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
                     return (
                       <div className="ml-5 space-y-0.5">
                         {pps.map((pp, ppIdx) => (
-                          <p key={ppIdx} className="text-[10px] text-amber-600">
+                          <p key={ppIdx} className="text-[10px] text-amber-600 break-all">
                             {pps.length > 1 && <span className="font-medium">问题{ppIdx + 1}: </span>}
                             {pp.text}
                           </p>
@@ -259,7 +259,7 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
                 </button>
               </div>
               {issue.description && (
-                <p className="text-[10px] text-muted-foreground pl-1">{issue.description}</p>
+                <p className="text-[10px] text-muted-foreground pl-1 break-all">{issue.description}</p>
               )}
             </div>
           ))}
@@ -307,7 +307,6 @@ export default function ReportDetailPage() {
           const projectType = (rpt.content?.task as Record<string, unknown>)?.project_type as string;
           const shouldMerge = projectType === '自研' || projectType === '改型/降本/优化';
           if (shouldMerge) {
-            // Deduplicate: for each task_id, only keep the latest report
             const byTaskId: Record<string, ReportDetail> = {};
             for (const r of allReports) {
               if (r.product_model !== rpt.product_model) continue;
@@ -316,7 +315,6 @@ export default function ReportDetailPage() {
                 byTaskId[r.task_id] = r;
               }
             }
-            // Current report's task_id should use current report
             byTaskId[rpt.task_id] = rpt;
             const siblings = Object.values(byTaskId)
               .filter((r: ReportDetail) => r.id !== rpt.id)
@@ -324,8 +322,8 @@ export default function ReportDetailPage() {
             setSiblingReports(siblings);
           }
         }
-        // Sync issues for this report
-        await syncReportIssues(rpt.id, rpt);
+        // Fetch live issues for this report
+        await fetchLiveIssues(rpt.id);
       } else {
         setLoadError(data.message || '报告加载失败');
       }
@@ -336,140 +334,22 @@ export default function ReportDetailPage() {
     }
   }, [id]);
 
-  const syncReportIssues = async (reportId: string, reportData?: ReportDetail | null) => {
+  const fetchLiveIssues = async (reportId: string) => {
     const res = await fetch(`/api/issues?limit=500`);
     const data = await res.json();
     const raw = data.data;
     const allIssues: IssueItem[] = Array.isArray(raw) ? raw : (raw?.list || []);
-    let reportIssues = allIssues.filter((i: IssueItem) => i.source_report_id === reportId);
-
-    // If no issues exist yet for this report, auto-create from report content
-    // But check for duplicates across ALL reports of the same task
-    if (reportIssues.length === 0 && reportData?.content) {
-      const content = reportData.content;
-      const records = content.records || [];
-      const recipes = content.recipes || [];
-      const task = content.task as Record<string, unknown> | undefined;
-
-      // Track created issue keys to prevent duplicates within this session
-      const createdKeys = new Set<string>();
-
-      for (const record of records) {
-        if (record.evaluation_result === '不合格') {
-          const issueKey = `record_fail::${record.check_item || '不合格检查项'}`;
-          // Check if we already created this issue in this session
-          if (createdKeys.has(issueKey)) continue;
-          // Check if this exact issue already exists for THIS report
-          const alreadyInReport = allIssues.find(i =>
-            i.source_report_id === reportId && i.source_type === 'record_fail' && i.title === record.check_item
-          );
-          if (alreadyInReport) { createdKeys.add(issueKey); continue; }
-
-          // Check if a similar issue exists from another report (same title + source_type)
-          const existingFromOtherReport = allIssues.find(i =>
-            i.source_type === 'record_fail' && i.title === (record.check_item || '不合格检查项') && i.source_report_id !== reportId
-          );
-          if (existingFromOtherReport) {
-            await fetch(`/api/issues/${existingFromOtherReport.id}`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                source_report_id: reportId,
-                source: `${reportData.title} - 不合格检查项`,
-              }),
-            });
-          } else {
-            await fetch('/api/issues', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                task_id: task?.id,
-                title: record.check_item || '不合格检查项',
-                product_model: task?.product_model || null,
-                level: '二类',
-                source: `${reportData.title} - 不合格检查项`,
-                source_report_id: reportId,
-                source_type: 'record_fail',
-                description: [record.check_requirement, record.check_standard, record.problem_description].filter(Boolean).join('\n'),
-              }),
-            });
-          }
-          createdKeys.add(issueKey);
-        }
-      }
-
-      for (const recipe of recipes) {
-        for (const step of (recipe.recipe_steps || [])) {
-          const problemPoints: Array<{ text: string; idx: number }> = [];
-          const pp = step.problem_points;
-          if (Array.isArray(pp) && pp.length > 0) {
-            (pp as Array<{ text: string }>).forEach((p, idx) => {
-              if (p.text && p.text.trim()) problemPoints.push({ text: p.text, idx });
-            });
-          } else if (step.problem_point && step.problem_point.trim()) {
-            problemPoints.push({ text: step.problem_point, idx: 0 });
-          }
-
-          for (const ppItem of problemPoints) {
-            const stepDesc = `步骤${step.step_number}: ${step.operation || ''}`;
-            const issueKey = `recipe_problem::${ppItem.text.substring(0, 200)}`;
-            if (createdKeys.has(issueKey)) continue;
-            const alreadyInReport = allIssues.find(i =>
-              i.source_report_id === reportId && i.source_type === 'recipe_problem' && i.title === ppItem.text
-            );
-            if (alreadyInReport) { createdKeys.add(issueKey); continue; }
-
-            const existingFromOtherReport = allIssues.find(i =>
-              i.source_type === 'recipe_problem' && i.title === ppItem.text.substring(0, 200) && i.source_report_id !== reportId
-            );
-            if (existingFromOtherReport) {
-              await fetch(`/api/issues/${existingFromOtherReport.id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  source_report_id: reportId,
-                  source: `${reportData.title} - 食谱功能问题(${recipe.name || ''})`,
-                }),
-              });
-            } else {
-              await fetch('/api/issues', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  task_id: task?.id,
-                  title: ppItem.text.substring(0, 200),
-                  product_model: task?.product_model || null,
-                  level: '二类',
-                  source: `${reportData.title} - 食谱功能问题(${recipe.name || ''})`,
-                  source_report_id: reportId,
-                  source_type: 'recipe_problem',
-                  description: stepDesc,
-                }),
-              });
-            }
-            createdKeys.add(issueKey);
-          }
-        }
-      }
-
-      // Re-fetch after auto-creation/re-linking
-      const res2 = await fetch(`/api/issues?limit=500`);
-      const data2 = await res2.json();
-      const raw2 = data2.data;
-      const allIssues2: IssueItem[] = Array.isArray(raw2) ? raw2 : (raw2?.list || []);
-      reportIssues = allIssues2.filter((i: IssueItem) => i.source_report_id === reportId);
-    }
-
+    const reportIssues = allIssues.filter((i: IssueItem) => i.source_report_id === reportId);
     setLiveIssuesMap(prev => ({ ...prev, [reportId]: reportIssues }));
   };
 
   useEffect(() => { fetchReport().finally(() => setLoading(false)); }, [fetchReport]);
 
-  // Also sync issues for sibling reports
+  // Also fetch issues for sibling reports
   useEffect(() => {
     siblingReports.forEach(rpt => {
       if (!liveIssuesMap[rpt.id]) {
-        syncReportIssues(rpt.id, rpt);
+        fetchLiveIssues(rpt.id);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
