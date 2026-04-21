@@ -2,16 +2,17 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Plus, Search, ClipboardList, ChevronRight } from 'lucide-react';
+import { Plus, Search, ClipboardList, ChevronRight, Trash2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 interface Task {
   id: string;
@@ -41,6 +42,9 @@ export default function TasksPage() {
   const [keyword, setKeyword] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletingTask, setDeletingTask] = useState<Task | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [form, setForm] = useState({
     task_name: '', product_category: '', product_model: '',
     project_type: '', project_phase: '', test_date: '', organizer: '',
@@ -70,6 +74,25 @@ export default function TasksPage() {
       setDialogOpen(false);
       setForm({ task_name: '', product_category: '', product_model: '', project_type: '', project_phase: '', test_date: '', organizer: '', target_user: '', test_purpose: '', test_method: '' });
       fetchTasks();
+    }
+  };
+
+  const handleDeleteTask = async () => {
+    if (!deletingTask || deleting) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/tasks/${deletingTask.id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.code === 0) {
+        setDeleteDialogOpen(false);
+        setDeletingTask(null);
+        fetchTasks();
+        toast.success('任务已删除');
+      } else {
+        toast.error(data.message || '删除失败');
+      }
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -196,33 +219,54 @@ export default function TasksPage() {
       ) : (
         <div className="grid gap-3">
           {tasks.map((task) => (
-            <Link key={task.id} href={`/tasks/${task.id}`}>
-              <Card className="hover:bg-muted/30 transition-colors">
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-sm font-medium truncate">{task.task_name}</h3>
-                        <Badge variant="secondary" className={cn('text-[10px]', statusConfig[task.status]?.color)}>
-                          {statusConfig[task.status]?.label || task.status}
-                        </Badge>
-                      </div>
-                      <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground flex-wrap">
-                        <span>{task.product_model}</span>
-                        {task.product_category && <span>品类: {task.product_category}</span>}
-                        {task.project_type && <span>{task.project_type}</span>}
-                        {task.project_phase && <span>{task.project_phase}</span>}
-                        {task.test_date && <span>{task.test_date}</span>}
-                      </div>
+            <Card key={task.id} className="hover:bg-muted/30 transition-colors">
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <Link href={`/tasks/${task.id}`} className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-sm font-medium truncate">{task.task_name}</h3>
+                      <Badge variant="secondary" className={cn('text-[10px]', statusConfig[task.status]?.color)}>
+                        {statusConfig[task.status]?.label || task.status}
+                      </Badge>
                     </div>
-                    <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 mt-1" />
+                    <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground flex-wrap">
+                      <span>{task.product_model}</span>
+                      {task.product_category && <span>品类: {task.product_category}</span>}
+                      {task.project_type && <span>{task.project_type}</span>}
+                      {task.project_phase && <span>{task.project_phase}</span>}
+                      {task.test_date && <span>{task.test_date}</span>}
+                    </div>
+                  </Link>
+                  <div className="flex items-center gap-1 shrink-0 mt-1">
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeletingTask(task); setDeleteDialogOpen(true); }}>
+                      <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+                    </Button>
+                    <Link href={`/tasks/${task.id}`}>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    </Link>
                   </div>
-                </CardContent>
-              </Card>
-            </Link>
+                </div>
+              </CardContent>
+            </Card>
           ))}
         </div>
       )}
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={(open) => { setDeleteDialogOpen(open); if (!open) setDeletingTask(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>确认删除任务</DialogTitle>
+            <DialogDescription>
+              删除后该任务及其所有关联数据（检查记录、素材、问题、报告、食谱/功能）将无法恢复，确认删除「{deletingTask?.task_name}」？
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => { setDeleteDialogOpen(false); setDeletingTask(null); }}>取消</Button>
+            <Button variant="destructive" onClick={handleDeleteTask} disabled={deleting}>{deleting ? '删除中...' : '确认删除'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
