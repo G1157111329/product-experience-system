@@ -1067,6 +1067,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
         <RecordDetailCard
           record={selectedRecord}
           taskId={taskId}
+          existingMaterials={recordMaterials[selectedRecord.id] || []}
           onRefresh={onRefresh}
           onClose={() => setSelectedRecord(null)}
           onImageClick={open}
@@ -1092,24 +1093,29 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
 }
 
 /* ─── Record Detail Expand ─── */
-function RecordDetailCard({ record, taskId, onRefresh, onClose, onImageClick }: {
-  record: CheckRecord; taskId: string; onRefresh: () => void; onClose: () => void; onImageClick: (url: string) => void;
+function RecordDetailCard({ record, taskId, existingMaterials, onRefresh, onClose, onImageClick }: {
+  record: CheckRecord; taskId: string; existingMaterials: Material[]; onRefresh: () => void; onClose: () => void; onImageClick: (url: string) => void;
 }) {
   const [open, setOpen] = useState(true);
   const [description, setDescription] = useState(record.problem_description || '');
   const [tempStatus, setTempStatus] = useState(record.evaluation_result);
   const [referenceIds, setReferenceIds] = useState<string[]>([]);
-  const [, setReferenceMats] = useState<Material[]>([]);
+  const [localMaterials, setLocalMaterials] = useState<Material[]>(existingMaterials);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  // Sync localMaterials when existingMaterials changes (e.g. after onRefresh)
+  useEffect(() => {
+    setLocalMaterials(existingMaterials);
+  }, [existingMaterials]);
 
   // Reset form when record changes
   useEffect(() => {
     setDescription(record.problem_description || '');
     setTempStatus(record.evaluation_result);
     setReferenceIds([]);
-    setReferenceMats([]);
   }, [record.id, record.problem_description, record.evaluation_result]);
 
   const handleSave = async () => {
@@ -1131,7 +1137,6 @@ function RecordDetailCard({ record, taskId, onRefresh, onClose, onImageClick }: 
           });
         }
         setReferenceIds([]);
-        setReferenceMats([]);
       }
       onRefresh();
       onClose();
@@ -1145,21 +1150,32 @@ function RecordDetailCard({ record, taskId, onRefresh, onClose, onImageClick }: 
     setDescription(record.problem_description || '');
     setTempStatus(record.evaluation_result);
     setReferenceIds([]);
-    setReferenceMats([]);
     onClose();
   };
 
-  const handleUpload = async (files: FileList | null) => {
-    if (!files) return;
-    for (const file of Array.from(files)) {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('task_id', taskId);
-      formData.append('record_id', record.id);
-      await fetch('/api/materials/upload', { method: 'POST', body: formData });
+  const handleDirectUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('task_id', taskId);
+        formData.append('record_id', record.id);
+        const res = await fetch('/api/materials/upload', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.code === 0 && data.data) {
+          // Immediately add to local materials and reference ids
+          const newMat = data.data as Material;
+          setLocalMaterials(prev => [...prev, newMat]);
+          setReferenceIds(prev => [...prev, newMat.id]);
+        }
+      }
+      toast.success('素材已上传并关联');
+      onRefresh();
+    } finally {
+      setUploading(false);
     }
-    onRefresh();
-    toast.success('素材已上传');
   };
 
   return (
@@ -1212,12 +1228,12 @@ function RecordDetailCard({ record, taskId, onRefresh, onClose, onImageClick }: 
             <Textarea placeholder="填写问题描述..." value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
           </div>
 
-          {/* Existing materials */}
-          {record.materials && record.materials.length > 0 && (
+          {/* Existing materials (includes both already-linked and newly uploaded) */}
+          {localMaterials.length > 0 && (
             <div className="space-y-2">
               <Label>已有素材</Label>
               <div className="grid grid-cols-4 gap-2">
-                {record.materials.map((mat) => (
+                {localMaterials.map((mat) => (
                   <div key={mat.id} className="aspect-square rounded-lg overflow-hidden bg-muted cursor-pointer border"
                     onClick={() => onImageClick(mat.file_url)}>
                     {mat.material_type === 'image' ? (
@@ -1240,23 +1256,23 @@ function RecordDetailCard({ record, taskId, onRefresh, onClose, onImageClick }: 
           <div className="space-y-2">
             <Label>素材管理</Label>
             <div className="flex gap-2 flex-wrap">
-              <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
-                <Upload className="h-3.5 w-3.5 mr-1" /> 上传图片
+              <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+                <Upload className="h-3.5 w-3.5 mr-1" /> {uploading ? '上传中...' : '上传图片'}
               </Button>
-              <Button variant="outline" size="sm" onClick={() => videoInputRef?.current?.click()}>
-                <Video className="h-3.5 w-3.5 mr-1" /> 上传视频
+              <Button variant="outline" size="sm" onClick={() => videoInputRef?.current?.click()} disabled={uploading}>
+                <Video className="h-3.5 w-3.5 mr-1" /> {uploading ? '上传中...' : '上传视频'}
               </Button>
             </div>
             <MaterialPicker
               taskId={taskId}
               selectedIds={referenceIds}
-              onSelectionChange={(ids, mats) => { setReferenceIds(ids); setReferenceMats(mats); }}
+              onSelectionChange={(ids, mats) => { setReferenceIds(ids); setLocalMaterials(mats); }}
             />
             {referenceIds.length > 0 && (
               <p className="text-xs text-muted-foreground">已选择 {referenceIds.length} 个素材，保存时将自动关联</p>
             )}
-            <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
-            <input ref={videoInputRef} type="file" accept="video/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
+            <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleDirectUpload(e.target.files)} />
+            <input ref={videoInputRef} type="file" accept="video/*" multiple className="hidden" onChange={(e) => handleDirectUpload(e.target.files)} />
           </div>
 
           {/* Save / Cancel */}

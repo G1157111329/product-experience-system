@@ -32,6 +32,8 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
   const [loading, setLoading] = useState(false);
   const [filterType, setFilterType] = useState<'all' | 'image' | 'video'>('all');
   const [selected, setSelected] = useState<string[]>(selectedIds || []);
+  // Track selected material objects so thumbnails can show even when dialog hasn't been opened
+  const [selectedMaterialMap, setSelectedMaterialMap] = useState<Record<string, Material>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
@@ -41,6 +43,21 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
   useEffect(() => {
     if (selectedIds) setSelected(selectedIds);
   }, [selectedIds]);
+
+  // When onSelectionChange provides materials, update our local map so thumbnails work
+  const notifySelectionChange = useCallback((newSelected: string[], newMats: Material[]) => {
+    setSelectedMaterialMap(prev => {
+      const updated = { ...prev };
+      // Add all materials from the callback
+      for (const m of newMats) {
+        updated[m.id] = m;
+      }
+      // Remove deselected materials from map only if they were previously tracked
+      // (keep them in case they're re-selected later - the map is just a cache)
+      return updated;
+    });
+    onSelectionChange?.(newSelected, newMats);
+  }, [onSelectionChange]);
 
   const fetchMaterials = useCallback(async () => {
     setLoading(true);
@@ -59,9 +76,19 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
           });
         }
         setMaterials(list);
+        // Update selectedMaterialMap with fetched materials
+        setSelectedMaterialMap(prev => {
+          const updated = { ...prev };
+          for (const m of list) {
+            if (selected.includes(m.id) || selectedIds?.includes(m.id)) {
+              updated[m.id] = m;
+            }
+          }
+          return updated;
+        });
       }
     } finally { setLoading(false); }
-  }, [taskId, recordId, recipeStepId, onSelect, onSelectionChange]);
+  }, [taskId, recordId, recipeStepId, onSelect, onSelectionChange, selected, selectedIds]);
 
   const handleOpen = (v: boolean) => {
     setIsOpen(v);
@@ -83,6 +110,10 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
         const data = await res.json();
         if (data.code !== 0) { toast.error(data.message); return; }
         const newMat = data.data as Material;
+        // Add to materials list
+        setMaterials(prev => [...prev, newMat]);
+        // Add to selectedMaterialMap for thumbnail display
+        setSelectedMaterialMap(prev => ({ ...prev, [newMat.id]: newMat }));
         if (onSelect && !onSelectionChange) {
           onSelect(newMat);
         } else if (onSelectionChange) {
@@ -90,10 +121,9 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
           setSelected(newSelected);
           const newMats = materials.filter(m => newSelected.includes(m.id));
           newMats.push(newMat);
-          onSelectionChange(newSelected, newMats);
+          notifySelectionChange(newSelected, newMats);
         }
       }
-      fetchMaterials();
       toast.success('上传成功');
     } finally {
       setUploading(false);
@@ -102,6 +132,9 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
   };
 
   const handleSelect = (m: Material) => {
+    // Track material in map for thumbnail display
+    setSelectedMaterialMap(prev => ({ ...prev, [m.id]: m }));
+
     if (onSelect && !onSelectionChange) {
       // Single select mode
       onSelect(m);
@@ -111,12 +144,48 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
       const newSelected = selected.includes(m.id) ? selected.filter(x => x !== m.id) : [...selected, m.id];
       setSelected(newSelected);
       if (onSelectionChange) {
-        onSelectionChange(newSelected, materials.filter(mat => newSelected.includes(mat.id)));
+        notifySelectionChange(newSelected, materials.filter(mat => newSelected.includes(mat.id)));
       }
     }
   };
 
+  const handleDeselect = (mId: string) => {
+    const newSelected = selected.filter(x => x !== mId);
+    setSelected(newSelected);
+    // Remove from map if no longer selected
+    setSelectedMaterialMap(prev => {
+      const updated = { ...prev };
+      delete updated[mId];
+      return updated;
+    });
+    if (onSelectionChange) {
+      notifySelectionChange(newSelected, materials.filter(mat => newSelected.includes(mat.id)));
+    }
+  };
+
   const filtered = filterType === 'all' ? materials : materials.filter(m => m.material_type === filterType);
+
+  // Render selected thumbnails from the map (works even when dialog hasn't been opened)
+  const renderSelectedThumbnails = () => {
+    if (selected.length === 0) return null;
+    return (
+      <div className="flex gap-1.5 flex-wrap">
+        {selected.map(id => {
+          const m = selectedMaterialMap[id];
+          if (!m) return null;
+          return (
+            <div key={id} className="relative w-12 h-12 rounded-md overflow-hidden border border-border group">
+              <MediaThumbnail url={m.file_url} type={m.material_type as 'image' | 'video'} size="sm" />
+              <button type="button" className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center text-[8px] opacity-0 group-hover:opacity-100 transition-opacity"
+                onClick={(e) => { e.stopPropagation(); handleDeselect(id); }}>
+                ×
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   // If no controlled open, render inline trigger button + dialog
   if (controlledOpen === undefined && onOpenChange === undefined) {
@@ -131,19 +200,7 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
               <span className="text-xs text-muted-foreground">已选 {selected.length} 项</span>
             )}
           </div>
-          {selected.length > 0 && (
-            <div className="flex gap-1.5 flex-wrap">
-              {materials.filter(m => selected.includes(m.id)).map(m => (
-                <div key={m.id} className="relative w-12 h-12 rounded-md overflow-hidden border border-border group">
-                  <MediaThumbnail url={m.file_url} type={m.material_type as 'image' | 'video'} size="sm" />
-                  <button type="button" className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center text-[8px] opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={(e) => { e.stopPropagation(); handleSelect(m); }}>
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+          {renderSelectedThumbnails()}
         </div>
         <Dialog open={isOpen} onOpenChange={handleOpen}>
           <DialogContent className="max-w-lg max-h-[85vh]">
