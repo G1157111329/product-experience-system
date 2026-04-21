@@ -85,13 +85,13 @@ export default function DashboardPage() {
     return <div className="flex items-center justify-center py-20"><Loader2 className="h-6 w-6 animate-spin" /></div>;
   }
 
-  const completionRate = data.totalTasks > 0 ? Math.round((data.completedTasks / data.totalTasks) * 100) : 0;
-  const resolutionRate = data.totalIssues > 0 ? Math.round((data.resolvedIssues / data.totalIssues) * 100) : 0;
+  const completionRate = (data.totalTasks ?? 0) > 0 ? Math.round(((data.completedTasks ?? 0) / data.totalTasks) * 100) : 0;
+  const resolutionRate = (data.totalIssues ?? 0) > 0 ? Math.round(((data.resolvedIssues ?? 0) / data.totalIssues) * 100) : 0;
 
   const stats = [
-    { label: '体验计划', value: data.totalTasks, icon: ClipboardList, color: 'text-primary', bg: 'bg-primary/10' },
+    { label: '体验计划', value: data.totalTasks ?? 0, icon: ClipboardList, color: 'text-primary', bg: 'bg-primary/10' },
     { label: '完成率', value: `${completionRate}%`, icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-    { label: '问题总数', value: data.totalIssues, icon: AlertTriangle, color: 'text-amber-600', bg: 'bg-amber-50' },
+    { label: '问题总数', value: data.totalIssues ?? 0, icon: AlertTriangle, color: 'text-amber-600', bg: 'bg-amber-50' },
     { label: '整改率', value: `${resolutionRate}%`, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50' },
   ];
 
@@ -141,11 +141,11 @@ export default function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent>
-            {data.recentTasks.length === 0 ? (
+            {(data.recentTasks?.length ?? 0) === 0 ? (
               <p className="text-xs text-muted-foreground text-center py-4">暂无体验计划</p>
             ) : (
               <div className="space-y-2">
-                {data.recentTasks.map(t => (
+                {(data.recentTasks ?? []).map(t => (
                   <Link key={t.id} href={`/tasks/${t.id}`} className="flex items-center gap-2 py-2 px-2 rounded-lg hover:bg-muted/50 transition-colors">
                     <ClipboardList className="h-4 w-4 text-muted-foreground shrink-0" />
                     <div className="flex-1 min-w-0">
@@ -172,11 +172,11 @@ export default function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent>
-            {data.recentIssues.length === 0 ? (
+            {(data.recentIssues?.length ?? 0) === 0 ? (
               <p className="text-xs text-muted-foreground text-center py-4">暂无问题点</p>
             ) : (
               <div className="space-y-2">
-                {data.recentIssues.map(i => (
+                {(data.recentIssues ?? []).map(i => (
                   <Link key={i.id} href={`/issues/${i.id}`} className="flex items-center gap-2 py-2 px-2 rounded-lg hover:bg-muted/50 transition-colors">
                     <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
                     <div className="flex-1 min-w-0">
