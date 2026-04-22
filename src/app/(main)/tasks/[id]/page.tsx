@@ -612,9 +612,11 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
   const [savingRecord, setSavingRecord] = useState(false);
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
   const [, setSelectedMaterials] = useState<Material[]>([]);
-  const [selectedRecord, setSelectedRecord] = useState<CheckRecord | null>(null);
   const [recordMaterials, setRecordMaterials] = useState<Record<string, Material[]>>({});
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
+
+  // ── Edit mode ──
+  const [editRecordId, setEditRecordId] = useState<string | null>(null);
 
   // ── Dynamic options from platform_settings ──
   const [phaseOptions, setPhaseOptions] = useState<string[]>(defaultPhaseOptions);
@@ -810,10 +812,171 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
     setSelectedMaterials([]);
   };
 
+  // ── Populate forms from existing record (for editing) ──
+  const populateFormsFromRecord = (record: CheckRecord) => {
+    const cat = record.standard_category || '通用标准';
+    setFormCategory(cat);
+    setEvaluationResult(record.evaluation_result || '待定');
+    setFuzzyKeyword('');
+    setFuzzyResults([]);
+
+    if (cat === '通用标准') {
+      setGeneralForm({
+        test_phase: record.test_phase || '',
+        experience_flow: record.experience_flow || '',
+        sensory_dimension: record.sensory_dimension || '',
+        selectedItemId: '',  // will be matched by useEffect when items load
+        problem_description: record.problem_description || '',
+      });
+    } else if (cat === '品类标准') {
+      setCategoryForm({
+        sensory_dimension: record.sensory_dimension || '',
+        check_dimension: record.check_dimension || '',
+        sub_check_dimension: record.sub_check_dimension || '',
+        selectedItemId: '',
+        problem_description: record.problem_description || '',
+      });
+    } else if (cat === '感官评价标准') {
+      setSensoryForm({
+        sensory_dimension: record.sensory_dimension || '',
+        score: (record as unknown as Record<string, unknown>).measurement_value as string || '',
+        result_description: record.problem_description || '',
+      });
+    } else {
+      setNonStandardForm({
+        description: record.check_item || '',
+        problem_description: record.problem_description || '',
+      });
+    }
+  };
+
+  // ── Handle edit: populate form and open dialog ──
+  const handleEditRecord = (record: CheckRecord) => {
+    setEditRecordId(record.id);
+    populateFormsFromRecord(record);
+    // Pre-select existing materials for this record
+    const existingMats = recordMaterials[record.id] || [];
+    setSelectedMaterialIds(existingMats.map(m => m.id));
+    setSelectedMaterials(existingMats);
+    setAddDialogOpen(true);
+  };
+
+  // ── Auto-select matching standard item when in edit mode and items load ──
+  useEffect(() => {
+    if (!editRecordId) return;
+    if (formCategory === '通用标准' && generalItems.length > 0 && !generalForm.selectedItemId) {
+      // Try to find an item that matches the record's touch_point or check_requirement
+      const record = records.find(r => r.id === editRecordId);
+      if (record) {
+        const match = generalItems.find(i =>
+          (record.touch_point && i.touch_point === record.touch_point) ||
+          (record.check_requirement && i.check_requirement === record.check_requirement)
+        );
+        if (match) setGeneralForm(prev => ({ ...prev, selectedItemId: match.id }));
+      }
+    }
+  }, [editRecordId, formCategory, generalItems, records]);
+
+  useEffect(() => {
+    if (!editRecordId) return;
+    if (formCategory === '品类标准' && categoryItems.length > 0 && !categoryForm.selectedItemId) {
+      const record = records.find(r => r.id === editRecordId);
+      if (record) {
+        const match = categoryItems.find(i =>
+          (record.check_item && i.check_item === record.check_item) ||
+          (record.check_standard && i.check_standard === record.check_standard)
+        );
+        if (match) setCategoryForm(prev => ({ ...prev, selectedItemId: match.id }));
+      }
+    }
+  }, [editRecordId, formCategory, categoryItems, records]);
+
   const handleAdd = async () => {
     if (savingRecord) return;
     setSavingRecord(true);
     try {
+      // ── EDIT mode: update existing record ──
+      if (editRecordId) {
+        let body: Record<string, unknown> = { evaluation_result: evaluationResult };
+
+        if (formCategory === '通用标准') {
+          const selectedItem = generalItems.find(i => i.id === generalForm.selectedItemId);
+          body = {
+            ...body,
+            standard_category: '通用标准',
+            sensory_dimension: generalForm.sensory_dimension || null,
+            test_phase: generalForm.test_phase || null,
+            experience_flow: generalForm.experience_flow || null,
+            touch_point: selectedItem?.touch_point || null,
+            check_item: selectedItem?.touch_point || selectedItem?.check_item || generalForm.experience_flow || '',
+            check_requirement: selectedItem?.check_requirement || null,
+            experience_standard: selectedItem?.experience_standard || null,
+            problem_description: generalForm.problem_description || null,
+            check_dimension: null, sub_check_dimension: null, check_standard: null,
+          };
+        } else if (formCategory === '品类标准') {
+          const selectedItem = categoryItems.find(i => i.id === categoryForm.selectedItemId);
+          body = {
+            ...body,
+            standard_category: '品类标准',
+            sensory_dimension: categoryForm.sensory_dimension || null,
+            check_dimension: categoryForm.check_dimension || null,
+            sub_check_dimension: selectedItem?.sub_check_dimension || categoryForm.sub_check_dimension || null,
+            check_item: selectedItem?.check_item || '',
+            check_requirement: selectedItem?.check_requirement || null,
+            check_standard: selectedItem?.check_standard || null,
+            problem_description: categoryForm.problem_description || null,
+            test_phase: null, experience_flow: null, touch_point: null, experience_standard: null,
+          };
+        } else if (formCategory === '感官评价标准') {
+          const refItem = sensoryRefItems[0];
+          body = {
+            ...body,
+            standard_category: '感官评价标准',
+            sensory_dimension: sensoryForm.sensory_dimension || null,
+            check_item: `${sensoryForm.sensory_dimension}评价`,
+            check_requirement: refItem?.evaluation_prep || null,
+            check_standard: refItem?.subjective_rating || null,
+            problem_description: sensoryForm.result_description || null,
+            measurement_value: sensoryForm.score || null,
+            test_phase: null, experience_flow: null, touch_point: null,
+            check_dimension: null, sub_check_dimension: null,
+          };
+        } else {
+          body = {
+            ...body,
+            standard_category: '非标准',
+            check_item: nonStandardForm.description || '',
+            problem_description: nonStandardForm.problem_description || null,
+            test_phase: null, experience_flow: null, sensory_dimension: null, touch_point: null,
+            check_requirement: null, experience_standard: null, check_dimension: null,
+            sub_check_dimension: null, check_standard: null,
+          };
+        }
+
+        const res = await fetch(`/api/records/${editRecordId}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (data.code === 0) {
+          if (selectedMaterialIds.length > 0) {
+            for (const matId of selectedMaterialIds) {
+              await fetch('/api/materials', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: matId, record_id: editRecordId }),
+              });
+            }
+          }
+          setAddDialogOpen(false);
+          resetForms();
+          setEditRecordId(null);
+          onRefresh();
+          toast.success('问题点已更新');
+        }
+        return;
+      }
+
+      // ── ADD mode: create new record ──
       let body: Record<string, unknown> = { task_id: taskId, evaluation_result: evaluationResult, sort_order: records.length };
 
       if (formCategory === '通用标准') {
@@ -891,6 +1054,14 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
 
   // Check if form is valid for submission
   const isFormValid = () => {
+    if (editRecordId) {
+      // In edit mode, just need basic fields (no need to re-select a standard item)
+      if (formCategory === '通用标准') return !!(generalForm.test_phase && generalForm.experience_flow && generalForm.sensory_dimension);
+      if (formCategory === '品类标准') return !!categoryForm.check_dimension;
+      if (formCategory === '感官评价标准') return !!sensoryForm.sensory_dimension;
+      if (formCategory === '非标准') return !!nonStandardForm.description;
+      return false;
+    }
     if (formCategory === '通用标准') return !!(generalForm.test_phase && generalForm.experience_flow && generalForm.sensory_dimension && generalForm.selectedItemId);
     if (formCategory === '品类标准') return !!(categoryForm.check_dimension && categoryForm.selectedItemId);
     if (formCategory === '感官评价标准') return !!(sensoryForm.sensory_dimension && sensoryForm.score);
@@ -1091,7 +1262,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
           <Label>检查结果</Label>
           <Textarea placeholder="描述检查结果" value={generalForm.problem_description} onChange={(e) => setGeneralForm({ ...generalForm, problem_description: e.target.value })} rows={2} />
         </div>
-        <MaterialPicker taskId={taskId} selectedIds={selectedMaterialIds} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
+        <MaterialPicker taskId={taskId} recordId={editRecordId || undefined} selectedIds={selectedMaterialIds} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
         <div className="space-y-1.5">
           <Label>检查结果 *</Label>
           <div className="flex gap-2">
@@ -1108,7 +1279,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
             ))}
           </div>
         </div>
-        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid() || savingRecord}>{savingRecord ? '添加中...' : '添加'}</Button>
+        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid() || savingRecord}>{savingRecord ? (editRecordId ? '保存中...' : '添加中...') : (editRecordId ? '保存' : '添加')}</Button>
       </div>
     );
 
@@ -1207,7 +1378,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
           <Label>检查结果</Label>
           <Textarea placeholder="描述检查结果" value={categoryForm.problem_description} onChange={(e) => setCategoryForm({ ...categoryForm, problem_description: e.target.value })} rows={2} />
         </div>
-        <MaterialPicker taskId={taskId} selectedIds={selectedMaterialIds} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
+        <MaterialPicker taskId={taskId} recordId={editRecordId || undefined} selectedIds={selectedMaterialIds} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
         <div className="space-y-1.5">
           <Label>检查结果 *</Label>
           <div className="flex gap-2">
@@ -1224,7 +1395,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
             ))}
           </div>
         </div>
-        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid() || savingRecord}>{savingRecord ? '添加中...' : '添加'}</Button>
+        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid() || savingRecord}>{savingRecord ? (editRecordId ? '保存中...' : '添加中...') : (editRecordId ? '保存' : '添加')}</Button>
       </div>
     );
 
@@ -1277,7 +1448,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
           <Label>结果描述</Label>
           <Textarea placeholder="描述评价结果" value={sensoryForm.result_description} onChange={(e) => setSensoryForm({ ...sensoryForm, result_description: e.target.value })} rows={2} />
         </div>
-        <MaterialPicker taskId={taskId} selectedIds={selectedMaterialIds} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
+        <MaterialPicker taskId={taskId} recordId={editRecordId || undefined} selectedIds={selectedMaterialIds} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
         <div className="space-y-1.5">
           <Label>检查结果 *</Label>
           <div className="flex gap-2">
@@ -1294,7 +1465,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
             ))}
           </div>
         </div>
-        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid() || savingRecord}>{savingRecord ? '添加中...' : '添加'}</Button>
+        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid() || savingRecord}>{savingRecord ? (editRecordId ? '保存中...' : '添加中...') : (editRecordId ? '保存' : '添加')}</Button>
       </div>
     );
 
@@ -1315,7 +1486,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
           <Textarea placeholder="描述检查结果（可选）" value={nonStandardForm.problem_description}
             onChange={(e) => setNonStandardForm({ ...nonStandardForm, problem_description: e.target.value })} rows={2} />
         </div>
-        <MaterialPicker taskId={taskId} selectedIds={selectedMaterialIds} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
+        <MaterialPicker taskId={taskId} recordId={editRecordId || undefined} selectedIds={selectedMaterialIds} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
         <div className="space-y-1.5">
           <Label>检查结果 *</Label>
           <div className="flex gap-2">
@@ -1332,7 +1503,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
             ))}
           </div>
         </div>
-        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid() || savingRecord}>{savingRecord ? '添加中...' : '添加'}</Button>
+        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid() || savingRecord}>{savingRecord ? (editRecordId ? '保存中...' : '添加中...') : (editRecordId ? '保存' : '添加')}</Button>
       </div>
     );
 
@@ -1343,7 +1514,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
     const res = await fetch(`/api/records/${record.id}`, { method: 'DELETE' });
     const data = await res.json();
     if (data.code === 0) {
-      if (selectedRecord?.id === record.id) setSelectedRecord(null);
+      if (editRecordId === record.id) setEditRecordId(null);
       onRefresh();
       toast.success('问题点已删除');
     }
@@ -1383,7 +1554,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
                   <div
                     key={record.id}
                     className="p-3 rounded-lg bg-muted/30 hover:bg-muted/50 cursor-pointer transition-colors"
-                    onClick={() => setSelectedRecord(selectedRecord?.id === record.id ? null : record)}
+                    onClick={() => handleEditRecord(record)}
                   >
                     <div className="flex items-center gap-3">
                       <span className={cn(
@@ -1443,21 +1614,10 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
         ))
       )}
 
-      {/* Record detail dialog */}
-      {selectedRecord && (
-        <RecordDetailCard
-          record={selectedRecord}
-          taskId={taskId}
-          existingMaterials={recordMaterials[selectedRecord.id] || []}
-          onRefresh={onRefresh}
-          onClose={() => setSelectedRecord(null)}
-          onImageClick={open}
-        />
-      )}
-
       {/* Add button */}
       <div className="sticky bottom-4">
         <Button className="w-full" onClick={async () => {
+          setEditRecordId(null);
           resetForms();
           // Apply saved senses defaults from DB (admin global setting)
           try {
@@ -1481,10 +1641,10 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
         </Button>
       </div>
 
-      {/* Add dialog */}
-      <Dialog open={addDialogOpen} onOpenChange={(open) => { setAddDialogOpen(open); if (!open) resetForms(); }}>
+      {/* Add/Edit dialog */}
+      <Dialog open={addDialogOpen} onOpenChange={(v) => { setAddDialogOpen(v); if (!v) { resetForms(); setEditRecordId(null); } }}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>新增问题点</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editRecordId ? '编辑问题点' : '新增问题点'}</DialogTitle></DialogHeader>
           <div className="mt-2">{renderAddForm()}</div>
         </DialogContent>
       </Dialog>
@@ -1493,425 +1653,6 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
 }
 
 
-/* ─── Record Detail Expand ─── */
-function RecordDetailCard({ record, taskId, existingMaterials, onRefresh, onClose, onImageClick }: {
-  record: CheckRecord; taskId: string; existingMaterials: Material[]; onRefresh: () => void; onClose: () => void; onImageClick: (url: string) => void;
-}) {
-  const [open, setOpen] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  // Form state - pre-filled with record data
-  const [formCategory, setFormCategory] = useState(record.standard_category || '通用标准');
-  // General standard fields
-  const [genForm, setGenForm] = useState({
-    test_phase: record.test_phase || '',
-    experience_flow: record.experience_flow || '',
-    sensory_dimension: record.sensory_dimension || '',
-    touch_point: record.touch_point || '',
-    check_requirement: record.check_requirement || '',
-    experience_standard: record.experience_standard || '',
-    check_tool: '',
-    evaluation_result: record.evaluation_result || '待定',
-  });
-  // Category standard fields
-  const [catForm, setCatForm] = useState({
-    sensory_dimension: record.sensory_dimension || '',
-    check_dimension: record.check_dimension || '',
-    sub_check_dimension: record.sub_check_dimension || '',
-    check_item: record.check_item || '',
-    check_requirement: record.check_requirement || '',
-    check_standard: record.check_standard || '',
-    evaluation_result: record.evaluation_result || '待定',
-  });
-  // Sensory evaluation fields
-  const [senForm, setSenForm] = useState({
-    sensory_dimension: record.sensory_dimension || '',
-    evaluation_prep: '',
-    subjective_score: '',
-    subjective_rating: '',
-    experience_standard: record.experience_standard || '',
-    evaluation_result: record.evaluation_result || '待定',
-  });
-  // Non-standard fields
-  const [nonStandardForm, setNonStandardForm] = useState({
-    description: record.check_item || record.problem_description || '',
-    problem_description: record.problem_description || '',
-    evaluation_result: record.evaluation_result || '待定',
-  });
-  // Description & materials
-  const [description, setDescription] = useState(record.problem_description || '');
-  const [referenceIds, setReferenceIds] = useState<string[]>([]);
-  const [localMaterials, setLocalMaterials] = useState<Material[]>(existingMaterials);
-
-  // Dynamic options from platform_settings
-  const [phaseOptions, setPhaseOptions] = useState<string[]>(defaultPhaseOptions);
-  const [flowByPhase, setFlowByPhase] = useState<Record<string, string[]>>(defaultFlowByPhase);
-  const [sensoryOptions, setSensoryOptions] = useState<string[]>(defaultSensoryOptions);
-
-  useEffect(() => {
-    fetch('/api/settings?key=standard_options').then(r => r.json()).then(d => {
-      if (d.code === 0 && d.data && (d.data.test_phases?.length > 0 || d.data.sensory_dimensions?.length > 0)) {
-        setPhaseOptions(d.data.test_phases || defaultPhaseOptions);
-        setFlowByPhase(d.data.experience_flows || defaultFlowByPhase);
-        setSensoryOptions(d.data.sensory_dimensions || defaultSensoryOptions);
-      }
-    }).catch(() => {});
-  }, []);
-
-  // General standard auto-fill
-  const [generalRefItems, setGeneralRefItems] = useState<Array<{ touch_point: string; check_requirement: string; experience_standard: string }>>([]);
-  useEffect(() => {
-    if (formCategory !== '通用标准') return;
-    if (!genForm.test_phase || !genForm.experience_flow || !genForm.sensory_dimension) {
-      setGeneralRefItems([]);
-      return;
-    }
-    fetch(`/api/standard-items/search?standard_category=通用标准&experience_flow=${encodeURIComponent(genForm.experience_flow)}&keyword=${encodeURIComponent(genForm.sensory_dimension)}`)
-      .then(r => r.json()).then(d => { if (d.code === 0) setGeneralRefItems(d.data || []); }).catch(() => {});
-  }, [formCategory, genForm.test_phase, genForm.experience_flow, genForm.sensory_dimension]);
-
-  const getEvaluationResult = () => {
-    if (formCategory === '通用标准') return genForm.evaluation_result;
-    if (formCategory === '品类标准') return catForm.evaluation_result;
-    if (formCategory === '感官评价标准') return senForm.evaluation_result;
-    return nonStandardForm.evaluation_result;
-  };
-
-  const setEvaluationResult = (val: string) => {
-    if (formCategory === '通用标准') setGenForm(f => ({ ...f, evaluation_result: val }));
-    else if (formCategory === '品类标准') setCatForm(f => ({ ...f, evaluation_result: val }));
-    else if (formCategory === '感官评价标准') setSenForm(f => ({ ...f, evaluation_result: val }));
-    else setNonStandardForm(f => ({ ...f, evaluation_result: val }));
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const updateBody: Record<string, unknown> = {
-        standard_category: formCategory,
-        problem_description: description,
-        evaluation_result: getEvaluationResult(),
-      };
-
-      if (formCategory === '通用标准') {
-        Object.assign(updateBody, {
-          test_phase: genForm.test_phase || null,
-          experience_flow: genForm.experience_flow || null,
-          sensory_dimension: genForm.sensory_dimension || null,
-          touch_point: genForm.touch_point || null,
-          check_requirement: genForm.check_requirement || null,
-          experience_standard: genForm.experience_standard || null,
-          check_tool: genForm.check_tool || null,
-          check_dimension: null, sub_check_dimension: null, check_standard: null, check_item: null,
-        });
-      } else if (formCategory === '品类标准') {
-        Object.assign(updateBody, {
-          sensory_dimension: catForm.sensory_dimension || null,
-          check_dimension: catForm.check_dimension || null,
-          sub_check_dimension: catForm.sub_check_dimension || null,
-          check_item: catForm.check_item || null,
-          check_requirement: catForm.check_requirement || null,
-          check_standard: catForm.check_standard || null,
-          test_phase: null, experience_flow: null, touch_point: null, experience_standard: null, check_tool: null,
-        });
-      } else if (formCategory === '感官评价标准') {
-        Object.assign(updateBody, {
-          sensory_dimension: senForm.sensory_dimension || null,
-          evaluation_prep: senForm.evaluation_prep || null,
-          subjective_score: senForm.subjective_score || null,
-          subjective_rating: senForm.subjective_rating || null,
-          experience_standard: senForm.experience_standard || null,
-          test_phase: null, experience_flow: null, touch_point: null, check_requirement: null, check_tool: null,
-          check_dimension: null, sub_check_dimension: null, check_standard: null, check_item: null,
-        });
-      } else {
-        // 非标准
-        Object.assign(updateBody, {
-          check_item: nonStandardForm.description || null,
-          problem_description: nonStandardForm.problem_description || null,
-          test_phase: null, experience_flow: null, sensory_dimension: null, touch_point: null,
-          check_requirement: null, experience_standard: null, check_tool: null,
-          check_dimension: null, sub_check_dimension: null, check_standard: null,
-        });
-      }
-
-      await fetch(`/api/records/${record.id}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updateBody),
-      });
-      // Link referenced materials
-      if (referenceIds.length > 0) {
-        for (const matId of referenceIds) {
-          await fetch('/api/materials', {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: matId, record_id: record.id }),
-          });
-        }
-        setReferenceIds([]);
-      }
-      onRefresh();
-      onClose();
-      toast.success('已保存');
-    } finally { setSaving(false); }
-  };
-
-  const handleCancel = () => { setReferenceIds([]); onClose(); };
-
-  const evalResultButtons = (current: string, setter: (v: string) => void) => (
-    <div className="flex gap-2">
-      {['合格', '不合格', '待定'].map(r => (
-        <button key={r} type="button" onClick={() => setter(r)}
-          className={cn('flex-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors',
-            current === r
-              ? r === '合格' ? 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800'
-                : r === '不合格' ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800'
-                : 'bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-800'
-              : 'bg-background border-border hover:bg-muted/50')}>
-          {r}
-        </button>
-      ))}
-    </div>
-  );
-
-  const categorySelector = (
-    <div className="space-y-1.5">
-      <Label>标准类型</Label>
-      <div className="flex gap-2 flex-wrap">
-        {['通用标准', '品类标准', '感官评价标准', '非标准'].map(cat => (
-          <button key={cat} type="button" onClick={() => setFormCategory(cat)}
-            className={cn('px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors',
-              formCategory === cat ? 'bg-primary text-primary-foreground border-primary' : 'bg-background border-border hover:bg-muted/50')}>
-            {cat}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-
-  const renderEditForm = () => {
-    if (formCategory === '通用标准') return (
-      <div className="space-y-3">
-        {categorySelector}
-        <div className="grid grid-cols-3 gap-3">
-          <div className="space-y-1.5">
-            <Label>产品使用阶段</Label>
-            <Select value={genForm.test_phase} onValueChange={(v) => setGenForm({ ...genForm, test_phase: v, experience_flow: '', touch_point: '', check_requirement: '', experience_standard: '' })}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="选择" /></SelectTrigger>
-              <SelectContent>{phaseOptions.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label>体验流程</Label>
-            <Select value={genForm.experience_flow} onValueChange={(v) => setGenForm({ ...genForm, experience_flow: v, touch_point: '', check_requirement: '', experience_standard: '' })}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="选择" /></SelectTrigger>
-              <SelectContent>{(flowByPhase[genForm.test_phase] || []).map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label>感官维度</Label>
-            <Select value={genForm.sensory_dimension} onValueChange={(v) => setGenForm({ ...genForm, sensory_dimension: v, touch_point: '', check_requirement: '', experience_standard: '' })}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="选择" /></SelectTrigger>
-              <SelectContent>{sensoryOptions.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-        </div>
-        {genForm.test_phase && genForm.experience_flow && genForm.sensory_dimension && generalRefItems.length > 0 && (
-          <div className="space-y-1.5">
-            <Label>匹配标准项</Label>
-            <Select value={genForm.touch_point} onValueChange={(v) => {
-              const item = generalRefItems.find(i => i.touch_point === v);
-              setGenForm({ ...genForm, touch_point: v, check_requirement: item?.check_requirement || '', experience_standard: item?.experience_standard || '' });
-            }}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="选择匹配项" /></SelectTrigger>
-              <SelectContent>
-                {generalRefItems.map((item, i) => <SelectItem key={i} value={item.touch_point || `item-${i}`}>{item.touch_point || `项目${i + 1}`}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <Label>触点</Label>
-            <Input className="h-8 text-xs" value={genForm.touch_point} onChange={e => setGenForm({ ...genForm, touch_point: e.target.value })} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>检验范围及具体要求</Label>
-            <Input className="h-8 text-xs" value={genForm.check_requirement} onChange={e => setGenForm({ ...genForm, check_requirement: e.target.value })} />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <Label>体验标准</Label>
-            <Input className="h-8 text-xs" value={genForm.experience_standard} onChange={e => setGenForm({ ...genForm, experience_standard: e.target.value })} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>测量工具</Label>
-            <Input className="h-8 text-xs" value={genForm.check_tool} onChange={e => setGenForm({ ...genForm, check_tool: e.target.value })} />
-          </div>
-        </div>
-        <div className="space-y-1.5">
-          <Label>问题描述</Label>
-          <Textarea placeholder="填写问题描述..." value={description} onChange={e => setDescription(e.target.value)} rows={2} />
-        </div>
-        <MaterialPicker taskId={taskId} recordId={record.id} selectedIds={referenceIds} onSelectionChange={(ids, mats) => { setReferenceIds(ids); setLocalMaterials(mats); }} />
-        <div className="space-y-1.5">
-          <Label>检查结果</Label>
-          {evalResultButtons(genForm.evaluation_result, (v) => setGenForm(f => ({ ...f, evaluation_result: v })))}
-        </div>
-      </div>
-    );
-
-    if (formCategory === '品类标准') return (
-      <div className="space-y-3">
-        {categorySelector}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <Label>感官维度</Label>
-            <Input className="h-8 text-xs" value={catForm.sensory_dimension} onChange={e => setCatForm({ ...catForm, sensory_dimension: e.target.value })} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>检查维度</Label>
-            <Input className="h-8 text-xs" value={catForm.check_dimension} onChange={e => setCatForm({ ...catForm, check_dimension: e.target.value })} />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <Label>细分检查维度</Label>
-            <Input className="h-8 text-xs" value={catForm.sub_check_dimension} onChange={e => setCatForm({ ...catForm, sub_check_dimension: e.target.value })} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>具体检查条目</Label>
-            <Input className="h-8 text-xs" value={catForm.check_item} onChange={e => setCatForm({ ...catForm, check_item: e.target.value })} />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <Label>检查要求及区域</Label>
-            <Input className="h-8 text-xs" value={catForm.check_requirement} onChange={e => setCatForm({ ...catForm, check_requirement: e.target.value })} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>检查标准</Label>
-            <Input className="h-8 text-xs" value={catForm.check_standard} onChange={e => setCatForm({ ...catForm, check_standard: e.target.value })} />
-          </div>
-        </div>
-        <div className="space-y-1.5">
-          <Label>问题描述</Label>
-          <Textarea placeholder="填写问题描述..." value={description} onChange={e => setDescription(e.target.value)} rows={2} />
-        </div>
-        <MaterialPicker taskId={taskId} recordId={record.id} selectedIds={referenceIds} onSelectionChange={(ids, mats) => { setReferenceIds(ids); setLocalMaterials(mats); }} />
-        <div className="space-y-1.5">
-          <Label>检查结果</Label>
-          {evalResultButtons(catForm.evaluation_result, (v) => setCatForm(f => ({ ...f, evaluation_result: v })))}
-        </div>
-      </div>
-    );
-
-    if (formCategory === '感官评价标准') return (
-      <div className="space-y-3">
-        {categorySelector}
-        <div className="space-y-1.5">
-          <Label>感官维度</Label>
-          <Input className="h-8 text-xs" value={senForm.sensory_dimension} onChange={e => setSenForm({ ...senForm, sensory_dimension: e.target.value })} />
-        </div>
-        <div className="space-y-1.5">
-          <Label>感官评价准备</Label>
-          <Textarea value={senForm.evaluation_prep} onChange={e => setSenForm({ ...senForm, evaluation_prep: e.target.value })} rows={2} />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <Label>主观满意度(分值)</Label>
-            <Input className="h-8 text-xs" value={senForm.subjective_score} onChange={e => setSenForm({ ...senForm, subjective_score: e.target.value })} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>主观感受描述</Label>
-            <Input className="h-8 text-xs" value={senForm.subjective_rating} onChange={e => setSenForm({ ...senForm, subjective_rating: e.target.value })} />
-          </div>
-        </div>
-        <div className="space-y-1.5">
-          <Label>体验标准</Label>
-          <Input className="h-8 text-xs" value={senForm.experience_standard} onChange={e => setSenForm({ ...senForm, experience_standard: e.target.value })} />
-        </div>
-        <div className="space-y-1.5">
-          <Label>问题描述</Label>
-          <Textarea placeholder="填写问题描述..." value={description} onChange={e => setDescription(e.target.value)} rows={2} />
-        </div>
-        <MaterialPicker taskId={taskId} recordId={record.id} selectedIds={referenceIds} onSelectionChange={(ids, mats) => { setReferenceIds(ids); setLocalMaterials(mats); }} />
-        <div className="space-y-1.5">
-          <Label>检查结果</Label>
-          {evalResultButtons(senForm.evaluation_result, (v) => setSenForm(f => ({ ...f, evaluation_result: v })))}
-        </div>
-      </div>
-    );
-
-    // 非标准
-    return (
-      <div className="space-y-3">
-        {categorySelector}
-        <div className="p-3 rounded-lg bg-muted/30 border border-border">
-          <p className="text-xs text-muted-foreground">非标准检查项无需关联产品使用阶段、体验流程、感官维度，仅需描述检查内容和结果</p>
-        </div>
-        <div className="space-y-1.5">
-          <Label>描述结果 *</Label>
-          <Textarea placeholder="描述检查项内容" value={nonStandardForm.description}
-            onChange={e => setNonStandardForm({ ...nonStandardForm, description: e.target.value })} rows={3} />
-        </div>
-        <div className="space-y-1.5">
-          <Label>检查结果描述</Label>
-          <Textarea placeholder="描述检查结果（可选）" value={nonStandardForm.problem_description}
-            onChange={e => setNonStandardForm({ ...nonStandardForm, problem_description: e.target.value })} rows={2} />
-        </div>
-        <MaterialPicker taskId={taskId} recordId={record.id} selectedIds={referenceIds} onSelectionChange={(ids, mats) => { setReferenceIds(ids); setLocalMaterials(mats); }} />
-        <div className="space-y-1.5">
-          <Label>检查结果</Label>
-          {evalResultButtons(nonStandardForm.evaluation_result, (v) => setNonStandardForm(f => ({ ...f, evaluation_result: v })))}
-        </div>
-      </div>
-    );
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) handleCancel(); else setOpen(v); }}>
-      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="text-base">编辑问题点</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4">
-          {renderEditForm()}
-
-          {/* Existing materials preview */}
-          {localMaterials.length > 0 && (
-            <div className="space-y-2">
-              <Label>已有素材</Label>
-              <div className="grid grid-cols-4 gap-2">
-                {localMaterials.map((mat) => (
-                  <div key={mat.id} className="aspect-square rounded-lg overflow-hidden bg-muted cursor-pointer border"
-                    onClick={() => onImageClick(mat.file_url)}>
-                    {mat.material_type === 'image' ? (
-                      <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center relative">
-                        <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                          <Play className="h-5 w-5 text-white fill-white" />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Save / Cancel */}
-          <div className="flex gap-2 justify-end pt-2 border-t">
-            <Button variant="outline" onClick={handleCancel}>取消</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving ? '保存中...' : '保存'}</Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 /* ─── Tab: 功能效果 ─── */
 function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpdate: () => void }) {
