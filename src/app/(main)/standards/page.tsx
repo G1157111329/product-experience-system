@@ -49,6 +49,7 @@ interface RecipeLibItem {
   recipe_library_steps: Array<{ id: string; step_number: number; operation: string; problem_point: string | null }>;
 }
 
+/* ── Recipe Library Section ── */
 function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWithProducts[]; isAdmin: boolean }) {
   const [recipes, setRecipes] = useState<RecipeLibItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -221,8 +222,8 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
   );
 }
 
-export default function StandardsPage() {
-  const { isAdmin } = useAuth();
+/* ── Experience Standards Section ── */
+function ExperienceStandardsSection({ categories, isAdmin }: { categories: CategoryWithProducts[]; isAdmin: boolean }) {
   const [standards, setStandards] = useState<Standard[]>([]);
   const [loading, setLoading] = useState(true);
   const [keyword, setKeyword] = useState('');
@@ -239,16 +240,6 @@ export default function StandardsPage() {
   const [createProduct, setCreateProduct] = useState('');
   const [importForm, setImportForm] = useState({ category: '通用标准', product_category: '', product: '', description: '' });
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [categories, setCategories] = useState<CategoryWithProducts[]>([]);
-
-  // Fetch categories for cascade
-  const fetchCategories = useCallback(async () => {
-    const res = await fetch('/api/categories');
-    const data = await res.json();
-    if (data.code === 0) setCategories(data.data || []);
-  }, []);
-
-  useEffect(() => { fetchCategories(); }, [fetchCategories]);
 
   const fetchStandards = async () => {
     setLoading(true);
@@ -338,94 +329,40 @@ export default function StandardsPage() {
   };
 
   return (
-    <div className="p-4 lg:p-6 space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl lg:text-2xl font-semibold">标准管理</h1>
-          <p className="text-sm text-muted-foreground mt-1">管理和维护体验标准库</p>
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <BookOpen className="h-5 w-5 text-primary" />
+          <h2 className="text-base font-semibold">体验标准</h2>
+          <Badge variant="secondary" className="text-[10px]">{standards.length}</Badge>
         </div>
         <div className="flex gap-2">
           {selectedIds.size > 0 && (
-            <Button size="sm" variant="destructive" className="shrink-0" onClick={() => setDeleteDialogOpen(true)}>
-              <Trash2 className="h-4 w-4 mr-1.5" /> 删除({selectedIds.size})
+            <Button size="sm" variant="destructive" className="h-7 text-xs shrink-0" onClick={() => setDeleteDialogOpen(true)}>
+              <Trash2 className="h-3 w-3 mr-1" /> 删除({selectedIds.size})
             </Button>
           )}
           {isAdmin && (
             <>
-              <Button size="sm" variant="outline" className="shrink-0" onClick={() => setImportDialogOpen(true)}>
-                <Upload className="h-4 w-4 mr-1.5" /> 批量导入
+              <Button variant="outline" size="sm" className="h-7 text-xs gap-1 shrink-0" onClick={() => setImportDialogOpen(true)}>
+                <Upload className="h-3 w-3" /> 批量导入
               </Button>
-              <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-                <Button size="sm" className="shrink-0" onClick={() => setCreateDialogOpen(true)}>
-                  <Plus className="h-4 w-4 mr-1.5" /> 新建标准
-                </Button>
-                <DialogContent>
-                  <DialogHeader><DialogTitle>新建标准</DialogTitle></DialogHeader>
-                  <div className="space-y-4 mt-2">
-                    <div className="space-y-1.5">
-                      <Label>选择标准分类</Label>
-                      <div className="grid gap-2">
-                        {Object.entries(categoryConfig).map(([key, cfg]) => (
-                          <div
-                            key={key}
-                            className={cn(
-                              'p-3 rounded-lg border-2 cursor-pointer transition-colors',
-                              createCategory === key ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/30'
-                            )}
-                            onClick={() => { setCreateCategory(key); setCreateProductCategory(''); setCreateProduct(''); }}
-                          >
-                            <div className="flex items-center gap-2">
-                              <Badge className={cn('text-[10px]', cfg.color)}>{cfg.label}</Badge>
-                              {key === '食谱功能标准' && <Badge variant="secondary" className="text-[10px]">开发中</Badge>}
-                            </div>
-                            <p className="text-xs text-muted-foreground mt-1">{cfg.desc}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    {createCategory === '品类标准' && (
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1.5">
-                          <Label>品类 *</Label>
-                          <Select value={createProductCategory} onValueChange={(v) => { setCreateProductCategory(v); setCreateProduct(''); }}>
-                            <SelectTrigger><SelectValue placeholder="选择品类" /></SelectTrigger>
-                            <SelectContent>
-                              {categories.map(cat => <SelectItem key={cat.id} value={cat.name}>{cat.name}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label>产品 *</Label>
-                          <Select value={createProduct} onValueChange={setCreateProduct} disabled={!createProductCategory}>
-                            <SelectTrigger><SelectValue placeholder={createProductCategory ? '选择产品' : '请先选择品类'} /></SelectTrigger>
-                            <SelectContent>
-                              {(categories.find(c => c.name === createProductCategory)?.products || []).map(p => (
-                                <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    )}
-                    <Button onClick={handleCreate} className="w-full" disabled={createCategory === '食谱功能标准' || (createCategory === '品类标准' && (!createProductCategory || !createProduct))}>
-                      创建并编辑
-                    </Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
+              <Button size="sm" className="h-7 text-xs gap-1 shrink-0" onClick={() => setCreateDialogOpen(true)}>
+                <Plus className="h-3 w-3" /> 新建标准
+              </Button>
             </>
           )}
         </div>
       </div>
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
+      <div className="flex gap-2">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="搜索标准..." className="pl-9" value={keyword} onChange={(e) => setKeyword(e.target.value)} />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input placeholder="搜索标准..." className="pl-9 h-8 text-xs" value={keyword} onChange={(e) => setKeyword(e.target.value)} />
         </div>
         <Select value={filterCategory} onValueChange={setFilterCategory}>
-          <SelectTrigger className="w-full sm:w-40"><SelectValue placeholder="全部分类" /></SelectTrigger>
+          <SelectTrigger className="w-28 h-8 text-xs"><SelectValue placeholder="全部分类" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部分类</SelectItem>
             {Object.entries(categoryConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
@@ -433,35 +370,39 @@ export default function StandardsPage() {
         </Select>
       </div>
 
-      {/* List */}
+      {/* List - card style matching RecipeLibrarySection */}
       {loading ? (
-        <div className="grid gap-3">{[1,2,3].map(i => <div key={i} className="h-20 bg-muted animate-pulse rounded-lg" />)}</div>
+        <div className="grid gap-2">{[1,2,3].map(i => <div key={i} className="h-16 bg-muted animate-pulse rounded-lg" />)}</div>
       ) : standards.length === 0 ? (
-        <Card><CardContent className="flex flex-col items-center py-12 text-center">
-          <BookOpen className="h-10 w-10 text-muted-foreground/50 mb-3" />
-          <p className="text-sm text-muted-foreground">暂无标准</p>
+        <Card><CardContent className="flex flex-col items-center py-8 text-center">
+          <BookOpen className="h-8 w-8 text-muted-foreground/50 mb-2" />
+          <p className="text-xs text-muted-foreground">暂无标准</p>
         </CardContent></Card>
       ) : (
-        <div className="grid gap-3">
-          <div className="flex items-center gap-3 px-1">
-            <Checkbox checked={selectedIds.size === standards.length && standards.length > 0} onCheckedChange={toggleSelectAll} className="h-4 w-4" />
-            <span className="text-xs text-muted-foreground">{selectedIds.size > 0 ? `已选 ${selectedIds.size} 项` : '全选'}</span>
-          </div>
+        <div className="grid gap-2">
+          {isAdmin && (
+            <div className="flex items-center gap-3 px-1">
+              <Checkbox checked={selectedIds.size === standards.length && standards.length > 0} onCheckedChange={toggleSelectAll} className="h-4 w-4" />
+              <span className="text-xs text-muted-foreground">{selectedIds.size > 0 ? `已选 ${selectedIds.size} 项` : '全选'}</span>
+            </div>
+          )}
           {standards.map((std) => (
             <div key={std.id} className="flex items-center gap-2">
-              <Checkbox checked={selectedIds.has(std.id)} onCheckedChange={() => toggleSelect(std.id)} className="h-4 w-4 shrink-0" />
+              {isAdmin && (
+                <Checkbox checked={selectedIds.has(std.id)} onCheckedChange={() => toggleSelect(std.id)} className="h-4 w-4 shrink-0" />
+              )}
               <Link href={`/standards/${std.id}`} className="flex-1 min-w-0">
                 <Card className="hover:bg-muted/30 transition-colors">
-                  <CardContent className="p-4 flex items-center gap-4">
+                  <CardContent className="p-3 flex items-center gap-3">
+                    <Badge variant="secondary" className={cn('text-[9px] shrink-0', categoryConfig[std.category]?.color)}>
+                      {categoryConfig[std.category]?.label || std.category}
+                    </Badge>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-sm font-medium truncate">{std.standard_name}</h3>
-                        <Badge variant="secondary" className={cn('text-[10px]', categoryConfig[std.category]?.color)}>
-                          {categoryConfig[std.category]?.label || std.category}
-                        </Badge>
+                        <span className="text-sm font-medium truncate">{std.standard_name}</span>
                         {std.product_category && <span className="text-[10px] text-muted-foreground">{std.product_category}{std.product ? ` - ${std.product}` : ''}</span>}
                       </div>
-                      <span className="text-xs text-muted-foreground">{std.standard_items?.[0]?.count || 0} 项检查项</span>
+                      <span className="text-[10px] text-muted-foreground">{std.standard_items?.[0]?.count || 0} 项检查项</span>
                     </div>
                     <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
                   </CardContent>
@@ -472,8 +413,62 @@ export default function StandardsPage() {
         </div>
       )}
 
-      {/* Recipe Library Section */}
-      <RecipeLibrarySection categories={categories} isAdmin={isAdmin} />
+      {/* Create Standard Dialog */}
+      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>新建标准</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div className="space-y-1.5">
+              <Label>选择标准分类</Label>
+              <div className="grid gap-2">
+                {Object.entries(categoryConfig).map(([key, cfg]) => (
+                  <div
+                    key={key}
+                    className={cn(
+                      'p-3 rounded-lg border-2 cursor-pointer transition-colors',
+                      createCategory === key ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/30'
+                    )}
+                    onClick={() => { setCreateCategory(key); setCreateProductCategory(''); setCreateProduct(''); }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Badge className={cn('text-[10px]', cfg.color)}>{cfg.label}</Badge>
+                      {key === '食谱功能标准' && <Badge variant="secondary" className="text-[10px]">开发中</Badge>}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">{cfg.desc}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {createCategory === '品类标准' && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>品类 *</Label>
+                  <Select value={createProductCategory} onValueChange={(v) => { setCreateProductCategory(v); setCreateProduct(''); }}>
+                    <SelectTrigger><SelectValue placeholder="选择品类" /></SelectTrigger>
+                    <SelectContent>
+                      {categories.map(cat => <SelectItem key={cat.id} value={cat.name}>{cat.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>产品 *</Label>
+                  <Select value={createProduct} onValueChange={setCreateProduct} disabled={!createProductCategory}>
+                    <SelectTrigger><SelectValue placeholder={createProductCategory ? '选择产品' : '请先选择品类'} /></SelectTrigger>
+                    <SelectContent>
+                      {(categories.find(c => c.name === createProductCategory)?.products || []).map(p => (
+                        <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+            <Button onClick={handleCreate} className="w-full" disabled={createCategory === '食谱功能标准' || (createCategory === '品类标准' && (!createProductCategory || !createProduct))}>
+              创建并编辑
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Import Dialog */}
       <Dialog open={importDialogOpen} onOpenChange={(open) => { setImportDialogOpen(open); if (!open) setSelectedFile(null); }}>
@@ -547,6 +542,60 @@ export default function StandardsPage() {
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/* ── Main Page ── */
+export default function StandardsPage() {
+  const { isAdmin } = useAuth();
+  const [categories, setCategories] = useState<CategoryWithProducts[]>([]);
+  const [activeSection, setActiveSection] = useState<'standards' | 'recipes'>('standards');
+
+  const fetchCategories = useCallback(async () => {
+    const res = await fetch('/api/categories');
+    const data = await res.json();
+    if (data.code === 0) setCategories(data.data || []);
+  }, []);
+
+  useEffect(() => { fetchCategories(); }, [fetchCategories]);
+
+  return (
+    <div className="p-4 lg:p-6 space-y-4">
+      <div>
+        <h1 className="text-xl lg:text-2xl font-semibold">标准管理</h1>
+        <p className="text-sm text-muted-foreground mt-1">管理和维护体验标准库与食谱库</p>
+      </div>
+
+      {/* Section Tabs */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => setActiveSection('standards')}
+          className={cn(
+            'flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+            activeSection === 'standards' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'
+          )}
+        >
+          <BookOpen className="h-4 w-4" /> 体验标准
+        </button>
+        <button
+          onClick={() => setActiveSection('recipes')}
+          className={cn(
+            'flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+            activeSection === 'recipes' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'
+          )}
+        >
+          <ChefHat className="h-4 w-4" /> 食谱库
+        </button>
+      </div>
+
+      {/* Section Content */}
+      {activeSection === 'standards' && (
+        <ExperienceStandardsSection categories={categories} isAdmin={isAdmin} />
+      )}
+      {activeSection === 'recipes' && (
+        <RecipeLibrarySection categories={categories} isAdmin={isAdmin} />
+      )}
     </div>
   );
 }

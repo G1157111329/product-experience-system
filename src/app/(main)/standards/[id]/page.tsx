@@ -42,9 +42,9 @@ interface StandardItem {
 interface Standard { id: string; standard_name: string; category: string; product_category: string | null; version: string; description: string | null; standard_items: StandardItem[]; }
 
 // ── Constants ──────────────────────────────────────────────────────
-const sensoryOptions = ['视觉', '听觉', '触觉', '嗅觉', '味觉'];
-const phaseOptions = ['开箱', '首次安装', '产品使用', '清洁收纳', '其他'];
-const flowByPhase: Record<string, string[]> = {
+const defaultSensoryOptions = ['视觉', '听觉', '触觉', '嗅觉', '味觉'];
+const defaultPhaseOptions = ['开箱', '首次安装', '产品使用', '清洁收纳', '其他'];
+const defaultFlowByPhase: Record<string, string[]> = {
   '开箱': ['拿取外包装', '拆开内包装'],
   '首次安装': ['配件梳理', '外观美观', '外观缺陷', '标识文字', '首次安装'],
   '产品使用': ['放置及组装', '操作交互', '产品运行'],
@@ -83,6 +83,21 @@ export default function StandardDetailPage() {
   // Editing item
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Record<string, unknown>>({});
+
+  // Dynamic options from platform_settings
+  const [phaseOptions, setPhaseOptions] = useState<string[]>(defaultPhaseOptions);
+  const [flowByPhase, setFlowByPhase] = useState<Record<string, string[]>>(defaultFlowByPhase);
+  const [sensoryOptions, setSensoryOptions] = useState<string[]>(defaultSensoryOptions);
+
+  useEffect(() => {
+    fetch('/api/settings?key=standard_options').then(r => r.json()).then(d => {
+      if (d.code === 0 && d.data && (d.data.test_phases?.length > 0 || d.data.sensory_dimensions?.length > 0)) {
+        setPhaseOptions(d.data.test_phases || defaultPhaseOptions);
+        setFlowByPhase(d.data.experience_flows || defaultFlowByPhase);
+        setSensoryOptions(d.data.sensory_dimensions || defaultSensoryOptions);
+      }
+    }).catch(() => {});
+  }, []);
 
   const fetchStandard = async () => {
     const res = await fetch(`/api/standards/${id}`);

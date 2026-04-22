@@ -126,11 +126,14 @@ export default function TaskDetailPage() {
   };
 
   const handleOpenTransfer = async () => {
-    const res = await fetch('/api/auth/users');
+    const res = await fetch(`/api/auth/users?admin_user_id=${user?.id}`);
     const data = await res.json();
     if (data.code === 0) {
       setTransferUsers((data.data || []).filter((u: Record<string, unknown>) => u.id !== user?.id));
+      setTransferTargetId('');
       setTransferOpen(true);
+    } else {
+      toast.error(data.message || '获取用户列表失败');
     }
   };
 
@@ -152,22 +155,30 @@ export default function TaskDetailPage() {
     }
   };
 
+  const [generatingReport, setGeneratingReport] = useState(false);
+
   const handleGenerateReport = async () => {
-    const res = await fetch('/api/reports', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ task_id: id }),
-    });
-    const data = await res.json();
-    if (data.code === 0) {
-      // Update task status to 已完成
-      await fetch(`/api/tasks/${id}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: '已完成' }),
+    if (generatingReport) return; // Prevent double-click
+    setGeneratingReport(true);
+    try {
+      const res = await fetch('/api/reports', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: id }),
       });
-      toast.success('报告生成成功，任务已标记为已完成');
-      router.push('/reports');
-    } else {
-      toast.error(data.message || '报告生成失败');
+      const data = await res.json();
+      if (data.code === 0) {
+        // Update task status to 已完成
+        await fetch(`/api/tasks/${id}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: '已完成' }),
+        });
+        toast.success('报告生成成功，任务已标记为已完成');
+        router.push('/reports');
+      } else {
+        toast.error(data.message || '报告生成失败');
+      }
+    } finally {
+      setGeneratingReport(false);
     }
   };
 
@@ -196,8 +207,8 @@ export default function TaskDetailPage() {
               <ArrowRightLeft className="h-4 w-4 mr-1.5" /> 转移
             </Button>
           )}
-          <Button size="sm" onClick={handleGenerateReport}>
-            <FileText className="h-4 w-4 mr-1.5" /> 报告生成
+          <Button size="sm" onClick={handleGenerateReport} disabled={generatingReport}>
+            <FileText className="h-4 w-4 mr-1.5" /> {generatingReport ? '生成中...' : '报告生成'}
           </Button>
         </div>
       </div>
@@ -584,9 +595,10 @@ interface StandardItem {
   standard: { id: string; standard_name: string; category: string; product_category: string | null } | null;
 }
 
-const phaseOptions = ['开箱', '首次安装', '产品使用', '清洁收纳', '其他'];
-const sensoryOptions = ['视觉', '听觉', '触觉', '嗅觉', '味觉'];
-const flowByPhase: Record<string, string[]> = {
+// Default options (used as fallback when DB settings not available)
+const defaultPhaseOptions = ['开箱', '首次安装', '产品使用', '清洁收纳', '其他'];
+const defaultSensoryOptions = ['视觉', '听觉', '触觉', '嗅觉', '味觉'];
+const defaultFlowByPhase: Record<string, string[]> = {
   '开箱': ['拿取外包装', '拆开内包装'],
   '首次安装': ['配件梳理', '外观美观', '外观缺陷', '标识文字', '首次安装'],
   '产品使用': ['放置及组装', '操作交互', '产品运行'],
@@ -603,6 +615,21 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
   const [selectedRecord, setSelectedRecord] = useState<CheckRecord | null>(null);
   const [recordMaterials, setRecordMaterials] = useState<Record<string, Material[]>>({});
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
+
+  // ── Dynamic options from platform_settings ──
+  const [phaseOptions, setPhaseOptions] = useState<string[]>(defaultPhaseOptions);
+  const [flowByPhase, setFlowByPhase] = useState<Record<string, string[]>>(defaultFlowByPhase);
+  const [sensoryOptions, setSensoryOptions] = useState<string[]>(defaultSensoryOptions);
+
+  useEffect(() => {
+    fetch('/api/settings?key=standard_options').then(r => r.json()).then(d => {
+      if (d.code === 0 && d.data && (d.data.test_phases?.length > 0 || d.data.sensory_dimensions?.length > 0)) {
+        setPhaseOptions(d.data.test_phases || defaultPhaseOptions);
+        setFlowByPhase(d.data.experience_flows || defaultFlowByPhase);
+        setSensoryOptions(d.data.sensory_dimensions || defaultSensoryOptions);
+      }
+    }).catch(() => {});
+  }, []);
 
   // Standard type selection
   const [formCategory, setFormCategory] = useState('通用标准');

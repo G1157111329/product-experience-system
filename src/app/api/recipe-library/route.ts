@@ -36,16 +36,10 @@ export async function POST(request: NextRequest) {
 
   if (!name) return NextResponse.json({ code: 1, message: '食谱名称不能为空' }, { status: 400 });
 
-  // Check uniqueness: same product_category + product + name
-  let dupQuery = client.from('recipe_library').select('id').eq('name', name);
-  if (product_category) dupQuery = dupQuery.eq('product_category', product_category);
-  else dupQuery = dupQuery.is('product_category', null);
-  if (product) dupQuery = dupQuery.eq('product', product);
-  else dupQuery = dupQuery.is('product', null);
-
-  const { data: existing } = await dupQuery;
+  // Check uniqueness: same name (regardless of category/product)
+  const { data: existing } = await client.from('recipe_library').select('id').eq('name', name);
   if (existing && existing.length > 0) {
-    return NextResponse.json({ code: 1, message: '该品类-产品下已存在同名食谱' }, { status: 400 });
+    return NextResponse.json({ code: 1, message: '已存在同名食谱' }, { status: 400 });
   }
 
   const { data, error } = await client.from('recipe_library').insert({

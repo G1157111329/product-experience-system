@@ -109,6 +109,9 @@ export async function POST(request: NextRequest) {
   // Also delete issues linked to the old reports for this task
   await client.from('issues').delete().eq('task_id', body.task_id);
 
+  // Small delay to ensure deletes are committed before inserts (prevent race conditions)
+  await new Promise(resolve => setTimeout(resolve, 200));
+
   const { data, error } = await client.from('reports').insert({
     task_id: body.task_id,
     template_id: body.template_id || null,
@@ -136,6 +139,11 @@ export async function POST(request: NextRequest) {
         const issueTitle = (record.check_item as string) || '不合格检查项';
         const issueKey = `record_fail::${issueTitle}`;
         if (createdKeys.has(issueKey)) continue;
+
+        // Double-check DB to prevent duplicates from concurrent report generation
+        const { data: existingIssue } = await client.from('issues').select('id')
+          .eq('task_id', body.task_id).eq('title', issueTitle).eq('source_type', 'record_fail');
+        if (existingIssue && existingIssue.length > 0) { createdKeys.add(issueKey); continue; }
 
         await client.from('issues').insert({
           task_id: body.task_id,
@@ -169,6 +177,11 @@ export async function POST(request: NextRequest) {
           const issueKey = `recipe_problem::${ppItem.text.substring(0, 200)}`;
           if (createdKeys.has(issueKey)) continue;
 
+          // Double-check DB to prevent duplicates from concurrent report generation
+          const { data: existingIssue } = await client.from('issues').select('id')
+            .eq('task_id', body.task_id).eq('title', ppItem.text.substring(0, 200)).eq('source_type', 'recipe_problem');
+          if (existingIssue && existingIssue.length > 0) { createdKeys.add(issueKey); continue; }
+
           const stepDesc = `步骤${step.step_number}: ${step.operation || ''}`;
           await client.from('issues').insert({
             task_id: body.task_id,
@@ -186,7 +199,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Save recipes to recipe_library (dedup by product_category + product + name)
+    // Save recipes to recipe_library (dedup by name only, regardless of category/product)
     const taskInfo = task as Record<string, unknown>;
     const taskProductCategory = taskInfo?.product_category as string || null;
     const taskProduct = taskInfo?.product as string || null;
@@ -194,13 +207,8 @@ export async function POST(request: NextRequest) {
       const recipeName = (recipe as Record<string, unknown>).name as string;
       if (!recipeName) continue;
 
-      // Check if recipe with same product_category + product + name already exists
-      let dupQuery = client.from('recipe_library').select('id').eq('name', recipeName);
-      if (taskProductCategory) dupQuery = dupQuery.eq('product_category', taskProductCategory);
-      else dupQuery = dupQuery.is('product_category', null);
-      if (taskProduct) dupQuery = dupQuery.eq('product', taskProduct);
-      else dupQuery = dupQuery.is('product', null);
-      const { data: existingLib } = await dupQuery;
+      // Check if recipe with same name already exists (name-only dedup for auto-save from reports)
+      const { data: existingLib } = await client.from('recipe_library').select('id').eq('name', recipeName);
 
       if (existingLib && existingLib.length > 0) continue; // Skip if already exists
 

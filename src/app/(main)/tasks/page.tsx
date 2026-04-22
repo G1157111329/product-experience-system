@@ -125,12 +125,14 @@ export default function TasksPage() {
 
   const handleOpenTransfer = async (task: Task) => {
     setTransferTask(task);
-    const res = await fetch('/api/auth/users');
+    const res = await fetch(`/api/auth/users?admin_user_id=${user?.id}`);
     const data = await res.json();
     if (data.code === 0) {
       setTransferUsers((data.data || []).filter((u: Record<string, unknown>) => u.id !== user?.id));
       setTransferTargetId('');
       setTransferOpen(true);
+    } else {
+      toast.error(data.message || '获取用户列表失败');
     }
   };
 
