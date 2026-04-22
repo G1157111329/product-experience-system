@@ -1171,7 +1171,45 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
                 'px-2 py-2 rounded-md text-xs font-medium border-2 transition-colors text-center',
                 formCategory === cat ? 'border-primary bg-primary/5 text-primary' : 'border-border text-muted-foreground hover:border-primary/30'
               )}
-              onClick={() => { setFormCategory(cat); setGeneralItems([]); setCategoryDimensions([]); setCategorySubDimensions([]); setCategoryItems([]); setSensoryRefItems([]); }}
+              onClick={() => {
+                setFormCategory(cat);
+                setGeneralItems([]);
+                setCategoryDimensions([]);
+                setCategorySubDimensions([]);
+                setCategoryItems([]);
+                setSensoryRefItems([]);
+                // In edit mode, populate the new category form with shared data from the record
+                if (editRecordData) {
+                  if (cat === '通用标准') {
+                    setGeneralForm({
+                      test_phase: editRecordData.test_phase || '',
+                      experience_flow: editRecordData.experience_flow || '',
+                      sensory_dimension: editRecordData.sensory_dimension || '',
+                      selectedItemId: '',
+                      problem_description: editRecordData.problem_description || '',
+                    });
+                  } else if (cat === '品类标准') {
+                    setCategoryForm({
+                      sensory_dimension: editRecordData.sensory_dimension || '',
+                      check_dimension: editRecordData.check_dimension || '',
+                      sub_check_dimension: editRecordData.sub_check_dimension || '',
+                      selectedItemId: '',
+                      problem_description: editRecordData.problem_description || '',
+                    });
+                  } else if (cat === '感官评价标准') {
+                    setSensoryForm({
+                      sensory_dimension: editRecordData.sensory_dimension || '',
+                      score: (editRecordData as unknown as Record<string, unknown>).measurement_value as string || '',
+                      result_description: editRecordData.problem_description || '',
+                    });
+                  } else {
+                    setNonStandardForm({
+                      description: editRecordData.check_item || '',
+                      problem_description: editRecordData.problem_description || '',
+                    });
+                  }
+                }
+              }}
             >
               {cat}
             </button>
