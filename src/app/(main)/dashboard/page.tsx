@@ -61,7 +61,7 @@ export default function DashboardPage() {
   const handleAudit = async (id: string, action: 'approve' | 'reject') => {
     const res = await fetch('/api/auth/audit', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ audit_id: id, action, admin_user_id: user?.id }),
+      body: JSON.stringify({ request_id: id, action, admin_user_id: user?.id }),
     });
     const d = await res.json();
     if (d.code === 0) { toast.success(d.message); fetchData(); } else toast.error(d.message);
@@ -73,7 +73,7 @@ export default function DashboardPage() {
     if (!cancelId) return;
     const res = await fetch('/api/auth/audit', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ audit_id: cancelId, action: 'cancel', user_id: user?.id }),
+      body: JSON.stringify({ request_id: cancelId, action: 'cancel', user_id: user?.id }),
     });
     const d = await res.json();
     if (d.code === 0) { toast.success('已取消'); setPendingRequests(prev => prev?.filter(p => p?.id !== cancelId) || []); }
