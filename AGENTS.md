@@ -39,8 +39,8 @@
 │   │   │   │   ├── register/    # 注册（需管理员审核）
 │   │   │   │   ├── forgot-password/ # 忘记密码（需管理员审核）
 │   │   │   │   ├── profile/     # 个人信息查看/修改（名称/密码修改需审核）
-│   │   │   │   ├── audit/       # 审核管理（管理员审核注册/密码/名称修改请求）
-│   │   │   │   └── users/       # 用户列表/角色管理（管理员升级/降级）
+│   │   │   │   ├── audit/       # 审核管理（管理员审核注册/密码/名称修改请求，参数：request_id）
+│   │   │   │   └── users/       # 用户列表/角色管理（管理员升级/降级/删除）
 │   │   │   ├── standards/       # 标准 CRUD
 │   │   │   │   └── import/      # 标准批量导入（PDF/Excel，按分类不同LLM prompt）
 │   │   │   ├── standard-items/  # 标准检查项 CRUD（含新字段：experience_flow, touch_point等）
@@ -121,9 +121,9 @@
 | GET | `/api/auth/profile` | 获取用户信息 |
 | PUT | `/api/auth/profile` | 修改名称/密码（需管理员审核） |
 | GET | `/api/auth/audit` | 获取审核请求（admin_user_id: 管理员查所有; user_id: 普通用户查自己的） |
-| PUT | `/api/auth/audit` | 审核（approve/reject，管理员）；取消申请（cancel，用户自己） |
+| PUT | `/api/auth/audit` | 审核（approve/reject，管理员，参数 request_id）；取消申请（cancel，用户自己） |
 | GET | `/api/auth/users` | 获取用户列表（管理员） |
-| POST | `/api/auth/users` | 升级/降级用户角色、删除用户账号（管理员） |
+| POST | `/api/auth/users` | 升级/降级用户角色、删除用户账号（管理员）；删除时级联清理report_shares和audit_requests） |
 | GET/POST | `/api/standards` | 标准列表/创建 |
 | GET/PUT/DELETE | `/api/standards/[id]` | 标准详情/更新/删除 |
 | POST | `/api/standards/import` | 标准批量导入（PDF/Excel，按分类不同LLM prompt） |
@@ -248,6 +248,9 @@ coze start
 22. **报告重新生成**: 同一任务重新生成报告时，先删除旧报告和旧问题，再创建新报告和新问题，确保每个任务始终只有一份最新报告
 23. **问题自动创建**: 问题在报告生成时由后端自动创建（非前端同步），使用 `createdKeys` Set 去重确保每个唯一问题（按 title+source_type）只创建一条，与素材数量无关；前端仅做只读查询
 24. **报告合并类型检查**: 报告详情页合并同型号报告时，仅合并"自研"和"改型/降本/优化"类型的报告，其他类型（如"海外产品"）的同型号报告不参与合并
+25. **视频素材缩略图**: 五感体验已选素材列表和PDF导出附录中，视频素材使用 `<video preload="metadata">` 显示首帧缩略图，覆盖半透明播放图标区分图片
+26. **管理员删除账号**: 管理员可在账号权限管理中删除用户（不可删除自己和最后一个管理员）；删除时级联清理 `report_shares.created_by`（设null）和 `platform_audit_requests`；报告中的 organizer 名称字符串不受影响
+27. **审核参数规范**: 前端审核请求统一使用 `request_id` 字段（非 `audit_id`），与后端 PUT /api/auth/audit 接口参数名保持一致
 
 ## 代码风格
 
@@ -267,6 +270,7 @@ coze start
 - **忘记密码**: 验证账号存在 → 填写新密码 → 提交审核 → 管理员审核通过后生效
 - **修改信息**: 名称/密码修改需提交审核 → 管理员审核通过后生效
 - **角色管理**: 管理员可将普通用户升级为管理账号，或降级管理账号为普通用户
+- **删除账号**: 管理员可删除用户账号（不可删除自己，不可删除最后一个管理员）；删除后该账号不存在，但其创建的报告和组织者名称保留
 
 ### 操作权限
 
@@ -286,3 +290,14 @@ coze start
 | 查看所有体验计划/问题/报告 | ✅ | ❌(仅自己的) |
 | 数据分析导出 | ✅ | ❌ |
 | 数据分析浏览 | ✅ | ✅ |
+
+## 常见问题与修复
+
+| 问题 | 根因 | 修复 |
+|------|------|------|
+| 审核请求点击通过报"参数不完整" | 前端发送 `audit_id`，后端期望 `request_id` | `dashboard/page.tsx` 中 `audit_id` 改为 `request_id` |
+| 问题列表出现重复 | 前端 `syncReportIssues` 并发竞态 + 多素材每个生成一个issue | 移除前端同步，问题创建移至后端报告生成时，`createdKeys` Set 去重 |
+| 重新生成报告产生重复 | POST /api/reports 始终 insert 新报告 | 生成前先删除同 task_id 的旧报告和旧问题 |
+| 报告合并了不应合并的类型 | 合并逻辑未检查候选报告的 project_type | 添加 `rProjectType` 过滤，仅合并"自研"/"改型降本优化" |
+| 移动端长字段穿透屏幕 | flex-1 无 min-w-0、Badge 无 max-w | body 加 `overflow-x-hidden`，flex-1 加 `min-w-0`，长文本用 `break-all`，Badge 用 `max-w-[Npx] truncate` |
+| 视频素材不显示缩略图 | 五感体验和PDF附录过滤了 video 类型 | 移除 `material_type === 'image'` 过滤，视频用 `<video preload="metadata">` + 播放图标 |
