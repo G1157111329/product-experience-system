@@ -69,12 +69,25 @@ interface ReportDetail {
   updated_at: string;
 }
 
+function formatBeijingTime(isoStr: string | null | undefined): string {
+  if (!isoStr) return '-';
+  try {
+    const d = new Date(isoStr);
+    // Format as YYYY-MM-DD HH:mm:ss in Beijing time (UTC+8)
+    const offset = 8 * 60; // Beijing offset in minutes
+    const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+    const beijing = new Date(utc + offset * 60000);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${beijing.getFullYear()}-${pad(beijing.getMonth() + 1)}-${pad(beijing.getDate())} ${pad(beijing.getHours())}:${pad(beijing.getMinutes())}:${pad(beijing.getSeconds())}`;
+  } catch { return String(isoStr); }
+}
+
 const taskFieldLabels: Record<string, string> = {
   task_name: '任务名称', product_category: '产品品类', product: '产品', product_model: '产品型号',
   project_type: '项目类型', project_phase: '项目阶段', test_date: '测试日期',
   organizer: '组织人', target_user: '目标用户', test_purpose: '测试目的',
   test_method: '测试方法', status: '状态', assigned_to: '负责人',
-  created_at: '创建时间', updated_at: '更新时间', selected_standards: '选择标准',
+  selected_standards: '选择标准',
 };
 
 const STATUS_LIST = ['待整改', '整改中', '已验证', '不整改'];
@@ -118,11 +131,13 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
       {task && (
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
           {Object.entries(task)
-            .filter(([k]) => !['id', 'selected_standards'].includes(k))
+            .filter(([k]) => !['id', 'selected_standards', 'created_by'].includes(k))
             .map(([key, value]) => (
               <div key={key} className="min-w-0">
                 <span className="text-muted-foreground">{taskFieldLabels[key] || key}: </span>
-                <span className="break-all">{String(value || '-')}</span>
+                <span className="break-all">
+                  {(key === 'created_at' || key === 'updated_at') ? formatBeijingTime(value as string) : String(value || '-')}
+                </span>
               </div>
             ))}
         </div>

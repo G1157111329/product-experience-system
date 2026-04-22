@@ -26,6 +26,18 @@ interface Report {
 
 const MERGED_TYPES = ['自研', '改型/降本/优化'];
 
+function formatBeijingTime(isoStr: string | null | undefined): string {
+  if (!isoStr) return '-';
+  try {
+    const d = new Date(isoStr);
+    const offset = 8 * 60;
+    const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+    const beijing = new Date(utc + offset * 60000);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${beijing.getFullYear()}-${pad(beijing.getMonth() + 1)}-${pad(beijing.getDate())} ${pad(beijing.getHours())}:${pad(beijing.getMinutes())}:${pad(beijing.getSeconds())}`;
+  } catch { return String(isoStr); }
+}
+
 export default function ReportsPage() {
   const { user, isAdmin } = useAuth();
   const router = useRouter();
@@ -218,7 +230,7 @@ export default function ReportsPage() {
                         <span className="flex-1 min-w-0 truncate">{r.title}</span>
                         <Badge variant="outline" className="text-[9px] shrink-0">{r.status === '草稿' ? '已完成' : r.status}</Badge>
                         <span className="text-[10px] text-muted-foreground shrink-0 hidden sm:inline">
-                          {new Date(r.created_at).toLocaleDateString('zh-CN')}
+                          {formatBeijingTime(r.created_at)}
                         </span>
                         <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0 cursor-pointer"
                           onClick={() => router.push(`/reports/${r.id}`)} />
@@ -249,7 +261,7 @@ export default function ReportsPage() {
                     </div>
                     <div className="text-[10px] text-muted-foreground mt-1 truncate">
                       {r.task_name && <span>{r.task_name}</span>}
-                      <span className="ml-2">{new Date(r.created_at).toLocaleDateString('zh-CN')}</span>
+                      <span className="ml-2">{formatBeijingTime(r.created_at)}</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
@@ -303,7 +315,7 @@ export default function ReportsPage() {
                   <CardContent className="text-xs text-muted-foreground space-y-1">
                     <div>产品型号: {r.product_model || '-'}</div>
                     <div>版本: V{r.version}</div>
-                    <div>生成时间: {new Date(r.created_at).toLocaleString('zh-CN')}</div>
+                    <div>生成时间: {formatBeijingTime(r.created_at)}</div>
                     {r.content && (
                       <>
                         <Separator className="my-1" />

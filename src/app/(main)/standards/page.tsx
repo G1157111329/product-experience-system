@@ -2,12 +2,14 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import Link from 'next/link';
-import { Search, BookOpen, ChevronRight, Upload, FileUp, Loader2, Trash2, Plus, ChefHat } from 'lucide-react';
+import { Search, BookOpen, ChevronRight, Upload, FileUp, Loader2, Trash2, Plus, ChefHat, Pencil, X, ChevronDown, ChevronUp } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Separator } from '@/components/ui/separator';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog';
@@ -49,6 +51,11 @@ interface RecipeLibItem {
   recipe_library_steps: Array<{ id: string; step_number: number; operation: string; problem_point: string | null }>;
 }
 
+interface RecipeLibStep {
+  id?: string; step_number: number; operation: string; problem_point: string | null; problem_points: Array<{ text: string }>;
+  material_ids?: string[];
+}
+
 /* ── Recipe Library Section ── */
 function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWithProducts[]; isAdmin: boolean }) {
   const [recipes, setRecipes] = useState<RecipeLibItem[]>([]);
@@ -56,9 +63,33 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
   const [filterCategory, setFilterCategory] = useState('');
   const [filterProduct, setFilterProduct] = useState('');
   const [addOpen, setAddOpen] = useState(false);
-  const [addForm, setAddForm] = useState({ name: '', product_category: '', product: '', ingredients: '', recipe_type: '食谱' });
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingRecipe, setEditingRecipe] = useState<RecipeLibItem | null>(null);
+  const [editForm, setEditForm] = useState({ name: '', product_category: '', product: '', ingredients: '', recipe_type: '食谱' });
 
-  const fetchRecipes = async () => {
+  // Add dialog form with steps
+  const [addForm, setAddForm] = useState({ name: '', product_category: '', product: '', ingredients: '', recipe_type: '食谱' });
+  const [addSteps, setAddSteps] = useState<RecipeLibStep[]>([]);
+  const [addStepOp, setAddStepOp] = useState('');
+  const [addStepPp, setAddStepPp] = useState('');
+  const [addingStep, setAddingStep] = useState(false);
+
+  // Expanded recipe detail - steps management
+  const [detailSteps, setDetailSteps] = useState<RecipeLibStep[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailStepOp, setDetailStepOp] = useState('');
+  const [detailStepPp, setDetailStepPp] = useState('');
+  const [detailAddingStep, setDetailAddingStep] = useState(false);
+  const [editStepId, setEditStepId] = useState<string | null>(null);
+  const [editStepOp, setEditStepOp] = useState('');
+  const [editStepPp, setEditStepPp] = useState('');
+
+  // Material upload state for steps
+  const [uploadingStepIdx, setUploadingStepIdx] = useState<number | null>(null);
+  const [uploadingFor, setUploadingFor] = useState<'add' | 'detail'>('add');
+
+  const fetchRecipes = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams();
     if (filterCategory) params.set('product_category', filterCategory);
@@ -67,21 +98,119 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
     const data = await res.json();
     if (data.code === 0) setRecipes(data.data || []);
     setLoading(false);
+  }, [filterCategory, filterProduct]);
+
+  useEffect(() => { fetchRecipes(); }, [fetchRecipes]);
+
+  const fetchDetailSteps = async (recipeId: string) => {
+    setDetailLoading(true);
+    const res = await fetch(`/api/recipe-library-steps?recipe_library_id=${recipeId}`);
+    const data = await res.json();
+    if (data.code === 0) setDetailSteps(data.data || []);
+    setDetailLoading(false);
   };
 
-  useEffect(() => { fetchRecipes(); }, [filterCategory, filterProduct]);
+  const handleExpand = (recipe: RecipeLibItem) => {
+    if (expandedId === recipe.id) {
+      setExpandedId(null);
+    } else {
+      setExpandedId(recipe.id);
+      fetchDetailSteps(recipe.id);
+      setDetailStepOp('');
+      setDetailStepPp('');
+      setEditStepId(null);
+    }
+  };
 
-  const handleAdd = async () => {
-    const res = await fetch('/api/recipe-library', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...addForm, steps: [] }),
+  // ── Add recipe with steps ──
+  const handleAddStep = () => {
+    if (!addStepOp.trim()) return;
+    setAddSteps([...addSteps, {
+      step_number: addSteps.length + 1,
+      operation: addStepOp.trim(),
+      problem_point: addStepPp.trim() || null,
+      problem_points: addStepPp.trim() ? [{ text: addStepPp.trim() }] : [],
+      material_ids: [],
+    }]);
+    setAddStepOp('');
+    setAddStepPp('');
+  };
+
+  const handleRemoveAddStep = (idx: number) => {
+    const newSteps = addSteps.filter((_, i) => i !== idx).map((s, i) => ({ ...s, step_number: i + 1 }));
+    setAddSteps(newSteps);
+  };
+
+  const handleAddRecipe = async () => {
+    if (!addForm.name.trim()) return;
+    setAddingStep(true);
+    try {
+      // 1. Create the recipe library item
+      const res = await fetch('/api/recipe-library', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...addForm, name: addForm.name.trim() }),
+      });
+      const data = await res.json();
+      if (data.code !== 0) { toast.error(data.message); return; }
+
+      const recipeId = data.data.id;
+
+      // 2. Create steps
+      for (const step of addSteps) {
+        await fetch('/api/recipe-library-steps', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            recipe_library_id: recipeId,
+            step_number: step.step_number,
+            operation: step.operation,
+            problem_point: step.problem_point,
+            problem_points: step.problem_points,
+          }),
+        });
+        // Upload materials for this step
+        for (const mid of (step.material_ids || [])) {
+          await fetch('/api/materials', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: mid, recipe_library_step_id: step.id || mid }),
+          });
+        }
+      }
+
+      setAddOpen(false);
+      setAddForm({ name: '', product_category: '', product: '', ingredients: '', recipe_type: '食谱' });
+      setAddSteps([]);
+      setAddStepOp('');
+      setAddStepPp('');
+      fetchRecipes();
+      toast.success('食谱已添加');
+    } finally { setAddingStep(false); }
+  };
+
+  // ── Edit recipe info ──
+  const handleOpenEdit = (recipe: RecipeLibItem) => {
+    setEditingRecipe(recipe);
+    setEditForm({
+      name: recipe.name,
+      product_category: recipe.product_category || '',
+      product: recipe.product || '',
+      ingredients: recipe.ingredients || '',
+      recipe_type: recipe.recipe_type || '食谱',
+    });
+    setEditOpen(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingRecipe) return;
+    const res = await fetch(`/api/recipe-library/${editingRecipe.id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(editForm),
     });
     const data = await res.json();
     if (data.code === 0) {
-      setAddOpen(false);
-      setAddForm({ name: '', product_category: '', product: '', ingredients: '', recipe_type: '食谱' });
+      setEditOpen(false);
+      setEditingRecipe(null);
       fetchRecipes();
-      toast.success('食谱已添加');
+      toast.success('已更新');
     } else toast.error(data.message);
   };
 
@@ -89,11 +218,97 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
     if (!confirm('确定删除此食谱？')) return;
     const res = await fetch(`/api/recipe-library/${id}`, { method: 'DELETE' });
     const data = await res.json();
-    if (data.code === 0) { fetchRecipes(); toast.success('已删除'); }
+    if (data.code === 0) { fetchRecipes(); toast.success('已删除'); if (expandedId === id) setExpandedId(null); }
     else toast.error(data.message);
   };
 
+  // ── Detail step management ──
+  const handleAddDetailStep = async () => {
+    if (!detailStepOp.trim() || !expandedId) return;
+    setDetailAddingStep(true);
+    try {
+      const res = await fetch('/api/recipe-library-steps', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipe_library_id: expandedId,
+          step_number: detailSteps.length + 1,
+          operation: detailStepOp.trim(),
+          problem_point: detailStepPp.trim() || null,
+          problem_points: detailStepPp.trim() ? [{ text: detailStepPp.trim() }] : [],
+        }),
+      });
+      const data = await res.json();
+      if (data.code === 0) {
+        setDetailStepOp('');
+        setDetailStepPp('');
+        fetchDetailSteps(expandedId);
+      } else toast.error(data.message);
+    } finally { setDetailAddingStep(false); }
+  };
+
+  const handleDeleteDetailStep = async (stepId: string) => {
+    if (!expandedId) return;
+    await fetch(`/api/recipe-library-steps/${stepId}`, { method: 'DELETE' });
+    fetchDetailSteps(expandedId);
+  };
+
+  const handleOpenEditStep = (step: RecipeLibStep) => {
+    setEditStepId(step.id || null);
+    setEditStepOp(step.operation);
+    setEditStepPp(step.problem_point || (step.problem_points && step.problem_points[0]?.text) || '');
+  };
+
+  const handleSaveEditStep = async () => {
+    if (!editStepId || !expandedId) return;
+    await fetch(`/api/recipe-library-steps/${editStepId}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        operation: editStepOp.trim(),
+        problem_point: editStepPp.trim() || null,
+        problem_points: editStepPp.trim() ? [{ text: editStepPp.trim() }] : [],
+      }),
+    });
+    setEditStepId(null);
+    fetchDetailSteps(expandedId);
+  };
+
+  const handleMoveStep = async (idx: number, direction: 'up' | 'down') => {
+    if (!expandedId) return;
+    const newSteps = [...detailSteps];
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= newSteps.length) return;
+    [newSteps[idx], newSteps[swapIdx]] = [newSteps[swapIdx], newSteps[idx]];
+    const reordered = newSteps.map((s, i) => ({ ...s, step_number: i + 1 }));
+    setDetailSteps(reordered);
+    await fetch('/api/recipe-library-steps', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ steps: reordered.filter(s => s.id).map(s => ({ id: s.id, step_number: s.step_number })) }),
+    });
+  };
+
+  // ── Material upload for steps ──
+  const handleStepMaterialUpload = async (file: File, stepIndex: number, target: 'add' | 'detail') => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('source', 'recipe_library_step');
+    const res = await fetch('/api/materials/upload', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (data.code === 0 && data.data?.id) {
+      if (target === 'add') {
+        setAddSteps(prev => {
+          const newSteps = [...prev];
+          const ids = [...(newSteps[stepIndex].material_ids || []), data.data.id];
+          newSteps[stepIndex] = { ...newSteps[stepIndex], material_ids: ids };
+          return newSteps;
+        });
+      }
+      toast.success('素材已上传');
+    } else toast.error(data.message || '上传失败');
+  };
+
   const selectedCat = categories.find(c => c.name === filterCategory);
+  const addSelectedCat = categories.find(c => c.name === addForm.product_category);
+  const editSelectedCat = categories.find(c => c.name === editForm.product_category);
 
   return (
     <div className="space-y-3">
@@ -130,7 +345,7 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
         )}
       </div>
 
-      {/* List */}
+      {/* Recipe List */}
       {loading ? (
         <div className="grid gap-2">{[1,2,3].map(i => <div key={i} className="h-16 bg-muted animate-pulse rounded-lg" />)}</div>
       ) : recipes.length === 0 ? (
@@ -141,27 +356,135 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
       ) : (
         <div className="grid gap-2">
           {recipes.map(recipe => (
-            <Card key={recipe.id} className="hover:bg-muted/30 transition-colors">
-              <CardContent className="p-3 flex items-center gap-3">
-                <Badge variant="secondary" className={cn('text-[9px] shrink-0', recipe.recipe_type === '食谱' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700')}>
-                  {recipe.recipe_type}
-                </Badge>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-medium truncate">{recipe.name}</span>
-                    <span className="text-[10px] text-muted-foreground">
-                      {recipe.product_category || '通用'}{recipe.product ? ` - ${recipe.product}` : ''}
-                    </span>
+            <Card key={recipe.id} className={cn('transition-colors', expandedId === recipe.id && 'ring-1 ring-primary/30')}>
+              <CardContent className="p-3">
+                <div className="flex items-center gap-3">
+                  <Badge variant="secondary" className={cn('text-[9px] shrink-0', recipe.recipe_type === '食谱' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700')}>
+                    {recipe.recipe_type}
+                  </Badge>
+                  <div className="flex-1 min-w-0 cursor-pointer" onClick={() => handleExpand(recipe)}>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium truncate">{recipe.name}</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {recipe.product_category || '通用'}{recipe.product ? ` - ${recipe.product}` : ''}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[10px] text-muted-foreground">{recipe.recipe_library_steps?.length || 0} 步骤</span>
+                      {recipe.ingredients && <span className="text-[10px] text-muted-foreground truncate max-w-[200px]">{recipe.ingredients}</span>}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-[10px] text-muted-foreground">{recipe.recipe_library_steps?.length || 0} 步骤</span>
-                    {recipe.ingredients && <span className="text-[10px] text-muted-foreground truncate max-w-[200px]">{recipe.ingredients}</span>}
+                  <div className="flex items-center gap-1 shrink-0">
+                    {isAdmin && (
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleOpenEdit(recipe)}>
+                        <Pencil className="h-3 w-3 text-muted-foreground" />
+                      </Button>
+                    )}
+                    {isAdmin && (
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDelete(recipe.id)}>
+                        <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
+                      </Button>
+                    )}
+                    <button className="p-1" onClick={() => handleExpand(recipe)}>
+                      {expandedId === recipe.id ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                    </button>
                   </div>
                 </div>
-                {isAdmin && (
-                  <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => handleDelete(recipe.id)}>
-                    <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
-                  </Button>
+
+                {/* Expanded detail - steps */}
+                {expandedId === recipe.id && (
+                  <div className="mt-3 pt-3 border-t space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium">步骤列表</span>
+                      {recipe.ingredients && (
+                        <span className="text-[10px] text-muted-foreground">食材/参数: {recipe.ingredients}</span>
+                      )}
+                    </div>
+
+                    {detailLoading ? (
+                      <div className="flex items-center justify-center py-4"><Loader2 className="h-4 w-4 animate-spin" /></div>
+                    ) : detailSteps.length === 0 ? (
+                      <p className="text-xs text-muted-foreground text-center py-2">暂无步骤，请添加</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {detailSteps.map((step, idx) => (
+                          <div key={step.id || idx} className="border rounded-lg p-3 space-y-2">
+                            {editStepId === step.id ? (
+                              /* Edit step mode */
+                              <div className="space-y-2">
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="outline" className="text-[10px] shrink-0">步骤{step.step_number}</Badge>
+                                  <Input className="h-7 text-xs" value={editStepOp} onChange={e => setEditStepOp(e.target.value)} placeholder="操作描述" />
+                                </div>
+                                <Input className="h-7 text-xs" value={editStepPp} onChange={e => setEditStepPp(e.target.value)} placeholder="问题点（可选）" />
+                                <div className="flex gap-2">
+                                  <Button size="sm" className="h-6 text-xs" onClick={handleSaveEditStep}>保存</Button>
+                                  <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setEditStepId(null)}>取消</Button>
+                                </div>
+                              </div>
+                            ) : (
+                              /* View step mode */
+                              <>
+                                <div className="flex items-start gap-2">
+                                  <Badge variant="outline" className="text-[10px] shrink-0 mt-0.5">步骤{step.step_number}</Badge>
+                                  <div className="flex-1 min-w-0 text-sm">{step.operation}</div>
+                                  {isAdmin && (
+                                    <div className="flex gap-1 shrink-0">
+                                      <button className="p-0.5" onClick={() => handleMoveStep(idx, 'up')} disabled={idx === 0}>
+                                        <ChevronUp className="h-3 w-3 text-muted-foreground" />
+                                      </button>
+                                      <button className="p-0.5" onClick={() => handleMoveStep(idx, 'down')} disabled={idx === detailSteps.length - 1}>
+                                        <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                                      </button>
+                                      <button className="p-0.5" onClick={() => handleOpenEditStep(step)}>
+                                        <Pencil className="h-3 w-3 text-muted-foreground" />
+                                      </button>
+                                      <button className="p-0.5" onClick={() => handleDeleteDetailStep(step.id!)}>
+                                        <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                                {step.problem_point && (
+                                  <div className="text-xs text-destructive pl-8">问题: {step.problem_point}</div>
+                                )}
+                                {step.problem_points && step.problem_points.length > 0 && !step.problem_point && (
+                                  <div className="text-xs text-destructive pl-8">
+                                    {step.problem_points.map((pp, pi) => <div key={pi}>问题: {pp.text}</div>)}
+                                  </div>
+                                )}
+                                {/* Step image upload */}
+                                {isAdmin && (
+                                  <div className="pl-8">
+                                    <label className="inline-flex items-center gap-1 text-[10px] text-primary cursor-pointer hover:underline">
+                                      <Plus className="h-3 w-3" /> 添加图片
+                                      <input type="file" accept="image/*,video/*" className="hidden"
+                                        onChange={e => { const f = e.target.files?.[0]; if (f) handleStepMaterialUpload(f, idx, 'detail'); }} />
+                                    </label>
+                                  </div>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Add new step */}
+                    {isAdmin && (
+                      <div className="border rounded-lg p-3 space-y-2 bg-muted/30">
+                        <span className="text-xs font-medium">添加步骤</span>
+                        <Input className="h-7 text-xs" value={detailStepOp} onChange={e => setDetailStepOp(e.target.value)}
+                          placeholder="操作描述 *" onKeyDown={e => { if (e.key === 'Enter' && detailStepOp.trim()) handleAddDetailStep(); }} />
+                        <Input className="h-7 text-xs" value={detailStepPp} onChange={e => setDetailStepPp(e.target.value)}
+                          placeholder="问题点（可选）" />
+                        <Button size="sm" className="h-7 text-xs gap-1" onClick={handleAddDetailStep}
+                          disabled={detailAddingStep || !detailStepOp.trim()}>
+                          {detailAddingStep ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />} 添加
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -170,13 +493,104 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
       )}
 
       {/* Add Dialog */}
-      <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent>
+      <Dialog open={addOpen} onOpenChange={(v) => { setAddOpen(v); if (!v) { setAddSteps([]); setAddStepOp(''); setAddStepPp(''); } }}>
+        <DialogContent className="max-w-lg max-h-[85vh]">
           <DialogHeader><DialogTitle>添加食谱到库</DialogTitle></DialogHeader>
+          <ScrollArea className="max-h-[70vh]">
+            <div className="space-y-3 pr-3">
+              <div className="space-y-1.5">
+                <Label>类型</Label>
+                <Select value={addForm.recipe_type} onValueChange={(v) => setAddForm({ ...addForm, recipe_type: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="食谱">食谱</SelectItem>
+                    <SelectItem value="功能">功能</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>品类</Label>
+                  <Select value={addForm.product_category} onValueChange={(v) => setAddForm({ ...addForm, product_category: v, product: '' })}>
+                    <SelectTrigger><SelectValue placeholder="选择品类" /></SelectTrigger>
+                    <SelectContent>
+                      {categories.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>产品</Label>
+                  <Select value={addForm.product} onValueChange={(v) => setAddForm({ ...addForm, product: v })}>
+                    <SelectTrigger><SelectValue placeholder={addForm.product_category ? '选择产品' : '请先选择品类'} /></SelectTrigger>
+                    <SelectContent>
+                      {(addSelectedCat?.products || []).map(p => <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>{addForm.recipe_type === '食谱' ? '食谱名称' : '功能名称'} *</Label>
+                <Input value={addForm.name} onChange={(e) => setAddForm({ ...addForm, name: e.target.value })} placeholder="名称需唯一" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>食材/参数</Label>
+                <Textarea value={addForm.ingredients} onChange={(e) => setAddForm({ ...addForm, ingredients: e.target.value })} rows={2} />
+              </div>
+
+              <Separator />
+
+              {/* Steps */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">步骤</Label>
+                {addSteps.length > 0 && (
+                  <div className="space-y-2">
+                    {addSteps.map((step, idx) => (
+                      <div key={idx} className="border rounded-lg p-2 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <Badge variant="outline" className="text-[10px]">步骤{step.step_number}</Badge>
+                          <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => handleRemoveAddStep(idx)}>
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <div className="text-xs">{step.operation}</div>
+                        {step.problem_point && <div className="text-xs text-destructive">问题: {step.problem_point}</div>}
+                        {/* Image upload for step */}
+                        <label className="inline-flex items-center gap-1 text-[10px] text-primary cursor-pointer hover:underline">
+                          <Plus className="h-3 w-3" /> 添加图片
+                          <input type="file" accept="image/*,video/*" className="hidden"
+                            onChange={e => { const f = e.target.files?.[0]; if (f) handleStepMaterialUpload(f, idx, 'add'); }} />
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="border rounded-lg p-2 space-y-2 bg-muted/30">
+                  <Input className="h-7 text-xs" value={addStepOp} onChange={e => setAddStepOp(e.target.value)}
+                    placeholder="操作描述 *" onKeyDown={e => { if (e.key === 'Enter' && addStepOp.trim()) handleAddStep(); }} />
+                  <Input className="h-7 text-xs" value={addStepPp} onChange={e => setAddStepPp(e.target.value)}
+                    placeholder="问题点（可选）" />
+                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleAddStep} disabled={!addStepOp.trim()}>
+                    <Plus className="h-3 w-3" /> 添加步骤
+                  </Button>
+                </div>
+              </div>
+
+              <Button onClick={handleAddRecipe} className="w-full" disabled={addingStep || !addForm.name.trim()}>
+                {addingStep ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null} 保存食谱
+              </Button>
+            </div>
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>编辑食谱</DialogTitle></DialogHeader>
           <div className="space-y-3 mt-2">
             <div className="space-y-1.5">
               <Label>类型</Label>
-              <Select value={addForm.recipe_type} onValueChange={(v) => setAddForm({ ...addForm, recipe_type: v })}>
+              <Select value={editForm.recipe_type} onValueChange={(v) => setEditForm({ ...editForm, recipe_type: v })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="食谱">食谱</SelectItem>
@@ -187,7 +601,7 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>品类</Label>
-                <Select value={addForm.product_category} onValueChange={(v) => setAddForm({ ...addForm, product_category: v, product: '' })}>
+                <Select value={editForm.product_category} onValueChange={(v) => setEditForm({ ...editForm, product_category: v, product: '' })}>
                   <SelectTrigger><SelectValue placeholder="选择品类" /></SelectTrigger>
                   <SelectContent>
                     {categories.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
@@ -196,25 +610,23 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
               </div>
               <div className="space-y-1.5">
                 <Label>产品</Label>
-                <Select value={addForm.product} onValueChange={(v) => setAddForm({ ...addForm, product: v })}>
-                  <SelectTrigger><SelectValue placeholder={addForm.product_category ? '选择产品' : '请先选择品类'} /></SelectTrigger>
+                <Select value={editForm.product} onValueChange={(v) => setEditForm({ ...editForm, product: v })}>
+                  <SelectTrigger><SelectValue placeholder={editForm.product_category ? '选择产品' : '请先选择品类'} /></SelectTrigger>
                   <SelectContent>
-                    {(categories.find(c => c.name === addForm.product_category)?.products || []).map(p => (
-                      <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
-                    ))}
+                    {(editSelectedCat?.products || []).map(p => <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label>{addForm.recipe_type === '食谱' ? '食谱名称' : '功能名称'} *</Label>
-              <Input value={addForm.name} onChange={(e) => setAddForm({ ...addForm, name: e.target.value })} placeholder="名称需唯一" />
+              <Label>{editForm.recipe_type === '食谱' ? '食谱名称' : '功能名称'} *</Label>
+              <Input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
             </div>
             <div className="space-y-1.5">
               <Label>食材/参数</Label>
-              <Textarea value={addForm.ingredients} onChange={(e) => setAddForm({ ...addForm, ingredients: e.target.value })} rows={2} />
+              <Textarea value={editForm.ingredients} onChange={(e) => setEditForm({ ...editForm, ingredients: e.target.value })} rows={2} />
             </div>
-            <Button onClick={handleAdd} className="w-full" disabled={!addForm.name}>保存</Button>
+            <Button onClick={handleSaveEdit} className="w-full">保存</Button>
           </div>
         </DialogContent>
       </Dialog>
