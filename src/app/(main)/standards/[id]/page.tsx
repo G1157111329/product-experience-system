@@ -51,14 +51,14 @@ const defaultFlowByPhase: Record<string, string[]> = {
   '清洁收纳': ['冲水', '擦拭', '晾干', '收纳'],
   '其他': ['其他'],
 };
-const levelOptions = ['一级', '二级', '三级'];
+const levelOptions = ['一类', '二类', '三类'];
 const sensoryColors: Record<string, string> = {
   '视觉': 'bg-blue-100 text-blue-700', '听觉': 'bg-purple-100 text-purple-700',
   '触觉': 'bg-amber-100 text-amber-700', '嗅觉': 'bg-emerald-100 text-emerald-700',
   '味觉': 'bg-rose-100 text-rose-700',
 };
 
-const emptyGeneral = { test_phase: '', experience_flow: '', sensory_dimension: '', touch_point: '', check_requirement: '', experience_standard: '', check_tool: '', problem_level: '一级' };
+const emptyGeneral = { test_phase: '', experience_flow: '', sensory_dimension: '', touch_point: '', check_requirement: '', experience_standard: '', check_tool: '', problem_level: '一类' };
 const emptyCategory = { sensory_dimension: '', check_dimension: '', sub_check_dimension: '', check_item: '', check_requirement: '', check_standard: '' };
 const emptySensory = { sensory_dimension: '', evaluation_prep: '', subjective_score: '', subjective_rating: '' };
 
@@ -144,7 +144,7 @@ export default function StandardDetailPage() {
 
   const startEdit = (item: StandardItem) => {
     setEditingItemId(item.id);
-    if (category === '通用标准') setEditForm({ sensory_dimension: item.sensory_dimension || '', test_phase: item.test_phase || '', experience_flow: item.experience_flow || '', touch_point: item.touch_point || '', check_requirement: item.check_requirement || '', experience_standard: item.experience_standard || '', check_tool: item.check_tool || '', problem_level: item.problem_level || '一级' });
+    if (category === '通用标准') setEditForm({ sensory_dimension: item.sensory_dimension || '', test_phase: item.test_phase || '', experience_flow: item.experience_flow || '', touch_point: item.touch_point || '', check_requirement: item.check_requirement || '', experience_standard: item.experience_standard || '', check_tool: item.check_tool || '', problem_level: item.problem_level || '一类' });
     else if (category === '品类标准') setEditForm({ sensory_dimension: item.sensory_dimension || '', check_dimension: item.check_dimension || '', sub_check_dimension: item.sub_check_dimension || '', check_item: item.check_item || '', check_requirement: item.check_requirement || '', check_standard: item.check_standard || '' });
     else if (category === '感官评价标准') setEditForm({ sensory_dimension: item.sensory_dimension || '', evaluation_prep: item.evaluation_prep || '', subjective_score: item.subjective_score?.toString() || '', subjective_rating: item.subjective_rating || '' });
   };

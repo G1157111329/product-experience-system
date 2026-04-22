@@ -50,7 +50,7 @@ export const standardItems = pgTable(
     standard_a: varchar("standard_a", { length: 200 }),
     standard_b: varchar("standard_b", { length: 200 }),
     standard_c: varchar("standard_c", { length: 200 }),
-    problem_level: varchar("problem_level", { length: 20 }), // 问题等级：一级/二级/三级
+    problem_level: varchar("problem_level", { length: 20 }), // 问题等级：一类/二类/三类
     evaluation_prep: text("evaluation_prep"), // 感官评价准备（感官评价标准）
     subjective_score: integer("subjective_score"), // 主观满意度分值（感官评价标准）
     subjective_rating: text("subjective_rating"), // 主观满意度描述（感官评价标准）

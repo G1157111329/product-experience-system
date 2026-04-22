@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import Link from 'next/link';
-import { Search, BookOpen, ChevronRight, Upload, FileUp, Loader2, Trash2, Plus, ChefHat, Pencil, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { Search, BookOpen, ChevronRight, Upload, FileUp, Loader2, Trash2, Plus, ChefHat, Pencil, X, ChevronDown, ChevronUp, GripVertical } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -427,14 +427,11 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
                         {detailSteps.map((step, idx) => (
                           <div key={step.id || idx}
                             className={cn(
-                              'border rounded-lg p-3 space-y-2 cursor-grab active:cursor-grabbing transition-all',
+                              'border rounded-lg p-3 space-y-2 transition-all',
                               dragIdx === idx && 'opacity-50 scale-95',
                               dragOverIdx === idx && 'border-primary border-2',
                             )}
-                            draggable={isAdmin}
-                            onDragStart={() => handleDragStart(idx)}
                             onDragOver={(e) => handleDragOver(e, idx)}
-                            onDragEnd={handleDragEnd}
                             onDragLeave={() => setDragOverIdx(null)}
                           >
                             {editStepId === step.id ? (
@@ -453,6 +450,15 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
                               /* View step mode */
                               <>
                                 <div className="flex items-start gap-2">
+                                  {isAdmin && (
+                                    <div className="cursor-grab active:cursor-grabbing shrink-0 text-muted-foreground/40 hover:text-muted-foreground mt-0.5"
+                                      draggable
+                                      onDragStart={() => handleDragStart(idx)}
+                                      onDragEnd={handleDragEnd}
+                                    >
+                                      <GripVertical className="h-4 w-4" />
+                                    </div>
+                                  )}
                                   <Badge variant="outline" className="text-[10px] shrink-0 mt-0.5">步骤{step.step_number}</Badge>
                                   <div className="flex-1 min-w-0 text-sm">{step.operation}</div>
                                   {isAdmin && (

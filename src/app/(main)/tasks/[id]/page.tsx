@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, ArrowRightLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Pencil, Trash2, Check, Link2, X, Play } from 'lucide-react';
+import { ArrowLeft, ArrowRightLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Pencil, Trash2, Check, Link2, X, Play, GripVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -1502,6 +1502,59 @@ function RecordDetailCard({ record, taskId, existingMaterials, onRefresh, onClos
   const [referenceIds, setReferenceIds] = useState<string[]>([]);
   const [localMaterials, setLocalMaterials] = useState<Material[]>(existingMaterials);
   const [saving, setSaving] = useState(false);
+  const [editStandard, setEditStandard] = useState(false);
+  const [standardFields, setStandardFields] = useState({
+    standard_category: record.standard_category || '通用标准',
+    test_phase: record.test_phase || '',
+    experience_flow: record.experience_flow || '',
+    sensory_dimension: record.sensory_dimension || '',
+    touch_point: record.touch_point || '',
+    check_requirement: record.check_requirement || '',
+    experience_standard: record.experience_standard || '',
+    check_dimension: record.check_dimension || '',
+    sub_check_dimension: record.sub_check_dimension || '',
+    check_standard: record.check_standard || '',
+  });
+
+  // Dynamic options from platform_settings
+  const [phaseOptions, setPhaseOptions] = useState<string[]>(defaultPhaseOptions);
+  const [flowByPhase, setFlowByPhase] = useState<Record<string, string[]>>(defaultFlowByPhase);
+  const [sensoryOptions, setSensoryOptions] = useState<string[]>(defaultSensoryOptions);
+
+  useEffect(() => {
+    fetch('/api/settings?key=standard_options').then(r => r.json()).then(d => {
+      if (d.code === 0 && d.data && (d.data.test_phases?.length > 0 || d.data.sensory_dimensions?.length > 0)) {
+        setPhaseOptions(d.data.test_phases || defaultPhaseOptions);
+        setFlowByPhase(d.data.experience_flows || defaultFlowByPhase);
+        setSensoryOptions(d.data.sensory_dimensions || defaultSensoryOptions);
+      }
+    }).catch(() => {});
+  }, []);
+
+  // Fetch general standard items when 3 selects are chosen (for auto-fill)
+  const [generalRefItems, setGeneralRefItems] = useState<Array<{ touch_point: string; check_requirement: string; experience_standard: string }>>([]);
+  useEffect(() => {
+    if (standardFields.standard_category !== '通用标准') return;
+    if (!standardFields.test_phase || !standardFields.experience_flow || !standardFields.sensory_dimension) {
+      setGeneralRefItems([]);
+      return;
+    }
+    fetch(`/api/standard-items/search?standard_category=通用标准&experience_flow=${encodeURIComponent(standardFields.experience_flow)}&keyword=${encodeURIComponent(standardFields.sensory_dimension)}`)
+      .then(r => r.json()).then(d => { if (d.code === 0) setGeneralRefItems(d.data || []); }).catch(() => {});
+  }, [standardFields.standard_category, standardFields.test_phase, standardFields.experience_flow, standardFields.sensory_dimension]);
+
+  // Auto-fill touch_point and check_requirement when general standard items are loaded
+  useEffect(() => {
+    if (standardFields.standard_category !== '通用标准' || generalRefItems.length === 0) return;
+    if (generalRefItems.length === 1) {
+      setStandardFields(prev => ({
+        ...prev,
+        touch_point: prev.touch_point || generalRefItems[0].touch_point || '',
+        check_requirement: prev.check_requirement || generalRefItems[0].check_requirement || '',
+        experience_standard: prev.experience_standard || generalRefItems[0].experience_standard || '',
+      }));
+    }
+  }, [generalRefItems, standardFields.standard_category]);
 
   // Sync localMaterials when existingMaterials changes (e.g. after onRefresh)
   useEffect(() => {
@@ -1518,12 +1571,28 @@ function RecordDetailCard({ record, taskId, existingMaterials, onRefresh, onClos
   const handleSave = async () => {
     setSaving(true);
     try {
+      const updateBody: Record<string, unknown> = {
+        evaluation_result: tempStatus,
+        problem_description: description,
+      };
+      if (editStandard) {
+        // Include standard fields in update
+        Object.assign(updateBody, {
+          standard_category: standardFields.standard_category,
+          test_phase: standardFields.test_phase || null,
+          experience_flow: standardFields.experience_flow || null,
+          sensory_dimension: standardFields.sensory_dimension || null,
+          touch_point: standardFields.touch_point || null,
+          check_requirement: standardFields.check_requirement || null,
+          experience_standard: standardFields.experience_standard || null,
+          check_dimension: standardFields.check_dimension || null,
+          sub_check_dimension: standardFields.sub_check_dimension || null,
+          check_standard: standardFields.check_standard || null,
+        });
+      }
       await fetch(`/api/records/${record.id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          evaluation_result: tempStatus,
-          problem_description: description,
-        }),
+        body: JSON.stringify(updateBody),
       });
       // Link referenced materials
       if (referenceIds.length > 0) {
@@ -1558,13 +1627,146 @@ function RecordDetailCard({ record, taskId, existingMaterials, onRefresh, onClos
         </DialogHeader>
         <div className="space-y-4">
           {/* Standard reference tags */}
-          <div className="flex flex-wrap gap-1">
-            {record.standard_category && <Badge variant="secondary" className="text-[10px]">{record.standard_category}</Badge>}
-            {record.check_dimension && <Badge variant="outline" className="text-[10px]">{record.check_dimension}</Badge>}
-            {record.sub_check_dimension && <Badge variant="outline" className="text-[10px]">{record.sub_check_dimension}</Badge>}
-            {record.test_phase && <Badge variant="outline" className="text-[10px]">{record.test_phase}</Badge>}
-            {record.experience_flow && <Badge variant="outline" className="text-[10px]">{record.experience_flow}</Badge>}
-            {record.touch_point && <Badge variant="outline" className="text-[10px]">{record.touch_point}</Badge>}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex flex-wrap gap-1">
+                {record.standard_category && <Badge variant="secondary" className="text-[10px]">{record.standard_category}</Badge>}
+                {record.check_dimension && <Badge variant="outline" className="text-[10px]">{record.check_dimension}</Badge>}
+                {record.sub_check_dimension && <Badge variant="outline" className="text-[10px]">{record.sub_check_dimension}</Badge>}
+                {record.test_phase && <Badge variant="outline" className="text-[10px]">{record.test_phase}</Badge>}
+                {record.experience_flow && <Badge variant="outline" className="text-[10px]">{record.experience_flow}</Badge>}
+                {record.touch_point && <Badge variant="outline" className="text-[10px]">{record.touch_point}</Badge>}
+              </div>
+              <Button variant="ghost" size="sm" className="h-6 text-[10px] gap-1 shrink-0" onClick={() => setEditStandard(!editStandard)}>
+                <Pencil className="h-3 w-3" /> {editStandard ? '收起' : '修改标准'}
+              </Button>
+            </div>
+
+            {editStandard && (
+              <div className="space-y-2 border rounded-lg p-3 bg-muted/20">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">标准类型</Label>
+                  <Select value={standardFields.standard_category} onValueChange={(v) => setStandardFields({
+                    ...standardFields, standard_category: v,
+                    test_phase: '', experience_flow: '', sensory_dimension: '', touch_point: '',
+                    check_requirement: '', experience_standard: '', check_dimension: '', sub_check_dimension: '', check_standard: '',
+                  })}>
+                    <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="通用标准">通用标准</SelectItem>
+                      <SelectItem value="品类标准">品类标准</SelectItem>
+                      <SelectItem value="感官评价标准">感官评价标准</SelectItem>
+                      <SelectItem value="非标准">非标准</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {standardFields.standard_category === '通用标准' && (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">产品使用阶段</Label>
+                      <Select value={standardFields.test_phase} onValueChange={(v) => setStandardFields({ ...standardFields, test_phase: v, experience_flow: '', touch_point: '', check_requirement: '', experience_standard: '' })}>
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="选择" /></SelectTrigger>
+                        <SelectContent>
+                          {phaseOptions.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">体验流程</Label>
+                      <Select value={standardFields.experience_flow} onValueChange={(v) => setStandardFields({ ...standardFields, experience_flow: v, touch_point: '', check_requirement: '', experience_standard: '' })}>
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="选择" /></SelectTrigger>
+                        <SelectContent>
+                          {(flowByPhase[standardFields.test_phase] || []).map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">感官维度</Label>
+                      <Select value={standardFields.sensory_dimension} onValueChange={(v) => setStandardFields({ ...standardFields, sensory_dimension: v, touch_point: '', check_requirement: '', experience_standard: '' })}>
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="选择" /></SelectTrigger>
+                        <SelectContent>
+                          {sensoryOptions.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {standardFields.test_phase && standardFields.experience_flow && standardFields.sensory_dimension && generalRefItems.length > 0 && (
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">选择标准项（自动填充）</Label>
+                        <Select value={standardFields.touch_point} onValueChange={(v) => {
+                          const item = generalRefItems.find(i => i.touch_point === v);
+                          setStandardFields({
+                            ...standardFields,
+                            touch_point: v,
+                            check_requirement: item?.check_requirement || '',
+                            experience_standard: item?.experience_standard || '',
+                          });
+                        }}>
+                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="选择触点/检查项" /></SelectTrigger>
+                          <SelectContent>
+                            {generalRefItems.map((item, i) => (
+                              <SelectItem key={i} value={item.touch_point || `item-${i}`}>{item.touch_point || `项目${i + 1}`}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">触点</Label>
+                      <Input className="h-8 text-xs" value={standardFields.touch_point} onChange={e => setStandardFields({ ...standardFields, touch_point: e.target.value })} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">检验范围及具体要求</Label>
+                      <Input className="h-8 text-xs" value={standardFields.check_requirement} onChange={e => setStandardFields({ ...standardFields, check_requirement: e.target.value })} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">体验标准</Label>
+                      <Input className="h-8 text-xs" value={standardFields.experience_standard} onChange={e => setStandardFields({ ...standardFields, experience_standard: e.target.value })} />
+                    </div>
+                  </>
+                )}
+
+                {standardFields.standard_category === '品类标准' && (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">感官维度</Label>
+                      <Input className="h-8 text-xs" value={standardFields.sensory_dimension} onChange={e => setStandardFields({ ...standardFields, sensory_dimension: e.target.value })} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">检查维度</Label>
+                      <Input className="h-8 text-xs" value={standardFields.check_dimension} onChange={e => setStandardFields({ ...standardFields, check_dimension: e.target.value })} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">细分检查维度</Label>
+                      <Input className="h-8 text-xs" value={standardFields.sub_check_dimension} onChange={e => setStandardFields({ ...standardFields, sub_check_dimension: e.target.value })} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">检查要求及区域</Label>
+                      <Input className="h-8 text-xs" value={standardFields.check_requirement} onChange={e => setStandardFields({ ...standardFields, check_requirement: e.target.value })} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">检查标准</Label>
+                      <Input className="h-8 text-xs" value={standardFields.check_standard} onChange={e => setStandardFields({ ...standardFields, check_standard: e.target.value })} />
+                    </div>
+                  </>
+                )}
+
+                {standardFields.standard_category === '感官评价标准' && (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">感官维度</Label>
+                      <Input className="h-8 text-xs" value={standardFields.sensory_dimension} onChange={e => setStandardFields({ ...standardFields, sensory_dimension: e.target.value })} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">体验标准</Label>
+                      <Input className="h-8 text-xs" value={standardFields.experience_standard} onChange={e => setStandardFields({ ...standardFields, experience_standard: e.target.value })} />
+                    </div>
+                  </>
+                )}
+
+                {/* 非标准: no standard fields needed, just description */}
+              </div>
+            )}
           </div>
 
           {/* Check requirement & standard */}
@@ -2047,45 +2249,51 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                   {recipe.recipe_steps?.map((step, stepIdx) => (
                     <div key={step.id}
                       className={cn(
-                        'p-3 rounded-lg bg-muted/30 space-y-1.5 cursor-grab active:cursor-grabbing transition-all',
+                        'p-3 rounded-lg bg-muted/30 space-y-1.5 transition-all',
                         dragStepIdx === stepIdx && 'opacity-50 scale-95',
                         dragStepOverIdx === stepIdx && 'border-primary border-2',
                       )}
-                      draggable
-                      onDragStart={() => setDragStepIdx(stepIdx)}
                       onDragOver={(e) => { e.preventDefault(); setDragStepOverIdx(stepIdx); }}
-                      onDragEnd={async () => {
-                        if (dragStepIdx !== null && dragStepOverIdx !== null && dragStepIdx !== dragStepOverIdx) {
-                          const steps = recipe.recipe_steps || [];
-                          const newSteps = [...steps];
-                          const [moved] = newSteps.splice(dragStepIdx, 1);
-                          newSteps.splice(dragStepOverIdx, 0, moved);
-                          const updatedRecipes = recipes.map(r => {
-                            if (r.id !== recipe.id) return r;
-                            return { ...r, recipe_steps: newSteps };
-                          });
-                          setRecipes(updatedRecipes);
-                          const reorderData = newSteps.map((s, i) => ({ id: s.id, step_number: i + 1 }));
-                          await fetch('/api/recipe-steps', {
-                            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ steps: reorderData }),
-                          });
-                        }
-                        setDragStepIdx(null);
-                        setDragStepOverIdx(null);
-                      }}
                       onDragLeave={() => setDragStepOverIdx(null)}
                     >
                       <div className="flex items-center gap-2">
+                        <div className="cursor-grab active:cursor-grabbing shrink-0 text-muted-foreground/40 hover:text-muted-foreground"
+                          draggable
+                          onDragStart={() => setDragStepIdx(stepIdx)}
+                          onDragEnd={async () => {
+                            if (dragStepIdx !== null && dragStepOverIdx !== null && dragStepIdx !== dragStepOverIdx) {
+                              const steps = recipe.recipe_steps || [];
+                              const newSteps = [...steps];
+                              const [moved] = newSteps.splice(dragStepIdx, 1);
+                              newSteps.splice(dragStepOverIdx, 0, moved);
+                              const updatedRecipes = recipes.map(r => {
+                                if (r.id !== recipe.id) return r;
+                                return { ...r, recipe_steps: newSteps };
+                              });
+                              setRecipes(updatedRecipes);
+                              const reorderData = newSteps.map((s, i) => ({ id: s.id, step_number: i + 1 }));
+                              await fetch('/api/recipe-steps', {
+                                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ steps: reorderData }),
+                              });
+                            }
+                            setDragStepIdx(null);
+                            setDragStepOverIdx(null);
+                          }}
+                        >
+                          <GripVertical className="h-4 w-4" />
+                        </div>
                         <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] flex items-center justify-center font-medium">
                           {stepIdx + 1}
                         </span>
                         <span className="text-sm flex-1 min-w-0 break-all">{step.operation}</span>
-                        <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={(e) => { e.stopPropagation(); handleDeleteStep(step); }}>
+                        <div className="flex items-center gap-0.5 shrink-0">
+                          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => handleEditStep(step)}>
+                            <Pencil className="h-3 w-3 text-muted-foreground" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => handleDeleteStep(step)}>
                             <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
                           </Button>
-                          <Pencil className="h-3 w-3 text-muted-foreground shrink-0" />
                         </div>
                       </div>
                       {/* Problem points display */}

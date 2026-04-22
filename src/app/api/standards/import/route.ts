@@ -73,10 +73,10 @@ async function parsePdfWithLLM(pdfUrl: string, headers: Record<string, string>, 
 8. check_requirement：检验范围及具体要求
 9. experience_standard：体验标准，如"间隙≤2mm"
 10. check_tool：测量工具，如"目视/卡尺/塞尺"
-11. problem_level只允许：一级/二级/三级
+11. problem_level只允许：一类/二类/三类
 
 示例输出：
-[{"sensory_dimension":"视觉","test_phase":"开箱","experience_flow":"拿取外包装","touch_point":"外箱手提把手","check_item":"外箱手提把手","check_requirement":"手提把手牢固，无脱胶","experience_standard":"手提把手承重≥5kg","check_tool":"目视","problem_level":"二级","measurement_position":null,"check_dimension":null,"sub_check_dimension":null,"check_standard":null,"evaluation_prep":null,"subjective_score":null,"subjective_rating":null}]`;
+[{"sensory_dimension":"视觉","test_phase":"开箱","experience_flow":"拿取外包装","touch_point":"外箱手提把手","check_item":"外箱手提把手","check_requirement":"手提把手牢固，无脱胶","experience_standard":"手提把手承重≥5kg","check_tool":"目视","problem_level":"二类","measurement_position":null,"check_dimension":null,"sub_check_dimension":null,"check_standard":null,"evaluation_prep":null,"subjective_score":null,"subjective_rating":null}]`;
   } else if (category === '品类标准') {
     systemPrompt += `4. sensory_dimension只允许：视觉/听觉/触觉/嗅觉/味觉
 5. check_dimension：检查维度，如"间隙段差"
