@@ -56,6 +56,7 @@ interface Issue {
 
 interface Material {
   id: string; material_type: string; file_name: string; file_url: string; file_size: number;
+  record_id: string | null; recipe_step_id: string | null;
 }
 
 interface Recipe {
@@ -613,6 +614,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
   const [savingRecord, setSavingRecord] = useState(false);
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
   const [, setSelectedMaterials] = useState<Material[]>([]);
+  const [initialMaterialIds, setInitialMaterialIds] = useState<string[]>([]);
   const [recordMaterials, setRecordMaterials] = useState<Record<string, Material[]>>({});
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
 
@@ -812,6 +814,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
     setFuzzyResults([]);
     setSelectedMaterialIds([]);
     setSelectedMaterials([]);
+    setInitialMaterialIds([]);
   };
 
   // ── Populate forms from existing record (for editing) ──
@@ -859,7 +862,9 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
     populateFormsFromRecord(record);
     // Pre-select existing materials for this record
     const existingMats = recordMaterials[record.id] || [];
-    setSelectedMaterialIds(existingMats.map(m => m.id));
+    const existingIds = existingMats.map(m => m.id);
+    setSelectedMaterialIds(existingIds);
+    setInitialMaterialIds(existingIds);
     setSelectedMaterials(existingMats);
     setAddDialogOpen(true);
   };
@@ -966,13 +971,20 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
         });
         const data = await res.json();
         if (data.code === 0) {
-          if (selectedMaterialIds.length > 0) {
-            for (const matId of selectedMaterialIds) {
-              await fetch('/api/materials', {
-                method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: matId, record_id: editRecordId }),
-              });
-            }
+          // Link newly selected materials
+          for (const matId of selectedMaterialIds) {
+            await fetch('/api/materials', {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: matId, record_id: editRecordId }),
+            });
+          }
+          // Unlink materials that were deselected (existed initially but not in current selection)
+          const removedIds = initialMaterialIds.filter(id => !selectedMaterialIds.includes(id));
+          for (const matId of removedIds) {
+            await fetch('/api/materials', {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: matId, record_id: null }),
+            });
           }
           setAddDialogOpen(false);
           resetForms();
@@ -1311,7 +1323,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
           <Label>检查结果</Label>
           <Textarea placeholder="描述检查结果" value={generalForm.problem_description} onChange={(e) => setGeneralForm({ ...generalForm, problem_description: e.target.value })} rows={2} />
         </div>
-        <MaterialPicker taskId={taskId} recordId={editRecordId || undefined} selectedIds={selectedMaterialIds} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
+        <MaterialPicker taskId={taskId} recordId={editRecordId || undefined} selectedIds={selectedMaterialIds} initialMaterials={editRecordId ? (recordMaterials[editRecordId] || []) : undefined} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
         <div className="space-y-1.5">
           <Label>检查结果 *</Label>
           <div className="flex gap-2">
@@ -1430,7 +1442,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
           <Label>检查结果</Label>
           <Textarea placeholder="描述检查结果" value={categoryForm.problem_description} onChange={(e) => setCategoryForm({ ...categoryForm, problem_description: e.target.value })} rows={2} />
         </div>
-        <MaterialPicker taskId={taskId} recordId={editRecordId || undefined} selectedIds={selectedMaterialIds} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
+        <MaterialPicker taskId={taskId} recordId={editRecordId || undefined} selectedIds={selectedMaterialIds} initialMaterials={editRecordId ? (recordMaterials[editRecordId] || []) : undefined} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
         <div className="space-y-1.5">
           <Label>检查结果 *</Label>
           <div className="flex gap-2">
@@ -1507,7 +1519,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
           <Label>结果描述</Label>
           <Textarea placeholder="描述评价结果" value={sensoryForm.result_description} onChange={(e) => setSensoryForm({ ...sensoryForm, result_description: e.target.value })} rows={2} />
         </div>
-        <MaterialPicker taskId={taskId} recordId={editRecordId || undefined} selectedIds={selectedMaterialIds} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
+        <MaterialPicker taskId={taskId} recordId={editRecordId || undefined} selectedIds={selectedMaterialIds} initialMaterials={editRecordId ? (recordMaterials[editRecordId] || []) : undefined} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
         <div className="space-y-1.5">
           <Label>检查结果 *</Label>
           <div className="flex gap-2">
@@ -1545,7 +1557,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
           <Textarea placeholder="描述检查结果（可选）" value={nonStandardForm.problem_description}
             onChange={(e) => setNonStandardForm({ ...nonStandardForm, problem_description: e.target.value })} rows={2} />
         </div>
-        <MaterialPicker taskId={taskId} recordId={editRecordId || undefined} selectedIds={selectedMaterialIds} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
+        <MaterialPicker taskId={taskId} recordId={editRecordId || undefined} selectedIds={selectedMaterialIds} initialMaterials={editRecordId ? (recordMaterials[editRecordId] || []) : undefined} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
         <div className="space-y-1.5">
           <Label>检查结果 *</Label>
           <div className="flex gap-2">

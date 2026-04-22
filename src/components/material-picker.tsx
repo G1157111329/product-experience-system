@@ -22,10 +22,11 @@ interface MaterialPickerProps {
   recipeStepId?: string;
   // Legacy API (used by tasks/[id])
   selectedIds?: string[];
+  initialMaterials?: Material[];
   onSelectionChange?: (ids: string[], materials: Material[]) => void;
 }
 
-export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onSelect, recordId, recipeStepId, selectedIds, onSelectionChange }: MaterialPickerProps) {
+export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onSelect, recordId, recipeStepId, selectedIds, initialMaterials, onSelectionChange }: MaterialPickerProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -33,7 +34,13 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
   const [filterType, setFilterType] = useState<'all' | 'image' | 'video'>('all');
   const [selected, setSelected] = useState<string[]>(selectedIds || []);
   // Track selected material objects so thumbnails can show even when dialog hasn't been opened
-  const [selectedMaterialMap, setSelectedMaterialMap] = useState<Record<string, Material>>({});
+  const [selectedMaterialMap, setSelectedMaterialMap] = useState<Record<string, Material>>(() => {
+    const map: Record<string, Material> = {};
+    if (initialMaterials) {
+      for (const m of initialMaterials) map[m.id] = m;
+    }
+    return map;
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
