@@ -42,10 +42,15 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { admin_user_id, target_user_id, action } = body; // action: 'upgrade' | 'downgrade'
+    const { admin_user_id, target_user_id, action } = body; // action: 'upgrade' | 'downgrade' | 'delete'
 
     if (!admin_user_id || !target_user_id || !action) {
       return NextResponse.json({ code: 1, message: '参数不完整' });
+    }
+
+    // Prevent self-deletion and self-role-change
+    if (admin_user_id === target_user_id) {
+      return NextResponse.json({ code: 1, message: '不能操作自己的账号' });
     }
 
     const supabase = createClient();
@@ -80,6 +85,41 @@ export async function POST(request: NextRequest) {
       }
       await supabase.from('platform_users').update({ role: 'user' }).eq('id', target_user_id);
       return NextResponse.json({ code: 0, message: '已降级为普通账号' });
+    }
+
+    if (action === 'delete') {
+      // Prevent deleting the last admin
+      const { data: targetUser } = await supabase
+        .from('platform_users')
+        .select('role')
+        .eq('id', target_user_id)
+        .maybeSingle();
+
+      if (targetUser?.role === 'admin') {
+        const { data: admins } = await supabase
+          .from('platform_users')
+          .select('id')
+          .eq('role', 'admin')
+          .eq('status', 'approved');
+
+        if (!admins || admins.length <= 1) {
+          return NextResponse.json({ code: 1, message: '至少保留一个管理账号' });
+        }
+      }
+
+      // Clean up references before deleting
+      // 1. Nullify report_shares.created_by (preserves share links)
+      await supabase.from('report_shares').update({ created_by: null }).eq('created_by', target_user_id);
+      // 2. Delete audit requests from/to this user
+      await supabase.from('platform_audit_requests').delete().eq('user_id', target_user_id);
+      await supabase.from('platform_audit_requests').delete().eq('admin_user_id', target_user_id);
+
+      // 3. Delete the user (reports/tasks preserve organizer as name string, not FK)
+      const { error: deleteError } = await supabase.from('platform_users').delete().eq('id', target_user_id);
+      if (deleteError) {
+        return NextResponse.json({ code: 1, message: '删除失败: ' + deleteError.message });
+      }
+      return NextResponse.json({ code: 0, message: '账号已删除' });
     }
 
     return NextResponse.json({ code: 1, message: '不支持的操作' });

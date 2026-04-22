@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   LayoutDashboard, BookOpen, ClipboardList, AlertTriangle, FileText,
   BarChart3, Menu, ChevronRight, User, LogOut, Key, Pencil,
-  Settings, Plus, Minus,
+  Settings, Plus, Minus, Trash2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -303,6 +303,24 @@ function UserSection() {
     } finally { setRoleLoading(false); }
   };
 
+  const handleDeleteUser = async (targetUserId: string, targetName: string) => {
+    if (!confirm(`确定删除账号「${targetName}」吗？删除后该账号将无法登录，但其创建的报告和组织者信息会保留。`)) return;
+    setRoleLoading(true);
+    try {
+      const res = await fetch('/api/auth/users', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin_user_id: user?.id, target_user_id: targetUserId, action: 'delete' }),
+      });
+      const data = await res.json();
+      if (data.code === 0) {
+        toast.success('账号已删除');
+        const usersRes = await fetch(`/api/auth/users?admin_user_id=${user?.id}`);
+        const usersData = await usersRes.json();
+        if (usersData.code === 0) setAllUsers(usersData.data || []);
+      } else toast.error(data.message);
+    } finally { setRoleLoading(false); }
+  };
+
   return (
     <>
       <div className="flex items-center gap-2">
@@ -402,11 +420,16 @@ function UserSection() {
                         <div className="flex items-center gap-1.5 shrink-0">
                           <Badge variant={u.role === 'admin' ? 'default' : 'secondary'} className="text-[10px] px-1.5">{u.role === 'admin' ? '管理' : '普通'}</Badge>
                           {u.id !== user?.id && (
-                            u.role === 'user' ? (
-                              <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5" onClick={() => handleRoleChange(u.id, 'upgrade')} disabled={roleLoading}>升级</Button>
-                            ) : (
-                              <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5" onClick={() => handleRoleChange(u.id, 'downgrade')} disabled={roleLoading}>降级</Button>
-                            )
+                            <>
+                              {u.role === 'user' ? (
+                                <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5" onClick={() => handleRoleChange(u.id, 'upgrade')} disabled={roleLoading}>升级</Button>
+                              ) : (
+                                <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5" onClick={() => handleRoleChange(u.id, 'downgrade')} disabled={roleLoading}>降级</Button>
+                              )}
+                              <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5 text-destructive hover:text-destructive" onClick={() => handleDeleteUser(u.id, u.name || u.account)} disabled={roleLoading}>
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </>
                           )}
                         </div>
                       </div>

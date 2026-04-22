@@ -123,7 +123,7 @@
 | GET | `/api/auth/audit` | 获取审核请求（admin_user_id: 管理员查所有; user_id: 普通用户查自己的） |
 | PUT | `/api/auth/audit` | 审核（approve/reject，管理员）；取消申请（cancel，用户自己） |
 | GET | `/api/auth/users` | 获取用户列表（管理员） |
-| POST | `/api/auth/users` | 升级/降级用户角色（管理员） |
+| POST | `/api/auth/users` | 升级/降级用户角色、删除用户账号（管理员） |
 | GET/POST | `/api/standards` | 标准列表/创建 |
 | GET/PUT/DELETE | `/api/standards/[id]` | 标准详情/更新/删除 |
 | POST | `/api/standards/import` | 标准批量导入（PDF/Excel，按分类不同LLM prompt） |
@@ -282,6 +282,7 @@ coze start
 | 标准引用到五感体验 | ✅ | ✅ |
 | 审核账号注册/密码/名称 | ✅ | ❌ |
 | 升级/降级用户角色 | ✅ | ❌ |
+| 删除用户账号 | ✅ | ❌ |
 | 查看所有体验计划/问题/报告 | ✅ | ❌(仅自己的) |
 | 数据分析导出 | ✅ | ❌ |
 | 数据分析浏览 | ✅ | ✅ |
