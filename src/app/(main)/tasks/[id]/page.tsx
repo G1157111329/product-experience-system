@@ -2,16 +2,17 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Pencil, Trash2, Check, Link2, X, Play } from 'lucide-react';
+import { ArrowLeft, ArrowRightLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Pencil, Trash2, Check, Link2, X, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
+import { useAuth } from '@/lib/auth-context';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useImagePreview } from '@/components/image-preview';
@@ -21,6 +22,12 @@ import { MaterialPicker } from '@/components/material-picker';
 interface CategoryWithProducts {
   id: string; name: string; sort_order: number;
   products: Array<{ id: string; name: string; category_id: string; sort_order: number }>;
+}
+
+interface RecipeLibRef {
+  id: string; name: string; product_category: string | null; product: string | null;
+  ingredients: string | null; recipe_type: string;
+  recipe_library_steps: Array<{ id: string; step_number: number; operation: string; problem_point: string | null; problem_points: unknown }>;
 }
 
 interface TaskDetail {
@@ -75,19 +82,22 @@ const sensoryColors: Record<string, string> = {
 const statusConfig: Record<string, { label: string; color: string }> = {
   '待执行': { label: '待执行', color: 'bg-muted text-muted-foreground' },
   '进行中': { label: '进行中', color: 'bg-primary/10 text-primary' },
-  '待审核': { label: '待审核', color: 'bg-amber-100 text-amber-700' },
   '已完成': { label: '已完成', color: 'bg-emerald-100 text-emerald-700' },
-  '已驳回': { label: '已驳回', color: 'bg-destructive/10 text-destructive' },
 };
 
 /* ─── Main Page ─── */
 export default function TaskDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const { user, isAdmin } = useAuth();
   const id = params.id as string;
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'info' | 'materials' | 'senses' | 'functions'>('info');
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferUsers, setTransferUsers] = useState<Array<{ id: string; name: string; account: string }>>([]);
+  const [transferTargetId, setTransferTargetId] = useState('');
+  const [transferring, setTransferring] = useState(false);
 
   const fetchTask = useCallback(async () => {
     const res = await fetch(`/api/tasks/${id}`);
@@ -96,6 +106,51 @@ export default function TaskDetailPage() {
   }, [id]);
 
   useEffect(() => { fetchTask().finally(() => setLoading(false)); }, [fetchTask]);
+
+  // Transfer task to another user
+  const handleTransfer = async () => {
+    if (!transferTargetId || transferring) return;
+    setTransferring(true);
+    try {
+      const res = await fetch(`/api/tasks/${id}/transfer`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_user_id: transferTargetId, admin_user_id: user?.id }),
+      });
+      const data = await res.json();
+      if (data.code === 0) {
+        toast.success(data.message);
+        setTransferOpen(false);
+        router.push('/tasks');
+      } else toast.error(data.message);
+    } finally { setTransferring(false); }
+  };
+
+  const handleOpenTransfer = async () => {
+    const res = await fetch('/api/auth/users');
+    const data = await res.json();
+    if (data.code === 0) {
+      setTransferUsers((data.data || []).filter((u: Record<string, unknown>) => u.id !== user?.id));
+      setTransferOpen(true);
+    }
+  };
+
+  // Auto-update task status based on content changes
+  const updateTaskStatusIfNeeded = async (action: 'add_content' | 'edit_completed') => {
+    if (!task) return;
+    let newStatus = '';
+    if (action === 'add_content' && task.status === '待执行') {
+      newStatus = '进行中';
+    } else if (action === 'edit_completed' && task.status === '已完成') {
+      newStatus = '进行中';
+    }
+    if (newStatus) {
+      await fetch(`/api/tasks/${id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      fetchTask(); // Refresh task data
+    }
+  };
 
   const handleGenerateReport = async () => {
     const res = await fetch('/api/reports', {
@@ -135,9 +190,16 @@ export default function TaskDetailPage() {
           </div>
           <p className="text-sm text-muted-foreground mt-1">{task.product_model} | {task.product_category}{task.product ? ` - ${task.product}` : ''}{task.project_type ? ` | ${task.project_type}` : ''}{task.project_phase ? ` | ${task.project_phase}` : ''}</p>
         </div>
-        <Button size="sm" onClick={handleGenerateReport}>
-          <FileText className="h-4 w-4 mr-1.5" /> 报告生成
-        </Button>
+        <div className="flex gap-2 shrink-0">
+          {isAdmin && (
+            <Button variant="outline" size="sm" onClick={handleOpenTransfer}>
+              <ArrowRightLeft className="h-4 w-4 mr-1.5" /> 转移
+            </Button>
+          )}
+          <Button size="sm" onClick={handleGenerateReport}>
+            <FileText className="h-4 w-4 mr-1.5" /> 报告生成
+          </Button>
+        </div>
       </div>
 
       {/* Tab Navigation */}
@@ -167,8 +229,37 @@ export default function TaskDetailPage() {
       {/* Tab Content */}
       {activeTab === 'info' && <BasicInfoTab task={task} onRefresh={fetchTask} />}
       {activeTab === 'materials' && <MaterialsTab taskId={id} />}
-      {activeTab === 'senses' && <SensesTab taskId={id} records={task.records || []} taskProductCategory={task.product_category} taskProduct={task.product} onRefresh={fetchTask} />}
-      {activeTab === 'functions' && <FunctionsTab taskId={id} />}
+      {activeTab === 'senses' && <SensesTab taskId={id} records={task.records || []} taskProductCategory={task.product_category} taskProduct={task.product} onRefresh={fetchTask} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} />}
+      {activeTab === 'functions' && <FunctionsTab taskId={id} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} />}
+
+      {/* Transfer Dialog */}
+      <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>转移体验计划</DialogTitle>
+            <DialogDescription>将该体验计划及其所有资料转移到其他用户</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="p-3 rounded-lg bg-muted/30 border border-border">
+              <p className="text-xs text-muted-foreground">转移后，该体验计划将从您的列表中移除，目标用户将获得所有资料的所有权</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>选择目标用户</Label>
+              <Select value={transferTargetId} onValueChange={setTransferTargetId}>
+                <SelectTrigger><SelectValue placeholder="请选择用户" /></SelectTrigger>
+                <SelectContent>
+                  {transferUsers.map((u: { id: string; name: string; account: string }) => (
+                    <SelectItem key={u.id} value={u.id}>{u.name || u.account}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button onClick={handleTransfer} className="w-full" disabled={!transferTargetId || transferring}>
+              {transferring ? '转移中...' : '确认转移'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -504,7 +595,7 @@ const flowByPhase: Record<string, string[]> = {
 };
 const standardCategoryOptions = ['通用标准', '品类标准', '感官评价标准', '非标准'];
 
-function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefresh }: { taskId: string; records: CheckRecord[]; taskProductCategory?: string; taskProduct?: string | null; onRefresh: () => void }) {
+function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefresh, onStatusUpdate }: { taskId: string; records: CheckRecord[]; taskProductCategory?: string; taskProduct?: string | null; onRefresh: () => void; onStatusUpdate: () => void }) {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [savingRecord, setSavingRecord] = useState(false);
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
@@ -763,6 +854,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
         setAddDialogOpen(false);
         resetForms();
         onRefresh();
+        onStatusUpdate();
         toast.success('问题点已添加');
       }
     } finally {
@@ -1338,17 +1430,18 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
 
       {/* Add button */}
       <div className="sticky bottom-4">
-        <Button className="w-full" onClick={() => {
+        <Button className="w-full" onClick={async () => {
           resetForms();
-          // Apply saved senses defaults
+          // Apply saved senses defaults from DB (admin global setting)
           try {
-            const saved = localStorage.getItem('senses_defaults');
-            if (saved) {
-              const defaults = JSON.parse(saved);
-              if (defaults.test_phase && defaults.test_phase !== 'clear') {
-                setGeneralForm(prev => ({ ...prev, test_phase: defaults.test_phase, experience_flow: defaults.experience_flow && defaults.experience_flow !== 'clear' ? defaults.experience_flow : '' }));
+            const res = await fetch('/api/settings?key=senses_defaults');
+            const d = await res.json();
+            if (d.code === 0 && d.data) {
+              const defaults = d.data;
+              if (defaults.test_phase) {
+                setGeneralForm(prev => ({ ...prev, test_phase: defaults.test_phase, experience_flow: defaults.experience_flow || '' }));
               }
-              if (defaults.sensory_dimension && defaults.sensory_dimension !== 'clear') {
+              if (defaults.sensory_dimension) {
                 setGeneralForm(prev => ({ ...prev, sensory_dimension: defaults.sensory_dimension }));
                 setCategoryForm(prev => ({ ...prev, sensory_dimension: defaults.sensory_dimension }));
                 setSensoryForm(prev => ({ ...prev, sensory_dimension: defaults.sensory_dimension }));
@@ -1530,7 +1623,7 @@ function RecordDetailCard({ record, taskId, existingMaterials, onRefresh, onClos
 }
 
 /* ─── Tab: 功能效果 ─── */
-function FunctionsTab({ taskId }: { taskId: string }) {
+function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpdate: () => void }) {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingRecipe, setSavingRecipe] = useState(false);
@@ -1555,12 +1648,12 @@ function FunctionsTab({ taskId }: { taskId: string }) {
 
   // ── Recipe library search (Feature 7) ──
   const [recipeSearch, setRecipeSearch] = useState('');
-  const [recipeSearchResults, setRecipeSearchResults] = useState<Recipe[]>([]);
+  const [recipeSearchResults, setRecipeSearchResults] = useState<RecipeLibRef[]>([]);
   const [recipeSearchLoading, setRecipeSearchLoading] = useState(false);
 
   // ── Step reference search (Feature 7) ──
   const [stepRefSearch, setStepRefSearch] = useState('');
-  const [stepRefResults, setStepRefResults] = useState<Recipe[]>([]);
+  const [stepRefResults, setStepRefResults] = useState<RecipeLibRef[]>([]);
   const [stepRefLoading, setStepRefLoading] = useState(false);
 
   const fetchRecipes = useCallback(async () => {
@@ -1598,7 +1691,7 @@ function FunctionsTab({ taskId }: { taskId: string }) {
     if (!recipeSearch.trim()) { setRecipeSearchResults([]); return; }
     setRecipeSearchLoading(true);
     const timer = setTimeout(async () => {
-      const res = await fetch(`/api/recipes?library=1&keyword=${encodeURIComponent(recipeSearch.trim())}`);
+      const res = await fetch(`/api/recipe-library?keyword=${encodeURIComponent(recipeSearch.trim())}`);
       const data = await res.json();
       if (data.code === 0) setRecipeSearchResults(data.data || []);
       else setRecipeSearchResults([]);
@@ -1612,7 +1705,7 @@ function FunctionsTab({ taskId }: { taskId: string }) {
     if (!stepRefSearch.trim()) { setStepRefResults([]); return; }
     setStepRefLoading(true);
     const timer = setTimeout(async () => {
-      const res = await fetch(`/api/recipes?library=1&keyword=${encodeURIComponent(stepRefSearch.trim())}`);
+      const res = await fetch(`/api/recipe-library?keyword=${encodeURIComponent(stepRefSearch.trim())}`);
       const data = await res.json();
       if (data.code === 0) setStepRefResults(data.data || []);
       else setStepRefResults([]);
@@ -1636,6 +1729,7 @@ function FunctionsTab({ taskId }: { taskId: string }) {
         setRecipeSearch('');
         setRecipeSearchResults([]);
         fetchRecipes();
+        onStatusUpdate();
         toast.success('食谱/功能已添加');
       }
     } finally {
@@ -1669,7 +1763,7 @@ function FunctionsTab({ taskId }: { taskId: string }) {
   };
 
   // ── Reference recipe from library (Feature 7) ──
-  const handleReferenceRecipe = async (refRecipe: Recipe) => {
+  const handleReferenceRecipe = async (refRecipe: RecipeLibRef) => {
     if (savingRecipe) return;
     setSavingRecipe(true);
     try {
@@ -1680,18 +1774,18 @@ function FunctionsTab({ taskId }: { taskId: string }) {
       const data = await res.json();
       if (data.code === 0) {
         const newRecipeId = data.data?.id;
-        // Copy steps from referenced recipe
-        if (refRecipe.recipe_steps && refRecipe.recipe_steps.length > 0 && newRecipeId) {
-          for (let i = 0; i < refRecipe.recipe_steps.length; i++) {
-            const srcStep = refRecipe.recipe_steps[i];
+        // Copy steps from referenced library recipe
+        if (refRecipe.recipe_library_steps && refRecipe.recipe_library_steps.length > 0 && newRecipeId) {
+          for (let i = 0; i < refRecipe.recipe_library_steps.length; i++) {
+            const srcStep = refRecipe.recipe_library_steps[i];
             await fetch('/api/recipe-steps', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 recipe_id: newRecipeId,
                 step_number: i + 1,
                 operation: srcStep.operation,
-                problem_point: srcStep.problem_point,
-                problem_points: srcStep.problem_points || [],
+                problem_point: srcStep.problem_point || null,
+                problem_points: (srcStep as Record<string, unknown>).problem_points || [],
               }),
             });
           }
@@ -1701,6 +1795,7 @@ function FunctionsTab({ taskId }: { taskId: string }) {
         setRecipeSearch('');
         setRecipeSearchResults([]);
         fetchRecipes();
+        onStatusUpdate();
         toast.success('已引用食谱/功能');
       }
     } finally { setSavingRecipe(false); }
@@ -1802,6 +1897,7 @@ function FunctionsTab({ taskId }: { taskId: string }) {
         setStepMaterialIds([]);
         setStepMaterials([]);
         fetchRecipes();
+        onStatusUpdate();
         toast.success('步骤已添加');
       }
     } finally {
@@ -2038,9 +2134,12 @@ function FunctionsTab({ taskId }: { taskId: string }) {
                       <div className="flex items-center gap-2">
                         <Badge variant="secondary" className="text-[9px] h-4 shrink-0">{refRecipe.recipe_type}</Badge>
                         <span className="font-medium">{refRecipe.name}</span>
-                        <span className="text-muted-foreground">{refRecipe.recipe_steps?.length || 0}步</span>
+                        <span className="text-muted-foreground">{refRecipe.recipe_library_steps?.length || 0}步</span>
                       </div>
-                      {refRecipe.ingredients && <p className="text-muted-foreground mt-0.5 line-clamp-1">{refRecipe.ingredients}</p>}
+                      <div className="text-muted-foreground mt-0.5">
+                        <span className="text-[10px]">{refRecipe.product_category || '通用'}{refRecipe.product ? ` - ${refRecipe.product}` : ''}</span>
+                        {refRecipe.ingredients && <span className="line-clamp-1 ml-1">{refRecipe.ingredients}</span>}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -2093,9 +2192,9 @@ function FunctionsTab({ taskId }: { taskId: string }) {
                   {stepRefResults.map((refRecipe) => (
                     <div key={refRecipe.id} className="space-y-1">
                       <div className="text-xs font-medium text-primary">{refRecipe.name}</div>
-                      {(refRecipe.recipe_steps || []).map((s) => (
+                      {(refRecipe.recipe_library_steps || []).map((s) => (
                         <div key={s.id} className="p-1.5 rounded cursor-pointer text-xs hover:bg-muted/50 border border-transparent"
-                          onClick={() => handleReferenceStep(s)}>
+                          onClick={() => handleReferenceStep(s as unknown as RecipeStep)}>
                           <span className="text-muted-foreground">步骤{s.step_number}:</span> <span className="line-clamp-1">{s.operation}</span>
                         </div>
                       ))}

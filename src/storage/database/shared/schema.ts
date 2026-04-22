@@ -345,3 +345,49 @@ export const platformProducts = pgTable(
     index("platform_products_category_id_idx").on(table.category_id),
   ]
 );
+
+// 食谱库（按品类-产品分类的全局食谱标准）
+export const recipeLibrary = pgTable(
+  "recipe_library",
+  {
+    id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+    product_category: varchar("product_category", { length: 100 }),
+    product: varchar("product", { length: 100 }),
+    name: varchar("name", { length: 200 }).notNull(),
+    ingredients: text("ingredients"),
+    recipe_type: varchar("recipe_type", { length: 20 }).default("食谱"),
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("recipe_library_product_idx").on(table.product_category, table.product),
+  ]
+);
+
+// 食谱库步骤
+export const recipeLibrarySteps = pgTable(
+  "recipe_library_steps",
+  {
+    id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+    recipe_library_id: varchar("recipe_library_id", { length: 36 }).notNull().references(() => recipeLibrary.id, { onDelete: "cascade" }),
+    step_number: integer("step_number").notNull().default(1),
+    operation: text("operation").notNull(),
+    problem_point: text("problem_point"),
+    problem_points: jsonb("problem_points").default([]),
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("recipe_library_steps_recipe_id_idx").on(table.recipe_library_id),
+  ]
+);
+
+// 平台设置（管理员全局配置）
+export const platformSettings = pgTable(
+  "platform_settings",
+  {
+    key: varchar("key", { length: 100 }).primaryKey(),
+    value: jsonb("value").notNull().default({}),
+    updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  }
+);

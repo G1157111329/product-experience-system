@@ -252,6 +252,25 @@ function CategoryProductSettings({ open, onOpenChange }: { open: boolean; onOpen
   );
 }
 
+function SensesDefaultsDisplay() {
+  const [defaults, setDefaults] = useState<{ test_phase?: string; experience_flow?: string; sensory_dimension?: string } | null>(null);
+  useEffect(() => {
+    fetch('/api/settings?key=senses_defaults').then(r => r.json()).then(d => {
+      if (d.code === 0) setDefaults(d.data);
+    }).catch(() => {});
+  }, []);
+  if (!defaults || (!defaults.test_phase && !defaults.experience_flow && !defaults.sensory_dimension)) {
+    return <span className="text-[11px] text-muted-foreground">未设置</span>;
+  }
+  return (
+    <div className="flex gap-2 flex-wrap">
+      {defaults.test_phase && <Badge variant="secondary" className="text-[10px]">阶段: {defaults.test_phase}</Badge>}
+      {defaults.experience_flow && <Badge variant="secondary" className="text-[10px]">流程: {defaults.experience_flow}</Badge>}
+      {defaults.sensory_dimension && <Badge variant="secondary" className="text-[10px]">维度: {defaults.sensory_dimension}</Badge>}
+    </div>
+  );
+}
+
 function UserSection() {
   const { user, isAdmin, logout } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
@@ -261,15 +280,15 @@ function UserSection() {
   const [allUsers, setAllUsers] = useState<Array<{ id: string; account: string; name: string; role: string }>>([]);
   const [roleLoading, setRoleLoading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // ── Senses defaults settings (admin-only global, stored in DB) ──
   const [sensesSettingsOpen, setSensesSettingsOpen] = useState(false);
   const [sensesDefaults, setSensesDefaults] = useState({ test_phase: '', experience_flow: '', sensory_dimension: '' });
 
   useEffect(() => {
     if (sensesSettingsOpen) {
-      try {
-        const saved = localStorage.getItem('senses_defaults');
-        if (saved) setSensesDefaults(JSON.parse(saved));
-      } catch {}
+      fetch('/api/settings?key=senses_defaults').then(r => r.json()).then(d => {
+        if (d.code === 0 && d.data) setSensesDefaults(d.data);
+      }).catch(() => {});
     }
   }, [sensesSettingsOpen]);
 
@@ -283,10 +302,16 @@ function UserSection() {
   };
   const sensesDimensionOptions = ['视觉', '听觉', '触觉', '嗅觉', '味觉'];
 
-  const handleSaveSensesDefaults = () => {
-    localStorage.setItem('senses_defaults', JSON.stringify(sensesDefaults));
-    setSensesSettingsOpen(false);
-    toast.success('五感体验默认选项已保存');
+  const handleSaveSensesDefaults = async () => {
+    const res = await fetch('/api/settings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'senses_defaults', value: sensesDefaults, admin_user_id: user?.id }),
+    });
+    const data = await res.json();
+    if (data.code === 0) {
+      setSensesSettingsOpen(false);
+      toast.success('五感体验默认选项已保存');
+    } else toast.error(data.message);
   };
 
   useEffect(() => {
@@ -430,27 +455,13 @@ function UserSection() {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label className="text-xs text-muted-foreground">五感体验默认选项</Label>
-                <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={() => setSensesSettingsOpen(true)}>
-                  <Settings className="h-3 w-3" /> 设置
-                </Button>
+                {isAdmin && (
+                  <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={() => setSensesSettingsOpen(true)}>
+                    <Settings className="h-3 w-3" /> 设置
+                  </Button>
+                )}
               </div>
-              {(() => {
-                try {
-                  const saved = localStorage.getItem('senses_defaults');
-                  if (saved) {
-                    const defaults = JSON.parse(saved);
-                    return (
-                      <div className="flex gap-2 flex-wrap">
-                        {defaults.test_phase && <Badge variant="secondary" className="text-[10px]">阶段: {defaults.test_phase}</Badge>}
-                        {defaults.experience_flow && <Badge variant="secondary" className="text-[10px]">流程: {defaults.experience_flow}</Badge>}
-                        {defaults.sensory_dimension && <Badge variant="secondary" className="text-[10px]">维度: {defaults.sensory_dimension}</Badge>}
-                        {!defaults.test_phase && !defaults.experience_flow && !defaults.sensory_dimension && <span className="text-[11px] text-muted-foreground">未设置</span>}
-                      </div>
-                    );
-                  }
-                } catch {}
-                return <span className="text-[11px] text-muted-foreground">未设置</span>;
-              })()}
+              <SensesDefaultsDisplay />
             </div>
 
             {/* Admin: Settings button in profile dialog */}
@@ -542,7 +553,15 @@ function UserSection() {
             </div>
             <div className="flex gap-2">
               <Button className="flex-1" onClick={handleSaveSensesDefaults}>保存</Button>
-              <Button variant="outline" className="flex-1" onClick={() => { setSensesDefaults({ test_phase: '', experience_flow: '', sensory_dimension: '' }); localStorage.removeItem('senses_defaults'); toast.success('已清除默认选项'); setSensesSettingsOpen(false); }}>清除设置</Button>
+              <Button variant="outline" className="flex-1" onClick={async () => {
+                setSensesDefaults({ test_phase: '', experience_flow: '', sensory_dimension: '' });
+                await fetch('/api/settings', {
+                  method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ key: 'senses_defaults', value: { test_phase: '', experience_flow: '', sensory_dimension: '' }, admin_user_id: user?.id }),
+                });
+                toast.success('已清除默认选项');
+                setSensesSettingsOpen(false);
+              }}>清除设置</Button>
             </div>
           </div>
         </DialogContent>
@@ -590,8 +609,7 @@ function MobileUserIcon() {
   const [sensesSettingsOpen, setSensesSettingsOpen] = useState(false);
   const [sensesDefaults, setSensesDefaults] = useState({ test_phase: '', experience_flow: '', sensory_dimension: '' });
 
-  const sensesPhaseOptions = ['开箱', '首次安装', '产品使用', '清洁收纳', '其他'];
-  const sensesFlowMap: Record<string, string[]> = {
+  const sensesPhaseOptions = ['开箱', '首次安装', '产品使用', '清洁收纳', '其他'];  const sensesFlowMap: Record<string, string[]> = {
     '开箱': ['拿取外包装', '拆开内包装'],
     '首次安装': ['配件梳理', '外观美观', '外观缺陷', '标识文字', '首次安装'],
     '产品使用': ['放置及组装', '操作交互', '产品运行'],
@@ -602,17 +620,22 @@ function MobileUserIcon() {
 
   useEffect(() => {
     if (sensesSettingsOpen) {
-      try {
-        const saved = localStorage.getItem('senses_defaults');
-        if (saved) setSensesDefaults(JSON.parse(saved));
-      } catch {}
+      fetch('/api/settings?key=senses_defaults').then(r => r.json()).then(d => {
+        if (d.code === 0 && d.data) setSensesDefaults(d.data);
+      }).catch(() => {});
     }
   }, [sensesSettingsOpen]);
 
-  const handleSaveSensesDefaults = () => {
-    localStorage.setItem('senses_defaults', JSON.stringify(sensesDefaults));
-    setSensesSettingsOpen(false);
-    toast.success('五感体验默认选项已保存');
+  const handleSaveSensesDefaults = async () => {
+    const res = await fetch('/api/settings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'senses_defaults', value: sensesDefaults, admin_user_id: user?.id }),
+    });
+    const data = await res.json();
+    if (data.code === 0) {
+      setSensesSettingsOpen(false);
+      toast.success('五感体验默认选项已保存');
+    } else toast.error(data.message);
   };
 
   if (!user) return null;
@@ -634,10 +657,13 @@ function MobileUserIcon() {
             <Separator />
             <div className="flex items-center justify-between">
               <span className="text-xs text-muted-foreground">五感体验默认选项</span>
-              <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={() => setSensesSettingsOpen(true)}>
-                <Settings className="h-3 w-3" /> 设置
-              </Button>
+              {isAdmin && (
+                <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={() => setSensesSettingsOpen(true)}>
+                  <Settings className="h-3 w-3" /> 设置
+                </Button>
+              )}
             </div>
+            <SensesDefaultsDisplay />
             {isAdmin && (
               <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setSettingsOpen(true), 100); }}>
                 <Settings className="h-4 w-4" /> 品类与产品设置
@@ -692,7 +718,15 @@ function MobileUserIcon() {
             </div>
             <div className="flex gap-2">
               <Button className="flex-1" onClick={handleSaveSensesDefaults}>保存</Button>
-              <Button variant="outline" className="flex-1" onClick={() => { setSensesDefaults({ test_phase: '', experience_flow: '', sensory_dimension: '' }); localStorage.removeItem('senses_defaults'); toast.success('已清除默认选项'); setSensesSettingsOpen(false); }}>清除设置</Button>
+              <Button variant="outline" className="flex-1" onClick={async () => {
+                setSensesDefaults({ test_phase: '', experience_flow: '', sensory_dimension: '' });
+                await fetch('/api/settings', {
+                  method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ key: 'senses_defaults', value: { test_phase: '', experience_flow: '', sensory_dimension: '' }, admin_user_id: user?.id }),
+                });
+                toast.success('已清除默认选项');
+                setSensesSettingsOpen(false);
+              }}>清除设置</Button>
             </div>
           </div>
         </DialogContent>

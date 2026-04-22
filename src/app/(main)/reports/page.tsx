@@ -216,7 +216,7 @@ export default function ReportsPage() {
                         <input type="checkbox" checked={compareIds.includes(r.id)} onChange={() => toggleCompare(r.id)}
                           className="h-3.5 w-3.5 shrink-0 rounded border-border" />
                         <span className="flex-1 min-w-0 truncate">{r.title}</span>
-                        <Badge variant="outline" className="text-[9px] shrink-0">{r.status}</Badge>
+                        <Badge variant="outline" className="text-[9px] shrink-0">{r.status === '草稿' ? '已完成' : r.status}</Badge>
                         <span className="text-[10px] text-muted-foreground shrink-0 hidden sm:inline">
                           {new Date(r.created_at).toLocaleDateString('zh-CN')}
                         </span>
@@ -245,7 +245,7 @@ export default function ReportsPage() {
                       {r.product_category && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{r.product_category}</Badge>}
                       {r.product && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{r.product}</Badge>}
                       {r.project_type && <Badge variant="outline" className="text-[10px]">{r.project_type}</Badge>}
-                      <Badge variant={r.status === '已审核' ? 'default' : 'secondary'} className="text-[10px]">{r.status}</Badge>
+                      <Badge variant={r.status === '已审核' ? 'default' : 'secondary'} className="text-[10px]">{r.status === '草稿' ? '已完成' : r.status}</Badge>
                     </div>
                     <div className="text-[10px] text-muted-foreground mt-1 truncate">
                       {r.task_name && <span>{r.task_name}</span>}
@@ -297,7 +297,7 @@ export default function ReportsPage() {
                     <CardTitle className="text-sm">{r.title}</CardTitle>
                     <div className="flex gap-1 flex-wrap">
                       {r.product_category && <Badge variant="outline" className="text-[10px]">{r.product_category}</Badge>}
-                      <Badge variant="outline" className="text-[10px]">{r.status}</Badge>
+                      <Badge variant="outline" className="text-[10px]">{r.status === '草稿' ? '已完成' : r.status}</Badge>
                     </div>
                   </CardHeader>
                   <CardContent className="text-xs text-muted-foreground space-y-1">

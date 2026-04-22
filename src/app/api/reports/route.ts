@@ -115,7 +115,7 @@ export async function POST(request: NextRequest) {
     title: body.title || `${task?.task_name || '体验'}报告`,
     product_model: task?.product_model || null,
     content: reportContent,
-    status: '草稿',
+    status: '已完成',
   }).select().single();
 
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
@@ -182,6 +182,49 @@ export async function POST(request: NextRequest) {
             status: '待整改',
           });
           createdKeys.add(issueKey);
+        }
+      }
+    }
+
+    // Save recipes to recipe_library (dedup by product_category + product + name)
+    const taskInfo = task as Record<string, unknown>;
+    const taskProductCategory = taskInfo?.product_category as string || null;
+    const taskProduct = taskInfo?.product as string || null;
+    for (const recipe of recs) {
+      const recipeName = (recipe as Record<string, unknown>).name as string;
+      if (!recipeName) continue;
+
+      // Check if recipe with same product_category + product + name already exists
+      let dupQuery = client.from('recipe_library').select('id').eq('name', recipeName);
+      if (taskProductCategory) dupQuery = dupQuery.eq('product_category', taskProductCategory);
+      else dupQuery = dupQuery.is('product_category', null);
+      if (taskProduct) dupQuery = dupQuery.eq('product', taskProduct);
+      else dupQuery = dupQuery.is('product', null);
+      const { data: existingLib } = await dupQuery;
+
+      if (existingLib && existingLib.length > 0) continue; // Skip if already exists
+
+      // Insert into recipe_library
+      const { data: libItem } = await client.from('recipe_library').insert({
+        name: recipeName,
+        product_category: taskProductCategory,
+        product: taskProduct,
+        ingredients: (recipe as Record<string, unknown>).ingredients as string || null,
+        recipe_type: (recipe as Record<string, unknown>).recipe_type as string || '食谱',
+      }).select().single();
+
+      // Copy steps to library
+      if (libItem) {
+        const steps = ((recipe as Record<string, unknown>).recipe_steps || []) as Array<Record<string, unknown>>;
+        for (let i = 0; i < steps.length; i++) {
+          const s = steps[i];
+          await client.from('recipe_library_steps').insert({
+            recipe_library_id: libItem.id,
+            step_number: i + 1,
+            operation: s.operation as string || '',
+            problem_point: s.problem_point as string || null,
+            problem_points: s.problem_points || [],
+          });
         }
       }
     }

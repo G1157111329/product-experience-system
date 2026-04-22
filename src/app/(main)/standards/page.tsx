@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import Link from 'next/link';
-import { Search, BookOpen, ChevronRight, Upload, FileUp, Loader2, Trash2, Plus } from 'lucide-react';
+import { Search, BookOpen, ChevronRight, Upload, FileUp, Loader2, Trash2, Plus, ChefHat } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -42,6 +42,184 @@ const categoryConfig: Record<string, { label: string; color: string; desc: strin
   '感官评价标准': { label: '感官评价', color: 'bg-amber-100 text-amber-700', desc: '感官主观评价标准' },
   '食谱功能标准': { label: '食谱功能', color: 'bg-emerald-100 text-emerald-700', desc: '食谱功能体验标准' },
 };
+
+interface RecipeLibItem {
+  id: string; name: string; product_category: string | null; product: string | null;
+  ingredients: string | null; recipe_type: string;
+  recipe_library_steps: Array<{ id: string; step_number: number; operation: string; problem_point: string | null }>;
+}
+
+function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWithProducts[]; isAdmin: boolean }) {
+  const [recipes, setRecipes] = useState<RecipeLibItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filterCategory, setFilterCategory] = useState('');
+  const [filterProduct, setFilterProduct] = useState('');
+  const [addOpen, setAddOpen] = useState(false);
+  const [addForm, setAddForm] = useState({ name: '', product_category: '', product: '', ingredients: '', recipe_type: '食谱' });
+
+  const fetchRecipes = async () => {
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (filterCategory) params.set('product_category', filterCategory);
+    if (filterProduct) params.set('product', filterProduct);
+    const res = await fetch(`/api/recipe-library?${params}`);
+    const data = await res.json();
+    if (data.code === 0) setRecipes(data.data || []);
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchRecipes(); }, [filterCategory, filterProduct]);
+
+  const handleAdd = async () => {
+    const res = await fetch('/api/recipe-library', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...addForm, steps: [] }),
+    });
+    const data = await res.json();
+    if (data.code === 0) {
+      setAddOpen(false);
+      setAddForm({ name: '', product_category: '', product: '', ingredients: '', recipe_type: '食谱' });
+      fetchRecipes();
+      toast.success('食谱已添加');
+    } else toast.error(data.message);
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('确定删除此食谱？')) return;
+    const res = await fetch(`/api/recipe-library/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.code === 0) { fetchRecipes(); toast.success('已删除'); }
+    else toast.error(data.message);
+  };
+
+  const selectedCat = categories.find(c => c.name === filterCategory);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <ChefHat className="h-5 w-5 text-emerald-600" />
+          <h2 className="text-base font-semibold">食谱库</h2>
+          <Badge variant="secondary" className="text-[10px]">{recipes.length}</Badge>
+        </div>
+        {isAdmin && (
+          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setAddOpen(true)}>
+            <Plus className="h-3 w-3" /> 添加食谱
+          </Button>
+        )}
+      </div>
+
+      {/* Filters */}
+      <div className="flex gap-2">
+        <Select value={filterCategory} onValueChange={(v) => { setFilterCategory(v === 'all' ? '' : v); setFilterProduct(''); }}>
+          <SelectTrigger className="w-32 h-8 text-xs"><SelectValue placeholder="全部品类" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部品类</SelectItem>
+            {categories.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        {filterCategory && (
+          <Select value={filterProduct} onValueChange={(v) => setFilterProduct(v === 'all' ? '' : v)}>
+            <SelectTrigger className="w-32 h-8 text-xs"><SelectValue placeholder="全部产品" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部产品</SelectItem>
+              {(selectedCat?.products || []).map(p => <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
+      </div>
+
+      {/* List */}
+      {loading ? (
+        <div className="grid gap-2">{[1,2,3].map(i => <div key={i} className="h-16 bg-muted animate-pulse rounded-lg" />)}</div>
+      ) : recipes.length === 0 ? (
+        <Card><CardContent className="flex flex-col items-center py-8 text-center">
+          <ChefHat className="h-8 w-8 text-muted-foreground/50 mb-2" />
+          <p className="text-xs text-muted-foreground">暂无食谱</p>
+        </CardContent></Card>
+      ) : (
+        <div className="grid gap-2">
+          {recipes.map(recipe => (
+            <Card key={recipe.id} className="hover:bg-muted/30 transition-colors">
+              <CardContent className="p-3 flex items-center gap-3">
+                <Badge variant="secondary" className={cn('text-[9px] shrink-0', recipe.recipe_type === '食谱' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700')}>
+                  {recipe.recipe_type}
+                </Badge>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium truncate">{recipe.name}</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {recipe.product_category || '通用'}{recipe.product ? ` - ${recipe.product}` : ''}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-[10px] text-muted-foreground">{recipe.recipe_library_steps?.length || 0} 步骤</span>
+                    {recipe.ingredients && <span className="text-[10px] text-muted-foreground truncate max-w-[200px]">{recipe.ingredients}</span>}
+                  </div>
+                </div>
+                {isAdmin && (
+                  <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => handleDelete(recipe.id)}>
+                    <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Add Dialog */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>添加食谱到库</DialogTitle></DialogHeader>
+          <div className="space-y-3 mt-2">
+            <div className="space-y-1.5">
+              <Label>类型</Label>
+              <Select value={addForm.recipe_type} onValueChange={(v) => setAddForm({ ...addForm, recipe_type: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="食谱">食谱</SelectItem>
+                  <SelectItem value="功能">功能</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>品类</Label>
+                <Select value={addForm.product_category} onValueChange={(v) => setAddForm({ ...addForm, product_category: v, product: '' })}>
+                  <SelectTrigger><SelectValue placeholder="选择品类" /></SelectTrigger>
+                  <SelectContent>
+                    {categories.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>产品</Label>
+                <Select value={addForm.product} onValueChange={(v) => setAddForm({ ...addForm, product: v })}>
+                  <SelectTrigger><SelectValue placeholder={addForm.product_category ? '选择产品' : '请先选择品类'} /></SelectTrigger>
+                  <SelectContent>
+                    {(categories.find(c => c.name === addForm.product_category)?.products || []).map(p => (
+                      <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>{addForm.recipe_type === '食谱' ? '食谱名称' : '功能名称'} *</Label>
+              <Input value={addForm.name} onChange={(e) => setAddForm({ ...addForm, name: e.target.value })} placeholder="名称需唯一" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>食材/参数</Label>
+              <Textarea value={addForm.ingredients} onChange={(e) => setAddForm({ ...addForm, ingredients: e.target.value })} rows={2} />
+            </div>
+            <Button onClick={handleAdd} className="w-full" disabled={!addForm.name}>保存</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
 
 export default function StandardsPage() {
   const { isAdmin } = useAuth();
@@ -293,6 +471,9 @@ export default function StandardsPage() {
           ))}
         </div>
       )}
+
+      {/* Recipe Library Section */}
+      <RecipeLibrarySection categories={categories} isAdmin={isAdmin} />
 
       {/* Import Dialog */}
       <Dialog open={importDialogOpen} onOpenChange={(open) => { setImportDialogOpen(open); if (!open) setSelectedFile(null); }}>

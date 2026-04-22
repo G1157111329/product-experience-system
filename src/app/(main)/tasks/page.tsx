@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { Plus, Search, ClipboardList, ChevronRight, Trash2 } from 'lucide-react';
+import { Plus, Search, ClipboardList, ChevronRight, Trash2, ArrowRightLeft } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,9 +31,7 @@ interface Task {
 const statusConfig: Record<string, { label: string; color: string }> = {
   '待执行': { label: '待执行', color: 'bg-muted text-muted-foreground' },
   '进行中': { label: '进行中', color: 'bg-primary/10 text-primary' },
-  '待审核': { label: '待审核', color: 'bg-amber-100 text-amber-700' },
   '已完成': { label: '已完成', color: 'bg-emerald-100 text-emerald-700' },
-  '已驳回': { label: '已驳回', color: 'bg-destructive/10 text-destructive' },
 };
 
 const PROJECT_TYPES = ['ODM/OEM', '竞品研究', '自研', '前期研究', '改型/降本/优化', '海外产品'];
@@ -49,6 +47,11 @@ export default function TasksPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingTask, setDeletingTask] = useState<Task | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [transferTask, setTransferTask] = useState<Task | null>(null);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferUsers, setTransferUsers] = useState<Array<{ id: string; name: string; account: string }>>([]);
+  const [transferTargetId, setTransferTargetId] = useState('');
+  const [transferring, setTransferring] = useState(false);
   const [categories, setCategories] = useState<CategoryWithProducts[]>([]);
   const [form, setForm] = useState({
     task_name: '', product_category: '', product: '', product_model: '',
@@ -120,7 +123,34 @@ export default function TasksPage() {
     } finally { setDeleting(false); }
   };
 
-  const tabs = ['all', '待执行', '进行中', '待审核', '已完成'];
+  const handleOpenTransfer = async (task: Task) => {
+    setTransferTask(task);
+    const res = await fetch('/api/auth/users');
+    const data = await res.json();
+    if (data.code === 0) {
+      setTransferUsers((data.data || []).filter((u: Record<string, unknown>) => u.id !== user?.id));
+      setTransferTargetId('');
+      setTransferOpen(true);
+    }
+  };
+
+  const handleTransfer = async () => {
+    if (!transferTask || !transferTargetId || transferring) return;
+    setTransferring(true);
+    try {
+      const res = await fetch(`/api/tasks/${transferTask.id}/transfer`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_user_id: transferTargetId, admin_user_id: user?.id }),
+      });
+      const data = await res.json();
+      if (data.code === 0) {
+        toast.success(data.message);
+        setTransferOpen(false); setTransferTask(null); fetchTasks();
+      } else toast.error(data.message);
+    } finally { setTransferring(false); }
+  };
+
+  const tabs = ['all', '待执行', '进行中', '已完成'];
 
   return (
     <div className="p-4 lg:p-6 space-y-4">
@@ -266,6 +296,11 @@ export default function TasksPage() {
                     </div>
                   </Link>
                   <div className="flex items-center gap-1 shrink-0 mt-1">
+                    {isAdmin && (
+                      <Button variant="ghost" size="icon" className="h-7 w-7" title="转移" onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleOpenTransfer(task); }}>
+                        <ArrowRightLeft className="h-3.5 w-3.5 text-muted-foreground" />
+                      </Button>
+                    )}
                     <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeletingTask(task); setDeleteDialogOpen(true); }}>
                       <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
                     </Button>
@@ -293,6 +328,35 @@ export default function TasksPage() {
             <Button variant="outline" onClick={() => { setDeleteDialogOpen(false); setDeletingTask(null); }}>取消</Button>
             <Button variant="destructive" onClick={handleDeleteTask} disabled={deleting}>{deleting ? '删除中...' : '确认删除'}</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Transfer dialog */}
+      <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>转移体验计划</DialogTitle>
+            <DialogDescription>将「{transferTask?.task_name}」及其所有资料转移到其他用户</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="p-3 rounded-lg bg-muted/30 border border-border">
+              <p className="text-xs text-muted-foreground">转移后，该体验计划将从原用户列表中移除，目标用户将获得所有资料的所有权</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>选择目标用户</Label>
+              <Select value={transferTargetId} onValueChange={setTransferTargetId}>
+                <SelectTrigger><SelectValue placeholder="请选择用户" /></SelectTrigger>
+                <SelectContent>
+                  {transferUsers.map(u => (
+                    <SelectItem key={u.id} value={u.id}>{u.name || u.account}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button onClick={handleTransfer} className="w-full" disabled={!transferTargetId || transferring}>
+              {transferring ? '转移中...' : '确认转移'}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

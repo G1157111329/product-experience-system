@@ -78,6 +78,7 @@
 |------|------|
 | `platform_users` | 用户账号（admin/user角色，pending/approved/rejected状态） |
 | `platform_audit_requests` | 用户审核请求（注册/密码重置/名称修改/角色升级） |
+| `platform_settings` | 平台全局设置（管理员配置，如五感体验默认选项，key-value JSONB） |
 | `standards` | 体验标准库（通用标准/品类标准/感官评价标准/非标准/食谱功能标准） |
 | `standard_items` | 标准检查项（含分类特定字段：experience_flow, touch_point, experience_standard, sub_check_dimension, check_standard, evaluation_prep, subjective_score, subjective_rating, reference_images） |
 | `experience_tasks` | 体验任务（含 created_by 用户隔离字段, project_type: ODM/OEM/竞品研究/自研/前期研究/改型降本优化/海外产品, project_phase: 手板研究/试制阶段/试产阶段/量产阶段） |
@@ -87,6 +88,8 @@
 | `report_templates` | 报告模板 |
 | `reports` | 报告（含 product_model 用于同型号合并） |
 | `report_shares` | 报告分享（share_token, expires_at, created_by，支持7天/30天/永久有效期） |
+| `recipe_library` | 食谱库（按品类-产品分类的全局食谱标准，同品类+产品+名称唯一） |
+| `recipe_library_steps` | 食谱库步骤 |
 | `recipes` | 食谱/功能 |
 | `recipe_steps` | 食谱步骤 |
 
@@ -152,6 +155,10 @@
 | GET | `/api/dashboard` | 仪表盘统计数据（支持created_by按用户过滤） |
 | GET | `/api/analysis` | 数据分析（支持product_category/project_type/organizer/issue_source_type/date_from/date_to筛选，非admin需传created_by） |
 | POST | `/api/analysis` | 数据导出CSV（仅管理员，format=csv） |
+| GET/POST | `/api/recipe-library` | 食谱库列表/创建（支持keyword搜索，按品类-产品分类，名称唯一约束） |
+| DELETE | `/api/recipe-library/[id]` | 删除食谱库项（步骤级联删除） |
+| GET/PUT | `/api/settings` | 平台设置读取/更新（管理员，key-value JSONB） |
+| POST | `/api/tasks/[id]/transfer` | 转移体验计划到其他用户（管理员，含全部资料） |
 
 ## 构建与运行
 
@@ -252,12 +259,16 @@ coze start
 26. **管理员删除账号**: 管理员可在账号权限管理中删除用户（不可删除自己和最后一个管理员）；删除时级联清理 `report_shares.created_by`（设null）和 `platform_audit_requests`；报告中的 organizer 名称字符串不受影响
 27. **审核参数规范**: 前端审核请求统一使用 `request_id` 字段（非 `audit_id`），与后端 PUT /api/auth/audit 接口参数名保持一致
 28. **五感体验描述匹配**: 新增问题点时支持输入关键词模糊搜索标准库，选择匹配项后自动反选使用阶段、体验流程、感官维度
-29. **个人信息设置入口**: 个人信息页增加"五感体验默认选项"设置，保存默认的产品使用阶段、体验流程、感官维度到 localStorage，新增问题点时自动应用
+29. **个人信息设置入口**: 个人信息页增加"五感体验默认选项"设置，管理员全局设置（存储在 platform_settings 表），设置后全局生效到标准管理和体验计划
 30. **非标准检查类型**: 五感体验新增问题点的标准类型新增"非标准"选项，仅要求描述结果和检查结果，无需产品使用阶段/体验流程/感官维度
 31. **体验计划基本信息编辑**: 任务详情页基本信息Tab支持点击编辑按钮进入编辑模式，修改后保存调用 PUT /api/tasks/[id]
 32. **食谱内容积累与引用**: 食谱/功能支持点击编辑图标修改名称和参数；新增食谱时支持搜索食谱库并引用（含步骤复制）
 33. **食谱步骤排序**: 食谱步骤支持上移/下移按钮重新排序，调用 PUT /api/recipe-steps 批量更新 step_number
 34. **食谱步骤跨食谱引用**: 新增步骤时支持搜索食谱库引用已有步骤的操作和问题点；新增食谱时支持引用已有食谱（含参数和步骤）
+35. **食谱库按品类-产品分类**: 食谱库独立存储在 recipe_library 表，按品类-产品分类，整合显示在标准管理页面；报告生成时自动去重保存到食谱库（同品类+产品+名称仅保留首次）；支持手动录入（如蛋挞/蛋挞2不同名称允许共存）；名称在同一品类-产品下唯一
+36. **任务状态自动流转**: 移除"待审核"状态，仅保留待执行/进行中/已完成；待执行→进行中（新增五感体验/食谱内容时自动触发）；进行中→已完成（生成报告时）；已完成→进行中（编辑已完成报告内容时）
+37. **报告状态修正**: 报告生成后状态直接为"已完成"（非"草稿"）；旧"草稿"状态在列表中显示为"已完成"
+38. **体验计划转移**: 管理员可将体验计划从用户A转移到用户B，转移后所有资料（素材、五感体验、食谱功能等）归属目标用户；仅管理员可操作
 
 ## 代码风格
 
