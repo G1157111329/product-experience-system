@@ -1492,29 +1492,56 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
   );
 }
 
+
 /* ─── Record Detail Expand ─── */
 function RecordDetailCard({ record, taskId, existingMaterials, onRefresh, onClose, onImageClick }: {
   record: CheckRecord; taskId: string; existingMaterials: Material[]; onRefresh: () => void; onClose: () => void; onImageClick: (url: string) => void;
 }) {
   const [open, setOpen] = useState(true);
-  const [description, setDescription] = useState(record.problem_description || '');
-  const [tempStatus, setTempStatus] = useState(record.evaluation_result);
-  const [referenceIds, setReferenceIds] = useState<string[]>([]);
-  const [localMaterials, setLocalMaterials] = useState<Material[]>(existingMaterials);
   const [saving, setSaving] = useState(false);
-  const [editStandard, setEditStandard] = useState(false);
-  const [standardFields, setStandardFields] = useState({
-    standard_category: record.standard_category || '通用标准',
+
+  // Form state - pre-filled with record data
+  const [formCategory, setFormCategory] = useState(record.standard_category || '通用标准');
+  // General standard fields
+  const [genForm, setGenForm] = useState({
     test_phase: record.test_phase || '',
     experience_flow: record.experience_flow || '',
     sensory_dimension: record.sensory_dimension || '',
     touch_point: record.touch_point || '',
     check_requirement: record.check_requirement || '',
     experience_standard: record.experience_standard || '',
+    check_tool: '',
+    evaluation_result: record.evaluation_result || '待定',
+  });
+  // Category standard fields
+  const [catForm, setCatForm] = useState({
+    sensory_dimension: record.sensory_dimension || '',
     check_dimension: record.check_dimension || '',
     sub_check_dimension: record.sub_check_dimension || '',
+    check_item: record.check_item || '',
+    check_requirement: record.check_requirement || '',
     check_standard: record.check_standard || '',
+    evaluation_result: record.evaluation_result || '待定',
   });
+  // Sensory evaluation fields
+  const [senForm, setSenForm] = useState({
+    sensory_dimension: record.sensory_dimension || '',
+    evaluation_prep: '',
+    subjective_score: '',
+    subjective_rating: '',
+    experience_standard: record.experience_standard || '',
+    evaluation_result: record.evaluation_result || '待定',
+  });
+  // Non-standard fields
+  const [nonStandardForm, setNonStandardForm] = useState({
+    description: record.check_item || record.problem_description || '',
+    problem_description: record.problem_description || '',
+    evaluation_result: record.evaluation_result || '待定',
+  });
+  // Description & materials
+  const [description, setDescription] = useState(record.problem_description || '');
+  const [referenceIds, setReferenceIds] = useState<string[]>([]);
+  const [localMaterials, setLocalMaterials] = useState<Material[]>(existingMaterials);
 
   // Dynamic options from platform_settings
   const [phaseOptions, setPhaseOptions] = useState<string[]>(defaultPhaseOptions);
@@ -1531,65 +1558,83 @@ function RecordDetailCard({ record, taskId, existingMaterials, onRefresh, onClos
     }).catch(() => {});
   }, []);
 
-  // Fetch general standard items when 3 selects are chosen (for auto-fill)
+  // General standard auto-fill
   const [generalRefItems, setGeneralRefItems] = useState<Array<{ touch_point: string; check_requirement: string; experience_standard: string }>>([]);
   useEffect(() => {
-    if (standardFields.standard_category !== '通用标准') return;
-    if (!standardFields.test_phase || !standardFields.experience_flow || !standardFields.sensory_dimension) {
+    if (formCategory !== '通用标准') return;
+    if (!genForm.test_phase || !genForm.experience_flow || !genForm.sensory_dimension) {
       setGeneralRefItems([]);
       return;
     }
-    fetch(`/api/standard-items/search?standard_category=通用标准&experience_flow=${encodeURIComponent(standardFields.experience_flow)}&keyword=${encodeURIComponent(standardFields.sensory_dimension)}`)
+    fetch(`/api/standard-items/search?standard_category=通用标准&experience_flow=${encodeURIComponent(genForm.experience_flow)}&keyword=${encodeURIComponent(genForm.sensory_dimension)}`)
       .then(r => r.json()).then(d => { if (d.code === 0) setGeneralRefItems(d.data || []); }).catch(() => {});
-  }, [standardFields.standard_category, standardFields.test_phase, standardFields.experience_flow, standardFields.sensory_dimension]);
+  }, [formCategory, genForm.test_phase, genForm.experience_flow, genForm.sensory_dimension]);
 
-  // Auto-fill touch_point and check_requirement when general standard items are loaded
-  useEffect(() => {
-    if (standardFields.standard_category !== '通用标准' || generalRefItems.length === 0) return;
-    if (generalRefItems.length === 1) {
-      setStandardFields(prev => ({
-        ...prev,
-        touch_point: prev.touch_point || generalRefItems[0].touch_point || '',
-        check_requirement: prev.check_requirement || generalRefItems[0].check_requirement || '',
-        experience_standard: prev.experience_standard || generalRefItems[0].experience_standard || '',
-      }));
-    }
-  }, [generalRefItems, standardFields.standard_category]);
+  const getEvaluationResult = () => {
+    if (formCategory === '通用标准') return genForm.evaluation_result;
+    if (formCategory === '品类标准') return catForm.evaluation_result;
+    if (formCategory === '感官评价标准') return senForm.evaluation_result;
+    return nonStandardForm.evaluation_result;
+  };
 
-  // Sync localMaterials when existingMaterials changes (e.g. after onRefresh)
-  useEffect(() => {
-    setLocalMaterials(existingMaterials);
-  }, [existingMaterials]);
-
-  // Reset form when record changes
-  useEffect(() => {
-    setDescription(record.problem_description || '');
-    setTempStatus(record.evaluation_result);
-    setReferenceIds([]);
-  }, [record.id, record.problem_description, record.evaluation_result]);
+  const setEvaluationResult = (val: string) => {
+    if (formCategory === '通用标准') setGenForm(f => ({ ...f, evaluation_result: val }));
+    else if (formCategory === '品类标准') setCatForm(f => ({ ...f, evaluation_result: val }));
+    else if (formCategory === '感官评价标准') setSenForm(f => ({ ...f, evaluation_result: val }));
+    else setNonStandardForm(f => ({ ...f, evaluation_result: val }));
+  };
 
   const handleSave = async () => {
     setSaving(true);
     try {
       const updateBody: Record<string, unknown> = {
-        evaluation_result: tempStatus,
+        standard_category: formCategory,
         problem_description: description,
+        evaluation_result: getEvaluationResult(),
       };
-      if (editStandard) {
-        // Include standard fields in update
+
+      if (formCategory === '通用标准') {
         Object.assign(updateBody, {
-          standard_category: standardFields.standard_category,
-          test_phase: standardFields.test_phase || null,
-          experience_flow: standardFields.experience_flow || null,
-          sensory_dimension: standardFields.sensory_dimension || null,
-          touch_point: standardFields.touch_point || null,
-          check_requirement: standardFields.check_requirement || null,
-          experience_standard: standardFields.experience_standard || null,
-          check_dimension: standardFields.check_dimension || null,
-          sub_check_dimension: standardFields.sub_check_dimension || null,
-          check_standard: standardFields.check_standard || null,
+          test_phase: genForm.test_phase || null,
+          experience_flow: genForm.experience_flow || null,
+          sensory_dimension: genForm.sensory_dimension || null,
+          touch_point: genForm.touch_point || null,
+          check_requirement: genForm.check_requirement || null,
+          experience_standard: genForm.experience_standard || null,
+          check_tool: genForm.check_tool || null,
+          check_dimension: null, sub_check_dimension: null, check_standard: null, check_item: null,
+        });
+      } else if (formCategory === '品类标准') {
+        Object.assign(updateBody, {
+          sensory_dimension: catForm.sensory_dimension || null,
+          check_dimension: catForm.check_dimension || null,
+          sub_check_dimension: catForm.sub_check_dimension || null,
+          check_item: catForm.check_item || null,
+          check_requirement: catForm.check_requirement || null,
+          check_standard: catForm.check_standard || null,
+          test_phase: null, experience_flow: null, touch_point: null, experience_standard: null, check_tool: null,
+        });
+      } else if (formCategory === '感官评价标准') {
+        Object.assign(updateBody, {
+          sensory_dimension: senForm.sensory_dimension || null,
+          evaluation_prep: senForm.evaluation_prep || null,
+          subjective_score: senForm.subjective_score || null,
+          subjective_rating: senForm.subjective_rating || null,
+          experience_standard: senForm.experience_standard || null,
+          test_phase: null, experience_flow: null, touch_point: null, check_requirement: null, check_tool: null,
+          check_dimension: null, sub_check_dimension: null, check_standard: null, check_item: null,
+        });
+      } else {
+        // 非标准
+        Object.assign(updateBody, {
+          check_item: nonStandardForm.description || null,
+          problem_description: nonStandardForm.problem_description || null,
+          test_phase: null, experience_flow: null, sensory_dimension: null, touch_point: null,
+          check_requirement: null, experience_standard: null, check_tool: null,
+          check_dimension: null, sub_check_dimension: null, check_standard: null,
         });
       }
+
       await fetch(`/api/records/${record.id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updateBody),
@@ -1607,202 +1652,233 @@ function RecordDetailCard({ record, taskId, existingMaterials, onRefresh, onClos
       onRefresh();
       onClose();
       toast.success('已保存');
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
-  const handleCancel = () => {
-    setDescription(record.problem_description || '');
-    setTempStatus(record.evaluation_result);
-    setReferenceIds([]);
-    onClose();
+  const handleCancel = () => { setReferenceIds([]); onClose(); };
+
+  const evalResultButtons = (current: string, setter: (v: string) => void) => (
+    <div className="flex gap-2">
+      {['合格', '不合格', '待定'].map(r => (
+        <button key={r} type="button" onClick={() => setter(r)}
+          className={cn('flex-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors',
+            current === r
+              ? r === '合格' ? 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800'
+                : r === '不合格' ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800'
+                : 'bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-800'
+              : 'bg-background border-border hover:bg-muted/50')}>
+          {r}
+        </button>
+      ))}
+    </div>
+  );
+
+  const categorySelector = (
+    <div className="space-y-1.5">
+      <Label>标准类型</Label>
+      <div className="flex gap-2 flex-wrap">
+        {['通用标准', '品类标准', '感官评价标准', '非标准'].map(cat => (
+          <button key={cat} type="button" onClick={() => setFormCategory(cat)}
+            className={cn('px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors',
+              formCategory === cat ? 'bg-primary text-primary-foreground border-primary' : 'bg-background border-border hover:bg-muted/50')}>
+            {cat}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  const renderEditForm = () => {
+    if (formCategory === '通用标准') return (
+      <div className="space-y-3">
+        {categorySelector}
+        <div className="grid grid-cols-3 gap-3">
+          <div className="space-y-1.5">
+            <Label>产品使用阶段</Label>
+            <Select value={genForm.test_phase} onValueChange={(v) => setGenForm({ ...genForm, test_phase: v, experience_flow: '', touch_point: '', check_requirement: '', experience_standard: '' })}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="选择" /></SelectTrigger>
+              <SelectContent>{phaseOptions.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>体验流程</Label>
+            <Select value={genForm.experience_flow} onValueChange={(v) => setGenForm({ ...genForm, experience_flow: v, touch_point: '', check_requirement: '', experience_standard: '' })}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="选择" /></SelectTrigger>
+              <SelectContent>{(flowByPhase[genForm.test_phase] || []).map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>感官维度</Label>
+            <Select value={genForm.sensory_dimension} onValueChange={(v) => setGenForm({ ...genForm, sensory_dimension: v, touch_point: '', check_requirement: '', experience_standard: '' })}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="选择" /></SelectTrigger>
+              <SelectContent>{sensoryOptions.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+        </div>
+        {genForm.test_phase && genForm.experience_flow && genForm.sensory_dimension && generalRefItems.length > 0 && (
+          <div className="space-y-1.5">
+            <Label>匹配标准项</Label>
+            <Select value={genForm.touch_point} onValueChange={(v) => {
+              const item = generalRefItems.find(i => i.touch_point === v);
+              setGenForm({ ...genForm, touch_point: v, check_requirement: item?.check_requirement || '', experience_standard: item?.experience_standard || '' });
+            }}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="选择匹配项" /></SelectTrigger>
+              <SelectContent>
+                {generalRefItems.map((item, i) => <SelectItem key={i} value={item.touch_point || `item-${i}`}>{item.touch_point || `项目${i + 1}`}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label>触点</Label>
+            <Input className="h-8 text-xs" value={genForm.touch_point} onChange={e => setGenForm({ ...genForm, touch_point: e.target.value })} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>检验范围及具体要求</Label>
+            <Input className="h-8 text-xs" value={genForm.check_requirement} onChange={e => setGenForm({ ...genForm, check_requirement: e.target.value })} />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label>体验标准</Label>
+            <Input className="h-8 text-xs" value={genForm.experience_standard} onChange={e => setGenForm({ ...genForm, experience_standard: e.target.value })} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>测量工具</Label>
+            <Input className="h-8 text-xs" value={genForm.check_tool} onChange={e => setGenForm({ ...genForm, check_tool: e.target.value })} />
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label>问题描述</Label>
+          <Textarea placeholder="填写问题描述..." value={description} onChange={e => setDescription(e.target.value)} rows={2} />
+        </div>
+        <MaterialPicker taskId={taskId} recordId={record.id} selectedIds={referenceIds} onSelectionChange={(ids, mats) => { setReferenceIds(ids); setLocalMaterials(mats); }} />
+        <div className="space-y-1.5">
+          <Label>检查结果</Label>
+          {evalResultButtons(genForm.evaluation_result, (v) => setGenForm(f => ({ ...f, evaluation_result: v })))}
+        </div>
+      </div>
+    );
+
+    if (formCategory === '品类标准') return (
+      <div className="space-y-3">
+        {categorySelector}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label>感官维度</Label>
+            <Input className="h-8 text-xs" value={catForm.sensory_dimension} onChange={e => setCatForm({ ...catForm, sensory_dimension: e.target.value })} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>检查维度</Label>
+            <Input className="h-8 text-xs" value={catForm.check_dimension} onChange={e => setCatForm({ ...catForm, check_dimension: e.target.value })} />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label>细分检查维度</Label>
+            <Input className="h-8 text-xs" value={catForm.sub_check_dimension} onChange={e => setCatForm({ ...catForm, sub_check_dimension: e.target.value })} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>具体检查条目</Label>
+            <Input className="h-8 text-xs" value={catForm.check_item} onChange={e => setCatForm({ ...catForm, check_item: e.target.value })} />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label>检查要求及区域</Label>
+            <Input className="h-8 text-xs" value={catForm.check_requirement} onChange={e => setCatForm({ ...catForm, check_requirement: e.target.value })} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>检查标准</Label>
+            <Input className="h-8 text-xs" value={catForm.check_standard} onChange={e => setCatForm({ ...catForm, check_standard: e.target.value })} />
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label>问题描述</Label>
+          <Textarea placeholder="填写问题描述..." value={description} onChange={e => setDescription(e.target.value)} rows={2} />
+        </div>
+        <MaterialPicker taskId={taskId} recordId={record.id} selectedIds={referenceIds} onSelectionChange={(ids, mats) => { setReferenceIds(ids); setLocalMaterials(mats); }} />
+        <div className="space-y-1.5">
+          <Label>检查结果</Label>
+          {evalResultButtons(catForm.evaluation_result, (v) => setCatForm(f => ({ ...f, evaluation_result: v })))}
+        </div>
+      </div>
+    );
+
+    if (formCategory === '感官评价标准') return (
+      <div className="space-y-3">
+        {categorySelector}
+        <div className="space-y-1.5">
+          <Label>感官维度</Label>
+          <Input className="h-8 text-xs" value={senForm.sensory_dimension} onChange={e => setSenForm({ ...senForm, sensory_dimension: e.target.value })} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>感官评价准备</Label>
+          <Textarea value={senForm.evaluation_prep} onChange={e => setSenForm({ ...senForm, evaluation_prep: e.target.value })} rows={2} />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label>主观满意度(分值)</Label>
+            <Input className="h-8 text-xs" value={senForm.subjective_score} onChange={e => setSenForm({ ...senForm, subjective_score: e.target.value })} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>主观感受描述</Label>
+            <Input className="h-8 text-xs" value={senForm.subjective_rating} onChange={e => setSenForm({ ...senForm, subjective_rating: e.target.value })} />
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label>体验标准</Label>
+          <Input className="h-8 text-xs" value={senForm.experience_standard} onChange={e => setSenForm({ ...senForm, experience_standard: e.target.value })} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>问题描述</Label>
+          <Textarea placeholder="填写问题描述..." value={description} onChange={e => setDescription(e.target.value)} rows={2} />
+        </div>
+        <MaterialPicker taskId={taskId} recordId={record.id} selectedIds={referenceIds} onSelectionChange={(ids, mats) => { setReferenceIds(ids); setLocalMaterials(mats); }} />
+        <div className="space-y-1.5">
+          <Label>检查结果</Label>
+          {evalResultButtons(senForm.evaluation_result, (v) => setSenForm(f => ({ ...f, evaluation_result: v })))}
+        </div>
+      </div>
+    );
+
+    // 非标准
+    return (
+      <div className="space-y-3">
+        {categorySelector}
+        <div className="p-3 rounded-lg bg-muted/30 border border-border">
+          <p className="text-xs text-muted-foreground">非标准检查项无需关联产品使用阶段、体验流程、感官维度，仅需描述检查内容和结果</p>
+        </div>
+        <div className="space-y-1.5">
+          <Label>描述结果 *</Label>
+          <Textarea placeholder="描述检查项内容" value={nonStandardForm.description}
+            onChange={e => setNonStandardForm({ ...nonStandardForm, description: e.target.value })} rows={3} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>检查结果描述</Label>
+          <Textarea placeholder="描述检查结果（可选）" value={nonStandardForm.problem_description}
+            onChange={e => setNonStandardForm({ ...nonStandardForm, problem_description: e.target.value })} rows={2} />
+        </div>
+        <MaterialPicker taskId={taskId} recordId={record.id} selectedIds={referenceIds} onSelectionChange={(ids, mats) => { setReferenceIds(ids); setLocalMaterials(mats); }} />
+        <div className="space-y-1.5">
+          <Label>检查结果</Label>
+          {evalResultButtons(nonStandardForm.evaluation_result, (v) => setNonStandardForm(f => ({ ...f, evaluation_result: v })))}
+        </div>
+      </div>
+    );
   };
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) handleCancel(); else setOpen(v); }}>
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-base">{record.check_item}</DialogTitle>
+          <DialogTitle className="text-base">编辑问题点</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          {/* Standard reference tags */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="flex flex-wrap gap-1">
-                {record.standard_category && <Badge variant="secondary" className="text-[10px]">{record.standard_category}</Badge>}
-                {record.check_dimension && <Badge variant="outline" className="text-[10px]">{record.check_dimension}</Badge>}
-                {record.sub_check_dimension && <Badge variant="outline" className="text-[10px]">{record.sub_check_dimension}</Badge>}
-                {record.test_phase && <Badge variant="outline" className="text-[10px]">{record.test_phase}</Badge>}
-                {record.experience_flow && <Badge variant="outline" className="text-[10px]">{record.experience_flow}</Badge>}
-                {record.touch_point && <Badge variant="outline" className="text-[10px]">{record.touch_point}</Badge>}
-              </div>
-              <Button variant="ghost" size="sm" className="h-6 text-[10px] gap-1 shrink-0" onClick={() => setEditStandard(!editStandard)}>
-                <Pencil className="h-3 w-3" /> {editStandard ? '收起' : '修改标准'}
-              </Button>
-            </div>
+          {renderEditForm()}
 
-            {editStandard && (
-              <div className="space-y-2 border rounded-lg p-3 bg-muted/20">
-                <div className="space-y-1.5">
-                  <Label className="text-xs">标准类型</Label>
-                  <Select value={standardFields.standard_category} onValueChange={(v) => setStandardFields({
-                    ...standardFields, standard_category: v,
-                    test_phase: '', experience_flow: '', sensory_dimension: '', touch_point: '',
-                    check_requirement: '', experience_standard: '', check_dimension: '', sub_check_dimension: '', check_standard: '',
-                  })}>
-                    <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="通用标准">通用标准</SelectItem>
-                      <SelectItem value="品类标准">品类标准</SelectItem>
-                      <SelectItem value="感官评价标准">感官评价标准</SelectItem>
-                      <SelectItem value="非标准">非标准</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {standardFields.standard_category === '通用标准' && (
-                  <>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">产品使用阶段</Label>
-                      <Select value={standardFields.test_phase} onValueChange={(v) => setStandardFields({ ...standardFields, test_phase: v, experience_flow: '', touch_point: '', check_requirement: '', experience_standard: '' })}>
-                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="选择" /></SelectTrigger>
-                        <SelectContent>
-                          {phaseOptions.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">体验流程</Label>
-                      <Select value={standardFields.experience_flow} onValueChange={(v) => setStandardFields({ ...standardFields, experience_flow: v, touch_point: '', check_requirement: '', experience_standard: '' })}>
-                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="选择" /></SelectTrigger>
-                        <SelectContent>
-                          {(flowByPhase[standardFields.test_phase] || []).map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">感官维度</Label>
-                      <Select value={standardFields.sensory_dimension} onValueChange={(v) => setStandardFields({ ...standardFields, sensory_dimension: v, touch_point: '', check_requirement: '', experience_standard: '' })}>
-                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="选择" /></SelectTrigger>
-                        <SelectContent>
-                          {sensoryOptions.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {standardFields.test_phase && standardFields.experience_flow && standardFields.sensory_dimension && generalRefItems.length > 0 && (
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">选择标准项（自动填充）</Label>
-                        <Select value={standardFields.touch_point} onValueChange={(v) => {
-                          const item = generalRefItems.find(i => i.touch_point === v);
-                          setStandardFields({
-                            ...standardFields,
-                            touch_point: v,
-                            check_requirement: item?.check_requirement || '',
-                            experience_standard: item?.experience_standard || '',
-                          });
-                        }}>
-                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="选择触点/检查项" /></SelectTrigger>
-                          <SelectContent>
-                            {generalRefItems.map((item, i) => (
-                              <SelectItem key={i} value={item.touch_point || `item-${i}`}>{item.touch_point || `项目${i + 1}`}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">触点</Label>
-                      <Input className="h-8 text-xs" value={standardFields.touch_point} onChange={e => setStandardFields({ ...standardFields, touch_point: e.target.value })} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">检验范围及具体要求</Label>
-                      <Input className="h-8 text-xs" value={standardFields.check_requirement} onChange={e => setStandardFields({ ...standardFields, check_requirement: e.target.value })} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">体验标准</Label>
-                      <Input className="h-8 text-xs" value={standardFields.experience_standard} onChange={e => setStandardFields({ ...standardFields, experience_standard: e.target.value })} />
-                    </div>
-                  </>
-                )}
-
-                {standardFields.standard_category === '品类标准' && (
-                  <>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">感官维度</Label>
-                      <Input className="h-8 text-xs" value={standardFields.sensory_dimension} onChange={e => setStandardFields({ ...standardFields, sensory_dimension: e.target.value })} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">检查维度</Label>
-                      <Input className="h-8 text-xs" value={standardFields.check_dimension} onChange={e => setStandardFields({ ...standardFields, check_dimension: e.target.value })} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">细分检查维度</Label>
-                      <Input className="h-8 text-xs" value={standardFields.sub_check_dimension} onChange={e => setStandardFields({ ...standardFields, sub_check_dimension: e.target.value })} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">检查要求及区域</Label>
-                      <Input className="h-8 text-xs" value={standardFields.check_requirement} onChange={e => setStandardFields({ ...standardFields, check_requirement: e.target.value })} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">检查标准</Label>
-                      <Input className="h-8 text-xs" value={standardFields.check_standard} onChange={e => setStandardFields({ ...standardFields, check_standard: e.target.value })} />
-                    </div>
-                  </>
-                )}
-
-                {standardFields.standard_category === '感官评价标准' && (
-                  <>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">感官维度</Label>
-                      <Input className="h-8 text-xs" value={standardFields.sensory_dimension} onChange={e => setStandardFields({ ...standardFields, sensory_dimension: e.target.value })} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">体验标准</Label>
-                      <Input className="h-8 text-xs" value={standardFields.experience_standard} onChange={e => setStandardFields({ ...standardFields, experience_standard: e.target.value })} />
-                    </div>
-                  </>
-                )}
-
-                {/* 非标准: no standard fields needed, just description */}
-              </div>
-            )}
-          </div>
-
-          {/* Check requirement & standard */}
-          {(record.check_requirement || record.check_standard || record.experience_standard) && (
-            <div className="space-y-1 text-xs bg-muted/40 rounded-md p-2">
-              {record.check_requirement && <div><span className="text-muted-foreground">检查要求：</span>{record.check_requirement}</div>}
-              {record.check_standard && <div><span className="text-muted-foreground">检查标准：</span>{record.check_standard}</div>}
-              {record.experience_standard && <div><span className="text-muted-foreground">体验标准：</span>{record.experience_standard}</div>}
-            </div>
-          )}
-
-          {/* Status */}
-          <div className="space-y-2">
-            <Label>检查结果</Label>
-            <div className="flex gap-2">
-              {['合格', '不合格', '待定'].map(r => (
-                <button key={r} type="button" onClick={() => setTempStatus(r)}
-                  className={cn('flex-1 px-3 py-2.5 rounded-lg text-sm font-medium border transition-colors',
-                    tempStatus === r
-                      ? r === '合格' ? 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-400'
-                        : r === '不合格' ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-400'
-                        : 'bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-400'
-                      : 'bg-background border-border hover:bg-muted/50')}>
-                  {r}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Description */}
-          <div className="space-y-2">
-            <Label>问题描述</Label>
-            <Textarea placeholder="填写问题描述..." value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
-          </div>
-
-          {/* Existing materials (includes both already-linked and newly uploaded) */}
+          {/* Existing materials preview */}
           {localMaterials.length > 0 && (
             <div className="space-y-2">
               <Label>已有素材</Label>
@@ -1825,20 +1901,6 @@ function RecordDetailCard({ record, taskId, existingMaterials, onRefresh, onClos
               </div>
             </div>
           )}
-
-          {/* Upload & reference materials - use MaterialPicker only */}
-          <div className="space-y-2">
-            <Label>素材管理</Label>
-            <MaterialPicker
-              taskId={taskId}
-              recordId={record.id}
-              selectedIds={referenceIds}
-              onSelectionChange={(ids, mats) => { setReferenceIds(ids); setLocalMaterials(mats); }}
-            />
-            {referenceIds.length > 0 && (
-              <p className="text-xs text-muted-foreground">已选择 {referenceIds.length} 个素材，保存时将自动关联</p>
-            )}
-          </div>
 
           {/* Save / Cancel */}
           <div className="flex gap-2 justify-end pt-2 border-t">
