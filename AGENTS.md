@@ -26,10 +26,10 @@
 │   │   │   └── login/           # 登录页（含注册/忘记密码弹窗）
 │   │   ├── (main)/              # 主布局路由组（需认证）
 │   │   │   ├── dashboard/       # 工作台
-│   │   │   ├── standards/       # 标准管理（含 [id] 详情、批量导入）
-│   │   │   ├── tasks/           # 体验计划（含 [id] 详情，五感体验关联标准项）
+│   │   │   ├── standards/       # 标准管理（双板块：体验标准+食谱库，含 [id] 详情、批量导入）
+│   │   │   ├── tasks/           # 体验计划（含 [id] 详情，五感体验关联标准项，步骤拖拽排序）
 │   │   │   ├── issues/          # 问题管理（含 [id] 详情）
-│   │   │   ├── reports/         # 报告中心（含 [id] 详情）
+│   │   │   ├── reports/         # 报告中心（含 [id] 详情，北京时间格式化）
 │   │   │   └── analysis/        # 数据分析
 │   │   ├── reports/print/       # 报告打印/PDF导出页面
 │   │   ├── reports/share/[token]/ # 报告分享公开页面（无需登录，只读）
@@ -46,21 +46,23 @@
 │   │   │   ├── standard-items/  # 标准检查项 CRUD（含新字段：experience_flow, touch_point等）
 │   │   │   │   └── search/      # 标准检查项跨标准搜索（支持standard_category/experience_flow筛选）
 │   │   │   ├── tasks/           # 体验任务 CRUD
-│   │   │   ├── records/         # 检查记录 CRUD（含standard_category, check_dimension, sub_check_dimension, check_standard, experience_flow, touch_point, experience_standard）
-│   │   │   ├── materials/       # 素材管理（上传/删除/重命名/关联）
+│   │   │   ├── records/         # 检查记录 CRUD（含standard_category等字段，编辑时同步更新对应issue状态）
+│   │   │   ├── materials/       # 素材管理（上传/删除/重命名/关联，支持recipe_library_step_id）
 │   │   │   ├── issues/          # 问题整改 CRUD
 │   │   │   ├── reports/         # 报告生成/CRUD
 │   │   │   │   ├── export-pdf/  # PDF导出API
 │   │   │   │   └── share/       # 报告分享API（创建/验证/列表/撤销）
 │   │   │   ├── recipes/         # 食谱/功能 CRUD
 │   │   │   ├── recipe-steps/    # 食谱步骤 CRUD
+│   │   │   ├── recipe-library/  # 食谱库 CRUD（名称全局唯一，步骤级联删除）
+│   │   │   ├── recipe-library-steps/ # 食谱库步骤 CRUD（含批量排序）
 │   │   │   └── dashboard/       # 仪表盘数据
 │   │   ├── layout.tsx           # 根布局（含 Toaster + AuthProvider + suppressHydrationWarning）
 │   │   └── page.tsx             # 首页重定向到 /dashboard
 │   ├── components/
 │   │   ├── navigation.tsx       # 导航组件（桌面侧栏 + 移动端底部/顶部 + RoleSwitcher）
 │   │   ├── image-preview.tsx    # 共享图片预览组件
-│   │   ├── material-picker.tsx  # 素材选择器组件（引用/上传）
+│   │   ├── material-picker.tsx  # 素材选择器组件（引用/上传，支持initialMaterials预填充）
 │   │   └── ui/                  # Shadcn UI 组件库
 │   ├── storage/database/
 │   │   ├── supabase-client.ts   # Supabase 客户端
@@ -82,13 +84,13 @@
 | `standards` | 体验标准库（通用标准/品类标准/感官评价标准/非标准/食谱功能标准） |
 | `standard_items` | 标准检查项（含分类特定字段：experience_flow, touch_point, experience_standard, sub_check_dimension, check_standard, evaluation_prep, subjective_score, subjective_rating, reference_images） |
 | `experience_tasks` | 体验任务（含 created_by 用户隔离字段, project_type: ODM/OEM/竞品研究/自研/前期研究/改型降本优化/海外产品, project_phase: 手板研究/试制阶段/试产阶段/量产阶段） |
-| `check_records` | 检查记录（走查，含 standard_category, check_dimension, sub_check_dimension, check_standard, experience_flow, touch_point, experience_standard） |
-| `materials` | 素材（图片/视频，含 AI 预留字段，可关联record或recipe_step） |
-| `issues` | 问题整改（含 level: 一类/二类/三类, source, source_report_id, source_type: record_fail/recipe_problem） |
+| `check_records` | 检查记录（走查，含 standard_category, check_dimension, sub_check_dimension, check_standard, experience_flow, touch_point, experience_standard, check_tool, problem_level） |
+| `materials` | 素材（图片/视频，含 AI 预留字段，可关联record或recipe_step或recipe_library_step，task_id可选） |
+| `issues` | 问题整改（含 level: 一类/二类/三类, source, source_report_id, source_type: record_fail/recipe_problem, UNIQUE(title, source_type, task_id)） |
 | `report_templates` | 报告模板 |
 | `reports` | 报告（含 product_model 用于同型号合并） |
 | `report_shares` | 报告分享（share_token, expires_at, created_by，支持7天/30天/永久有效期） |
-| `recipe_library` | 食谱库（按品类-产品分类的全局食谱标准，同品类+产品+名称唯一） |
+| `recipe_library` | 食谱库（名称全局唯一约束，按品类-产品分类的全局食谱标准） |
 | `recipe_library_steps` | 食谱库步骤 |
 | `recipes` | 食谱/功能 |
 | `recipe_steps` | 食谱步骤 |
@@ -96,7 +98,7 @@
 ## 标准分类体系
 
 ### 通用标准
-字段：产品使用阶段(开箱/首次安装/产品使用/清洁收纳/其他) → 体验流程(级联) → 感官维度 → 触点 → 检验范围及具体要求 → 体验标准 → 测量工具 → 问题等级(一级/二级/三级)
+字段：产品使用阶段(开箱/首次安装/产品使用/清洁收纳/其他) → 体验流程(级联) → 感官维度 → 触点 → 检验范围及具体要求 → 体验标准 → 测量工具 → 问题等级(一类/二类/三类)
 
 体验流程级联映射：
 - 开箱 → 拿取外包装/拆开内包装
@@ -135,8 +137,8 @@
 | GET/POST | `/api/tasks` | 任务列表/创建（分页+筛选） |
 | GET/PUT/DELETE | `/api/tasks/[id]` | 任务详情（含记录+问题）/更新/删除 |
 | GET/POST | `/api/records` | 检查记录列表/创建（含standard_category等新字段） |
-| PUT/DELETE | `/api/records/[id]` | 记录更新/删除 |
-| POST | `/api/materials/upload` | 素材上传（文件大小100MB限制，仅图片/视频） |
+| PUT/DELETE | `/api/records/[id]` | 记录更新（含标准字段+检查结果+问题描述，更新时同步对应issue状态）/删除 |
+| POST | `/api/materials/upload` | 素材上传（文件大小100MB限制，仅图片/视频，支持task_id或recipe_library_step_id） |
 | PUT | `/api/materials` | 素材重命名/关联record_id/recipe_step_id |
 | GET/DELETE | `/api/materials` | 素材列表/删除 |
 | GET/POST | `/api/issues` | 问题列表/创建 |
@@ -156,7 +158,10 @@
 | GET | `/api/analysis` | 数据分析（支持product_category/project_type/organizer/issue_source_type/date_from/date_to筛选，非admin需传created_by） |
 | POST | `/api/analysis` | 数据导出CSV（仅管理员，format=csv） |
 | GET/POST | `/api/recipe-library` | 食谱库列表/创建（支持keyword搜索，按品类-产品分类，名称唯一约束） |
-| DELETE | `/api/recipe-library/[id]` | 删除食谱库项（步骤级联删除） |
+| GET/PUT | `/api/recipe-library/[id]` | 食谱库详情/更新（含名称唯一性检查） |
+| DELETE | `/api/recipe-library/[id]` | 删除食谱库项（步骤级联删除，素材关联清理） |
+| GET/POST | `/api/recipe-library-steps` | 食谱库步骤列表/创建；PUT 批量更新步骤排序 |
+| PUT/DELETE | `/api/recipe-library-steps/[id]` | 食谱库步骤更新/删除（含素材关联清理） |
 | GET/PUT | `/api/settings` | 平台设置读取/更新（管理员，key-value JSONB） |
 | POST | `/api/tasks/[id]/transfer` | 转移体验计划到其他用户（管理员，含全部资料） |
 
@@ -247,7 +252,7 @@ coze start
 14. **报告中心重构**: 移除"生成报告"按钮，新增"报告对比"功能；自研/改型降本优化报告按product_model在列表页分组，详情页/打印页内容级合并
 15. **报告内容级合并**: 自研和改型/降本/优化类型的报告，在报告详情页和打印页中，同product_model的所有报告按时间排序合并展示，每份报告连续完整，用分割线和阶段/时间标注区分
 16. **体验计划项目类型**: 新建时选择项目类型（ODM/OEM/竞品研究/自研/前期研究/改型降本优化/海外产品），自研可选项目阶段（手板研究/试制阶段/试产阶段/量产阶段）
-17. **检查记录状态编辑**: RecordDetailCard使用Dialog弹窗模式编辑状态，新增问题时可编辑检查结果（合格/不合格/待定）
+17. **检查记录编辑重构**: 点击问题点用现有记录数据预填充表单，复用新增问题点对话框（标准类型选择+级联字段+检查结果+素材管理），保存调用 PUT /api/records/[id]；编辑模式切换标准类型时自动从记录预填充共享字段（sensory_dimension/problem_description/evaluationResult等）
 18. **数据隔离**: 体验计划和问题管理按用户隔离（experience_tasks.created_by字段），工作台数据按用户过滤；标准管理和报告中心保持平台共享（因同型号不同阶段可能不同账号承接）；管理账号(admin)可查看所有数据
 19. **非管理员待申请**: 非管理员工作台"待审核"改为"待申请"，显示该账号的密码/名称修改待审核列表（排除注册记录），可用叉图标取消申请
 20. **数据分析**: 所有账号可浏览数据分析页面，核心指标为任务数/完成率/问题总数/整改率；支持按品类/项目类型/任务人/问题点分类/时间范围多维筛选；保留任务状态分布/问题等级分布(一类/二类/三类)/问题整改进度(按状态×等级)；管理账号可导出数据
@@ -263,14 +268,21 @@ coze start
 30. **非标准检查类型**: 五感体验新增问题点的标准类型新增"非标准"选项，仅要求描述结果和检查结果，无需产品使用阶段/体验流程/感官维度
 31. **体验计划基本信息编辑**: 任务详情页基本信息Tab支持点击编辑按钮进入编辑模式，修改后保存调用 PUT /api/tasks/[id]
 32. **食谱内容积累与引用**: 食谱/功能支持点击编辑图标修改名称和参数；新增食谱时支持搜索食谱库并引用（含步骤复制）
-33. **食谱步骤排序**: 食谱步骤支持上移/下移按钮重新排序，调用 PUT /api/recipe-steps 批量更新 step_number
+33. **食谱步骤拖拽排序**: 食谱步骤和食谱库步骤支持 HTML5 原生拖拽排序（GripVertical拖拽手柄），体验计划步骤也采用同样的拖拽排序组件；调用 PUT /api/recipe-steps 批量更新 step_number
 34. **食谱步骤跨食谱引用**: 新增步骤时支持搜索食谱库引用已有步骤的操作和问题点；新增食谱时支持引用已有食谱（含参数和步骤）
 35. **食谱库按品类-产品分类**: 食谱库独立存储在 recipe_library 表，按品类-产品分类，整合显示在标准管理页面；报告生成时自动去重保存到食谱库（仅按食谱名称去重，不考虑品类和产品不同）；名称全局唯一约束
 36. **任务状态自动流转**: 移除"待审核"状态，仅保留待执行/进行中/已完成；待执行→进行中（新增五感体验/食谱内容时自动触发）；进行中→已完成（生成报告时）；已完成→进行中（编辑已完成报告内容时）
 37. **报告状态修正**: 报告生成后状态直接为"已完成"（非"草稿"）；旧"草稿"状态在列表中显示为"已完成"
 38. **体验计划转移**: 管理员可将体验计划从用户A转移到用户B，转移后所有资料（素材、五感体验、食谱功能等）归属目标用户；仅管理员可操作；转移时需传递 admin_user_id 获取用户列表
 39. **标准管理双板块**: 标准管理页面划分为"体验标准"和"食谱库"两大板块，通过顶部Tab切换；体验标准列表采用与食谱库一致的卡片样式
-40. **问题去重增强**: 报告生成时问题创建增加 DB 级双检（insert前查重），前端报告生成按钮增加防重复点击锁，避免并发产生重复问题
+40. **问题去重增强**: 报告生成时问题创建增加 DB 级唯一约束 `UNIQUE(title, source_type, task_id)`，insert 失败时静默跳过；前端报告生成按钮增加防重复点击锁
+41. **食谱库步骤管理**: 食谱库支持展开查看步骤详情；添加步骤时支持直接上传图片（先创建步骤获取ID再上传）；步骤支持编辑/删除/拖拽排序
+42. **标准检查项问题等级**: 统一为一类/二类/三类，与问题管理保持一致（原一级/二级/三级已废弃）
+43. **记录编辑同步问题**: PUT /api/records/[id] 更新检查记录时，同步更新对应问题状态（合格→已验证，不合格→待整改），通过 title+source_type+task_id 匹配
+44. **编辑模式素材管理**: 编辑问题点时，通过 initialMaterialIds 追踪初始素材，保存时对比差异：新增素材关联 record_id，取消选择的素材设置 record_id=null 解除关联
+45. **MaterialPicker 增强**: 新增 initialMaterials prop 支持预填充已有素材缩略图；支持 recipe_library_step_id 参数
+46. **报告时间格式化**: 报告中心 created_at/updated_at 以北京时间（UTC+8）格式显示，隐藏 created_by 字段
+47. **页面内边距统一**: 工作台/报告中心/问题管理等主页面统一使用 p-4 lg:p-6 内边距，与体验计划/标准管理/数据分析页面一致
 
 ## 代码风格
 
@@ -322,4 +334,8 @@ coze start
 | 移动端长字段穿透屏幕 | flex-1 无 min-w-0、Badge 无 max-w | body 加 `overflow-x-hidden`，flex-1 加 `min-w-0`，长文本用 `break-all`，Badge 用 `max-w-[Npx] truncate` |
 | 视频素材不显示缩略图 | 五感体验和PDF附录过滤了 video 类型 | 移除 `material_type === 'image'` 过滤，视频用 `<video preload="metadata">` + 播放图标 |
 | 转移功能无反应 | 前端调用 `/api/auth/users` 未传 `admin_user_id` | 添加 `admin_user_id` 参数：`/api/auth/users?admin_user_id=${user?.id}` |
-| 问题点偶发重复 | 报告生成并发或双击导致重复创建 | 前端按钮加 `generatingReport` 锁 + 后端 insert 前 DB 查重 + 删除后 200ms 延迟 |
+| 问题点偶发重复 | 报告生成并发或双击导致重复创建 | DB 唯一约束 `UNIQUE(title, source_type, task_id)`，insert 失败静默跳过 |
+| 编辑问题点素材取消选择不生效 | 保存时只处理新增关联，未处理取消关联 | 保存时对比 `initialMaterialIds` 与 `selectedMaterialIds`，差异项设 `record_id=null` |
+| 编辑问题点切换标准类型后表单为空 | `populateFormsFromRecord` 只填充原始类别表单 | 切换类别时从 `editRecordData` 自动预填充共享字段（sensory_dimension/evaluationResult等） |
+| 食谱库步骤添加图片报"缺少必要参数" | upload API 要求 task_id 必填，食谱库步骤无 task_id | DB 将 materials.task_id 改为可选，新增 recipe_library_step_id 字段 |
+| 食谱库删除图标报错 | 重写 route.ts 时丢失 DELETE handler | 重新添加 DELETE handler，含步骤和素材级联清理 |
