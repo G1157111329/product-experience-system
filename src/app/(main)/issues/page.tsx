@@ -257,7 +257,7 @@ export default function IssuesPage() {
   const verifiedCount = issues.filter(i => i.status === '已验证').length;
 
   return (
-    <div className="space-y-4">
+    <div className="p-4 lg:p-6 space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold">问题管理</h1>
