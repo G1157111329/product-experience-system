@@ -7,13 +7,17 @@ export async function GET(request: NextRequest) {
   const task_id = searchParams.get('task_id');
   const record_id = searchParams.get('record_id');
   const recipe_step_id = searchParams.get('recipe_step_id');
+  const recipe_library_step_id = searchParams.get('recipe_library_step_id');
+  const limit = parseInt(searchParams.get('limit') || '100', 10);
 
   let query = client.from('materials').select('*');
   if (task_id) query = query.eq('task_id', task_id);
   if (record_id) query = query.eq('record_id', record_id);
   if (recipe_step_id) query = query.eq('recipe_step_id', recipe_step_id);
+  if (recipe_library_step_id) query = query.eq('recipe_library_step_id', recipe_library_step_id);
 
-  const { data, error } = await query.order('created_at', { ascending: false });
+  query = query.order('created_at', { ascending: false }).limit(limit);
+  const { data, error } = await query;
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
 
   return NextResponse.json({ code: 0, message: 'success', data });

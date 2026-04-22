@@ -18,10 +18,14 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   return NextResponse.json({ code: 0, message: '更新成功', data });
 }
 
-// DELETE: Delete a step
+// DELETE: Delete a step (and its associated materials)
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+
+  // Delete materials associated with this step
+  await client.from('materials').delete().eq('recipe_library_step_id', id);
+
   const { error } = await client.from('recipe_library_steps').delete().eq('id', id);
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
   return NextResponse.json({ code: 0, message: '删除成功' });

@@ -15,11 +15,16 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
     const record_id = formData.get('record_id') as string | null;
-    const task_id = formData.get('task_id') as string;
+    const task_id = formData.get('task_id') as string | null;
     const recipe_step_id = formData.get('recipe_step_id') as string | null;
+    const recipe_library_step_id = formData.get('recipe_library_step_id') as string | null;
 
-    if (!file || !task_id) {
-      return NextResponse.json({ code: 1, message: '缺少必要参数' }, { status: 400 });
+    if (!file) {
+      return NextResponse.json({ code: 1, message: '缺少文件' }, { status: 400 });
+    }
+
+    if (!task_id && !recipe_library_step_id) {
+      return NextResponse.json({ code: 1, message: '缺少必要参数(需提供task_id或recipe_library_step_id)' }, { status: 400 });
     }
 
     // 文件大小校验 (100MB)
@@ -37,7 +42,8 @@ export async function POST(request: NextRequest) {
     const materialType = file.type.startsWith('image/') ? 'image' : 'video';
     const buffer = Buffer.from(await file.arrayBuffer());
     const timestamp = Date.now();
-    const fileName = `experience-media/${task_id}/${materialType}/${timestamp}_${file.name}`;
+    const folderId = recipe_library_step_id || task_id || 'unknown';
+    const fileName = `experience-media/${folderId}/${materialType}/${timestamp}_${file.name}`;
 
     // 上传到对象存储
     const fileKey = await storage.uploadFile({
@@ -53,7 +59,9 @@ export async function POST(request: NextRequest) {
     const client = getSupabaseClient();
     const { data, error } = await client.from('materials').insert({
       record_id: record_id || null,
-      task_id,
+      task_id: task_id || null,
+      recipe_step_id: recipe_step_id || null,
+      recipe_library_step_id: recipe_library_step_id || null,
       material_type: materialType,
       file_name: file.name,
       file_path: fileKey,

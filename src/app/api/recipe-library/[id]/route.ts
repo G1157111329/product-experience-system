@@ -26,3 +26,25 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
   return NextResponse.json({ code: 0, message: '更新成功', data });
 }
+
+// DELETE: Delete a recipe library item (steps cascade delete)
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const client = getSupabaseClient();
+
+  // Get all step IDs for this recipe
+  const { data: steps } = await client.from('recipe_library_steps').select('id').eq('recipe_library_id', id);
+  const stepIds = (steps || []).map(s => s.id);
+
+  // Delete materials associated with these steps
+  if (stepIds.length > 0) {
+    await client.from('materials').delete().in('recipe_library_step_id', stepIds);
+  }
+
+  // Delete steps
+  await client.from('recipe_library_steps').delete().eq('recipe_library_id', id);
+
+  const { error } = await client.from('recipe_library').delete().eq('id', id);
+  if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
+  return NextResponse.json({ code: 0, message: '删除成功' });
+}

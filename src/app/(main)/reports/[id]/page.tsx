@@ -87,7 +87,7 @@ const taskFieldLabels: Record<string, string> = {
   project_type: '项目类型', project_phase: '项目阶段', test_date: '测试日期',
   organizer: '组织人', target_user: '目标用户', test_purpose: '测试目的',
   test_method: '测试方法', status: '状态', assigned_to: '负责人',
-  selected_standards: '选择标准',
+  selected_standards: '选择标准', created_at: '创建时间', updated_at: '更新时间',
 };
 
 const STATUS_LIST = ['待整改', '整改中', '已验证', '不整改'];

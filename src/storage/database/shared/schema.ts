@@ -98,7 +98,8 @@ export const checkRecords = pgTable(
   "check_records",
   {
     id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
-    task_id: varchar("task_id", { length: 36 }).notNull().references(() => experienceTasks.id, { onDelete: "cascade" }),
+    task_id: varchar("task_id", { length: 36 }).references(() => experienceTasks.id, { onDelete: "cascade" }),
+    recipe_library_step_id: varchar("recipe_library_step_id", { length: 36 }),
     standard_item_id: varchar("standard_item_id", { length: 36 }), // 关联标准检查项
     standard_category: varchar("standard_category", { length: 50 }), // 标准类型：通用标准/品类标准/感官评价标准
     sensory_dimension: varchar("sensory_dimension", { length: 20 }),

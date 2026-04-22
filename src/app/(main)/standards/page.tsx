@@ -70,24 +70,24 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
 
   // Add dialog form with steps
   const [addForm, setAddForm] = useState({ name: '', product_category: '', product: '', ingredients: '', recipe_type: '食谱' });
-  const [addSteps, setAddSteps] = useState<RecipeLibStep[]>([]);
+  const [addSteps, setAddSteps] = useState<Array<{ step_number: number; operation: string; imageFiles: File[] }>>([]);
   const [addStepOp, setAddStepOp] = useState('');
-  const [addStepPp, setAddStepPp] = useState('');
-  const [addingStep, setAddingStep] = useState(false);
+  const [addingRecipe, setAddingRecipe] = useState(false);
 
   // Expanded recipe detail - steps management
   const [detailSteps, setDetailSteps] = useState<RecipeLibStep[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailStepOp, setDetailStepOp] = useState('');
-  const [detailStepPp, setDetailStepPp] = useState('');
   const [detailAddingStep, setDetailAddingStep] = useState(false);
   const [editStepId, setEditStepId] = useState<string | null>(null);
   const [editStepOp, setEditStepOp] = useState('');
-  const [editStepPp, setEditStepPp] = useState('');
 
-  // Material upload state for steps
-  const [uploadingStepIdx, setUploadingStepIdx] = useState<number | null>(null);
-  const [uploadingFor, setUploadingFor] = useState<'add' | 'detail'>('add');
+  // Drag state
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+
+  // Step materials map
+  const [stepMaterials, setStepMaterials] = useState<Record<string, Array<{ id: string; file_url: string; material_type: string; file_name: string }>>>({});
 
   const fetchRecipes = useCallback(async () => {
     setLoading(true);
@@ -106,7 +106,19 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
     setDetailLoading(true);
     const res = await fetch(`/api/recipe-library-steps?recipe_library_id=${recipeId}`);
     const data = await res.json();
-    if (data.code === 0) setDetailSteps(data.data || []);
+    if (data.code === 0) {
+      setDetailSteps(data.data || []);
+      // Fetch materials for each step
+      const matMap: Record<string, Array<{ id: string; file_url: string; material_type: string; file_name: string }>> = {};
+      for (const step of (data.data || [])) {
+        if (step.id) {
+          const mRes = await fetch(`/api/materials?recipe_library_step_id=${step.id}&limit=50`);
+          const mData = await mRes.json();
+          if (mData.code === 0) matMap[step.id] = mData.data || [];
+        }
+      }
+      setStepMaterials(matMap);
+    }
     setDetailLoading(false);
   };
 
@@ -117,23 +129,15 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
       setExpandedId(recipe.id);
       fetchDetailSteps(recipe.id);
       setDetailStepOp('');
-      setDetailStepPp('');
       setEditStepId(null);
     }
   };
 
   // ── Add recipe with steps ──
-  const handleAddStep = () => {
+  const handleAddStepInDialog = () => {
     if (!addStepOp.trim()) return;
-    setAddSteps([...addSteps, {
-      step_number: addSteps.length + 1,
-      operation: addStepOp.trim(),
-      problem_point: addStepPp.trim() || null,
-      problem_points: addStepPp.trim() ? [{ text: addStepPp.trim() }] : [],
-      material_ids: [],
-    }]);
+    setAddSteps([...addSteps, { step_number: addSteps.length + 1, operation: addStepOp.trim(), imageFiles: [] }]);
     setAddStepOp('');
-    setAddStepPp('');
   };
 
   const handleRemoveAddStep = (idx: number) => {
@@ -141,9 +145,17 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
     setAddSteps(newSteps);
   };
 
+  const handleAddStepImage = (idx: number, file: File) => {
+    setAddSteps(prev => {
+      const newSteps = [...prev];
+      newSteps[idx] = { ...newSteps[idx], imageFiles: [...newSteps[idx].imageFiles, file] };
+      return newSteps;
+    });
+  };
+
   const handleAddRecipe = async () => {
     if (!addForm.name.trim()) return;
-    setAddingStep(true);
+    setAddingRecipe(true);
     try {
       // 1. Create the recipe library item
       const res = await fetch('/api/recipe-library', {
@@ -155,24 +167,21 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
 
       const recipeId = data.data.id;
 
-      // 2. Create steps
+      // 2. Create steps and upload images
       for (const step of addSteps) {
-        await fetch('/api/recipe-library-steps', {
+        const stepRes = await fetch('/api/recipe-library-steps', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            recipe_library_id: recipeId,
-            step_number: step.step_number,
-            operation: step.operation,
-            problem_point: step.problem_point,
-            problem_points: step.problem_points,
-          }),
+          body: JSON.stringify({ recipe_library_id: recipeId, step_number: step.step_number, operation: step.operation }),
         });
-        // Upload materials for this step
-        for (const mid of (step.material_ids || [])) {
-          await fetch('/api/materials', {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: mid, recipe_library_step_id: step.id || mid }),
-          });
+        const stepData = await stepRes.json();
+        if (stepData.code === 0 && stepData.data?.id) {
+          // Upload images for this step
+          for (const file of step.imageFiles) {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('recipe_library_step_id', stepData.data.id);
+            await fetch('/api/materials/upload', { method: 'POST', body: formData });
+          }
         }
       }
 
@@ -180,10 +189,9 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
       setAddForm({ name: '', product_category: '', product: '', ingredients: '', recipe_type: '食谱' });
       setAddSteps([]);
       setAddStepOp('');
-      setAddStepPp('');
       fetchRecipes();
       toast.success('食谱已添加');
-    } finally { setAddingStep(false); }
+    } finally { setAddingRecipe(false); }
   };
 
   // ── Edit recipe info ──
@@ -229,18 +237,11 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
     try {
       const res = await fetch('/api/recipe-library-steps', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          recipe_library_id: expandedId,
-          step_number: detailSteps.length + 1,
-          operation: detailStepOp.trim(),
-          problem_point: detailStepPp.trim() || null,
-          problem_points: detailStepPp.trim() ? [{ text: detailStepPp.trim() }] : [],
-        }),
+        body: JSON.stringify({ recipe_library_id: expandedId, step_number: detailSteps.length + 1, operation: detailStepOp.trim() }),
       });
       const data = await res.json();
       if (data.code === 0) {
         setDetailStepOp('');
-        setDetailStepPp('');
         fetchDetailSteps(expandedId);
       } else toast.error(data.message);
     } finally { setDetailAddingStep(false); }
@@ -255,55 +256,54 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
   const handleOpenEditStep = (step: RecipeLibStep) => {
     setEditStepId(step.id || null);
     setEditStepOp(step.operation);
-    setEditStepPp(step.problem_point || (step.problem_points && step.problem_points[0]?.text) || '');
   };
 
   const handleSaveEditStep = async () => {
     if (!editStepId || !expandedId) return;
     await fetch(`/api/recipe-library-steps/${editStepId}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        operation: editStepOp.trim(),
-        problem_point: editStepPp.trim() || null,
-        problem_points: editStepPp.trim() ? [{ text: editStepPp.trim() }] : [],
-      }),
+      body: JSON.stringify({ operation: editStepOp.trim() }),
     });
     setEditStepId(null);
     fetchDetailSteps(expandedId);
   };
 
-  const handleMoveStep = async (idx: number, direction: 'up' | 'down') => {
-    if (!expandedId) return;
+  // ── Drag-and-drop reorder ──
+  const handleDragStart = (idx: number) => { setDragIdx(idx); };
+  const handleDragOver = (e: React.DragEvent, idx: number) => { e.preventDefault(); setDragOverIdx(idx); };
+  const handleDragEnd = async () => {
+    if (dragIdx === null || dragOverIdx === null || dragIdx === dragOverIdx || !expandedId) {
+      setDragIdx(null); setDragOverIdx(null); return;
+    }
     const newSteps = [...detailSteps];
-    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
-    if (swapIdx < 0 || swapIdx >= newSteps.length) return;
-    [newSteps[idx], newSteps[swapIdx]] = [newSteps[swapIdx], newSteps[idx]];
+    const [moved] = newSteps.splice(dragIdx, 1);
+    newSteps.splice(dragOverIdx, 0, moved);
     const reordered = newSteps.map((s, i) => ({ ...s, step_number: i + 1 }));
     setDetailSteps(reordered);
+    setDragIdx(null); setDragOverIdx(null);
     await fetch('/api/recipe-library-steps', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ steps: reordered.filter(s => s.id).map(s => ({ id: s.id, step_number: s.step_number })) }),
     });
   };
 
-  // ── Material upload for steps ──
-  const handleStepMaterialUpload = async (file: File, stepIndex: number, target: 'add' | 'detail') => {
+  // ── Material upload for detail step ──
+  const handleDetailStepUpload = async (file: File, stepId: string) => {
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('source', 'recipe_library_step');
+    formData.append('recipe_library_step_id', stepId);
     const res = await fetch('/api/materials/upload', { method: 'POST', body: formData });
     const data = await res.json();
-    if (data.code === 0 && data.data?.id) {
-      if (target === 'add') {
-        setAddSteps(prev => {
-          const newSteps = [...prev];
-          const ids = [...(newSteps[stepIndex].material_ids || []), data.data.id];
-          newSteps[stepIndex] = { ...newSteps[stepIndex], material_ids: ids };
-          return newSteps;
-        });
-      }
-      toast.success('素材已上传');
+    if (data.code === 0) {
+      toast.success('图片已上传');
+      fetchDetailSteps(expandedId!);
     } else toast.error(data.message || '上传失败');
+  };
+
+  // ── Delete material ──
+  const handleDeleteMaterial = async (materialId: string) => {
+    await fetch(`/api/materials?id=${materialId}`, { method: 'DELETE' });
+    if (expandedId) fetchDetailSteps(expandedId);
   };
 
   const selectedCat = categories.find(c => c.name === filterCategory);
@@ -376,12 +376,12 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     {isAdmin && (
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleOpenEdit(recipe)}>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); handleOpenEdit(recipe); }}>
                         <Pencil className="h-3 w-3 text-muted-foreground" />
                       </Button>
                     )}
                     {isAdmin && (
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDelete(recipe.id)}>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); handleDelete(recipe.id); }}>
                         <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
                       </Button>
                     )}
@@ -396,6 +396,7 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
                   <div className="mt-3 pt-3 border-t space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-medium">步骤列表</span>
+                      <span className="text-[10px] text-muted-foreground">拖拽步骤可重新排序</span>
                       {recipe.ingredients && (
                         <span className="text-[10px] text-muted-foreground">食材/参数: {recipe.ingredients}</span>
                       )}
@@ -408,7 +409,18 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
                     ) : (
                       <div className="space-y-2">
                         {detailSteps.map((step, idx) => (
-                          <div key={step.id || idx} className="border rounded-lg p-3 space-y-2">
+                          <div key={step.id || idx}
+                            className={cn(
+                              'border rounded-lg p-3 space-y-2 cursor-grab active:cursor-grabbing transition-all',
+                              dragIdx === idx && 'opacity-50 scale-95',
+                              dragOverIdx === idx && 'border-primary border-2',
+                            )}
+                            draggable={isAdmin}
+                            onDragStart={() => handleDragStart(idx)}
+                            onDragOver={(e) => handleDragOver(e, idx)}
+                            onDragEnd={handleDragEnd}
+                            onDragLeave={() => setDragOverIdx(null)}
+                          >
                             {editStepId === step.id ? (
                               /* Edit step mode */
                               <div className="space-y-2">
@@ -416,7 +428,6 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
                                   <Badge variant="outline" className="text-[10px] shrink-0">步骤{step.step_number}</Badge>
                                   <Input className="h-7 text-xs" value={editStepOp} onChange={e => setEditStepOp(e.target.value)} placeholder="操作描述" />
                                 </div>
-                                <Input className="h-7 text-xs" value={editStepPp} onChange={e => setEditStepPp(e.target.value)} placeholder="问题点（可选）" />
                                 <div className="flex gap-2">
                                   <Button size="sm" className="h-6 text-xs" onClick={handleSaveEditStep}>保存</Button>
                                   <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setEditStepId(null)}>取消</Button>
@@ -430,12 +441,6 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
                                   <div className="flex-1 min-w-0 text-sm">{step.operation}</div>
                                   {isAdmin && (
                                     <div className="flex gap-1 shrink-0">
-                                      <button className="p-0.5" onClick={() => handleMoveStep(idx, 'up')} disabled={idx === 0}>
-                                        <ChevronUp className="h-3 w-3 text-muted-foreground" />
-                                      </button>
-                                      <button className="p-0.5" onClick={() => handleMoveStep(idx, 'down')} disabled={idx === detailSteps.length - 1}>
-                                        <ChevronDown className="h-3 w-3 text-muted-foreground" />
-                                      </button>
                                       <button className="p-0.5" onClick={() => handleOpenEditStep(step)}>
                                         <Pencil className="h-3 w-3 text-muted-foreground" />
                                       </button>
@@ -445,21 +450,33 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
                                     </div>
                                   )}
                                 </div>
-                                {step.problem_point && (
-                                  <div className="text-xs text-destructive pl-8">问题: {step.problem_point}</div>
-                                )}
-                                {step.problem_points && step.problem_points.length > 0 && !step.problem_point && (
-                                  <div className="text-xs text-destructive pl-8">
-                                    {step.problem_points.map((pp, pi) => <div key={pi}>问题: {pp.text}</div>)}
+                                {/* Step images */}
+                                {step.id && stepMaterials[step.id] && stepMaterials[step.id].length > 0 && (
+                                  <div className="flex gap-2 flex-wrap pl-8">
+                                    {stepMaterials[step.id].map(mat => (
+                                      <div key={mat.id} className="relative group w-16 h-16 rounded border overflow-hidden">
+                                        {mat.material_type === 'video' ? (
+                                          <video src={mat.file_url} className="w-full h-full object-cover" preload="metadata" />
+                                        ) : (
+                                          <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
+                                        )}
+                                        {isAdmin && (
+                                          <button className="absolute top-0 right-0 bg-black/50 text-white rounded-bl p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                                            onClick={() => handleDeleteMaterial(mat.id)}>
+                                            <X className="h-3 w-3" />
+                                          </button>
+                                        )}
+                                      </div>
+                                    ))}
                                   </div>
                                 )}
-                                {/* Step image upload */}
-                                {isAdmin && (
+                                {/* Upload image button */}
+                                {isAdmin && step.id && (
                                   <div className="pl-8">
                                     <label className="inline-flex items-center gap-1 text-[10px] text-primary cursor-pointer hover:underline">
                                       <Plus className="h-3 w-3" /> 添加图片
                                       <input type="file" accept="image/*,video/*" className="hidden"
-                                        onChange={e => { const f = e.target.files?.[0]; if (f) handleStepMaterialUpload(f, idx, 'detail'); }} />
+                                        onChange={e => { const f = e.target.files?.[0]; if (f) handleDetailStepUpload(f, step.id!); }} />
                                     </label>
                                   </div>
                                 )}
@@ -474,14 +491,14 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
                     {isAdmin && (
                       <div className="border rounded-lg p-3 space-y-2 bg-muted/30">
                         <span className="text-xs font-medium">添加步骤</span>
-                        <Input className="h-7 text-xs" value={detailStepOp} onChange={e => setDetailStepOp(e.target.value)}
-                          placeholder="操作描述 *" onKeyDown={e => { if (e.key === 'Enter' && detailStepOp.trim()) handleAddDetailStep(); }} />
-                        <Input className="h-7 text-xs" value={detailStepPp} onChange={e => setDetailStepPp(e.target.value)}
-                          placeholder="问题点（可选）" />
-                        <Button size="sm" className="h-7 text-xs gap-1" onClick={handleAddDetailStep}
-                          disabled={detailAddingStep || !detailStepOp.trim()}>
-                          {detailAddingStep ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />} 添加
-                        </Button>
+                        <div className="flex gap-2">
+                          <Input className="h-7 text-xs flex-1" value={detailStepOp} onChange={e => setDetailStepOp(e.target.value)}
+                            placeholder="操作描述 *" onKeyDown={e => { if (e.key === 'Enter' && detailStepOp.trim()) handleAddDetailStep(); }} />
+                          <Button size="sm" className="h-7 text-xs gap-1" onClick={handleAddDetailStep}
+                            disabled={detailAddingStep || !detailStepOp.trim()}>
+                            {detailAddingStep ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />} 添加
+                          </Button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -493,7 +510,7 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
       )}
 
       {/* Add Dialog */}
-      <Dialog open={addOpen} onOpenChange={(v) => { setAddOpen(v); if (!v) { setAddSteps([]); setAddStepOp(''); setAddStepPp(''); } }}>
+      <Dialog open={addOpen} onOpenChange={(v) => { setAddOpen(v); if (!v) { setAddSteps([]); setAddStepOp(''); } }}>
         <DialogContent className="max-w-lg max-h-[85vh]">
           <DialogHeader><DialogTitle>添加食谱到库</DialogTitle></DialogHeader>
           <ScrollArea className="max-h-[70vh]">
@@ -553,12 +570,21 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
                           </Button>
                         </div>
                         <div className="text-xs">{step.operation}</div>
-                        {step.problem_point && <div className="text-xs text-destructive">问题: {step.problem_point}</div>}
-                        {/* Image upload for step */}
+                        {/* Image thumbnails */}
+                        {step.imageFiles.length > 0 && (
+                          <div className="flex gap-1 flex-wrap">
+                            {step.imageFiles.map((f, fi) => (
+                              <div key={fi} className="w-10 h-10 rounded border overflow-hidden">
+                                <img src={URL.createObjectURL(f)} alt={f.name} className="w-full h-full object-cover" />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {/* Upload image */}
                         <label className="inline-flex items-center gap-1 text-[10px] text-primary cursor-pointer hover:underline">
                           <Plus className="h-3 w-3" /> 添加图片
                           <input type="file" accept="image/*,video/*" className="hidden"
-                            onChange={e => { const f = e.target.files?.[0]; if (f) handleStepMaterialUpload(f, idx, 'add'); }} />
+                            onChange={e => { const f = e.target.files?.[0]; if (f) handleAddStepImage(idx, f); }} />
                         </label>
                       </div>
                     ))}
@@ -566,17 +592,15 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
                 )}
                 <div className="border rounded-lg p-2 space-y-2 bg-muted/30">
                   <Input className="h-7 text-xs" value={addStepOp} onChange={e => setAddStepOp(e.target.value)}
-                    placeholder="操作描述 *" onKeyDown={e => { if (e.key === 'Enter' && addStepOp.trim()) handleAddStep(); }} />
-                  <Input className="h-7 text-xs" value={addStepPp} onChange={e => setAddStepPp(e.target.value)}
-                    placeholder="问题点（可选）" />
-                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleAddStep} disabled={!addStepOp.trim()}>
+                    placeholder="操作描述 *" onKeyDown={e => { if (e.key === 'Enter' && addStepOp.trim()) handleAddStepInDialog(); }} />
+                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleAddStepInDialog} disabled={!addStepOp.trim()}>
                     <Plus className="h-3 w-3" /> 添加步骤
                   </Button>
                 </div>
               </div>
 
-              <Button onClick={handleAddRecipe} className="w-full" disabled={addingStep || !addForm.name.trim()}>
-                {addingStep ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null} 保存食谱
+              <Button onClick={handleAddRecipe} className="w-full" disabled={addingRecipe || !addForm.name.trim()}>
+                {addingRecipe ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null} 保存食谱
               </Button>
             </div>
           </ScrollArea>
