@@ -45,7 +45,8 @@ interface CheckRecord {
   problem_description: string | null; measurement_value: string | null;
   standard_category: string | null; test_phase: string | null;
   experience_flow: string | null; touch_point: string | null;
-  experience_standard: string | null;
+  experience_standard: string | null; check_tool: string | null;
+  problem_level: string | null; task_id: string;
   materials?: Material[];
 }
 
@@ -617,6 +618,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
 
   // ── Edit mode ──
   const [editRecordId, setEditRecordId] = useState<string | null>(null);
+  const [editRecordData, setEditRecordData] = useState<CheckRecord | null>(null);
 
   // ── Dynamic options from platform_settings ──
   const [phaseOptions, setPhaseOptions] = useState<string[]>(defaultPhaseOptions);
@@ -853,6 +855,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
   // ── Handle edit: populate form and open dialog ──
   const handleEditRecord = (record: CheckRecord) => {
     setEditRecordId(record.id);
+    setEditRecordData(record);
     populateFormsFromRecord(record);
     // Pre-select existing materials for this record
     const existingMats = recordMaterials[record.id] || [];
@@ -897,6 +900,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
     try {
       // ── EDIT mode: update existing record ──
       if (editRecordId) {
+        const rec = editRecordData;
         let body: Record<string, unknown> = { evaluation_result: evaluationResult };
 
         if (formCategory === '通用标准') {
@@ -907,11 +911,13 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
             sensory_dimension: generalForm.sensory_dimension || null,
             test_phase: generalForm.test_phase || null,
             experience_flow: generalForm.experience_flow || null,
-            touch_point: selectedItem?.touch_point || null,
-            check_item: selectedItem?.touch_point || selectedItem?.check_item || generalForm.experience_flow || '',
-            check_requirement: selectedItem?.check_requirement || null,
-            experience_standard: selectedItem?.experience_standard || null,
-            problem_description: generalForm.problem_description || null,
+            touch_point: selectedItem?.touch_point || rec?.touch_point || null,
+            check_item: selectedItem?.touch_point || selectedItem?.check_item || rec?.check_item || generalForm.experience_flow || '',
+            check_requirement: selectedItem?.check_requirement || rec?.check_requirement || null,
+            experience_standard: selectedItem?.experience_standard || rec?.experience_standard || null,
+            check_tool: selectedItem?.check_tool || rec?.check_tool || null,
+            problem_level: selectedItem?.problem_level || rec?.problem_level || null,
+            problem_description: generalForm.problem_description || rec?.problem_description || null,
             check_dimension: null, sub_check_dimension: null, check_standard: null,
           };
         } else if (formCategory === '品类标准') {
@@ -921,11 +927,11 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
             standard_category: '品类标准',
             sensory_dimension: categoryForm.sensory_dimension || null,
             check_dimension: categoryForm.check_dimension || null,
-            sub_check_dimension: selectedItem?.sub_check_dimension || categoryForm.sub_check_dimension || null,
-            check_item: selectedItem?.check_item || '',
-            check_requirement: selectedItem?.check_requirement || null,
-            check_standard: selectedItem?.check_standard || null,
-            problem_description: categoryForm.problem_description || null,
+            sub_check_dimension: selectedItem?.sub_check_dimension || categoryForm.sub_check_dimension || rec?.sub_check_dimension || null,
+            check_item: selectedItem?.check_item || rec?.check_item || '',
+            check_requirement: selectedItem?.check_requirement || rec?.check_requirement || null,
+            check_standard: selectedItem?.check_standard || rec?.check_standard || null,
+            problem_description: categoryForm.problem_description || rec?.problem_description || null,
             test_phase: null, experience_flow: null, touch_point: null, experience_standard: null,
           };
         } else if (formCategory === '感官评价标准') {
@@ -935,9 +941,10 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
             standard_category: '感官评价标准',
             sensory_dimension: sensoryForm.sensory_dimension || null,
             check_item: `${sensoryForm.sensory_dimension}评价`,
-            check_requirement: refItem?.evaluation_prep || null,
-            check_standard: refItem?.subjective_rating || null,
-            problem_description: sensoryForm.result_description || null,
+            check_requirement: refItem?.evaluation_prep || rec?.check_requirement || null,
+            experience_standard: refItem?.experience_standard || rec?.experience_standard || null,
+            check_standard: refItem?.subjective_rating || rec?.check_standard || null,
+            problem_description: sensoryForm.result_description || rec?.problem_description || null,
             measurement_value: sensoryForm.score || null,
             test_phase: null, experience_flow: null, touch_point: null,
             check_dimension: null, sub_check_dimension: null,
@@ -946,8 +953,8 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
           body = {
             ...body,
             standard_category: '非标准',
-            check_item: nonStandardForm.description || '',
-            problem_description: nonStandardForm.problem_description || null,
+            check_item: nonStandardForm.description || rec?.check_item || '',
+            problem_description: nonStandardForm.problem_description || rec?.problem_description || null,
             test_phase: null, experience_flow: null, sensory_dimension: null, touch_point: null,
             check_requirement: null, experience_standard: null, check_dimension: null,
             sub_check_dimension: null, check_standard: null,
@@ -970,6 +977,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
           setAddDialogOpen(false);
           resetForms();
           setEditRecordId(null);
+          setEditRecordData(null);
           onRefresh();
           toast.success('问题点已更新');
         }
@@ -1236,24 +1244,27 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
           </div>
         )}
 
-        {/* Auto-filled fields preview from selected item */}
-        {selectedGeneralItem && (
+        {/* Auto-filled fields preview from selected item, or existing values in edit mode */}
+        {(selectedGeneralItem || (editRecordData && formCategory === '通用标准')) && (
           <div className="space-y-1.5 p-3 rounded-lg bg-muted/30 border border-border">
-            <Label className="text-xs text-muted-foreground">自动引用（来自标准库）</Label>
-            {selectedGeneralItem.touch_point && (
-              <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-24 shrink-0">触点</span><span className="font-medium">{selectedGeneralItem.touch_point}</span></div>
+            <Label className="text-xs text-muted-foreground">{selectedGeneralItem ? '自动引用（来自标准库）' : '当前引用（编辑中）'}</Label>
+            {(selectedGeneralItem?.touch_point || editRecordData?.touch_point) && (
+              <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-24 shrink-0">触点</span><span className="font-medium">{selectedGeneralItem?.touch_point || editRecordData?.touch_point}</span></div>
             )}
-            {selectedGeneralItem.check_requirement && (
-              <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-24 shrink-0">检验范围及具体要求</span><span>{selectedGeneralItem.check_requirement}</span></div>
+            {(selectedGeneralItem?.check_requirement || editRecordData?.check_requirement) && (
+              <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-24 shrink-0">检验范围及具体要求</span><span>{selectedGeneralItem?.check_requirement || editRecordData?.check_requirement}</span></div>
             )}
-            {selectedGeneralItem.experience_standard && (
-              <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-24 shrink-0">体验标准</span><span>{selectedGeneralItem.experience_standard}</span></div>
+            {(selectedGeneralItem?.experience_standard || editRecordData?.experience_standard) && (
+              <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-24 shrink-0">体验标准</span><span>{selectedGeneralItem?.experience_standard || editRecordData?.experience_standard}</span></div>
             )}
-            {selectedGeneralItem.check_tool && (
-              <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-24 shrink-0">测量工具</span><span>{selectedGeneralItem.check_tool}</span></div>
+            {(selectedGeneralItem?.check_tool || editRecordData?.check_tool) && (
+              <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-24 shrink-0">测量工具</span><span>{selectedGeneralItem?.check_tool || editRecordData?.check_tool}</span></div>
             )}
-            {selectedGeneralItem.problem_level && (
+            {(selectedGeneralItem?.problem_level) && (
               <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-24 shrink-0">问题等级</span><Badge variant="secondary" className="text-[9px] h-4">{selectedGeneralItem.problem_level}</Badge></div>
+            )}
+            {!selectedGeneralItem && editRecordData && (
+              <p className="text-[10px] text-muted-foreground mt-1">选择标准库检查项可更新引用，或直接保存保持原值</p>
             )}
           </div>
         )}
@@ -1358,18 +1369,21 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
           </div>
         )}
 
-        {/* Auto-filled fields preview from selected item */}
-        {selectedCategoryItem && (
+        {/* Auto-filled fields preview from selected item, or existing values in edit mode */}
+        {(selectedCategoryItem || (editRecordData && formCategory === '品类标准')) && (
           <div className="space-y-1.5 p-3 rounded-lg bg-muted/30 border border-border">
-            <Label className="text-xs text-muted-foreground">自动引用（来自标准库）</Label>
-            {selectedCategoryItem.check_item && (
-              <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-24 shrink-0">具体检查条目</span><span className="font-medium">{selectedCategoryItem.check_item}</span></div>
+            <Label className="text-xs text-muted-foreground">{selectedCategoryItem ? '自动引用（来自标准库）' : '当前引用（编辑中）'}</Label>
+            {(selectedCategoryItem?.check_item || editRecordData?.check_item) && (
+              <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-24 shrink-0">具体检查条目</span><span className="font-medium">{selectedCategoryItem?.check_item || editRecordData?.check_item}</span></div>
             )}
-            {selectedCategoryItem.check_requirement && (
-              <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-24 shrink-0">检查要求及区域</span><span>{selectedCategoryItem.check_requirement}</span></div>
+            {(selectedCategoryItem?.check_requirement || editRecordData?.check_requirement) && (
+              <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-24 shrink-0">检查要求及区域</span><span>{selectedCategoryItem?.check_requirement || editRecordData?.check_requirement}</span></div>
             )}
-            {selectedCategoryItem.check_standard && (
-              <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-24 shrink-0">检查标准</span><span>{selectedCategoryItem.check_standard}</span></div>
+            {(selectedCategoryItem?.check_standard || editRecordData?.check_standard) && (
+              <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-24 shrink-0">检查标准</span><span>{selectedCategoryItem?.check_standard || editRecordData?.check_standard}</span></div>
+            )}
+            {!selectedCategoryItem && editRecordData && (
+              <p className="text-[10px] text-muted-foreground mt-1">选择标准库检查项可更新引用，或直接保存保持原值</p>
             )}
           </div>
         )}
@@ -1413,14 +1427,13 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
           </Select>
         </div>
 
-        {/* Auto-filled reference from standard */}
-        {sensoryRefItems.length > 0 && (
+        {/* Auto-filled reference from standard, or existing values in edit mode */}
+        {(sensoryRefItems.length > 0 || (editRecordData && formCategory === '感官评价标准')) && (
           <div className="space-y-2 p-3 rounded-lg bg-muted/30 border border-border">
-            <Label className="text-xs text-muted-foreground">引用标准（来自标准库）</Label>
-            {sensoryRefItems[0].evaluation_prep && (
-              <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-24 shrink-0">感官评价准备</span><span>{sensoryRefItems[0].evaluation_prep}</span></div>
+            <Label className="text-xs text-muted-foreground">{sensoryRefItems.length > 0 ? '引用标准（来自标准库）' : '当前引用（编辑中）'}</Label>
+            {(sensoryRefItems[0]?.evaluation_prep || editRecordData?.check_requirement) && (
+              <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-24 shrink-0">感官评价准备</span><span>{sensoryRefItems[0]?.evaluation_prep || editRecordData?.check_requirement}</span></div>
             )}
-            {/* Show all subjective rating levels as reference */}
             {sensoryRefItems.length > 0 && (
               <div className="space-y-1">
                 <span className="text-xs text-muted-foreground">主观满意度标准</span>
@@ -1431,6 +1444,14 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
                   </div>
                 ))}
               </div>
+            )}
+            {!sensoryRefItems.length && editRecordData && (
+              <>
+                {editRecordData.experience_standard && (
+                  <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-24 shrink-0">体验标准</span><span>{editRecordData.experience_standard}</span></div>
+                )}
+                <p className="text-[10px] text-muted-foreground mt-1">选择感官维度可更新引用，或直接保存保持原值</p>
+              </>
             )}
           </div>
         )}
@@ -1618,6 +1639,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
       <div className="sticky bottom-4">
         <Button className="w-full" onClick={async () => {
           setEditRecordId(null);
+          setEditRecordData(null);
           resetForms();
           // Apply saved senses defaults from DB (admin global setting)
           try {

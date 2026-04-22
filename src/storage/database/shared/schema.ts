@@ -112,6 +112,8 @@ export const checkRecords = pgTable(
     check_requirement: text("check_requirement"),
     check_standard: text("check_standard"), // 检查标准（品类标准）
     experience_standard: text("experience_standard"), // 体验标准（通用标准）
+    check_tool: text("check_tool"), // 测量工具（通用标准）
+    problem_level: text("problem_level"), // 问题等级：一类/二类/三类
     evaluation_result: varchar("evaluation_result", { length: 20 }), // 合格/不合格/待定
     problem_description: text("problem_description"),
     measurement_position: varchar("measurement_position", { length: 200 }), // 测量位置（从标准引用）
