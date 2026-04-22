@@ -1671,6 +1671,9 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
   const [editStepForm, setEditStepForm] = useState({ operation: '', step_material_ids: [] as string[], problem_points: [{ text: '', material_ids: [] as string[] }] });
   const [editStepMaterialIds, setEditStepMaterialIds] = useState<string[]>([]);
   const [, setEditStepMaterials] = useState<Material[]>([]);
+  // Drag state for step reorder
+  const [dragStepIdx, setDragStepIdx] = useState<number | null>(null);
+  const [dragStepOverIdx, setDragStepOverIdx] = useState<number | null>(null);
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
 
   // ── Recipe library search (Feature 7) ──
@@ -1826,28 +1829,6 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
         toast.success('已引用食谱/功能');
       }
     } finally { setSavingRecipe(false); }
-  };
-
-  // ── Step reorder (Feature 6) ──
-  const handleReorderStep = async (recipe: Recipe, stepIdx: number, direction: 'up' | 'down') => {
-    const steps = recipe.recipe_steps || [];
-    if (direction === 'up' && stepIdx === 0) return;
-    if (direction === 'down' && stepIdx === steps.length - 1) return;
-    const swapIdx = direction === 'up' ? stepIdx - 1 : stepIdx + 1;
-    const newSteps = [...steps];
-    [newSteps[stepIdx], newSteps[swapIdx]] = [newSteps[swapIdx], newSteps[stepIdx]];
-    // Update local state optimistically
-    const updatedRecipes = recipes.map(r => {
-      if (r.id !== recipe.id) return r;
-      return { ...r, recipe_steps: newSteps };
-    });
-    setRecipes(updatedRecipes);
-    // Save to backend
-    const reorderData = newSteps.map((s, i) => ({ id: s.id, step_number: i + 1 }));
-    await fetch('/api/recipe-steps', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ steps: reorderData }),
-    });
   };
 
   // ── Reference step from another recipe (Feature 7) ──
@@ -2062,28 +2043,50 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
               {/* Expanded detail */}
               {selectedRecipe?.id === recipe.id && (
                 <div className="px-4 pb-4 space-y-2 border-t border-border pt-3" onClick={(e) => e.stopPropagation()}>
+                  <span className="text-[10px] text-muted-foreground">拖拽步骤可重新排序</span>
                   {recipe.recipe_steps?.map((step, stepIdx) => (
-                    <div key={step.id} className="p-3 rounded-lg bg-muted/30 space-y-1.5 cursor-pointer hover:bg-muted/50 transition-colors"
-                      onClick={() => handleEditStep(step)}>
+                    <div key={step.id}
+                      className={cn(
+                        'p-3 rounded-lg bg-muted/30 space-y-1.5 cursor-grab active:cursor-grabbing transition-all',
+                        dragStepIdx === stepIdx && 'opacity-50 scale-95',
+                        dragStepOverIdx === stepIdx && 'border-primary border-2',
+                      )}
+                      draggable
+                      onDragStart={() => setDragStepIdx(stepIdx)}
+                      onDragOver={(e) => { e.preventDefault(); setDragStepOverIdx(stepIdx); }}
+                      onDragEnd={async () => {
+                        if (dragStepIdx !== null && dragStepOverIdx !== null && dragStepIdx !== dragStepOverIdx) {
+                          const steps = recipe.recipe_steps || [];
+                          const newSteps = [...steps];
+                          const [moved] = newSteps.splice(dragStepIdx, 1);
+                          newSteps.splice(dragStepOverIdx, 0, moved);
+                          const updatedRecipes = recipes.map(r => {
+                            if (r.id !== recipe.id) return r;
+                            return { ...r, recipe_steps: newSteps };
+                          });
+                          setRecipes(updatedRecipes);
+                          const reorderData = newSteps.map((s, i) => ({ id: s.id, step_number: i + 1 }));
+                          await fetch('/api/recipe-steps', {
+                            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ steps: reorderData }),
+                          });
+                        }
+                        setDragStepIdx(null);
+                        setDragStepOverIdx(null);
+                      }}
+                      onDragLeave={() => setDragStepOverIdx(null)}
+                    >
                       <div className="flex items-center gap-2">
                         <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] flex items-center justify-center font-medium">
                           {stepIdx + 1}
                         </span>
                         <span className="text-sm flex-1 min-w-0 break-all">{step.operation}</span>
                         <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                          <Button variant="ghost" size="icon" className="h-5 w-5" disabled={stepIdx === 0}
-                            onClick={() => handleReorderStep(recipe, stepIdx, 'up')}>
-                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={(e) => { e.stopPropagation(); handleDeleteStep(step); }}>
+                            <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-5 w-5" disabled={stepIdx === (recipe.recipe_steps?.length || 0) - 1}
-                            onClick={() => handleReorderStep(recipe, stepIdx, 'down')}>
-                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                          </Button>
+                          <Pencil className="h-3 w-3 text-muted-foreground shrink-0" />
                         </div>
-                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={(e) => { e.stopPropagation(); handleDeleteStep(step); }}>
-                          <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
-                        </Button>
-                        <Pencil className="h-3 w-3 text-muted-foreground shrink-0" />
                       </div>
                       {/* Problem points display */}
                       {(() => {

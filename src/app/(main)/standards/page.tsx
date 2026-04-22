@@ -79,6 +79,7 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailStepOp, setDetailStepOp] = useState('');
   const [detailAddingStep, setDetailAddingStep] = useState(false);
+  const [detailStepImage, setDetailStepImage] = useState<File | null>(null);
   const [editStepId, setEditStepId] = useState<string | null>(null);
   const [editStepOp, setEditStepOp] = useState('');
 
@@ -129,6 +130,7 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
       setExpandedId(recipe.id);
       fetchDetailSteps(recipe.id);
       setDetailStepOp('');
+      setDetailStepImage(null);
       setEditStepId(null);
     }
   };
@@ -137,6 +139,12 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
   const handleAddStepInDialog = () => {
     if (!addStepOp.trim()) return;
     setAddSteps([...addSteps, { step_number: addSteps.length + 1, operation: addStepOp.trim(), imageFiles: [] }]);
+    setAddStepOp('');
+  };
+
+  const handleAddStepWithImage = (file: File) => {
+    if (!addStepOp.trim()) return;
+    setAddSteps([...addSteps, { step_number: addSteps.length + 1, operation: addStepOp.trim(), imageFiles: [file] }]);
     setAddStepOp('');
   };
 
@@ -241,7 +249,15 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
       });
       const data = await res.json();
       if (data.code === 0) {
+        // Upload image if provided
+        if (detailStepImage && data.data?.id) {
+          const formData = new FormData();
+          formData.append('file', detailStepImage);
+          formData.append('recipe_library_step_id', data.data.id);
+          await fetch('/api/materials/upload', { method: 'POST', body: formData });
+        }
         setDetailStepOp('');
+        setDetailStepImage(null);
         fetchDetailSteps(expandedId);
       } else toast.error(data.message);
     } finally { setDetailAddingStep(false); }
@@ -491,9 +507,26 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
                     {isAdmin && (
                       <div className="border rounded-lg p-3 space-y-2 bg-muted/30">
                         <span className="text-xs font-medium">添加步骤</span>
-                        <div className="flex gap-2">
-                          <Input className="h-7 text-xs flex-1" value={detailStepOp} onChange={e => setDetailStepOp(e.target.value)}
-                            placeholder="操作描述 *" onKeyDown={e => { if (e.key === 'Enter' && detailStepOp.trim()) handleAddDetailStep(); }} />
+                        <Input className="h-7 text-xs" value={detailStepOp} onChange={e => setDetailStepOp(e.target.value)}
+                          placeholder="操作描述 *" onKeyDown={e => { if (e.key === 'Enter' && detailStepOp.trim()) handleAddDetailStep(); }} />
+                        <div className="flex items-center gap-2">
+                          <label className="inline-flex items-center gap-1 text-[10px] text-primary cursor-pointer hover:underline shrink-0">
+                            <Plus className="h-3 w-3" /> 上传图片
+                            <input type="file" accept="image/*,video/*" className="hidden"
+                              onChange={e => { const f = e.target.files?.[0]; if (f) setDetailStepImage(f); }} />
+                          </label>
+                          {detailStepImage && (
+                            <div className="flex items-center gap-1">
+                              <div className="w-8 h-8 rounded border overflow-hidden">
+                                <img src={URL.createObjectURL(detailStepImage)} alt="" className="w-full h-full object-cover" />
+                              </div>
+                              <span className="text-[10px] text-muted-foreground max-w-[100px] truncate">{detailStepImage.name}</span>
+                              <button className="p-0.5" onClick={() => setDetailStepImage(null)}>
+                                <X className="h-3 w-3 text-muted-foreground" />
+                              </button>
+                            </div>
+                          )}
+                          <div className="flex-1" />
                           <Button size="sm" className="h-7 text-xs gap-1" onClick={handleAddDetailStep}
                             disabled={detailAddingStep || !detailStepOp.trim()}>
                             {detailAddingStep ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />} 添加
@@ -593,9 +626,17 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
                 <div className="border rounded-lg p-2 space-y-2 bg-muted/30">
                   <Input className="h-7 text-xs" value={addStepOp} onChange={e => setAddStepOp(e.target.value)}
                     placeholder="操作描述 *" onKeyDown={e => { if (e.key === 'Enter' && addStepOp.trim()) handleAddStepInDialog(); }} />
-                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleAddStepInDialog} disabled={!addStepOp.trim()}>
-                    <Plus className="h-3 w-3" /> 添加步骤
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <label className="inline-flex items-center gap-1 text-[10px] text-primary cursor-pointer hover:underline shrink-0">
+                      <Plus className="h-3 w-3" /> 上传图片
+                      <input type="file" accept="image/*,video/*" className="hidden"
+                        onChange={e => { const f = e.target.files?.[0]; if (f && addStepOp.trim()) handleAddStepWithImage(f); }} />
+                    </label>
+                    <div className="flex-1" />
+                    <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleAddStepInDialog} disabled={!addStepOp.trim()}>
+                      <Plus className="h-3 w-3" /> 添加步骤
+                    </Button>
+                  </div>
                 </div>
               </div>
 

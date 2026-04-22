@@ -1,4 +1,4 @@
-import { pgTable, serial, timestamp, varchar, text, boolean, integer, jsonb, index, date } from "drizzle-orm/pg-core"
+import { pgTable, serial, timestamp, varchar, text, boolean, integer, jsonb, index, date, unique } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 // 系统表 - 必须保留
@@ -190,6 +190,7 @@ export const issues = pgTable(
     index("issues_status_idx").on(table.status),
     index("issues_severity_idx").on(table.severity),
     index("issues_created_at_idx").on(table.created_at),
+    unique("issues_unique_per_task").on(table.title, table.source_type, table.task_id),
   ]
 );
 
