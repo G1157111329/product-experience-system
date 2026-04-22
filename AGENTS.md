@@ -155,11 +155,34 @@
 
 ## 构建与运行
 
+### 环境要求
+- **Node.js**: 24+ (通过 .coze 配置 `requires = ["nodejs-24"]`)
+- **包管理器**: pnpm (禁止 npm / yarn)
+- **端口**: 5000 (开发与生产统一，`DEPLOY_RUN_PORT` 环境变量)
+
+### 环境变量
+
+| 变量名 | 说明 | 示例值 |
+|--------|------|--------|
+| `COZE_WORKSPACE_PATH` | 项目工作目录 | `/workspace/projects/` |
+| `COZE_PROJECT_DOMAIN_DEFAULT` | 对外访问域名 | `https://abc123.dev.coze.site` |
+| `DEPLOY_RUN_PORT` | 服务监听端口 | `5000` |
+| `COZE_PROJECT_ENV` | 环境标识 | `DEV` / `PROD` |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase 项目 URL | `https://xxx.supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase 匿名密钥 | `eyJ...` |
+| `OSS_ACCESS_KEY_ID` | 对象存储 AccessKey | — |
+| `OSS_ACCESS_KEY_SECRET` | 对象存储 SecretKey | — |
+| `OSS_BUCKET` | 对象存储 Bucket | — |
+| `OSS_REGION` | 对象存储 Region | — |
+| `OSS_ENDPOINT` | 对象存储 Endpoint | — |
+
+### 开发命令
+
 ```bash
 # 安装依赖
 pnpm install
 
-# 开发模式
+# 开发模式（端口 5000，支持 HMR）
 pnpm dev
 
 # 类型检查
@@ -168,9 +191,36 @@ pnpm ts-check
 # Lint
 pnpm lint
 
-# 构建
+# 构建生产版本
 pnpm build
+
+# 启动生产环境
+pnpm start
 ```
+
+### Coze CLI 命令
+
+```bash
+# 初始化项目（仅首次）
+coze init /workspace/projects --template nextjs
+
+# 启动开发环境
+coze dev
+
+# 构建生产版本
+coze build
+
+# 启动生产环境
+coze start
+```
+
+### 初始账号
+
+| 角色 | 账号 | 密码 |
+|------|------|------|
+| 管理员 | bear2026 | bear2026 |
+
+> 注册新账号需管理员审核通过后可登录
 
 ## 关键设计决策
 
@@ -195,6 +245,9 @@ pnpm build
 19. **非管理员待申请**: 非管理员工作台"待审核"改为"待申请"，显示该账号的密码/名称修改待审核列表（排除注册记录），可用叉图标取消申请
 20. **数据分析**: 所有账号可浏览数据分析页面，核心指标为任务数/完成率/问题总数/整改率；支持按品类/项目类型/任务人/问题点分类/时间范围多维筛选；保留任务状态分布/问题等级分布(一类/二类/三类)/问题整改进度(按状态×等级)；管理账号可导出数据
 21. **报告分享**: 报告中心和报告详情页可生成分享链接，设置有效期（7天/30天/永久）；公开页面 `/reports/share/[token]` 无需登录，只读查看，支持导出PDF、图片放大、视频播放；可查看已创建的分享链接列表并撤销
+22. **报告重新生成**: 同一任务重新生成报告时，先删除旧报告和旧问题，再创建新报告和新问题，确保每个任务始终只有一份最新报告
+23. **问题自动创建**: 问题在报告生成时由后端自动创建（非前端同步），使用 `createdKeys` Set 去重确保每个唯一问题（按 title+source_type）只创建一条，与素材数量无关；前端仅做只读查询
+24. **报告合并类型检查**: 报告详情页合并同型号报告时，仅合并"自研"和"改型/降本/优化"类型的报告，其他类型（如"海外产品"）的同型号报告不参与合并
 
 ## 代码风格
 
@@ -204,6 +257,7 @@ pnpm build
 - React 组件使用 'use client' 标注客户端组件
 - 禁止 Hydration 错误：不在 JSX 中使用 typeof window/Date.now() 等
 - 权限系统：基于数据库 `platform_users.role` 字段，管理账号(admin)可编辑标准、批量导入/删除、审核账号；使用账号(user)只读；`useAuth()` hook 获取当前用户信息
+- **移动端溢出处理**: flex-1 元素必须添加 `min-w-0`；长文本使用 `break-all` 或 `truncate`；Badge 使用 `max-w-[Npx] truncate`；根 body 已设置 `overflow-x-hidden`
 
 ## 权限说明
 
