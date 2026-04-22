@@ -78,7 +78,7 @@
 |------|------|
 | `platform_users` | 用户账号（admin/user角色，pending/approved/rejected状态） |
 | `platform_audit_requests` | 用户审核请求（注册/密码重置/名称修改/角色升级） |
-| `standards` | 体验标准库（通用标准/品类标准/感官评价标准/食谱功能标准） |
+| `standards` | 体验标准库（通用标准/品类标准/感官评价标准/非标准/食谱功能标准） |
 | `standard_items` | 标准检查项（含分类特定字段：experience_flow, touch_point, experience_standard, sub_check_dimension, check_standard, evaluation_prep, subjective_score, subjective_rating, reference_images） |
 | `experience_tasks` | 体验任务（含 created_by 用户隔离字段, project_type: ODM/OEM/竞品研究/自研/前期研究/改型降本优化/海外产品, project_phase: 手板研究/试制阶段/试产阶段/量产阶段） |
 | `check_records` | 检查记录（走查，含 standard_category, check_dimension, sub_check_dimension, check_standard, experience_flow, touch_point, experience_standard） |
@@ -128,7 +128,7 @@
 | GET/PUT/DELETE | `/api/standards/[id]` | 标准详情/更新/删除 |
 | POST | `/api/standards/import` | 标准批量导入（PDF/Excel，按分类不同LLM prompt） |
 | GET/POST | `/api/standard-items` | 检查项列表/创建（支持批量，含新字段） |
-| GET | `/api/standard-items/search` | 跨标准检查项搜索（支持category/experience_flow筛选，product_category自动包含null标准） |
+| GET | `/api/standard-items/search` | 跨标准检查项搜索（支持category/experience_flow/keyword多字段模糊筛选） |
 | GET/POST | `/api/tasks` | 任务列表/创建（分页+筛选） |
 | GET/PUT/DELETE | `/api/tasks/[id]` | 任务详情（含记录+问题）/更新/删除 |
 | GET/POST | `/api/records` | 检查记录列表/创建（含standard_category等新字段） |
@@ -145,9 +145,9 @@
 | GET | `/api/reports/share?token=xxx` | 验证分享令牌并获取报告（公开接口） |
 | GET | `/api/reports/share/list?report_id=xxx` | 获取报告的分享链接列表 |
 | DELETE | `/api/reports/share/list?id=xxx` | 撤销分享链接 |
-| GET/POST | `/api/recipes` | 食谱/功能列表/创建 |
+| GET/POST | `/api/recipes` | 食谱/功能列表/创建；GET 支持 library=1&keyword 跨任务搜索食谱库 |
 | GET/PUT/DELETE | `/api/recipes/[id]` | 食谱详情/更新/删除 |
-| GET/POST | `/api/recipe-steps` | 步骤列表/创建 |
+| GET/POST | `/api/recipe-steps` | 步骤列表/创建；PUT 批量更新步骤排序（steps 数组） |
 | PUT/DELETE | `/api/recipe-steps/[id]` | 步骤更新/删除 |
 | GET | `/api/dashboard` | 仪表盘统计数据（支持created_by按用户过滤） |
 | GET | `/api/analysis` | 数据分析（支持product_category/project_type/organizer/issue_source_type/date_from/date_to筛选，非admin需传created_by） |
@@ -251,6 +251,13 @@ coze start
 25. **视频素材缩略图**: 五感体验已选素材列表和PDF导出附录中，视频素材使用 `<video preload="metadata">` 显示首帧缩略图，覆盖半透明播放图标区分图片
 26. **管理员删除账号**: 管理员可在账号权限管理中删除用户（不可删除自己和最后一个管理员）；删除时级联清理 `report_shares.created_by`（设null）和 `platform_audit_requests`；报告中的 organizer 名称字符串不受影响
 27. **审核参数规范**: 前端审核请求统一使用 `request_id` 字段（非 `audit_id`），与后端 PUT /api/auth/audit 接口参数名保持一致
+28. **五感体验描述匹配**: 新增问题点时支持输入关键词模糊搜索标准库，选择匹配项后自动反选使用阶段、体验流程、感官维度
+29. **个人信息设置入口**: 个人信息页增加"五感体验默认选项"设置，保存默认的产品使用阶段、体验流程、感官维度到 localStorage，新增问题点时自动应用
+30. **非标准检查类型**: 五感体验新增问题点的标准类型新增"非标准"选项，仅要求描述结果和检查结果，无需产品使用阶段/体验流程/感官维度
+31. **体验计划基本信息编辑**: 任务详情页基本信息Tab支持点击编辑按钮进入编辑模式，修改后保存调用 PUT /api/tasks/[id]
+32. **食谱内容积累与引用**: 食谱/功能支持点击编辑图标修改名称和参数；新增食谱时支持搜索食谱库并引用（含步骤复制）
+33. **食谱步骤排序**: 食谱步骤支持上移/下移按钮重新排序，调用 PUT /api/recipe-steps 批量更新 step_number
+34. **食谱步骤跨食谱引用**: 新增步骤时支持搜索食谱库引用已有步骤的操作和问题点；新增食谱时支持引用已有食谱（含参数和步骤）
 
 ## 代码风格
 

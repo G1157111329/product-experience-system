@@ -18,6 +18,11 @@ import { useImagePreview } from '@/components/image-preview';
 import { MaterialPicker } from '@/components/material-picker';
 
 /* ─── Types ─── */
+interface CategoryWithProducts {
+  id: string; name: string; sort_order: number;
+  products: Array<{ id: string; name: string; category_id: string; sort_order: number }>;
+}
+
 interface TaskDetail {
   id: string; task_name: string; product_category: string; product: string | null; product_model: string;
   project_type: string | null; project_phase: string | null; test_date: string | null; organizer: string | null;
@@ -160,7 +165,7 @@ export default function TaskDetailPage() {
       </div>
 
       {/* Tab Content */}
-      {activeTab === 'info' && <BasicInfoTab task={task} />}
+      {activeTab === 'info' && <BasicInfoTab task={task} onRefresh={fetchTask} />}
       {activeTab === 'materials' && <MaterialsTab taskId={id} />}
       {activeTab === 'senses' && <SensesTab taskId={id} records={task.records || []} taskProductCategory={task.product_category} taskProduct={task.product} onRefresh={fetchTask} />}
       {activeTab === 'functions' && <FunctionsTab taskId={id} />}
@@ -169,28 +174,129 @@ export default function TaskDetailPage() {
 }
 
 /* ─── Tab: 基本信息 ─── */
-function BasicInfoTab({ task }: { task: TaskDetail }) {
+function BasicInfoTab({ task, onRefresh }: { task: TaskDetail; onRefresh: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    task_name: task.task_name || '',
+    product_category: task.product_category || '',
+    product: task.product || '',
+    product_model: task.product_model || '',
+    project_type: task.project_type || '',
+    project_phase: task.project_phase || '',
+    test_date: task.test_date || '',
+    organizer: task.organizer || '',
+    target_user: task.target_user || '',
+    test_purpose: task.test_purpose || '',
+    test_method: task.test_method || '',
+    status: task.status || '',
+  });
+  const [categories, setCategories] = useState<CategoryWithProducts[]>([]);
+
+  useEffect(() => {
+    if (editing) {
+      fetch('/api/categories').then(r => r.json()).then(d => { if (d.code === 0) setCategories(d.data || []); }).catch(() => {});
+    }
+  }, [editing]);
+
+  const selectedCategoryData = categories.find(c => c.name === form.product_category);
+  const availableProducts = selectedCategoryData?.products || [];
+  const projectTypes = ['ODM', 'OEM', '竞品研究', '自研', '前期研究', '改型降本优化', '海外产品'];
+  const projectPhases = ['手板研究', '试制阶段', '试产阶段', '量产阶段'];
+
+  const handleSave = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/tasks/${task.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      const data = await res.json();
+      if (data.code === 0) {
+        toast.success('已更新');
+        setEditing(false);
+        onRefresh();
+      } else toast.error(data.message);
+    } finally { setSaving(false); }
+  };
+
+  const fields = [
+    { label: '任务名称', key: 'task_name' as const, type: 'text' },
+    { label: '产品品类', key: 'product_category' as const, type: 'category' },
+    { label: '产品', key: 'product' as const, type: 'product' },
+    { label: '产品型号', key: 'product_model' as const, type: 'text' },
+    { label: '项目类型', key: 'project_type' as const, type: 'project_type' },
+    { label: '项目阶段', key: 'project_phase' as const, type: 'project_phase' },
+    { label: '体验时间', key: 'test_date' as const, type: 'date' },
+    { label: '组织人', key: 'organizer' as const, type: 'text' },
+    { label: '目标人群', key: 'target_user' as const, type: 'text' },
+    { label: '体验目的', key: 'test_purpose' as const, type: 'textarea' },
+    { label: '体验方法', key: 'test_method' as const, type: 'textarea' },
+    { label: '状态', key: 'status' as const, type: 'status' },
+  ];
+
   return (
     <Card>
       <CardContent className="p-4 space-y-3">
-        {[
-          { label: '任务名称', value: task.task_name },
-          { label: '产品品类', value: task.product_category },
-          { label: '产品', value: task.product || '-' },
-          { label: '产品型号', value: task.product_model },
-          { label: '项目类型', value: task.project_type },
-          { label: '项目阶段', value: task.project_phase },
-          { label: '体验时间', value: task.test_date },
-          { label: '组织人', value: task.organizer },
-          { label: '目标人群', value: task.target_user },
-          { label: '体验目的', value: task.test_purpose },
-          { label: '体验方法', value: task.test_method },
-          { label: '状态', value: task.status },
-          { label: '负责人', value: task.assigned_to },
-        ].map((item) => (
-          <div key={item.label} className="flex gap-4">
-            <span className="text-xs text-muted-foreground w-20 shrink-0">{item.label}</span>
-            <span className="text-sm">{item.value || '-'}</span>
+        <div className="flex justify-end">
+          {!editing ? (
+            <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => { setForm({ task_name: task.task_name || '', product_category: task.product_category || '', product: task.product || '', product_model: task.product_model || '', project_type: task.project_type || '', project_phase: task.project_phase || '', test_date: task.test_date || '', organizer: task.organizer || '', target_user: task.target_user || '', test_purpose: task.test_purpose || '', test_method: task.test_method || '', status: task.status || '' }); setEditing(true); }}>
+              <Pencil className="h-3 w-3" /> 编辑
+            </Button>
+          ) : (
+            <div className="flex gap-2">
+              <Button size="sm" className="h-7 text-xs" onClick={handleSave} disabled={saving}>{saving ? '保存中...' : '保存'}</Button>
+              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setEditing(false)}>取消</Button>
+            </div>
+          )}
+        </div>
+        {fields.map((field) => (
+          <div key={field.key} className="flex gap-4">
+            <span className="text-xs text-muted-foreground w-20 shrink-0">{field.label}</span>
+            {editing ? (
+              <div className="flex-1 min-w-0">
+                {field.type === 'text' && <Input value={form[field.key]} onChange={(e) => setForm({ ...form, [field.key]: e.target.value })} className="h-7 text-sm" />}
+                {field.type === 'textarea' && <Textarea value={form[field.key]} onChange={(e) => setForm({ ...form, [field.key]: e.target.value })} rows={2} className="text-sm" />}
+                {field.type === 'date' && <Input type="date" value={form[field.key]} onChange={(e) => setForm({ ...form, [field.key]: e.target.value })} className="h-7 text-sm" />}
+                {field.type === 'category' && (
+                  <Select value={form.product_category} onValueChange={(v) => setForm({ ...form, product_category: v, product: '' })}>
+                    <SelectTrigger className="h-7 text-sm"><SelectValue placeholder="选择品类" /></SelectTrigger>
+                    <SelectContent>{categories.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                )}
+                {field.type === 'product' && (
+                  <Select value={form.product} onValueChange={(v) => setForm({ ...form, product: v })}>
+                    <SelectTrigger className="h-7 text-sm"><SelectValue placeholder={form.product_category ? '选择产品' : '请先选择品类'} /></SelectTrigger>
+                    <SelectContent>{availableProducts.map(p => <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                )}
+                {field.type === 'project_type' && (
+                  <div className="flex flex-wrap gap-1.5">{projectTypes.map(t => (
+                    <button key={t} type="button" onClick={() => setForm({ ...form, project_type: t, project_phase: t === '自研' ? form.project_phase : '' })}
+                      className={cn('px-2 py-1 rounded text-[11px] border transition-colors', form.project_type === t ? 'bg-primary text-primary-foreground border-primary' : 'bg-background border-border hover:bg-muted/50')}>
+                      {t}
+                    </button>
+                  ))}</div>
+                )}
+                {field.type === 'project_phase' && form.project_type === '自研' && (
+                  <div className="flex flex-wrap gap-1.5">{projectPhases.map(p => (
+                    <button key={p} type="button" onClick={() => setForm({ ...form, project_phase: p })}
+                      className={cn('px-2 py-1 rounded text-[11px] border transition-colors', form.project_phase === p ? 'bg-primary text-primary-foreground border-primary' : 'bg-background border-border hover:bg-muted/50')}>
+                      {p}
+                    </button>
+                  ))}</div>
+                )}
+                {field.type === 'status' && (
+                  <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
+                    <SelectTrigger className="h-7 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>{Object.entries(statusConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                )}
+              </div>
+            ) : (
+              <span className="text-sm break-all">{field.key === 'project_phase' && task.project_type !== '自研' ? '-' : (String(task[field.key as keyof TaskDetail] ?? '-') )}</span>
+            )}
           </div>
         ))}
       </CardContent>
@@ -396,7 +502,7 @@ const flowByPhase: Record<string, string[]> = {
   '清洁收纳': ['冲水', '擦拭', '晾干', '收纳'],
   '其他': ['其他'],
 };
-const standardCategoryOptions = ['通用标准', '品类标准', '感官评价标准'];
+const standardCategoryOptions = ['通用标准', '品类标准', '感官评价标准', '非标准'];
 
 function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefresh }: { taskId: string; records: CheckRecord[]; taskProductCategory?: string; taskProduct?: string | null; onRefresh: () => void }) {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -424,6 +530,14 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
   const [sensoryForm, setSensoryForm] = useState({ sensory_dimension: '', score: '', result_description: '' });
   const [sensoryRefItems, setSensoryRefItems] = useState<StandardItem[]>([]);
   const [evaluationResult, setEvaluationResult] = useState('待定');
+
+  // ── 非标准 form ──
+  const [nonStandardForm, setNonStandardForm] = useState({ description: '', problem_description: '' });
+
+  // ── Fuzzy search ──
+  const [fuzzyKeyword, setFuzzyKeyword] = useState('');
+  const [fuzzyResults, setFuzzyResults] = useState<StandardItem[]>([]);
+  const [fuzzyLoading, setFuzzyLoading] = useState(false);
 
   // ── Record status edit dialog ──
   const [statusEditOpen, setStatusEditOpen] = useState(false);
@@ -522,6 +636,26 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
     fetchItems();
   }, [formCategory, sensoryForm.sensory_dimension, taskProductCategory]);
 
+  // ── Fuzzy search: keyword-based search across all standard items ──
+  useEffect(() => {
+    if (!fuzzyKeyword.trim()) { setFuzzyResults([]); return; }
+    setFuzzyLoading(true);
+    const timer = setTimeout(async () => {
+      const params = new URLSearchParams();
+      params.set('keyword', fuzzyKeyword.trim());
+      if (taskProductCategory) params.set('product_category', taskProductCategory);
+      if (taskProduct) params.set('product', taskProduct);
+      try {
+        const res = await fetch(`/api/standard-items/search?${params}`);
+        const data = await res.json();
+        if (data.code === 0) setFuzzyResults(data.data || []);
+        else setFuzzyResults([]);
+      } catch { setFuzzyResults([]); }
+      setFuzzyLoading(false);
+    }, 300);
+    return () => { clearTimeout(timer); setFuzzyLoading(false); };
+  }, [fuzzyKeyword, taskProductCategory, taskProduct]);
+
   // Fetch materials for each record
   useEffect(() => {
     const fetchRecordMaterials = async () => {
@@ -551,6 +685,9 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
     setSensoryForm({ sensory_dimension: '', score: '', result_description: '' });
     setSensoryRefItems([]);
     setEvaluationResult('待定');
+    setNonStandardForm({ description: '', problem_description: '' });
+    setFuzzyKeyword('');
+    setFuzzyResults([]);
     setSelectedMaterialIds([]);
     setSelectedMaterials([]);
   };
@@ -600,6 +737,13 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
           problem_description: sensoryForm.result_description || null,
           measurement_value: sensoryForm.score || null,
         };
+      } else if (formCategory === '非标准') {
+        body = {
+          ...body,
+          standard_category: '非标准',
+          check_item: nonStandardForm.description || '',
+          problem_description: nonStandardForm.problem_description || null,
+        };
       }
 
       const res = await fetch('/api/records', {
@@ -631,6 +775,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
     if (formCategory === '通用标准') return !!(generalForm.test_phase && generalForm.experience_flow && generalForm.sensory_dimension && generalForm.selectedItemId);
     if (formCategory === '品类标准') return !!(categoryForm.check_dimension && categoryForm.selectedItemId);
     if (formCategory === '感官评价标准') return !!(sensoryForm.sensory_dimension && sensoryForm.score);
+    if (formCategory === '非标准') return !!nonStandardForm.description;
     return false;
   };
 
@@ -647,6 +792,71 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
   const selectedGeneralItem = generalItems.find(i => i.id === generalForm.selectedItemId);
   // Get selected item for category standard
   const selectedCategoryItem = categoryItems.find(i => i.id === categoryForm.selectedItemId);
+
+  // Handle fuzzy search selection: auto-fill form based on matched standard item
+  const handleFuzzySelect = (item: StandardItem) => {
+    const stdCat = item.standard?.category as string || '通用标准';
+    setFormCategory(stdCat);
+    setFuzzyKeyword('');
+    setFuzzyResults([]);
+
+    if (stdCat === '通用标准') {
+      // Auto-fill test_phase, experience_flow, sensory_dimension
+      const itemAny = item as unknown as Record<string, unknown>;
+      const phase = itemAny.test_phase as string || '';
+      const flow = itemAny.experience_flow as string || '';
+      const dim = itemAny.sensory_dimension as string || '';
+      setGeneralForm(prev => ({ ...prev, test_phase: phase, experience_flow: flow, sensory_dimension: dim, selectedItemId: item.id }));
+      // Items will be fetched via useEffect once the form state updates
+    } else if (stdCat === '品类标准') {
+      const itemAny = item as unknown as Record<string, unknown>;
+      const dim = itemAny.sensory_dimension as string || '';
+      const checkDim = itemAny.check_dimension as string || '';
+      setCategoryForm(prev => ({ ...prev, sensory_dimension: dim, check_dimension: checkDim, selectedItemId: item.id }));
+    } else if (stdCat === '感官评价标准') {
+      const itemAny = item as unknown as Record<string, unknown>;
+      const dim = itemAny.sensory_dimension as string || '';
+      setSensoryForm(prev => ({ ...prev, sensory_dimension: dim }));
+    }
+  };
+
+  // Fuzzy search input component (shown for 通用标准/品类标准/感官评价标准)
+  const renderFuzzySearch = () => (
+    <div className="space-y-1.5">
+      <Label className="text-xs text-muted-foreground">描述结果快速匹配</Label>
+      <Input placeholder="输入关键词搜索标准库..." value={fuzzyKeyword}
+        onChange={(e) => setFuzzyKeyword(e.target.value)} />
+      {fuzzyLoading && <p className="text-[11px] text-muted-foreground animate-pulse">搜索中...</p>}
+      {fuzzyResults.length > 0 && (
+        <div className="max-h-48 overflow-y-auto space-y-1 border rounded-lg p-2">
+          {fuzzyResults.slice(0, 20).map((item) => {
+            const stdCat = item.standard?.category || '通用标准';
+            return (
+              <div key={item.id}
+                className="p-2 rounded-md cursor-pointer text-xs transition-colors border border-transparent hover:bg-muted/50"
+                onClick={() => handleFuzzySelect(item)}>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="text-[9px] h-4 shrink-0">{stdCat}</Badge>
+                  <span className="font-medium truncate">{item.touch_point || item.check_item}</span>
+                </div>
+                {item.check_requirement && <p className="text-muted-foreground mt-0.5 line-clamp-1">{item.check_requirement}</p>}
+                <div className="flex gap-2 mt-0.5 text-[10px] text-muted-foreground">
+                  {(() => { const it = item as unknown as Record<string, unknown>; return (<>
+                    {it.test_phase && <span>阶段: {it.test_phase as string}</span>}
+                    {it.experience_flow && <span>流程: {it.experience_flow as string}</span>}
+                    {it.sensory_dimension && <span>维度: {it.sensory_dimension as string}</span>}
+                  </>); })()}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {fuzzyKeyword.trim() && !fuzzyLoading && fuzzyResults.length === 0 && (
+        <p className="text-[11px] text-muted-foreground">未找到匹配的标准项</p>
+      )}
+    </div>
+  );
 
   // Render the add form based on category
   const renderAddForm = () => {
@@ -676,6 +886,8 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
     if (formCategory === '通用标准') return (
       <div className="space-y-3">
         {categorySelector}
+        {renderFuzzySearch()}
+        <Separator />
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label>产品使用阶段 *</Label>
@@ -785,6 +997,8 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
     if (formCategory === '品类标准') return (
       <div className="space-y-3">
         {categorySelector}
+        {renderFuzzySearch()}
+        <Separator />
         {/* Show no-data warning if product has no 品类标准 */}
         {categoryDimensions.length === 0 && !categoryLoading && (
           <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-950/20 dark:border-amber-800">
@@ -899,6 +1113,8 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
     if (formCategory === '感官评价标准') return (
       <div className="space-y-3">
         {categorySelector}
+        {renderFuzzySearch()}
+        <Separator />
         <div className="space-y-1.5">
           <Label>感官维度 *</Label>
           <Select value={sensoryForm.sensory_dimension} onValueChange={(v) => setSensoryForm({ ...sensoryForm, sensory_dimension: v, score: '', result_description: '' })}>
@@ -941,6 +1157,44 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
         <div className="space-y-1.5">
           <Label>结果描述</Label>
           <Textarea placeholder="描述评价结果" value={sensoryForm.result_description} onChange={(e) => setSensoryForm({ ...sensoryForm, result_description: e.target.value })} rows={2} />
+        </div>
+        <MaterialPicker taskId={taskId} selectedIds={selectedMaterialIds} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
+        <div className="space-y-1.5">
+          <Label>检查结果 *</Label>
+          <div className="flex gap-2">
+            {['合格', '不合格', '待定'].map(r => (
+              <button key={r} type="button" onClick={() => setEvaluationResult(r)}
+                className={cn('flex-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors',
+                  evaluationResult === r
+                    ? r === '合格' ? 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800'
+                      : r === '不合格' ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800'
+                      : 'bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-800'
+                    : 'bg-background border-border hover:bg-muted/50')}>
+                {r}
+              </button>
+            ))}
+          </div>
+        </div>
+        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid() || savingRecord}>{savingRecord ? '添加中...' : '添加'}</Button>
+      </div>
+    );
+
+    // ── 非标准 form ──
+    if (formCategory === '非标准') return (
+      <div className="space-y-3">
+        {categorySelector}
+        <div className="p-3 rounded-lg bg-muted/30 border border-border">
+          <p className="text-xs text-muted-foreground">非标准检查项无需关联产品使用阶段、体验流程、感官维度，仅需描述检查内容和结果</p>
+        </div>
+        <div className="space-y-1.5">
+          <Label>描述结果 *</Label>
+          <Textarea placeholder="描述检查项内容" value={nonStandardForm.description}
+            onChange={(e) => setNonStandardForm({ ...nonStandardForm, description: e.target.value })} rows={3} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>检查结果</Label>
+          <Textarea placeholder="描述检查结果（可选）" value={nonStandardForm.problem_description}
+            onChange={(e) => setNonStandardForm({ ...nonStandardForm, problem_description: e.target.value })} rows={2} />
         </div>
         <MaterialPicker taskId={taskId} selectedIds={selectedMaterialIds} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
         <div className="space-y-1.5">
@@ -1084,7 +1338,25 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
 
       {/* Add button */}
       <div className="sticky bottom-4">
-        <Button className="w-full" onClick={() => { resetForms(); setAddDialogOpen(true); }}>
+        <Button className="w-full" onClick={() => {
+          resetForms();
+          // Apply saved senses defaults
+          try {
+            const saved = localStorage.getItem('senses_defaults');
+            if (saved) {
+              const defaults = JSON.parse(saved);
+              if (defaults.test_phase && defaults.test_phase !== 'clear') {
+                setGeneralForm(prev => ({ ...prev, test_phase: defaults.test_phase, experience_flow: defaults.experience_flow && defaults.experience_flow !== 'clear' ? defaults.experience_flow : '' }));
+              }
+              if (defaults.sensory_dimension && defaults.sensory_dimension !== 'clear') {
+                setGeneralForm(prev => ({ ...prev, sensory_dimension: defaults.sensory_dimension }));
+                setCategoryForm(prev => ({ ...prev, sensory_dimension: defaults.sensory_dimension }));
+                setSensoryForm(prev => ({ ...prev, sensory_dimension: defaults.sensory_dimension }));
+              }
+            }
+          } catch {}
+          setAddDialogOpen(true);
+        }}>
           <Plus className="h-4 w-4 mr-1.5" /> 新增问题点
         </Button>
       </div>
@@ -1267,9 +1539,12 @@ function FunctionsTab({ taskId }: { taskId: string }) {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addStepDialogOpen, setAddStepDialogOpen] = useState(false);
   const [editStepDialogOpen, setEditStepDialogOpen] = useState(false);
+  const [editRecipeDialogOpen, setEditRecipeDialogOpen] = useState(false);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [editingStep, setEditingStep] = useState<RecipeStep | null>(null);
+  const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
   const [newRecipe, setNewRecipe] = useState({ name: '', ingredients: '', recipe_type: '食谱' });
+  const [editRecipeForm, setEditRecipeForm] = useState({ name: '', ingredients: '', recipe_type: '食谱' });
   const [newStep, setNewStep] = useState({ operation: '', step_material_ids: [] as string[], problem_points: [{ text: '', material_ids: [] as string[] }] });
   const [stepMaterialIds, setStepMaterialIds] = useState<string[]>([]);
   const [, setStepMaterials] = useState<Material[]>([]);
@@ -1278,11 +1553,20 @@ function FunctionsTab({ taskId }: { taskId: string }) {
   const [, setEditStepMaterials] = useState<Material[]>([]);
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
 
+  // ── Recipe library search (Feature 7) ──
+  const [recipeSearch, setRecipeSearch] = useState('');
+  const [recipeSearchResults, setRecipeSearchResults] = useState<Recipe[]>([]);
+  const [recipeSearchLoading, setRecipeSearchLoading] = useState(false);
+
+  // ── Step reference search (Feature 7) ──
+  const [stepRefSearch, setStepRefSearch] = useState('');
+  const [stepRefResults, setStepRefResults] = useState<Recipe[]>([]);
+  const [stepRefLoading, setStepRefLoading] = useState(false);
+
   const fetchRecipes = useCallback(async () => {
     const res = await fetch(`/api/recipes?task_id=${taskId}`);
     const data = await res.json();
     if (data.code === 0) {
-      // For each recipe, fetch step materials (deduplicate by id as safety net)
       const recipesData: Recipe[] = (data.data || []);
       const seen = new Set<string>();
       const deduped = recipesData.filter(r => {
@@ -1309,6 +1593,34 @@ function FunctionsTab({ taskId }: { taskId: string }) {
 
   useEffect(() => { fetchRecipes(); }, [fetchRecipes]);
 
+  // ── Recipe library fuzzy search ──
+  useEffect(() => {
+    if (!recipeSearch.trim()) { setRecipeSearchResults([]); return; }
+    setRecipeSearchLoading(true);
+    const timer = setTimeout(async () => {
+      const res = await fetch(`/api/recipes?library=1&keyword=${encodeURIComponent(recipeSearch.trim())}`);
+      const data = await res.json();
+      if (data.code === 0) setRecipeSearchResults(data.data || []);
+      else setRecipeSearchResults([]);
+      setRecipeSearchLoading(false);
+    }, 300);
+    return () => { clearTimeout(timer); setRecipeSearchLoading(false); };
+  }, [recipeSearch]);
+
+  // ── Step reference fuzzy search ──
+  useEffect(() => {
+    if (!stepRefSearch.trim()) { setStepRefResults([]); return; }
+    setStepRefLoading(true);
+    const timer = setTimeout(async () => {
+      const res = await fetch(`/api/recipes?library=1&keyword=${encodeURIComponent(stepRefSearch.trim())}`);
+      const data = await res.json();
+      if (data.code === 0) setStepRefResults(data.data || []);
+      else setStepRefResults([]);
+      setStepRefLoading(false);
+    }, 300);
+    return () => { clearTimeout(timer); setStepRefLoading(false); };
+  }, [stepRefSearch]);
+
   const handleAddRecipe = async () => {
     if (savingRecipe) return;
     setSavingRecipe(true);
@@ -1321,12 +1633,114 @@ function FunctionsTab({ taskId }: { taskId: string }) {
       if (data.code === 0) {
         setAddDialogOpen(false);
         setNewRecipe({ name: '', ingredients: '', recipe_type: '食谱' });
+        setRecipeSearch('');
+        setRecipeSearchResults([]);
         fetchRecipes();
         toast.success('食谱/功能已添加');
       }
     } finally {
       setSavingRecipe(false);
     }
+  };
+
+  // ── Edit recipe (Feature 3) ──
+  const handleEditRecipe = (recipe: Recipe) => {
+    setEditingRecipe(recipe);
+    setEditRecipeForm({ name: recipe.name, ingredients: recipe.ingredients || '', recipe_type: recipe.recipe_type || '食谱' });
+    setEditRecipeDialogOpen(true);
+  };
+
+  const handleSaveEditRecipe = async () => {
+    if (!editingRecipe || savingRecipe) return;
+    setSavingRecipe(true);
+    try {
+      const res = await fetch(`/api/recipes/${editingRecipe.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editRecipeForm),
+      });
+      const data = await res.json();
+      if (data.code === 0) {
+        setEditRecipeDialogOpen(false);
+        setEditingRecipe(null);
+        fetchRecipes();
+        toast.success('食谱/功能已更新');
+      } else toast.error(data.message);
+    } finally { setSavingRecipe(false); }
+  };
+
+  // ── Reference recipe from library (Feature 7) ──
+  const handleReferenceRecipe = async (refRecipe: Recipe) => {
+    if (savingRecipe) return;
+    setSavingRecipe(true);
+    try {
+      const res = await fetch('/api/recipes', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: taskId, name: refRecipe.name, ingredients: refRecipe.ingredients, recipe_type: refRecipe.recipe_type }),
+      });
+      const data = await res.json();
+      if (data.code === 0) {
+        const newRecipeId = data.data?.id;
+        // Copy steps from referenced recipe
+        if (refRecipe.recipe_steps && refRecipe.recipe_steps.length > 0 && newRecipeId) {
+          for (let i = 0; i < refRecipe.recipe_steps.length; i++) {
+            const srcStep = refRecipe.recipe_steps[i];
+            await fetch('/api/recipe-steps', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                recipe_id: newRecipeId,
+                step_number: i + 1,
+                operation: srcStep.operation,
+                problem_point: srcStep.problem_point,
+                problem_points: srcStep.problem_points || [],
+              }),
+            });
+          }
+        }
+        setAddDialogOpen(false);
+        setNewRecipe({ name: '', ingredients: '', recipe_type: '食谱' });
+        setRecipeSearch('');
+        setRecipeSearchResults([]);
+        fetchRecipes();
+        toast.success('已引用食谱/功能');
+      }
+    } finally { setSavingRecipe(false); }
+  };
+
+  // ── Step reorder (Feature 6) ──
+  const handleReorderStep = async (recipe: Recipe, stepIdx: number, direction: 'up' | 'down') => {
+    const steps = recipe.recipe_steps || [];
+    if (direction === 'up' && stepIdx === 0) return;
+    if (direction === 'down' && stepIdx === steps.length - 1) return;
+    const swapIdx = direction === 'up' ? stepIdx - 1 : stepIdx + 1;
+    const newSteps = [...steps];
+    [newSteps[stepIdx], newSteps[swapIdx]] = [newSteps[swapIdx], newSteps[stepIdx]];
+    // Update local state optimistically
+    const updatedRecipes = recipes.map(r => {
+      if (r.id !== recipe.id) return r;
+      return { ...r, recipe_steps: newSteps };
+    });
+    setRecipes(updatedRecipes);
+    // Save to backend
+    const reorderData = newSteps.map((s, i) => ({ id: s.id, step_number: i + 1 }));
+    await fetch('/api/recipe-steps', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ steps: reorderData }),
+    });
+  };
+
+  // ── Reference step from another recipe (Feature 7) ──
+  const handleReferenceStep = (srcStep: RecipeStep) => {
+    setNewStep(prev => ({
+      ...prev,
+      operation: prev.operation ? prev.operation + '\n' + srcStep.operation : srcStep.operation,
+      problem_points: srcStep.problem_points && srcStep.problem_points.length > 0
+        ? [...prev.problem_points, ...srcStep.problem_points.map(p => ({ text: p.text || '', material_ids: [] as string[] }))]
+        : srcStep.problem_point
+          ? [...prev.problem_points, { text: srcStep.problem_point, material_ids: [] as string[] }]
+          : prev.problem_points,
+    }));
+    setStepRefSearch('');
+    setStepRefResults([]);
   };
 
   const handleAddStep = async () => {
@@ -1513,6 +1927,9 @@ function FunctionsTab({ taskId }: { taskId: string }) {
                     <span>{recipe.recipe_steps?.length || 0} 步骤</span>
                     <span>{recipe.problem_count || 0} 问题</span>
                   </div>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={(e) => { e.stopPropagation(); handleEditRecipe(recipe); }}>
+                    <Pencil className="h-3 w-3 text-muted-foreground" />
+                  </Button>
                   <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={(e) => { e.stopPropagation(); handleDeleteRecipe(recipe); }}>
                     <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
                   </Button>
@@ -1530,6 +1947,16 @@ function FunctionsTab({ taskId }: { taskId: string }) {
                           {stepIdx + 1}
                         </span>
                         <span className="text-sm flex-1 min-w-0 break-all">{step.operation}</span>
+                        <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <Button variant="ghost" size="icon" className="h-5 w-5" disabled={stepIdx === 0}
+                            onClick={() => handleReorderStep(recipe, stepIdx, 'up')}>
+                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-5 w-5" disabled={stepIdx === (recipe.recipe_steps?.length || 0) - 1}
+                            onClick={() => handleReorderStep(recipe, stepIdx, 'down')}>
+                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                          </Button>
+                        </div>
                         <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={(e) => { e.stopPropagation(); handleDeleteStep(step); }}>
                           <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
                         </Button>
@@ -1593,10 +2020,38 @@ function FunctionsTab({ taskId }: { taskId: string }) {
       </div>
 
       {/* Add recipe dialog */}
-      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-        <DialogContent>
+      <Dialog open={addDialogOpen} onOpenChange={(open) => { setAddDialogOpen(open); if (!open) { setRecipeSearch(''); setRecipeSearchResults([]); } }}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>新增食谱/功能</DialogTitle></DialogHeader>
           <div className="space-y-3 mt-2">
+            {/* Recipe library search (Feature 7) */}
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">从食谱库引用</Label>
+              <Input placeholder="搜索已有食谱名称..." value={recipeSearch}
+                onChange={(e) => setRecipeSearch(e.target.value)} />
+              {recipeSearchLoading && <p className="text-[11px] text-muted-foreground animate-pulse">搜索中...</p>}
+              {recipeSearchResults.length > 0 && (
+                <div className="max-h-40 overflow-y-auto space-y-1 border rounded-lg p-2">
+                  {recipeSearchResults.map((refRecipe) => (
+                    <div key={refRecipe.id} className="p-2 rounded-md cursor-pointer text-xs transition-colors border border-transparent hover:bg-muted/50"
+                      onClick={() => handleReferenceRecipe(refRecipe)}>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary" className="text-[9px] h-4 shrink-0">{refRecipe.recipe_type}</Badge>
+                        <span className="font-medium">{refRecipe.name}</span>
+                        <span className="text-muted-foreground">{refRecipe.recipe_steps?.length || 0}步</span>
+                      </div>
+                      {refRecipe.ingredients && <p className="text-muted-foreground mt-0.5 line-clamp-1">{refRecipe.ingredients}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {recipeSearch.trim() && !recipeSearchLoading && recipeSearchResults.length === 0 && (
+                <p className="text-[11px] text-muted-foreground">未找到匹配的食谱</p>
+              )}
+            </div>
+
+            <Separator />
+
             <div className="space-y-1.5">
               <Label>类型</Label>
               <Select value={newRecipe.recipe_type} onValueChange={(v) => setNewRecipe({ ...newRecipe, recipe_type: v })}>
@@ -1623,10 +2078,38 @@ function FunctionsTab({ taskId }: { taskId: string }) {
       </Dialog>
 
       {/* Add step dialog */}
-      <Dialog open={addStepDialogOpen} onOpenChange={(open) => { setAddStepDialogOpen(open); if (!open) { setStepMaterialIds([]); setStepMaterials([]); setNewStep({ operation: '', step_material_ids: [], problem_points: [{ text: '', material_ids: [] }] }); } }}>
+      <Dialog open={addStepDialogOpen} onOpenChange={(open) => { setAddStepDialogOpen(open); if (!open) { setStepMaterialIds([]); setStepMaterials([]); setNewStep({ operation: '', step_material_ids: [], problem_points: [{ text: '', material_ids: [] }] }); setStepRefSearch(''); setStepRefResults([]); } }}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>新增步骤 - {selectedRecipe?.name}</DialogTitle></DialogHeader>
           <div className="space-y-3 mt-2">
+            {/* Step reference search (Feature 7) */}
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">引用已有步骤</Label>
+              <Input placeholder="搜索食谱名称以引用步骤..." value={stepRefSearch}
+                onChange={(e) => setStepRefSearch(e.target.value)} />
+              {stepRefLoading && <p className="text-[11px] text-muted-foreground animate-pulse">搜索中...</p>}
+              {stepRefResults.length > 0 && (
+                <div className="max-h-40 overflow-y-auto space-y-1 border rounded-lg p-2">
+                  {stepRefResults.map((refRecipe) => (
+                    <div key={refRecipe.id} className="space-y-1">
+                      <div className="text-xs font-medium text-primary">{refRecipe.name}</div>
+                      {(refRecipe.recipe_steps || []).map((s) => (
+                        <div key={s.id} className="p-1.5 rounded cursor-pointer text-xs hover:bg-muted/50 border border-transparent"
+                          onClick={() => handleReferenceStep(s)}>
+                          <span className="text-muted-foreground">步骤{s.step_number}:</span> <span className="line-clamp-1">{s.operation}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {stepRefSearch.trim() && !stepRefLoading && stepRefResults.length === 0 && (
+                <p className="text-[11px] text-muted-foreground">未找到匹配的食谱</p>
+              )}
+            </div>
+
+            <Separator />
+
             <div className="space-y-1.5">
               <Label>具体操作 *</Label>
               <Textarea placeholder="描述该步骤的操作" value={newStep.operation}
@@ -1777,6 +2260,34 @@ function FunctionsTab({ taskId }: { taskId: string }) {
               </div>
             )}
             <Button onClick={handleSaveEditStep} className="w-full" disabled={!editStepForm.operation || savingEditStep}>{savingEditStep ? '保存中...' : '保存修改'}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit recipe dialog (Feature 3) */}
+      <Dialog open={editRecipeDialogOpen} onOpenChange={setEditRecipeDialogOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>编辑食谱/功能</DialogTitle></DialogHeader>
+          <div className="space-y-3 mt-2">
+            <div className="space-y-1.5">
+              <Label>类型</Label>
+              <Select value={editRecipeForm.recipe_type} onValueChange={(v) => setEditRecipeForm({ ...editRecipeForm, recipe_type: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="食谱">食谱</SelectItem>
+                  <SelectItem value="功能">功能</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>{editRecipeForm.recipe_type === '食谱' ? '食谱名称' : '功能名称'} *</Label>
+              <Input value={editRecipeForm.name} onChange={(e) => setEditRecipeForm({ ...editRecipeForm, name: e.target.value })} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>食材/参数</Label>
+              <Textarea value={editRecipeForm.ingredients} onChange={(e) => setEditRecipeForm({ ...editRecipeForm, ingredients: e.target.value })} rows={2} />
+            </div>
+            <Button onClick={handleSaveEditRecipe} className="w-full" disabled={!editRecipeForm.name || savingRecipe}>{savingRecipe ? '保存中...' : '保存修改'}</Button>
           </div>
         </DialogContent>
       </Dialog>

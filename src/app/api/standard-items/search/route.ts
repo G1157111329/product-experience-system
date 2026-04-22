@@ -70,7 +70,11 @@ export async function GET(request: NextRequest) {
   if (test_phase) itemQuery = itemQuery.eq('test_phase', test_phase);
   if (experience_flow) itemQuery = itemQuery.eq('experience_flow', experience_flow);
   if (check_dimension) itemQuery = itemQuery.eq('check_dimension', check_dimension);
-  if (keyword) itemQuery = itemQuery.ilike('check_item', `%${keyword}%`);
+  if (keyword) {
+    // Fuzzy search across multiple text fields
+    const kw = `%${keyword}%`;
+    itemQuery = itemQuery.or(`check_item.ilike.${kw},check_requirement.ilike.${kw},touch_point.ilike.${kw},experience_standard.ilike.${kw},check_standard.ilike.${kw}`);
+  }
 
   const { data: items, error: itemError } = await itemQuery;
   if (itemError) return NextResponse.json({ code: 1, message: itemError.message }, { status: 500 });

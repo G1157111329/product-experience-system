@@ -50,3 +50,16 @@ export async function POST(request: NextRequest) {
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
   return NextResponse.json({ code: 0, message: '创建成功', data });
 }
+
+/** Batch reorder steps */
+export async function PUT(request: NextRequest) {
+  const client = getSupabaseClient();
+  const body = await request.json();
+  const { steps } = body as { steps: Array<{ id: string; step_number: number }> };
+  if (!steps || !Array.isArray(steps)) return NextResponse.json({ code: 1, message: '参数不完整' }, { status: 400 });
+
+  for (const step of steps) {
+    await client.from('recipe_steps').update({ step_number: step.step_number, updated_at: new Date().toISOString() }).eq('id', step.id);
+  }
+  return NextResponse.json({ code: 0, message: '排序已更新' });
+}

@@ -261,6 +261,33 @@ function UserSection() {
   const [allUsers, setAllUsers] = useState<Array<{ id: string; account: string; name: string; role: string }>>([]);
   const [roleLoading, setRoleLoading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sensesSettingsOpen, setSensesSettingsOpen] = useState(false);
+  const [sensesDefaults, setSensesDefaults] = useState({ test_phase: '', experience_flow: '', sensory_dimension: '' });
+
+  useEffect(() => {
+    if (sensesSettingsOpen) {
+      try {
+        const saved = localStorage.getItem('senses_defaults');
+        if (saved) setSensesDefaults(JSON.parse(saved));
+      } catch {}
+    }
+  }, [sensesSettingsOpen]);
+
+  const sensesPhaseOptions = ['开箱', '首次安装', '产品使用', '清洁收纳', '其他'];
+  const sensesFlowMap: Record<string, string[]> = {
+    '开箱': ['拿取外包装', '拆开内包装'],
+    '首次安装': ['配件梳理', '外观美观', '外观缺陷', '标识文字', '首次安装'],
+    '产品使用': ['放置及组装', '操作交互', '产品运行'],
+    '清洁收纳': ['冲水', '擦拭', '晾干', '收纳'],
+    '其他': ['其他'],
+  };
+  const sensesDimensionOptions = ['视觉', '听觉', '触觉', '嗅觉', '味觉'];
+
+  const handleSaveSensesDefaults = () => {
+    localStorage.setItem('senses_defaults', JSON.stringify(sensesDefaults));
+    setSensesSettingsOpen(false);
+    toast.success('五感体验默认选项已保存');
+  };
 
   useEffect(() => {
     if (profileOpen && isAdmin && user?.id) {
@@ -398,6 +425,34 @@ function UserSection() {
               <Badge variant={isAdmin ? 'default' : 'secondary'} className="text-xs">{isAdmin ? '管理账号' : '使用账号'}</Badge>
             </div>
 
+            <Separator />
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-muted-foreground">五感体验默认选项</Label>
+                <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={() => setSensesSettingsOpen(true)}>
+                  <Settings className="h-3 w-3" /> 设置
+                </Button>
+              </div>
+              {(() => {
+                try {
+                  const saved = localStorage.getItem('senses_defaults');
+                  if (saved) {
+                    const defaults = JSON.parse(saved);
+                    return (
+                      <div className="flex gap-2 flex-wrap">
+                        {defaults.test_phase && <Badge variant="secondary" className="text-[10px]">阶段: {defaults.test_phase}</Badge>}
+                        {defaults.experience_flow && <Badge variant="secondary" className="text-[10px]">流程: {defaults.experience_flow}</Badge>}
+                        {defaults.sensory_dimension && <Badge variant="secondary" className="text-[10px]">维度: {defaults.sensory_dimension}</Badge>}
+                        {!defaults.test_phase && !defaults.experience_flow && !defaults.sensory_dimension && <span className="text-[11px] text-muted-foreground">未设置</span>}
+                      </div>
+                    );
+                  }
+                } catch {}
+                return <span className="text-[11px] text-muted-foreground">未设置</span>;
+              })()}
+            </div>
+
             {/* Admin: Settings button in profile dialog */}
             {isAdmin && (
               <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setSettingsOpen(true), 100); }}>
@@ -444,6 +499,54 @@ function UserSection() {
 
       {/* Settings Dialog (Admin only) */}
       <CategoryProductSettings open={settingsOpen} onOpenChange={setSettingsOpen} />
+
+      {/* Senses Defaults Settings Dialog */}
+      <Dialog open={sensesSettingsOpen} onOpenChange={setSensesSettingsOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>五感体验默认选项</DialogTitle>
+            <DialogDescription>设置新增问题点时的默认筛选选项，避免每次重复选择</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs">产品使用阶段</Label>
+              <Select value={sensesDefaults.test_phase} onValueChange={(v) => setSensesDefaults({ ...sensesDefaults, test_phase: v, experience_flow: v !== sensesDefaults.test_phase ? '' : sensesDefaults.experience_flow })}>
+                <SelectTrigger><SelectValue placeholder="选择默认阶段（可选）" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="clear">不设置</SelectItem>
+                  {sensesPhaseOptions.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            {sensesDefaults.test_phase && sensesDefaults.test_phase !== 'clear' && (
+              <div className="space-y-1.5">
+                <Label className="text-xs">体验流程</Label>
+                <Select value={sensesDefaults.experience_flow} onValueChange={(v) => setSensesDefaults({ ...sensesDefaults, experience_flow: v })}>
+                  <SelectTrigger><SelectValue placeholder="选择默认流程（可选）" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="clear">不设置</SelectItem>
+                    {(sensesFlowMap[sensesDefaults.test_phase] || []).map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <Label className="text-xs">感官维度</Label>
+              <Select value={sensesDefaults.sensory_dimension} onValueChange={(v) => setSensesDefaults({ ...sensesDefaults, sensory_dimension: v })}>
+                <SelectTrigger><SelectValue placeholder="选择默认维度（可选）" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="clear">不设置</SelectItem>
+                  {sensesDimensionOptions.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex gap-2">
+              <Button className="flex-1" onClick={handleSaveSensesDefaults}>保存</Button>
+              <Button variant="outline" className="flex-1" onClick={() => { setSensesDefaults({ test_phase: '', experience_flow: '', sensory_dimension: '' }); localStorage.removeItem('senses_defaults'); toast.success('已清除默认选项'); setSensesSettingsOpen(false); }}>清除设置</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -484,6 +587,33 @@ function MobileUserIcon() {
   const { user, isAdmin, logout } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sensesSettingsOpen, setSensesSettingsOpen] = useState(false);
+  const [sensesDefaults, setSensesDefaults] = useState({ test_phase: '', experience_flow: '', sensory_dimension: '' });
+
+  const sensesPhaseOptions = ['开箱', '首次安装', '产品使用', '清洁收纳', '其他'];
+  const sensesFlowMap: Record<string, string[]> = {
+    '开箱': ['拿取外包装', '拆开内包装'],
+    '首次安装': ['配件梳理', '外观美观', '外观缺陷', '标识文字', '首次安装'],
+    '产品使用': ['放置及组装', '操作交互', '产品运行'],
+    '清洁收纳': ['冲水', '擦拭', '晾干', '收纳'],
+    '其他': ['其他'],
+  };
+  const sensesDimensionOptions = ['视觉', '听觉', '触觉', '嗅觉', '味觉'];
+
+  useEffect(() => {
+    if (sensesSettingsOpen) {
+      try {
+        const saved = localStorage.getItem('senses_defaults');
+        if (saved) setSensesDefaults(JSON.parse(saved));
+      } catch {}
+    }
+  }, [sensesSettingsOpen]);
+
+  const handleSaveSensesDefaults = () => {
+    localStorage.setItem('senses_defaults', JSON.stringify(sensesDefaults));
+    setSensesSettingsOpen(false);
+    toast.success('五感体验默认选项已保存');
+  };
 
   if (!user) return null;
   return (
@@ -502,7 +632,12 @@ function MobileUserIcon() {
             <div><span className="text-xs text-muted-foreground">名称：</span><span className="text-sm">{user.name}</span></div>
             <div><span className="text-xs text-muted-foreground">角色：</span><Badge variant={isAdmin ? 'default' : 'secondary'} className="text-xs">{isAdmin ? '管理账号' : '使用账号'}</Badge></div>
             <Separator />
-            {/* Admin: Settings button in mobile profile */}
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">五感体验默认选项</span>
+              <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={() => setSensesSettingsOpen(true)}>
+                <Settings className="h-3 w-3" /> 设置
+              </Button>
+            </div>
             {isAdmin && (
               <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setSettingsOpen(true), 100); }}>
                 <Settings className="h-4 w-4" /> 品类与产品设置
@@ -516,6 +651,52 @@ function MobileUserIcon() {
         </DialogContent>
       </Dialog>
       <CategoryProductSettings open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <Dialog open={sensesSettingsOpen} onOpenChange={setSensesSettingsOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>五感体验默认选项</DialogTitle>
+            <DialogDescription>设置新增问题点时的默认筛选选项</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs">产品使用阶段</Label>
+              <Select value={sensesDefaults.test_phase} onValueChange={(v) => setSensesDefaults({ ...sensesDefaults, test_phase: v, experience_flow: v !== sensesDefaults.test_phase ? '' : sensesDefaults.experience_flow })}>
+                <SelectTrigger><SelectValue placeholder="选择默认阶段（可选）" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="clear">不设置</SelectItem>
+                  {sensesPhaseOptions.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            {sensesDefaults.test_phase && sensesDefaults.test_phase !== 'clear' && (
+              <div className="space-y-1.5">
+                <Label className="text-xs">体验流程</Label>
+                <Select value={sensesDefaults.experience_flow} onValueChange={(v) => setSensesDefaults({ ...sensesDefaults, experience_flow: v })}>
+                  <SelectTrigger><SelectValue placeholder="选择默认流程（可选）" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="clear">不设置</SelectItem>
+                    {(sensesFlowMap[sensesDefaults.test_phase] || []).map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <Label className="text-xs">感官维度</Label>
+              <Select value={sensesDefaults.sensory_dimension} onValueChange={(v) => setSensesDefaults({ ...sensesDefaults, sensory_dimension: v })}>
+                <SelectTrigger><SelectValue placeholder="选择默认维度（可选）" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="clear">不设置</SelectItem>
+                  {sensesDimensionOptions.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex gap-2">
+              <Button className="flex-1" onClick={handleSaveSensesDefaults}>保存</Button>
+              <Button variant="outline" className="flex-1" onClick={() => { setSensesDefaults({ test_phase: '', experience_flow: '', sensory_dimension: '' }); localStorage.removeItem('senses_defaults'); toast.success('已清除默认选项'); setSensesSettingsOpen(false); }}>清除设置</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

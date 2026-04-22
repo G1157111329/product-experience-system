@@ -5,6 +5,18 @@ export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
   const { searchParams } = new URL(request.url);
   const task_id = searchParams.get('task_id');
+  const keyword = searchParams.get('keyword');
+  const library = searchParams.get('library');
+
+  // Library search: search across all tasks (for recipe referencing)
+  if (library) {
+    let query = client.from('recipes').select('*, recipe_steps(*)').order('created_at', { ascending: true });
+    if (keyword) query = query.ilike('name', `%${keyword}%`);
+    const { data, error } = await query.limit(50);
+    if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
+    return NextResponse.json({ code: 0, message: 'success', data });
+  }
+
   if (!task_id) return NextResponse.json({ code: 1, message: '缺少 task_id' }, { status: 400 });
 
   const { data, error } = await client
