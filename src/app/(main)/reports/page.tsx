@@ -332,8 +332,8 @@ export default function ReportsPage() {
       </Dialog>
 
       {/* Share dialog */}
-      <Dialog open={!!shareReportId} onOpenChange={() => setShareReportId(null)}>
-        <DialogContent className="max-w-md">
+      <Dialog open={!!shareReportId} onOpenChange={() => { setShareReportId(null); setShareLink(null); }}>
+        <DialogContent className="max-w-md w-[calc(100vw-2rem)] max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>分享报告</DialogTitle>
             <DialogDescription>生成分享链接，其他人可以通过链接查看报告</DialogDescription>
@@ -342,15 +342,15 @@ export default function ReportsPage() {
             {/* Duration selection */}
             <div className="space-y-2">
               <label className="text-sm font-medium">链接有效期</label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="flex gap-2">
                 {([
                   { value: '7d' as const, label: '7天', icon: Clock },
                   { value: '30d' as const, label: '30天', icon: Clock },
                   { value: 'permanent' as const, label: '永久', icon: Infinity },
                 ]).map(opt => (
                   <Button key={opt.value} type="button" variant={shareDuration === opt.value ? 'default' : 'outline'}
-                    size="sm" className="gap-1" onClick={() => setShareDuration(opt.value)}>
-                    <opt.icon className="h-3.5 w-3.5" /> {opt.label}
+                    size="sm" className="flex-1 gap-1 min-w-0" onClick={() => setShareDuration(opt.value)}>
+                    <opt.icon className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">{opt.label}</span>
                   </Button>
                 ))}
               </div>
@@ -368,13 +368,15 @@ export default function ReportsPage() {
             {shareLink && (
               <div className="space-y-2">
                 <label className="text-sm font-medium">分享链接</label>
-                <div className="flex gap-2">
-                  <input readOnly value={shareLink} className="flex-1 text-xs bg-muted rounded-md px-3 py-2 border border-border truncate" onClick={(e) => (e.target as HTMLInputElement).select()} />
-                  <Button type="button" size="sm" variant="outline" onClick={() => handleCopyLink(shareLink)}>
+                <div className="flex gap-2 items-center">
+                  <div className="flex-1 min-w-0 text-xs bg-muted rounded-md px-3 py-2 border border-border truncate select-all cursor-text" onClick={(e) => { const sel = window.getSelection(); if (sel) sel.selectAllChildren(e.currentTarget); }}>
+                    {shareLink}
+                  </div>
+                  <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => handleCopyLink(shareLink)}>
                     <Copy className="h-3.5 w-3.5" />
                   </Button>
                 </div>
-                <p className="text-[10px] text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   {shareDuration === 'permanent' ? '此链接永久有效' : `此链接${shareDuration === '7d' ? '7天' : '30天'}内有效`}
                 </p>
               </div>
@@ -388,9 +390,9 @@ export default function ReportsPage() {
                   {shareLinks.map(s => {
                     const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/reports/share/${s.share_token}`;
                     return (
-                      <div key={s.id} className="flex items-center gap-2 p-2 bg-muted/50 rounded-md text-xs">
+                      <div key={s.id} className="flex items-start gap-1.5 p-2 bg-muted/50 rounded-md text-xs">
                         <div className="flex-1 min-w-0">
-                          <div className="truncate text-muted-foreground">{link}</div>
+                          <div className="truncate text-muted-foreground break-all">{link}</div>
                           <div className="flex gap-2 mt-0.5">
                             {s.is_expired ? (
                               <span className="text-destructive">已过期</span>
@@ -401,14 +403,16 @@ export default function ReportsPage() {
                             )}
                           </div>
                         </div>
-                        {!s.is_expired && (
-                          <Button type="button" variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => handleCopyLink(link)}>
-                            <Copy className="h-3 w-3" />
+                        <div className="flex shrink-0 gap-0.5">
+                          {!s.is_expired && (
+                            <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleCopyLink(link)}>
+                              <Copy className="h-3 w-3" />
+                            </Button>
+                          )}
+                          <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => handleRevokeShare(s.id)}>
+                            <X className="h-3 w-3" />
                           </Button>
-                        )}
-                        <Button type="button" variant="ghost" size="icon" className="h-6 w-6 shrink-0 text-destructive" onClick={() => handleRevokeShare(s.id)}>
-                          <X className="h-3 w-3" />
-                        </Button>
+                        </div>
                       </div>
                     );
                   })}
