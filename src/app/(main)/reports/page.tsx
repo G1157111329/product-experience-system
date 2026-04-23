@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { FileText, Printer, BarChart3, Users, User as UserIcon, ChevronRight, Trash2, Loader2, Share2, Copy, Clock, Infinity, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { FileText, Printer, BarChart3, Users, User as UserIcon, ChevronRight, Trash2, Loader2, Share2, Copy, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -333,90 +334,108 @@ export default function ReportsPage() {
 
       {/* Share dialog */}
       <Dialog open={!!shareReportId} onOpenChange={() => { setShareReportId(null); setShareLink(null); }}>
-        <DialogContent className="max-w-md w-[calc(100vw-2rem)] max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>分享报告</DialogTitle>
-            <DialogDescription>生成分享链接，其他人可以通过链接查看报告</DialogDescription>
+        <DialogContent className="max-w-sm w-[calc(100vw-2rem)] p-0 gap-0">
+          <DialogHeader className="px-5 pt-5 pb-2">
+            <DialogTitle className="text-base">分享报告</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            {/* Duration selection */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">链接有效期</label>
-              <div className="flex gap-2">
-                {([
-                  { value: '7d' as const, label: '7天', icon: Clock },
-                  { value: '30d' as const, label: '30天', icon: Clock },
-                  { value: 'permanent' as const, label: '永久', icon: Infinity },
-                ]).map(opt => (
-                  <Button key={opt.value} type="button" variant={shareDuration === opt.value ? 'default' : 'outline'}
-                    size="sm" className="flex-1 gap-1 min-w-0" onClick={() => setShareDuration(opt.value)}>
-                    <opt.icon className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">{opt.label}</span>
-                  </Button>
-                ))}
-              </div>
-            </div>
-
-            {/* Create button */}
-            {!shareLink && (
-              <Button type="button" className="w-full" onClick={handleCreateShare} disabled={shareCreating}>
-                {shareCreating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Share2 className="h-4 w-4 mr-2" />}
-                生成分享链接
-              </Button>
-            )}
-
-            {/* Generated link */}
-            {shareLink && (
-              <div className="space-y-2">
-                <label className="text-sm font-medium">分享链接</label>
-                <div className="flex gap-2 items-center">
-                  <div className="flex-1 min-w-0 text-xs bg-muted rounded-md px-3 py-2 border border-border truncate select-all cursor-text" onClick={(e) => { const sel = window.getSelection(); if (sel) sel.selectAllChildren(e.currentTarget); }}>
-                    {shareLink}
-                  </div>
-                  <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => handleCopyLink(shareLink)}>
-                    <Copy className="h-3.5 w-3.5" />
-                  </Button>
+          <div className="px-5 pb-5">
+            {/* Step 1: Not yet generated */}
+            {!shareLink ? (
+              <div className="space-y-3">
+                <p className="text-xs text-muted-foreground">选择有效期并生成分享链接</p>
+                <div className="flex gap-2">
+                  {([
+                    { value: '7d' as const, label: '7天' },
+                    { value: '30d' as const, label: '30天' },
+                    { value: 'permanent' as const, label: '永久' },
+                  ]).map(opt => (
+                    <Button key={opt.value} type="button" variant={shareDuration === opt.value ? 'default' : 'outline'}
+                      size="sm" className="flex-1 h-9 text-sm" onClick={() => setShareDuration(opt.value)}>
+                      {opt.label}
+                    </Button>
+                  ))}
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {shareDuration === 'permanent' ? '此链接永久有效' : `此链接${shareDuration === '7d' ? '7天' : '30天'}内有效`}
-                </p>
-              </div>
-            )}
-
-            {/* Existing share links */}
-            {shareLinks.length > 0 && (
-              <div className="space-y-2">
-                <label className="text-sm font-medium">已创建的链接</label>
-                <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                  {shareLinks.map(s => {
-                    const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/reports/share/${s.share_token}`;
-                    return (
-                      <div key={s.id} className="flex items-start gap-1.5 p-2 bg-muted/50 rounded-md text-xs">
-                        <div className="flex-1 min-w-0">
-                          <div className="truncate text-muted-foreground break-all">{link}</div>
-                          <div className="flex gap-2 mt-0.5">
-                            {s.is_expired ? (
-                              <span className="text-destructive">已过期</span>
-                            ) : s.expires_at ? (
-                              <span className="text-muted-foreground">有效期至 {new Date(s.expires_at).toLocaleDateString('zh-CN')}</span>
-                            ) : (
-                              <span className="text-muted-foreground">永久有效</span>
+                <Button type="button" className="w-full h-10" onClick={handleCreateShare} disabled={shareCreating}>
+                  {shareCreating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Share2 className="h-4 w-4 mr-2" />}
+                  生成分享链接
+                </Button>
+                {/* Existing links - compact */}
+                {shareLinks.length > 0 && (
+                  <div className="pt-1">
+                    <p className="text-xs text-muted-foreground mb-1.5">已有 {shareLinks.length} 个分享链接</p>
+                    <div className="space-y-1">
+                      {shareLinks.slice(0, 3).map(s => (
+                        <div key={s.id} className="flex items-center gap-2 text-xs py-1">
+                          <span className={cn('shrink-0', s.is_expired ? 'text-destructive' : 'text-emerald-600')}>
+                            {s.is_expired ? '已过期' : s.expires_at ? `${new Date(s.expires_at).toLocaleDateString('zh-CN')}前` : '永久有效'}
+                          </span>
+                          <span className="flex-1 min-w-0 truncate text-muted-foreground">
+                            {`${typeof window !== 'undefined' ? window.location.origin : ''}/reports/share/${s.share_token}`}
+                          </span>
+                          <div className="flex shrink-0 gap-0.5">
+                            {!s.is_expired && (
+                              <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleCopyLink(`${typeof window !== 'undefined' ? window.location.origin : ''}/reports/share/${s.share_token}`)}>
+                                <Copy className="h-3 w-3" />
+                              </Button>
                             )}
+                            <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => handleRevokeShare(s.id)}>
+                              <X className="h-3 w-3" />
+                            </Button>
                           </div>
                         </div>
-                        <div className="flex shrink-0 gap-0.5">
-                          {!s.is_expired && (
-                            <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleCopyLink(link)}>
-                              <Copy className="h-3 w-3" />
-                            </Button>
-                          )}
-                          <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => handleRevokeShare(s.id)}>
-                            <X className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })}
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Step 2: Link generated */
+              <div className="space-y-3">
+                <div className="bg-muted rounded-lg p-3 space-y-2">
+                  <p className="text-xs text-muted-foreground">分享链接已生成</p>
+                  <div className="bg-background rounded-md px-3 py-2 text-xs break-all select-all cursor-text border" onClick={(e) => { const sel = window.getSelection(); if (sel) sel.selectAllChildren(e.currentTarget); }}>
+                    {shareLink}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="button" size="sm" className="flex-1 h-9" onClick={() => handleCopyLink(shareLink)}>
+                      <Copy className="h-3.5 w-3.5 mr-1.5" /> 复制链接
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" className="h-9" onClick={() => { setShareLink(null); }}>
+                      再生成一个
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {shareDuration === 'permanent' ? '此链接永久有效' : `此链接${shareDuration === '7d' ? '7天' : '30天'}内有效`}
+                  </p>
                 </div>
+                {/* Existing links */}
+                {shareLinks.length > 0 && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1.5">全部链接 ({shareLinks.length})</p>
+                    <div className="space-y-1">
+                      {shareLinks.map(s => (
+                        <div key={s.id} className="flex items-center gap-2 text-xs py-1">
+                          <span className={cn('shrink-0', s.is_expired ? 'text-destructive' : 'text-emerald-600')}>
+                            {s.is_expired ? '已过期' : s.expires_at ? `${new Date(s.expires_at).toLocaleDateString('zh-CN')}前` : '永久'}
+                          </span>
+                          <span className="flex-1 min-w-0 truncate text-muted-foreground">
+                            {`${typeof window !== 'undefined' ? window.location.origin : ''}/reports/share/${s.share_token}`}
+                          </span>
+                          <div className="flex shrink-0 gap-0.5">
+                            {!s.is_expired && (
+                              <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleCopyLink(`${typeof window !== 'undefined' ? window.location.origin : ''}/reports/share/${s.share_token}`)}>
+                                <Copy className="h-3 w-3" />
+                              </Button>
+                            )}
+                            <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => handleRevokeShare(s.id)}>
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
