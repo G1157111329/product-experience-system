@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
 
   // Library search: search across all tasks (for recipe referencing)
   if (library) {
-    let query = client.from('recipes').select('*, recipe_steps(*)').order('created_at', { ascending: true });
+    let query = client.from('recipes').select('*, recipe_steps(*)').order('sort_order', { ascending: true });
     if (keyword) query = query.ilike('name', `%${keyword}%`);
     const { data, error } = await query.limit(50);
     if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     .from('recipes')
     .select('*, recipe_steps(*)')
     .eq('task_id', task_id)
-    .order('created_at', { ascending: true });
+    .order('sort_order', { ascending: true });
 
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
   return NextResponse.json({ code: 0, message: 'success', data });
@@ -42,4 +42,19 @@ export async function POST(request: NextRequest) {
 
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
   return NextResponse.json({ code: 0, message: '创建成功', data });
+}
+
+export async function PUT(request: NextRequest) {
+  const client = getSupabaseClient();
+  const body = await request.json();
+
+  // Batch update sort order: { recipes: [{ id, sort_order }] }
+  if (body.recipes && Array.isArray(body.recipes)) {
+    for (const item of body.recipes) {
+      await client.from('recipes').update({ sort_order: item.sort_order }).eq('id', item.id);
+    }
+    return NextResponse.json({ code: 0, message: '排序已更新' });
+  }
+
+  return NextResponse.json({ code: 1, message: '参数不完整' }, { status: 400 });
 }

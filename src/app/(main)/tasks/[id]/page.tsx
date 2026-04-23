@@ -1751,6 +1751,9 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
   // Drag state for step reorder
   const [dragStepIdx, setDragStepIdx] = useState<number | null>(null);
   const [dragStepOverIdx, setDragStepOverIdx] = useState<number | null>(null);
+  // Drag state for recipe reorder
+  const [dragRecipeIdx, setDragRecipeIdx] = useState<number | null>(null);
+  const [dragRecipeOverIdx, setDragRecipeOverIdx] = useState<number | null>(null);
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
 
   // ── Recipe library search (Feature 7) ──
@@ -2094,11 +2097,40 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
         </CardContent></Card>
       ) : (
         <div className="space-y-2">
-          {recipes.map((recipe) => (
-            <Card key={recipe.id} className="cursor-pointer hover:bg-muted/30 transition-colors"
-              onClick={() => setSelectedRecipe(selectedRecipe?.id === recipe.id ? null : recipe)}>
+          <span className="text-[10px] text-muted-foreground">拖拽食谱可重新排序</span>
+          {recipes.map((recipe, recipeIdx) => (
+            <Card key={recipe.id}
+              className={cn(
+                'cursor-pointer hover:bg-muted/30 transition-all',
+                dragRecipeIdx === recipeIdx && 'opacity-50 scale-95',
+                dragRecipeOverIdx === recipeIdx && 'border-primary border-2',
+              )}
+              onClick={() => setSelectedRecipe(selectedRecipe?.id === recipe.id ? null : recipe)}
+              onDragOver={(e) => { e.preventDefault(); setDragRecipeOverIdx(recipeIdx); }}
+              onDragLeave={() => setDragRecipeOverIdx(null)}
+            >
               <CardContent className="p-4">
                 <div className="flex items-center gap-3">
+                  <div className="cursor-grab active:cursor-grabbing shrink-0"
+                    draggable
+                    onDragStart={() => setDragRecipeIdx(recipeIdx)}
+                    onDragEnd={async () => {
+                      if (dragRecipeIdx !== null && dragRecipeOverIdx !== null && dragRecipeIdx !== dragRecipeOverIdx) {
+                        const newRecipes = [...recipes];
+                        const [moved] = newRecipes.splice(dragRecipeIdx, 1);
+                        newRecipes.splice(dragRecipeOverIdx, 0, moved);
+                        setRecipes(newRecipes);
+                        await fetch('/api/recipes', {
+                          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ recipes: newRecipes.map((r, i) => ({ id: r.id, sort_order: i })) }),
+                        });
+                      }
+                      setDragRecipeIdx(null);
+                      setDragRecipeOverIdx(null);
+                    }}
+                  >
+                    <GripVertical className="h-4 w-4 text-muted-foreground" />
+                  </div>
                   <Badge variant="secondary" className="text-[10px] shrink-0">{recipe.recipe_type}</Badge>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{recipe.name}</p>

@@ -19,6 +19,7 @@ export const standards = pgTable(
     version: varchar("version", { length: 20 }).default("V1.0"),
     is_active: boolean("is_active").default(true).notNull(),
     description: text("description"),
+    sort_order: integer("sort_order").default(0),
     created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
