@@ -434,12 +434,19 @@ function MaterialsTab({ taskId }: { taskId: string }) {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('task_id', taskId);
+      toast.loading(`正在上传 ${file.name}...`, { id: `upload-${file.name}` });
       try {
-        const res = await fetch('/api/materials/upload', { method: 'POST', body: formData });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 min timeout for large files
+        const res = await fetch('/api/materials/upload', { method: 'POST', body: formData, signal: controller.signal });
+        clearTimeout(timeoutId);
         const data = await res.json();
-        if (data.code === 0) toast.success('上传成功');
-        else toast.error(data.message);
-      } catch { toast.error('上传失败'); }
+        if (data.code === 0) toast.success(`${file.name} 上传成功`, { id: `upload-${file.name}` });
+        else toast.error(data.message, { id: `upload-${file.name}` });
+      } catch (err) {
+        const msg = err instanceof DOMException && err.name === 'AbortError' ? '上传超时，请重试' : '上传失败';
+        toast.error(msg, { id: `upload-${file.name}` });
+      }
     }
     fetchMaterials();
   };
@@ -478,8 +485,8 @@ function MaterialsTab({ taskId }: { taskId: string }) {
           <Video className="h-4 w-4 mr-1.5" /> 上传视频
         </Button>
       </div>
-      <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
-      <input ref={videoInputRef} type="file" accept="video/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
+      <input ref={fileInputRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
+      <input ref={videoInputRef} type="file" accept="video/mp4,video/webm,video/quicktime,video/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
 
       {loading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{[1,2,3].map(i => <div key={i} className="aspect-square bg-muted animate-pulse rounded-lg" />)}</div>

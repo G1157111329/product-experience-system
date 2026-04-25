@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
 
   // Library search: search across all tasks (for recipe referencing)
   if (library) {
-    let query = client.from('recipes').select('*, recipe_steps(*)').order('sort_order', { ascending: true });
+    let query = client.from('recipes').select('*, recipe_steps(*)').order('sort_order', { ascending: true }).order('step_number', { referencedTable: 'recipe_steps', ascending: true });
     if (keyword) query = query.ilike('name', `%${keyword}%`);
     const { data, error } = await query.limit(50);
     if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
@@ -23,7 +23,8 @@ export async function GET(request: NextRequest) {
     .from('recipes')
     .select('*, recipe_steps(*)')
     .eq('task_id', task_id)
-    .order('sort_order', { ascending: true });
+    .order('sort_order', { ascending: true })
+    .order('step_number', { referencedTable: 'recipe_steps', ascending: true });
 
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
   return NextResponse.json({ code: 0, message: 'success', data });

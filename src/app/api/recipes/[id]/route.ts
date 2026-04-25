@@ -7,6 +7,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { data, error } = await client
     .from('recipes')
     .select('*, recipe_steps(*)')
+    .order('step_number', { referencedTable: 'recipe_steps', ascending: true })
     .eq('id', id)
     .single();
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 404 });

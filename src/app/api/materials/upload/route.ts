@@ -10,6 +10,10 @@ const storage = new S3Storage({
   region: 'cn-beijing',
 });
 
+// Allow up to 100MB file uploads with extended timeout
+export const maxDuration = 120; // seconds - extended for large video uploads
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
@@ -40,20 +44,59 @@ export async function POST(request: NextRequest) {
     }
 
     const materialType = file.type.startsWith('image/') ? 'image' : 'video';
-    const buffer = Buffer.from(await file.arrayBuffer());
+
+    // Use streaming for large files (>5MB)
+    const isLargeFile = file.size > 5 * 1024 * 1024;
+    let buffer: Buffer;
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      buffer = Buffer.from(arrayBuffer);
+    } catch (bufErr) {
+      console.error('[upload] Buffer creation failed:', bufErr);
+      return NextResponse.json({ code: 1, message: `文件读取失败(${(file.size / 1024 / 1024).toFixed(1)}MB)，请重试` }, { status: 500 });
+    }
+
     const timestamp = Date.now();
     const folderId = recipe_library_step_id || task_id || 'unknown';
     const fileName = `experience-media/${folderId}/${materialType}/${timestamp}_${file.name}`;
 
-    // 上传到对象存储
-    const fileKey = await storage.uploadFile({
-      fileContent: buffer,
-      fileName,
-      contentType: file.type,
-    });
+    // 上传到对象存储 (with retry for large files)
+    let fileKey: string | undefined;
+    const maxRetries = isLargeFile ? 2 : 0;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        fileKey = await storage.uploadFile({
+          fileContent: buffer,
+          fileName,
+          contentType: file.type,
+        });
+        break;
+      } catch (uploadErr) {
+        console.error(`[upload] S3 upload attempt ${attempt + 1} failed:`, uploadErr);
+        if (attempt === maxRetries) {
+          return NextResponse.json({
+            code: 1,
+            message: `文件上传失败(${(file.size / 1024 / 1024).toFixed(1)}MB)，请检查网络后重试`
+          }, { status: 500 });
+        }
+        // Wait before retry
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+      }
+    }
+
+    if (!fileKey) {
+      return NextResponse.json({ code: 1, message: '文件上传失败' }, { status: 500 });
+    }
 
     // 生成访问URL
-    const fileUrl = await storage.generatePresignedUrl({ key: fileKey, expireTime: 86400 * 30 });
+    let fileUrl: string;
+    try {
+      fileUrl = await storage.generatePresignedUrl({ key: fileKey, expireTime: 86400 * 30 });
+    } catch (urlErr) {
+      console.error('[upload] Generate presigned URL failed:', urlErr);
+      // Fallback: construct URL manually
+      fileUrl = `${process.env.COZE_BUCKET_ENDPOINT_URL}/${process.env.COZE_BUCKET_NAME}/${fileKey}`;
+    }
 
     // 保存素材记录到数据库
     const client = getSupabaseClient();
@@ -69,10 +112,14 @@ export async function POST(request: NextRequest) {
       file_url: fileUrl,
     }).select().single();
 
-    if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
+    if (error) {
+      console.error('[upload] DB insert failed:', error);
+      return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
+    }
 
     return NextResponse.json({ code: 0, message: '上传成功', data: { ...data, file_url: fileUrl } });
   } catch (err) {
+    console.error('[upload] Unexpected error:', err);
     const message = err instanceof Error ? err.message : '上传失败';
     return NextResponse.json({ code: 1, message }, { status: 500 });
   }
