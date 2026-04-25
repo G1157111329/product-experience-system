@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 interface Material {
   id: string; material_type: string; file_name: string; file_url: string;
   file_size: number; record_id: string | null; recipe_step_id: string | null;
+  recipe_id: string | null;
 }
 
 interface MaterialPickerProps {
@@ -20,13 +21,14 @@ interface MaterialPickerProps {
   onSelect?: (material: Material) => void;
   recordId?: string;
   recipeStepId?: string;
+  recipeId?: string;
   // Legacy API (used by tasks/[id])
   selectedIds?: string[];
   initialMaterials?: Material[];
   onSelectionChange?: (ids: string[], materials: Material[]) => void;
 }
 
-export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onSelect, recordId, recipeStepId, selectedIds, initialMaterials, onSelectionChange }: MaterialPickerProps) {
+export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onSelect, recordId, recipeStepId, recipeId, selectedIds, initialMaterials, onSelectionChange }: MaterialPickerProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -79,7 +81,8 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
           list = list.filter(m => {
             if (recordId && m.record_id === recordId) return true;
             if (recipeStepId && m.recipe_step_id === recipeStepId) return true;
-            return !m.record_id && !m.recipe_step_id;
+            if (recipeId && m.recipe_id === recipeId) return true;
+            return !m.record_id && !m.recipe_step_id && !m.recipe_id;
           });
         }
         setMaterials(list);
@@ -113,6 +116,7 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
         formData.append('task_id', taskId);
         if (recordId) formData.append('record_id', recordId);
         if (recipeStepId) formData.append('recipe_step_id', recipeStepId);
+        if (recipeId) formData.append('recipe_id', recipeId);
         const res = await fetch('/api/materials/upload', { method: 'POST', body: formData });
         const data = await res.json();
         if (data.code !== 0) { toast.error(data.message); return; }

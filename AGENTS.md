@@ -13,7 +13,7 @@
 - **Styling**: Tailwind CSS 4
 - **Database**: Supabase (PostgreSQL)
 - **File Storage**: S3 兼容对象存储 (coze-coding-dev-sdk)
-- **AI/LLM**: doubao-seed-2-0-pro-260215 (标准导入解析), doubao-seed-2-0-lite (其他场景)
+- **AI/LLM**: doubao-seed-2-0-pro-260215 (标准导入解析), doubao-seed-1-6-vision-250815 (食谱效果评价, 可配置), doubao-seed-2-0-lite (其他场景)
 - **PDF/Excel解析**: coze-coding-dev-sdk FetchClient + xlsx
 - **Theme**: Teal 主色 / Business 字体 / Cool 阴影
 
@@ -52,7 +52,8 @@
 │   │   │   ├── reports/         # 报告生成/CRUD
 │   │   │   │   ├── export-pdf/  # PDF导出API
 │   │   │   │   └── share/       # 报告分享API（创建/验证/列表/撤销）
-│   │   │   ├── recipes/         # 食谱/功能 CRUD
+│   │   │   ├── recipes/         # 食谱/功能 CRUD（含effect_description/effect_score效果评价字段）
+│   │   │   │   └── [id]/ai-evaluate/ # AI效果评价（基于描述+图片生成评分）
 │   │   │   ├── recipe-steps/    # 食谱步骤 CRUD
 │   │   │   ├── recipe-library/  # 食谱库 CRUD（名称全局唯一，步骤级联删除）
 │   │   │   ├── recipe-library-steps/ # 食谱库步骤 CRUD（含批量排序）
@@ -60,7 +61,7 @@
 │   │   ├── layout.tsx           # 根布局（含 Toaster + AuthProvider + suppressHydrationWarning）
 │   │   └── page.tsx             # 首页重定向到 /dashboard
 │   ├── components/
-│   │   ├── navigation.tsx       # 导航组件（桌面侧栏 + 移动端底部/顶部 + RoleSwitcher）
+│   │   ├── navigation.tsx       # 导航组件（桌面侧栏 + 移动端底部/顶部 + RoleSwitcher + AiConfigSettings）
 │   │   ├── image-preview.tsx    # 共享图片预览组件
 │   │   ├── material-picker.tsx  # 素材选择器组件（引用/上传，支持initialMaterials预填充）
 │   │   └── ui/                  # Shadcn UI 组件库
@@ -85,14 +86,14 @@
 | `standard_items` | 标准检查项（含分类特定字段：experience_flow, touch_point, experience_standard, sub_check_dimension, check_standard, evaluation_prep, subjective_score, subjective_rating, reference_images） |
 | `experience_tasks` | 体验任务（含 created_by 用户隔离字段, project_type: ODM/OEM/竞品研究/自研/前期研究/改型降本优化/海外产品, project_phase: 手板研究/试制阶段/试产阶段/量产阶段） |
 | `check_records` | 检查记录（走查，含 standard_category, check_dimension, sub_check_dimension, check_standard, experience_flow, touch_point, experience_standard, check_tool, problem_level） |
-| `materials` | 素材（图片/视频，含 AI 预留字段，可关联record或recipe_step或recipe_library_step，task_id可选） |
+| `materials` | 素材（图片/视频，含 AI 预留字段，可关联record或recipe_step或recipe_library_step或recipe，task_id可选） |
 | `issues` | 问题整改（含 level: 一类/二类/三类, source, source_report_id, source_type: record_fail/recipe_problem, UNIQUE(title, source_type, task_id)） |
 | `report_templates` | 报告模板 |
 | `reports` | 报告（含 product_model 用于同型号合并） |
 | `report_shares` | 报告分享（share_token, expires_at, created_by，支持7天/30天/永久有效期） |
 | `recipe_library` | 食谱库（名称全局唯一约束，按品类-产品分类的全局食谱标准） |
 | `recipe_library_steps` | 食谱库步骤 |
-| `recipes` | 食谱/功能 |
+| `recipes` | 食谱/功能（含 effect_description 效果评价描述, effect_score AI评分） |
 | `recipe_steps` | 食谱步骤 |
 
 ## 标准分类体系
@@ -138,8 +139,8 @@
 | GET/PUT/DELETE | `/api/tasks/[id]` | 任务详情（含记录+问题）/更新/删除 |
 | GET/POST | `/api/records` | 检查记录列表/创建（含standard_category等新字段） |
 | PUT/DELETE | `/api/records/[id]` | 记录更新（含标准字段+检查结果+问题描述，更新时同步对应issue状态）/删除 |
-| POST | `/api/materials/upload` | 素材上传（文件大小100MB限制，仅图片/视频，支持task_id或recipe_library_step_id） |
-| PUT | `/api/materials` | 素材重命名/关联record_id/recipe_step_id |
+| POST | `/api/materials/upload` | 素材上传（文件大小100MB限制，仅图片/视频，支持task_id或recipe_library_step_id或recipe_id） |
+| PUT | `/api/materials` | 素材重命名/关联record_id/recipe_step_id/recipe_id |
 | GET/DELETE | `/api/materials` | 素材列表/删除 |
 | GET/POST | `/api/issues` | 问题列表/创建 |
 | GET/PUT/DELETE | `/api/issues/[id]` | 问题详情/更新/删除 |
@@ -150,8 +151,9 @@
 | GET | `/api/reports/share?token=xxx` | 验证分享令牌并获取报告（公开接口） |
 | GET | `/api/reports/share/list?report_id=xxx` | 获取报告的分享链接列表 |
 | DELETE | `/api/reports/share/list?id=xxx` | 撤销分享链接 |
-| GET/POST | `/api/recipes` | 食谱/功能列表/创建；GET 支持 library=1&keyword 跨任务搜索食谱库 |
-| GET/PUT/DELETE | `/api/recipes/[id]` | 食谱详情/更新/删除 |
+| GET/POST | `/api/recipes` | 食谱/功能列表/创建；GET 支持 library=1&keyword 跨任务搜索食谱库；含effect_description/effect_score |
+| GET/PUT/DELETE | `/api/recipes/[id]` | 食谱详情/更新/删除（含effect_description/effect_score/effect_material_ids） |
+| POST | `/api/recipes/[id]/ai-evaluate` | AI效果评价（基于描述+图片生成评分，使用内置或自定义AI模型） |
 | GET/POST | `/api/recipe-steps` | 步骤列表/创建；PUT 批量更新步骤排序（steps 数组） |
 | PUT/DELETE | `/api/recipe-steps/[id]` | 步骤更新/删除 |
 | GET | `/api/dashboard` | 仪表盘统计数据（支持created_by按用户过滤） |
@@ -162,7 +164,7 @@
 | DELETE | `/api/recipe-library/[id]` | 删除食谱库项（步骤级联删除，素材关联清理） |
 | GET/POST | `/api/recipe-library-steps` | 食谱库步骤列表/创建；PUT 批量更新步骤排序 |
 | PUT/DELETE | `/api/recipe-library-steps/[id]` | 食谱库步骤更新/删除（含素材关联清理） |
-| GET/PUT | `/api/settings` | 平台设置读取/更新（管理员，key-value JSONB） |
+| GET/PUT | `/api/settings` | 平台设置读取/更新（管理员，key-value JSONB；ai_config含AI模型配置） |
 | POST | `/api/tasks/[id]/transfer` | 转移体验计划到其他用户（管理员，含全部资料） |
 
 ## 构建与运行
@@ -283,6 +285,10 @@ coze start
 45. **MaterialPicker 增强**: 新增 initialMaterials prop 支持预填充已有素材缩略图；支持 recipe_library_step_id 参数
 46. **报告时间格式化**: 报告中心 created_at/updated_at 以北京时间（UTC+8）格式显示，隐藏 created_by 字段
 47. **页面内边距统一**: 工作台/报告中心/问题管理等主页面统一使用 p-4 lg:p-6 内边距，与体验计划/标准管理/数据分析页面一致
+48. **食谱效果评价**: 每个食谱/功能新增"效果/出品效果评价"板块（与步骤同等级），包含效果描述输入框+附件素材框+AI总结评分；AI通过视觉评估食物状态和功能效果，按美食评委评分制（满分10分）输出分数
+49. **AI模型配置**: 管理员可在个人设置中配置AI模型和API信息，支持内置模型（doubao-seed-vision系列等）和自定义API（OpenAI兼容格式）；配置存储在platform_settings(ai_config)，包含provider/model/temperature/custom_api_url/custom_api_key
+50. **食谱效果素材关联**: materials表新增recipe_id字段，可关联食谱效果评价的附件素材；MaterialPicker组件支持recipe_id参数
+51. **AI效果评价API**: POST /api/recipes/[id]/ai-evaluate 端点，接收食谱描述+图片素材，调用AI模型生成评价内容和评分，评分自动保存到recipes.effect_score
 
 ## 代码风格
 

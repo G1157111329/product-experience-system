@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, ArrowRightLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Pencil, Trash2, Check, Link2, X, Play, GripVertical } from 'lucide-react';
+import { ArrowLeft, ArrowRightLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Pencil, Trash2, Check, Link2, X, Play, GripVertical, Sparkles, Save, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -56,12 +56,14 @@ interface Issue {
 
 interface Material {
   id: string; material_type: string; file_name: string; file_url: string; file_size: number;
-  record_id: string | null; recipe_step_id: string | null;
+  record_id: string | null; recipe_step_id: string | null; recipe_id: string | null;
 }
 
 interface Recipe {
   id: string; name: string; ingredients: string | null; recipe_type: string;
   problem_count: number; recipe_steps: RecipeStep[];
+  effect_description?: string | null; effect_score?: string | null;
+  effect_materials?: Material[];
 }
 
 interface ProblemPoint {
@@ -1763,6 +1765,13 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
   const [dragRecipeOverIdx, setDragRecipeOverIdx] = useState<number | null>(null);
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
 
+  // ── Effect evaluation states ──
+  const [effectDesc, setEffectDesc] = useState<Record<string, string>>({});
+  const [effectMaterialIds, setEffectMaterialIds] = useState<Record<string, string[]>>({});
+  const [effectSaving, setEffectSaving] = useState<Record<string, boolean>>({});
+  const [aiEvaluating, setAiEvaluating] = useState<Record<string, boolean>>({});
+  const [aiResult, setAiResult] = useState<Record<string, { content: string; score: string }>>({});
+
   // ── Recipe library search (Feature 7) ──
   const [recipeSearch, setRecipeSearch] = useState('');
   const [recipeSearchResults, setRecipeSearchResults] = useState<RecipeLibRef[]>([]);
@@ -1793,7 +1802,10 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
               return { ...step, materials: matData.data || [] };
             })
           );
-          return { ...recipe, recipe_steps: stepsWithMats };
+          // Fetch effect materials
+          const effectMatRes = await fetch(`/api/materials?recipe_id=${recipe.id}`);
+          const effectMatData = await effectMatRes.json();
+          return { ...recipe, recipe_steps: stepsWithMats, effect_materials: effectMatData.data || [] };
         })
       );
       setRecipes(enriched);
@@ -2090,6 +2102,51 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
     }
   };
 
+  // ── Save effect evaluation ──
+  const handleSaveEffect = async (recipe: Recipe) => {
+    setEffectSaving(prev => ({ ...prev, [recipe.id]: true }));
+    try {
+      const desc = effectDesc[recipe.id] ?? recipe.effect_description ?? '';
+      const matIds = effectMaterialIds[recipe.id] ?? (recipe.effect_materials || []).map(m => m.id);
+      const res = await fetch(`/api/recipes/${recipe.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: recipe.name, ingredients: recipe.ingredients,
+          recipe_type: recipe.recipe_type, problem_count: recipe.problem_count,
+          effect_description: desc,
+          effect_material_ids: matIds,
+        }),
+      });
+      const data = await res.json();
+      if (data.code === 0) {
+        fetchRecipes();
+        toast.success('效果评价已保存');
+      } else toast.error(data.message);
+    } finally {
+      setEffectSaving(prev => ({ ...prev, [recipe.id]: false }));
+    }
+  };
+
+  // ── AI evaluate effect ──
+  const handleAiEvaluate = async (recipe: Recipe) => {
+    // Save first
+    await handleSaveEffect(recipe);
+    setAiEvaluating(prev => ({ ...prev, [recipe.id]: true }));
+    try {
+      const res = await fetch(`/api/recipes/${recipe.id}/ai-evaluate`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (data.code === 0) {
+        setAiResult(prev => ({ ...prev, [recipe.id]: data.data }));
+        fetchRecipes();
+        toast.success(`AI评分完成：${data.data.score}分`);
+      } else toast.error(data.message);
+    } finally {
+      setAiEvaluating(prev => ({ ...prev, [recipe.id]: false }));
+    }
+  };
+
   return (
     <div className="space-y-4">
       <PreviewComponent />
@@ -2254,6 +2311,91 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                     onClick={() => { setSelectedRecipe(recipe); setAddStepDialogOpen(true); }}>
                     <Plus className="h-3.5 w-3.5 mr-1" /> 新增步骤
                   </Button>
+
+                  {/* Effect Evaluation Section */}
+                  <div className="mt-3 p-3 rounded-lg border border-primary/20 bg-primary/5 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Star className="h-4 w-4 text-primary" />
+                      <span className="text-sm font-medium">效果/出品效果评价</span>
+                      {recipe.effect_score && (
+                        <Badge className="text-[10px] bg-primary text-primary-foreground ml-auto">
+                          {recipe.effect_score}分
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">评价描述</Label>
+                      <Textarea
+                        placeholder="描述该食谱/功能的效果和出品表现..."
+                        value={effectDesc[recipe.id] ?? recipe.effect_description ?? ''}
+                        onChange={(e) => setEffectDesc(prev => ({ ...prev, [recipe.id]: e.target.value }))}
+                        rows={3}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">附件素材</Label>
+                      <p className="text-[11px] text-muted-foreground">上传效果图片或视频，AI将结合文字和图片进行评价</p>
+                      <MaterialPicker
+                        taskId={taskId}
+                        selectedIds={effectMaterialIds[recipe.id] ?? (recipe.effect_materials || []).map(m => m.id)}
+                        initialMaterials={recipe.effect_materials || []}
+                        onSelectionChange={(ids) => {
+                          setEffectMaterialIds(prev => ({ ...prev, [recipe.id]: ids }));
+                        }}
+                      />
+                    </div>
+                    {/* Existing effect materials preview */}
+                    {recipe.effect_materials && recipe.effect_materials.length > 0 && !effectMaterialIds[recipe.id] && (
+                      <div className="flex gap-1.5 flex-wrap">
+                        {recipe.effect_materials.map((mat) => (
+                          <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border cursor-pointer"
+                            onClick={() => open(mat.file_url)}>
+                            {mat.material_type === 'image' ? (
+                              <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center bg-muted relative">
+                                <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
+                                <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                                  <Play className="h-4 w-4 text-white fill-white" />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* AI result display */}
+                    {(aiResult[recipe.id] || recipe.effect_score) && (
+                      <div className="p-2.5 rounded-lg bg-muted/50 border border-border space-y-1.5">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="h-3.5 w-3.5 text-primary" />
+                          <span className="text-xs font-medium">AI评价结果</span>
+                          <Badge className="text-[10px] bg-primary text-primary-foreground">
+                            {aiResult[recipe.id]?.score || recipe.effect_score}分/10分
+                          </Badge>
+                        </div>
+                        {aiResult[recipe.id]?.content && (
+                          <p className="text-xs text-muted-foreground whitespace-pre-wrap break-all">
+                            {aiResult[recipe.id].content}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" className="flex-1"
+                        onClick={() => handleSaveEffect(recipe)}
+                        disabled={effectSaving[recipe.id]}>
+                        <Save className="h-3.5 w-3.5 mr-1" />
+                        {effectSaving[recipe.id] ? '保存中...' : '保存评价'}
+                      </Button>
+                      <Button size="sm" className="flex-1"
+                        onClick={() => handleAiEvaluate(recipe)}
+                        disabled={aiEvaluating[recipe.id] || (!effectDesc[recipe.id] && !recipe.effect_description && (!effectMaterialIds[recipe.id]?.length && !recipe.effect_materials?.length))}>
+                        <Sparkles className="h-3.5 w-3.5 mr-1" />
+                        {aiEvaluating[recipe.id] ? 'AI评价中...' : 'AI总结评分'}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               )}
             </Card>

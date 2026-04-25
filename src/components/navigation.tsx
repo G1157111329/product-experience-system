@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   LayoutDashboard, BookOpen, ClipboardList, AlertTriangle, FileText,
   BarChart3, Menu, ChevronRight, User, LogOut, Key, Pencil,
-  Settings, Plus, Minus, Trash2,
+  Settings, Plus, Minus, Trash2, Sparkles,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -245,6 +245,167 @@ function CategoryProductSettings({ open, onOpenChange }: { open: boolean; onOpen
                 </>
               )}
             </div>
+          </div>
+        </ScrollArea>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AiConfigSettings({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const [config, setConfig] = useState<{
+    provider: string; model: string; temperature: number;
+    custom_api_url: string; custom_api_key: string;
+  }>({
+    provider: 'builtin', model: 'doubao-seed-1-6-vision-250815', temperature: 0.7,
+    custom_api_url: '', custom_api_key: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const { user } = useAuth();
+
+  const builtinModels = [
+    { id: 'doubao-seed-2-0-pro-260215', name: 'Doubao Seed 2.0 Pro（旗舰推理）' },
+    { id: 'doubao-seed-2-0-lite-260215', name: 'Doubao Seed 2.0 Lite（均衡型）' },
+    { id: 'doubao-seed-1-8-251228', name: 'Doubao Seed 1.8（Agent优化）' },
+    { id: 'doubao-seed-1-6-vision-250815', name: 'Doubao Seed 1.6 Vision（视觉理解）' },
+    { id: 'deepseek-v3-2-251201', name: 'DeepSeek V3.2' },
+    { id: 'kimi-k2-5-260127', name: 'Kimi K2.5（多模态）' },
+  ];
+
+  const fetchConfig = useCallback(async () => {
+    const res = await fetch('/api/settings?key=ai_config');
+    const data = await res.json();
+    if (data.code === 0 && data.data && Object.keys(data.data).length > 0) {
+      setConfig(prev => ({ ...prev, ...data.data }));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) fetchConfig();
+  }, [open, fetchConfig]);
+
+  useEffect(() => {
+    if (!open) {
+      // Reset on close
+    }
+  }, [open]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'ai_config', value: config, admin_user_id: user?.id }),
+      });
+      const data = await res.json();
+      if (data.code === 0) toast.success('AI配置已保存');
+      else toast.error(data.message);
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg max-h-[85vh]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5" /> AI模型配置
+          </DialogTitle>
+          <DialogDescription>配置食谱/功能效果评价使用的AI模型和参数，仅管理员可设置</DialogDescription>
+        </DialogHeader>
+        <ScrollArea className="max-h-[65vh]">
+          <div className="space-y-5 pr-3">
+            {/* Provider Selection */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <Badge variant="secondary" className="text-[10px]">接入</Badge> AI服务
+              </h3>
+              <Select value={config.provider} onValueChange={(v) => setConfig({ ...config, provider: v })}>
+                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="builtin">内置模型（推荐）</SelectItem>
+                  <SelectItem value="custom">自定义API</SelectItem>
+                </SelectContent>
+              </Select>
+              {config.provider === 'builtin' && (
+                <p className="text-[11px] text-muted-foreground">使用平台内置AI模型，无需额外配置API密钥</p>
+              )}
+              {config.provider === 'custom' && (
+                <p className="text-[11px] text-muted-foreground">接入自定义AI服务（需兼容OpenAI Chat Completions API格式）</p>
+              )}
+            </div>
+
+            <Separator />
+
+            {/* Model Selection (builtin) */}
+            {config.provider === 'builtin' && (
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  <Badge variant="secondary" className="text-[10px]">模型</Badge> 选择模型
+                </h3>
+                <Select value={config.model} onValueChange={(v) => setConfig({ ...config, model: v })}>
+                  <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {builtinModels.map(m => (
+                      <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">视觉理解模型（Vision）可分析图片，推荐用于效果评价</p>
+              </div>
+            )}
+
+            {/* Custom API Configuration */}
+            {config.provider === 'custom' && (
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  <Badge variant="secondary" className="text-[10px]">API</Badge> API配置
+                </h3>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">模型名称</Label>
+                  <Input placeholder="如：gpt-4o, claude-3-5-sonnet" value={config.model}
+                    onChange={(e) => setConfig({ ...config, model: e.target.value })} className="h-8 text-sm" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">API地址</Label>
+                  <Input placeholder="如：https://api.openai.com/v1/chat/completions"
+                    value={config.custom_api_url}
+                    onChange={(e) => setConfig({ ...config, custom_api_url: e.target.value })} className="h-8 text-sm" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">API密钥</Label>
+                  <Input type="password" placeholder="输入API Key"
+                    value={config.custom_api_key}
+                    onChange={(e) => setConfig({ ...config, custom_api_key: e.target.value })} className="h-8 text-sm" />
+                  <p className="text-[10px] text-muted-foreground">密钥将加密存储于平台设置中</p>
+                </div>
+              </div>
+            )}
+
+            <Separator />
+
+            {/* Temperature */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <Badge variant="secondary" className="text-[10px]">参数</Badge> 温度参数
+              </h3>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs">Temperature: {config.temperature.toFixed(1)}</Label>
+                </div>
+                <input type="range" min="0" max="2" step="0.1" value={config.temperature}
+                  onChange={(e) => setConfig({ ...config, temperature: parseFloat(e.target.value) })}
+                  className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer" />
+                <div className="flex justify-between text-[10px] text-muted-foreground">
+                  <span>精确(0)</span>
+                  <span>平衡(1.0)</span>
+                  <span>创意(2.0)</span>
+                </div>
+              </div>
+            </div>
+
+            <Button onClick={handleSave} className="w-full" disabled={saving}>
+              {saving ? '保存中...' : '保存配置'}
+            </Button>
           </div>
         </ScrollArea>
       </DialogContent>
@@ -538,6 +699,8 @@ function UserSection() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   // ── Standard options settings (admin-only global, stored in DB) ──
   const [standardOptionsOpen, setStandardOptionsOpen] = useState(false);
+  // ── AI config settings (admin-only global, stored in DB) ──
+  const [aiConfigOpen, setAiConfigOpen] = useState(false);
 
   useEffect(() => {
     if (profileOpen && isAdmin && user?.id) {
@@ -698,6 +861,12 @@ function UserSection() {
                 <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setStandardOptionsOpen(true), 100); }}>
                   <Settings className="h-4 w-4" /> 通用标准选项设置
                 </Button>
+                <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setAiConfigOpen(true), 100); }}>
+                  <Sparkles className="h-4 w-4" /> AI模型配置
+                </Button>
+                <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setAiConfigOpen(true), 100); }}>
+                  <Sparkles className="h-4 w-4" /> AI模型配置
+                </Button>
               </>
             )}
 
@@ -741,6 +910,7 @@ function UserSection() {
       {/* Settings Dialog (Admin only) */}
       <CategoryProductSettings open={settingsOpen} onOpenChange={setSettingsOpen} />
       <StandardOptionsSettings open={standardOptionsOpen} onOpenChange={setStandardOptionsOpen} />
+      <AiConfigSettings open={aiConfigOpen} onOpenChange={setAiConfigOpen} />
     </>
   );
 }
@@ -782,6 +952,7 @@ function MobileUserIcon() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [standardOptionsOpen, setStandardOptionsOpen] = useState(false);
+  const [aiConfigOpen, setAiConfigOpen] = useState(false);
 
   if (!user) return null;
   return (
@@ -828,6 +999,7 @@ function MobileUserIcon() {
       </Dialog>
       <CategoryProductSettings open={settingsOpen} onOpenChange={setSettingsOpen} />
       <StandardOptionsSettings open={standardOptionsOpen} onOpenChange={setStandardOptionsOpen} />
+      <AiConfigSettings open={aiConfigOpen} onOpenChange={setAiConfigOpen} />
     </>
   );
 }

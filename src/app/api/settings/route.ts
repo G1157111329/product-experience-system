@@ -7,9 +7,9 @@ export async function GET(request: NextRequest) {
   const key = request.nextUrl.searchParams.get('key');
   if (!key) return NextResponse.json({ code: 1, message: '缺少 key 参数' }, { status: 400 });
 
-  const { data, error } = await client.from('platform_settings').select('value').eq('key', key).single();
+  const { data, error } = await client.from('platform_settings').select('value').eq('key', key).maybeSingle();
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
-  return NextResponse.json({ code: 0, message: 'success', data: data?.value || {} });
+  return NextResponse.json({ code: 0, message: 'success', data: data?.value || null });
 }
 
 // PUT: Update a platform setting (admin only)
