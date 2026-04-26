@@ -78,7 +78,9 @@ export async function POST(request: NextRequest) {
           return { ...step, materials: stepMaterials || [] };
         })
       );
-      return { ...recipe, recipe_steps: stepsWithMaterials };
+      // Fetch effect materials (linked via recipe_id)
+      const { data: effectMaterials } = await client.from('materials').select('*').eq('recipe_id', recipe.id);
+      return { ...recipe, recipe_steps: stepsWithMaterials, effect_materials: effectMaterials || [] };
     })
   );
 
@@ -92,6 +94,10 @@ export async function POST(request: NextRequest) {
       } else if (s.problem_point && String(s.problem_point).trim() !== '') {
         computedProblemCount += 1;
       }
+    }
+    // Count effect problem point
+    if (recipe.effect_problem_point && String(recipe.effect_problem_point).trim() !== '') {
+      computedProblemCount += 1;
     }
     return { ...recipe, problem_count: computedProblemCount };
   });
@@ -190,6 +196,29 @@ export async function POST(request: NextRequest) {
               status: '待整改',
             });
             // If insert fails due to unique constraint, it's a duplicate - skip silently
+            if (!insertError) {
+              createdKeys.add(issueKey);
+            }
+          }
+        }
+
+        // Create issues from recipe effect problem points
+        if (recipe.effect_problem_point && String(recipe.effect_problem_point).trim()) {
+          const effectPP = String(recipe.effect_problem_point).trim();
+          const issueTitle = effectPP.substring(0, 200);
+          const issueKey = `recipe_problem::${issueTitle}`;
+          if (!createdKeys.has(issueKey)) {
+            const { error: insertError } = await client.from('issues').insert({
+              task_id: body.task_id,
+              title: issueTitle,
+              product_model: (task as Record<string, unknown>)?.product_model || null,
+              level: '二类',
+              source: `${reportTitle} - 食谱效果问题(${(recipe as Record<string, unknown>).name || ''})`,
+              source_report_id: reportId,
+              source_type: 'recipe_problem',
+              description: '效果/出品效果评价问题',
+              status: '待整改',
+            });
             if (!insertError) {
               createdKeys.add(issueKey);
             }

@@ -245,6 +245,7 @@ export const recipes = pgTable(
     problem_count: integer("problem_count").default(0),
     effect_description: text("effect_description"), // 效果/出品效果评价描述
     effect_score: varchar("effect_score", { length: 20 }), // AI评分（满分10分）
+    effect_problem_point: text("effect_problem_point"), // 效果评价问题点
     created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },

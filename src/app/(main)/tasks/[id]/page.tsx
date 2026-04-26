@@ -62,7 +62,7 @@ interface Material {
 interface Recipe {
   id: string; name: string; ingredients: string | null; recipe_type: string;
   problem_count: number; recipe_steps: RecipeStep[];
-  effect_description?: string | null; effect_score?: string | null;
+  effect_description?: string | null; effect_score?: string | null; effect_problem_point?: string | null;
   effect_materials?: Material[];
 }
 
@@ -1767,6 +1767,7 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
 
   // ── Effect evaluation states ──
   const [effectDesc, setEffectDesc] = useState<Record<string, string>>({});
+  const [effectProblem, setEffectProblem] = useState<Record<string, string>>({});
   const [effectMaterialIds, setEffectMaterialIds] = useState<Record<string, string[]>>({});
   const [effectSaving, setEffectSaving] = useState<Record<string, boolean>>({});
   const [aiEvaluating, setAiEvaluating] = useState<Record<string, boolean>>({});
@@ -2107,6 +2108,7 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
     setEffectSaving(prev => ({ ...prev, [recipe.id]: true }));
     try {
       const desc = effectDesc[recipe.id] ?? recipe.effect_description ?? '';
+      const pp = effectProblem[recipe.id] ?? recipe.effect_problem_point ?? '';
       const matIds = effectMaterialIds[recipe.id] ?? (recipe.effect_materials || []).map(m => m.id);
       const res = await fetch(`/api/recipes/${recipe.id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -2114,6 +2116,7 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
           name: recipe.name, ingredients: recipe.ingredients,
           recipe_type: recipe.recipe_type, problem_count: recipe.problem_count,
           effect_description: desc,
+          effect_problem_point: pp,
           effect_material_ids: matIds,
         }),
       });
@@ -2330,6 +2333,15 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                         value={effectDesc[recipe.id] ?? recipe.effect_description ?? ''}
                         onChange={(e) => setEffectDesc(prev => ({ ...prev, [recipe.id]: e.target.value }))}
                         rows={3}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">问题点</Label>
+                      <Textarea
+                        placeholder="记录效果评价中发现的问题..."
+                        value={effectProblem[recipe.id] ?? recipe.effect_problem_point ?? ''}
+                        onChange={(e) => setEffectProblem(prev => ({ ...prev, [recipe.id]: e.target.value }))}
+                        rows={2}
                       />
                     </div>
                     <div className="space-y-1.5">

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Download, Video, Play, Share2, Copy, X, Loader2 } from 'lucide-react';
+import { ArrowLeft, Download, Video, Play, Share2, Copy, X, Loader2, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -31,6 +31,8 @@ interface RecipeStep {
 interface Recipe {
   id: string; name: string; ingredients: string | null; recipe_type: string;
   problem_count: number; recipe_steps: RecipeStep[];
+  effect_description?: string | null; effect_score?: string | null; effect_problem_point?: string | null;
+  effect_materials?: Material[];
 }
 
 interface CheckRecord {
@@ -247,6 +249,44 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
                   ))}
                 </div>
               ))}
+              {/* Effect Evaluation */}
+              {(recipe.effect_description || recipe.effect_problem_point || recipe.effect_score || (recipe.effect_materials && recipe.effect_materials.length > 0)) && (
+                <div className="mt-2 p-2.5 rounded-lg border border-primary/20 bg-primary/5 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <Star className="h-3.5 w-3.5 text-primary" />
+                    <span className="text-[11px] font-medium text-primary">效果/出品效果评价</span>
+                    {recipe.effect_score && (
+                      <Badge className="text-[9px] bg-primary text-primary-foreground ml-auto">
+                        {recipe.effect_score}分/10分
+                      </Badge>
+                    )}
+                  </div>
+                  {recipe.effect_description && (
+                    <p className="text-[11px] text-muted-foreground whitespace-pre-wrap break-all ml-5">{recipe.effect_description}</p>
+                  )}
+                  {recipe.effect_problem_point && (
+                    <p className="text-[10px] text-amber-600 break-all ml-5">问题: {recipe.effect_problem_point}</p>
+                  )}
+                  {recipe.effect_materials && recipe.effect_materials.length > 0 && (
+                    <div className="flex gap-1.5 flex-wrap ml-5">
+                      {recipe.effect_materials.map((mat) => (
+                        mat.material_type === 'image' ? (
+                          <div key={mat.id} className="w-10 h-10 rounded overflow-hidden border cursor-pointer" onClick={() => open(mat.file_url)}>
+                            <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
+                          </div>
+                        ) : (
+                          <div key={mat.id} className="w-10 h-10 rounded overflow-hidden border cursor-pointer relative" onClick={() => open(mat.file_url)}>
+                            <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                              <Play className="h-2.5 w-2.5 text-white fill-white" />
+                            </div>
+                          </div>
+                        )
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>

@@ -52,7 +52,7 @@
 │   │   │   ├── reports/         # 报告生成/CRUD
 │   │   │   │   ├── export-pdf/  # PDF导出API
 │   │   │   │   └── share/       # 报告分享API（创建/验证/列表/撤销）
-│   │   │   ├── recipes/         # 食谱/功能 CRUD（含effect_description/effect_score效果评价字段）
+│   │   │   ├── recipes/         # 食谱/功能 CRUD（含effect_description/effect_score/effect_problem_point效果评价字段）
 │   │   │   │   └── [id]/ai-evaluate/ # AI效果评价（基于描述+图片生成评分）
 │   │   │   ├── recipe-steps/    # 食谱步骤 CRUD
 │   │   │   ├── recipe-library/  # 食谱库 CRUD（名称全局唯一，步骤级联删除）
@@ -93,7 +93,7 @@
 | `report_shares` | 报告分享（share_token, expires_at, created_by，支持7天/30天/永久有效期） |
 | `recipe_library` | 食谱库（名称全局唯一约束，按品类-产品分类的全局食谱标准） |
 | `recipe_library_steps` | 食谱库步骤 |
-| `recipes` | 食谱/功能（含 effect_description 效果评价描述, effect_score AI评分） |
+| `recipes` | 食谱/功能（含 effect_description 效果评价描述, effect_score AI评分, effect_problem_point 效果问题点） |
 | `recipe_steps` | 食谱步骤 |
 
 ## 标准分类体系
@@ -151,8 +151,8 @@
 | GET | `/api/reports/share?token=xxx` | 验证分享令牌并获取报告（公开接口） |
 | GET | `/api/reports/share/list?report_id=xxx` | 获取报告的分享链接列表 |
 | DELETE | `/api/reports/share/list?id=xxx` | 撤销分享链接 |
-| GET/POST | `/api/recipes` | 食谱/功能列表/创建；GET 支持 library=1&keyword 跨任务搜索食谱库；含effect_description/effect_score |
-| GET/PUT/DELETE | `/api/recipes/[id]` | 食谱详情/更新/删除（含effect_description/effect_score/effect_material_ids） |
+| GET/POST | `/api/recipes` | 食谱/功能列表/创建；GET 支持 library=1&keyword 跨任务搜索食谱库；含effect_description/effect_score/effect_problem_point |
+| GET/PUT/DELETE | `/api/recipes/[id]` | 食谱详情/更新/删除（含effect_description/effect_score/effect_problem_point/effect_material_ids） |
 | POST | `/api/recipes/[id]/ai-evaluate` | AI效果评价（基于描述+图片生成评分，使用内置或自定义AI模型） |
 | GET/POST | `/api/recipe-steps` | 步骤列表/创建；PUT 批量更新步骤排序（steps 数组） |
 | PUT/DELETE | `/api/recipe-steps/[id]` | 步骤更新/删除 |
@@ -289,6 +289,8 @@ coze start
 49. **AI模型配置**: 管理员可在个人设置中配置AI模型和API信息，支持内置模型（doubao-seed-vision系列等）和自定义API（OpenAI兼容格式）；配置存储在platform_settings(ai_config)，包含provider/model/temperature/custom_api_url/custom_api_key
 50. **食谱效果素材关联**: materials表新增recipe_id字段，可关联食谱效果评价的附件素材；MaterialPicker组件支持recipe_id参数
 51. **AI效果评价API**: POST /api/recipes/[id]/ai-evaluate 端点，接收食谱描述+图片素材，调用AI模型生成评价内容和评分，评分自动保存到recipes.effect_score
+52. **效果评价问题点**: 效果/出品效果评价板块新增问题点输入框（effect_problem_point字段），与步骤的问题点格式一致；报告生成时效果问题点也会自动创建问题记录
+53. **报告效果评价展示**: 报告详情页、打印页、分享页均展示效果评价板块（描述+问题点+素材+AI评分），打印页base64转换包含效果素材图片
 
 ## 代码风格
 

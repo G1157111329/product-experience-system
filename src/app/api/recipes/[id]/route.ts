@@ -42,6 +42,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   // Effect evaluation fields
   if (body.effect_description !== undefined) updateData.effect_description = body.effect_description;
   if (body.effect_score !== undefined) updateData.effect_score = body.effect_score;
+  if (body.effect_problem_point !== undefined) updateData.effect_problem_point = body.effect_problem_point;
 
   const { data, error } = await client.from('recipes').update(updateData).eq('id', id).select().single();
 

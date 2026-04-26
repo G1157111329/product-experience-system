@@ -22,6 +22,8 @@ interface RecipeStep {
 interface Recipe {
   id: string; name: string; ingredients: string | null; recipe_type: string;
   problem_count: number; recipe_steps: RecipeStep[];
+  effect_description?: string | null; effect_score?: string | null; effect_problem_point?: string | null;
+  effect_materials?: Material[];
 }
 
 interface CheckRecord {
@@ -379,6 +381,45 @@ export default function ShareReportPage() {
                             </div>
                           );
                         })}
+                        {/* Effect Evaluation */}
+                        {(recipe.effect_description || recipe.effect_problem_point || recipe.effect_score || (recipe.effect_materials && recipe.effect_materials.length > 0)) && (
+                          <div className="mt-2 p-2.5 rounded-lg border border-primary/20 bg-primary/5 space-y-1.5">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-medium text-primary">效果/出品效果评价</span>
+                              {recipe.effect_score && (
+                                <Badge className="text-[9px] bg-primary text-primary-foreground ml-auto">
+                                  {recipe.effect_score}分/10分
+                                </Badge>
+                              )}
+                            </div>
+                            {recipe.effect_description && (
+                              <p className="text-xs text-muted-foreground whitespace-pre-wrap break-all ml-4">{recipe.effect_description}</p>
+                            )}
+                            {recipe.effect_problem_point && (
+                              <p className="text-xs text-amber-600 break-all ml-4">问题: {recipe.effect_problem_point}</p>
+                            )}
+                            {recipe.effect_materials && recipe.effect_materials.length > 0 && (
+                              <div className="flex gap-1.5 flex-wrap ml-4">
+                                {recipe.effect_materials.map(mat => (
+                                  <div key={mat.id}
+                                    className="w-12 h-12 sm:w-14 sm:h-14 rounded-md overflow-hidden border border-border cursor-pointer relative shrink-0"
+                                    onClick={() => openPreview(mat.file_url)}>
+                                    {mat.material_type === 'image' ? (
+                                      <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
+                                    ) : (
+                                      <>
+                                        <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
+                                        <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                                          <Play className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white fill-white" />
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </CardContent>

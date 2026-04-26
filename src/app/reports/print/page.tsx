@@ -18,6 +18,8 @@ interface RecipeStep {
 interface Recipe {
   id: string; name: string; ingredients: string | null; recipe_type: string;
   problem_count: number; recipe_steps: RecipeStep[];
+  effect_description?: string | null; effect_score?: string | null; effect_problem_point?: string | null;
+  effect_materials?: Material[];
 }
 
 interface CheckRecord {
@@ -206,6 +208,38 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
                   </div>
                 );
               })}
+              {/* Effect Evaluation */}
+              {(recipe.effect_description || recipe.effect_problem_point || recipe.effect_score || (recipe.effect_materials && recipe.effect_materials.length > 0)) && (
+                <div style={{ marginTop: '8px', padding: '8px', borderRadius: '4px', border: '1px solid #99f6e4', background: '#f0fdfa' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 600, color: '#0d9488' }}>效果/出品效果评价</span>
+                    {recipe.effect_score && (
+                      <span style={{ marginLeft: 'auto', display: 'inline-block', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 600, background: '#0d9488', color: 'white' }}>{recipe.effect_score}分/10分</span>
+                    )}
+                  </div>
+                  {recipe.effect_description && (
+                    <div style={{ fontSize: '11px', color: '#555', marginLeft: '20px', whiteSpace: 'pre-wrap' }}>{recipe.effect_description}</div>
+                  )}
+                  {recipe.effect_problem_point && (
+                    <div style={{ fontSize: '11px', color: '#d97706', marginLeft: '20px' }}>问题: {recipe.effect_problem_point}</div>
+                  )}
+                  {recipe.effect_materials && recipe.effect_materials.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px', marginLeft: '20px' }}>
+                      {recipe.effect_materials.filter(m => m.material_type === 'image').map(mat => (
+                        <img key={mat.id} src={mat.file_url} alt={mat.file_name} style={{ width: '50px', height: '50px', borderRadius: '3px', objectFit: 'cover', border: '1px solid #e5e7eb' }} crossOrigin="anonymous" />
+                      ))}
+                      {recipe.effect_materials.filter(m => m.material_type === 'video').map(mat => (
+                        <div key={mat.id} style={{ width: '50px', height: '50px', borderRadius: '3px', overflow: 'hidden', border: '1px solid #e5e7eb', position: 'relative', background: '#e5e7eb' }}>
+                          <video src={mat.file_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
+                          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)' }}>
+                            <span style={{ color: 'white', fontSize: '16px' }}>&#9654;</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </>
@@ -324,6 +358,9 @@ function ReportPrintContent() {
             step.materials?.forEach(m => {
               if (m.material_type === 'image') allImageUrls.push(m.file_url);
             });
+          });
+          recipe.effect_materials?.forEach(m => {
+            if (m.material_type === 'image') allImageUrls.push(m.file_url);
           });
         });
         rpt.content.materials?.forEach(m => {
