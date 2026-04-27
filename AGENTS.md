@@ -292,7 +292,9 @@ coze start
 52. **效果评价问题点**: 效果/出品效果评价板块新增问题点输入框（effect_problem_point字段），与步骤的问题点格式一致；报告生成时效果问题点也会自动创建问题记录
 53. **报告效果评价展示**: 报告详情页、打印页、分享页均展示效果评价板块（描述+问题点+素材+AI四维评价结果+综合评分），打印页base64转换包含效果素材图片；AI评价结果可随报告下载PDF
 54. **AI四维评价框架**: AI评价内部采用固定四维评价体系作为方法论（质感/透彻/纯净/恒定），但对外仅展示综合评分和总结评语，不展示四维度细节；评价结果存储在recipes.effect_ai_result(JSONB)，格式为 { score, summary }
-55. **AI评价结果持久化**: AI评价结果（四维评分+评语+综合评分）完整保存到数据库effect_ai_result字段，体验计划页面和报告中心均可查看历史评价结果；重新生成报告时effect_ai_result随食谱数据保存到报告content中
+55. **AI评价结果持久化**: AI评价结果完整保存到数据库effect_ai_result字段，体验计划页面和报告中心均可查看历史评价结果；重新生成报告时effect_ai_result随食谱数据保存到报告content中
+56. **效果评价素材去重**: 效果评价板块的素材仅通过MaterialPicker的initialMaterials展示，不再重复渲染预览区块
+57. **产品型号条件必填**: 新建体验计划时，产品型号仅在项目类型为"自研"或"改型/降本/优化"时必填（Label动态显示*号），其他项目类型（ODM/OEM、竞品研究、前期研究、海外产品）产品型号可选
 
 ## 代码风格
 
@@ -349,3 +351,5 @@ coze start
 | 编辑问题点切换标准类型后表单为空 | `populateFormsFromRecord` 只填充原始类别表单 | 切换类别时从 `editRecordData` 自动预填充共享字段（sensory_dimension/evaluationResult等） |
 | 食谱库步骤添加图片报"缺少必要参数" | upload API 要求 task_id 必填，食谱库步骤无 task_id | DB 将 materials.task_id 改为可选，新增 recipe_library_step_id 字段 |
 | 食谱库删除图标报错 | 重写 route.ts 时丢失 DELETE handler | 重新添加 DELETE handler，含步骤和素材级联清理 |
+| 效果评价图片重复出现 | MaterialPicker已有initialMaterials展示，下方又有独立预览区块 | 移除重复的素材预览区块，仅保留MaterialPicker |
+| 产品型号所有项目类型都必填 | 表单验证未区分项目类型 | 仅"自研"和"改型/降本/优化"时必填，其他类型可选 |
