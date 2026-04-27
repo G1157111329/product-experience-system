@@ -393,10 +393,7 @@ export default function ShareReportPage() {
                                 </Badge>
                               )}
                             </div>
-                            {recipe.effect_ai_result && (
-                              <p className="text-xs text-muted-foreground whitespace-pre-wrap break-all ml-4">{recipe.effect_ai_result.summary}</p>
-                            )}
-                            {!recipe.effect_ai_result && recipe.effect_description && (
+                            {recipe.effect_description && (
                               <p className="text-xs text-muted-foreground whitespace-pre-wrap break-all ml-4">{recipe.effect_description}</p>
                             )}
                             {recipe.effect_problem_point && (

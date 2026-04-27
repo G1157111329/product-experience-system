@@ -295,6 +295,9 @@ coze start
 55. **AI评价结果持久化**: AI评价结果完整保存到数据库effect_ai_result字段，体验计划页面和报告中心均可查看历史评价结果；重新生成报告时effect_ai_result随食谱数据保存到报告content中；AI总结内容可编辑，编辑后保存覆盖原AI结果；报告生成时优先使用AI评价结果（可能经过编辑），无AI评价则使用用户描述
 56. **效果评价素材去重**: 效果评价板块的素材仅通过MaterialPicker的initialMaterials展示，不再重复渲染预览区块
 57. **产品型号条件必填**: 新建体验计划时，产品型号仅在项目类型为"自研"或"改型/降本/优化"时必填（Label动态显示*号），其他项目类型（ODM/OEM、竞品研究、前期研究、海外产品）产品型号可选
+58. **AI评价覆盖描述框**: AI生成评价后直接覆盖"评价描述"输入框内容，用户可在此基础上编辑；AI评价结果仅保留分值(effect_score)，总结内容不再单独存储为effect_ai_result
+59. **报告效果评价逻辑**: 报告生成时优先使用AI评价结果（可能经过编辑后的描述），无AI评价则使用用户原始描述
+60. **步骤编辑素材管理**: 编辑步骤时通过initialMaterials预填充已有素材，保存时对比初始素材ID与当前选中ID，取消选择的素材设置recipe_step_id=null解除关联
 
 ## 代码风格
 
@@ -353,3 +356,5 @@ coze start
 | 食谱库删除图标报错 | 重写 route.ts 时丢失 DELETE handler | 重新添加 DELETE handler，含步骤和素材级联清理 |
 | 效果评价图片重复出现 | MaterialPicker已有initialMaterials展示，下方又有独立预览区块 | 移除重复的素材预览区块，仅保留MaterialPicker |
 | 产品型号所有项目类型都必填 | 表单验证未区分项目类型 | 仅"自研"和"改型/降本/优化"时必填，其他类型可选 |
+| 步骤编辑无法删除已关联素材 | 保存时只处理新增关联，未处理取消关联 | 对比editStepInitialMaterialIds与当前选中，取消选择设recipe_step_id=null |
+| 视频上传打开相机而非录像 | accept="video/*"缺少capture属性 | 视频input添加capture属性，移动端直接打开视频录制 |

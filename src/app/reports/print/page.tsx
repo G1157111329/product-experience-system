@@ -210,7 +210,7 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
                 );
               })}
               {/* Effect Evaluation */}
-              {(recipe.effect_description || recipe.effect_problem_point || recipe.effect_score || recipe.effect_ai_result || (recipe.effect_materials && recipe.effect_materials.length > 0)) && (
+              {(recipe.effect_description || recipe.effect_problem_point || recipe.effect_score || (recipe.effect_materials && recipe.effect_materials.length > 0)) && (
                 <div style={{ marginTop: '8px', padding: '8px', borderRadius: '4px', border: '1px solid #99f6e4', background: '#f0fdfa' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
                     <span style={{ fontSize: '11px', fontWeight: 600, color: '#0d9488' }}>效果/出品效果评价</span>
@@ -220,10 +220,7 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
                         color: 'white' }}>综合 {recipe.effect_score}分/10分</span>
                     )}
                   </div>
-                  {recipe.effect_ai_result && (
-                      <div style={{ fontSize: '11px', color: '#555', marginLeft: '20px', whiteSpace: 'pre-wrap' }}>{recipe.effect_ai_result.summary}</div>
-                  )}
-                  {!recipe.effect_ai_result && recipe.effect_description && (
+                  {recipe.effect_description && (
                     <div style={{ fontSize: '11px', color: '#555', marginLeft: '20px', whiteSpace: 'pre-wrap' }}>{recipe.effect_description}</div>
                   )}
                   {recipe.effect_problem_point && (

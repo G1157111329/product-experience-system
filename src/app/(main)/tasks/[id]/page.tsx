@@ -489,7 +489,7 @@ function MaterialsTab({ taskId }: { taskId: string }) {
         </Button>
       </div>
       <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
-      <input ref={videoInputRef} type="file" accept="video/mp4,video/webm,video/quicktime,video/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
+      <input ref={videoInputRef} type="file" accept="video/*" className="hidden" onChange={(e) => handleUpload(e.target.files)} />
 
       {loading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{[1,2,3].map(i => <div key={i} className="aspect-square bg-muted animate-pulse rounded-lg" />)}</div>
@@ -1749,6 +1749,7 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
   const [editRecipeDialogOpen, setEditRecipeDialogOpen] = useState(false);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [editingStep, setEditingStep] = useState<RecipeStep | null>(null);
+  const [editStepInitialMaterialIds, setEditStepInitialMaterialIds] = useState<string[]>([]);
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
   const [newRecipe, setNewRecipe] = useState({ name: '', ingredients: '', recipe_type: '食谱' });
   const [editRecipeForm, setEditRecipeForm] = useState({ name: '', ingredients: '', recipe_type: '食谱' });
@@ -1779,7 +1780,6 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
     };
     score: string;
   }>>({});
-  const [editedAiSummary, setEditedAiSummary] = useState<Record<string, string>>({});
 
   // ── Recipe library search (Feature 7) ──
   const [recipeSearch, setRecipeSearch] = useState('');
@@ -2036,6 +2036,9 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
     setEditStepForm({ operation: step.operation, step_material_ids: stepMatIds, problem_points: pps });
     setEditStepMaterialIds([]);
     setEditStepMaterials([]);
+    // Track initial material IDs for unlink on save
+    const allInitialMatIds = stepMats ? stepMats.map(m => m.id) : [];
+    setEditStepInitialMaterialIds(allInitialMatIds);
     setEditStepDialogOpen(true);
   };
 
@@ -2056,6 +2059,19 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
       });
       const data = await res.json();
       if (data.code === 0) {
+        // Determine all material IDs that should be linked to this step
+        const allSelectedIds = new Set([
+          ...(editStepForm.step_material_ids || []),
+          ...validPPs.flatMap(p => p.material_ids || []),
+        ]);
+        // Unlink materials that were removed (were in initial but not in current selection)
+        const removedIds = editStepInitialMaterialIds.filter(id => !allSelectedIds.has(id));
+        for (const matId of removedIds) {
+          await fetch('/api/materials', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: matId, recipe_step_id: null }),
+          });
+        }
         // Link step-level materials
         if (editStepForm.step_material_ids && editStepForm.step_material_ids.length > 0) {
           for (const matId of editStepForm.step_material_ids) {
@@ -2118,13 +2134,7 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
       const desc = effectDesc[recipe.id] ?? recipe.effect_description ?? '';
       const pp = effectProblem[recipe.id] ?? recipe.effect_problem_point ?? '';
       const matIds = effectMaterialIds[recipe.id] ?? (recipe.effect_materials || []).map(m => m.id);
-      // Use edited AI summary if available, otherwise use original AI result
-      const currentAiResult = aiResult[recipe.id]?.result || recipe.effect_ai_result;
       const currentAiScore = aiResult[recipe.id]?.score || recipe.effect_score;
-      const editedSummary = editedAiSummary[recipe.id];
-      const finalAiResult = currentAiResult
-        ? { score: currentAiResult.score, summary: editedSummary !== undefined ? editedSummary : currentAiResult.summary }
-        : null;
       const res = await fetch(`/api/recipes/${recipe.id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2133,7 +2143,6 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
           effect_description: desc,
           effect_problem_point: pp,
           effect_material_ids: matIds,
-          effect_ai_result: finalAiResult,
           effect_score: currentAiScore,
         }),
       });
@@ -2159,6 +2168,10 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
       const data = await res.json();
       if (data.code === 0) {
         setAiResult(prev => ({ ...prev, [recipe.id]: data.data }));
+        // Overwrite description with AI summary
+        if (data.data?.result?.summary) {
+          setEffectDesc(prev => ({ ...prev, [recipe.id]: data.data.result.summary }));
+        }
         fetchRecipes();
         toast.success(`AI评价完成：综合${data.data.score}分`);
       } else toast.error(data.message);
@@ -2373,29 +2386,17 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                         }}
                       />
                     </div>
-                    {/* AI result display */}
+                    {/* AI score badge */}
                     {(() => {
-                      const aiData = aiResult[recipe.id]?.result || recipe.effect_ai_result;
                       const aiScore = aiResult[recipe.id]?.score || recipe.effect_score;
-                      if (!aiData && !aiScore) return null;
-                      const currentSummary = editedAiSummary[recipe.id] !== undefined ? editedAiSummary[recipe.id] : (aiData?.summary || '');
+                      if (!aiScore) return null;
                       return (
-                        <div className="p-2.5 rounded-lg bg-muted/50 border border-border space-y-1.5">
-                          <div className="flex items-center gap-2">
-                            <Sparkles className="h-3.5 w-3.5 text-primary" />
-                            <span className="text-xs font-medium">AI评价结果</span>
-                            {aiScore && (
-                              <Badge className={`text-[10px] ml-auto ${Number(aiScore) >= 8 ? 'bg-emerald-600' : Number(aiScore) >= 6 ? 'bg-blue-600' : Number(aiScore) >= 4 ? 'bg-amber-600' : 'bg-red-600'} text-white`}>
-                                {aiScore}分/10分
-                              </Badge>
-                            )}
-                          </div>
-                          <textarea
-                            className="w-full min-h-[60px] text-[11px] text-muted-foreground bg-transparent border-0 resize-y focus:outline-none focus:ring-0 p-0"
-                            value={currentSummary}
-                            onChange={(e) => setEditedAiSummary(prev => ({ ...prev, [recipe.id]: e.target.value }))}
-                            placeholder="AI总结内容（可编辑）"
-                          />
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="h-3.5 w-3.5 text-primary" />
+                          <span className="text-xs text-muted-foreground">AI评分</span>
+                          <Badge className={`text-[10px] ml-auto ${Number(aiScore) >= 8 ? 'bg-emerald-600' : Number(aiScore) >= 6 ? 'bg-blue-600' : Number(aiScore) >= 4 ? 'bg-amber-600' : 'bg-red-600'} text-white`}>
+                            {aiScore}分/10分
+                          </Badge>
                         </div>
                       );
                     })()}
@@ -2606,6 +2607,10 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                   setEditStepMaterialIds(ids);
                   setEditStepMaterials(mats);
                 }}
+                initialMaterials={((editingStep as unknown as Record<string, unknown>)?.materials as Material[] | undefined)?.filter(m => {
+                  const ppMatIds = new Set(editStepForm.problem_points.flatMap(p => p.material_ids || []));
+                  return !ppMatIds.has(m.id);
+                }) || []}
               />
             </div>
             <div className="space-y-2">
@@ -2643,33 +2648,11 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                       setEditStepMaterialIds(ids);
                       setEditStepMaterials(mats);
                     }}
+                    initialMaterials={((editingStep as unknown as Record<string, unknown>)?.materials as Material[] | undefined)?.filter(m => (pp.material_ids || []).includes(m.id)) || []}
                   />
                 </div>
               ))}
             </div>
-            {/* Existing materials preview */}
-            {editingStep?.materials && editingStep.materials.length > 0 && (
-              <div className="space-y-1.5">
-                <Label>当前关联素材</Label>
-                <div className="flex gap-1.5 flex-wrap">
-                  {editingStep.materials.map((mat) => (
-                    <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border cursor-pointer"
-                      onClick={() => open(mat.file_url)}>
-                      {mat.material_type === 'image' ? (
-                        <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center bg-muted relative">
-                          <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
-                          <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                            <Play className="h-4 w-4 text-white fill-white" />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
             <Button onClick={handleSaveEditStep} className="w-full" disabled={!editStepForm.operation || savingEditStep}>{savingEditStep ? '保存中...' : '保存修改'}</Button>
           </div>
         </DialogContent>

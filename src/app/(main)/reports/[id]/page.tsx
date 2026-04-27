@@ -251,7 +251,7 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
                 </div>
               ))}
               {/* Effect Evaluation */}
-              {(recipe.effect_description || recipe.effect_problem_point || recipe.effect_score || recipe.effect_ai_result || (recipe.effect_materials && recipe.effect_materials.length > 0)) && (
+              {(recipe.effect_description || recipe.effect_problem_point || recipe.effect_score || (recipe.effect_materials && recipe.effect_materials.length > 0)) && (
                 <div className="mt-2 p-2.5 rounded-lg border border-primary/20 bg-primary/5 space-y-1.5">
                   <div className="flex items-center gap-2">
                     <Star className="h-3.5 w-3.5 text-primary" />
@@ -262,10 +262,7 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
                       </Badge>
                     )}
                   </div>
-                  {recipe.effect_ai_result && (
-                      <p className="text-[11px] text-muted-foreground whitespace-pre-wrap break-all ml-5">{recipe.effect_ai_result.summary}</p>
-                  )}
-                  {!recipe.effect_ai_result && recipe.effect_description && (
+                  {recipe.effect_description && (
                     <p className="text-[11px] text-muted-foreground whitespace-pre-wrap break-all ml-5">{recipe.effect_description}</p>
                   )}
                   {recipe.effect_problem_point && (
