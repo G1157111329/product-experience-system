@@ -1779,6 +1779,7 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
     };
     score: string;
   }>>({});
+  const [editedAiSummary, setEditedAiSummary] = useState<Record<string, string>>({});
 
   // ── Recipe library search (Feature 7) ──
   const [recipeSearch, setRecipeSearch] = useState('');
@@ -2117,6 +2118,13 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
       const desc = effectDesc[recipe.id] ?? recipe.effect_description ?? '';
       const pp = effectProblem[recipe.id] ?? recipe.effect_problem_point ?? '';
       const matIds = effectMaterialIds[recipe.id] ?? (recipe.effect_materials || []).map(m => m.id);
+      // Use edited AI summary if available, otherwise use original AI result
+      const currentAiResult = aiResult[recipe.id]?.result || recipe.effect_ai_result;
+      const currentAiScore = aiResult[recipe.id]?.score || recipe.effect_score;
+      const editedSummary = editedAiSummary[recipe.id];
+      const finalAiResult = currentAiResult
+        ? { score: currentAiResult.score, summary: editedSummary !== undefined ? editedSummary : currentAiResult.summary }
+        : null;
       const res = await fetch(`/api/recipes/${recipe.id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2125,6 +2133,8 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
           effect_description: desc,
           effect_problem_point: pp,
           effect_material_ids: matIds,
+          effect_ai_result: finalAiResult,
+          effect_score: currentAiScore,
         }),
       });
       const data = await res.json();
@@ -2368,6 +2378,7 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                       const aiData = aiResult[recipe.id]?.result || recipe.effect_ai_result;
                       const aiScore = aiResult[recipe.id]?.score || recipe.effect_score;
                       if (!aiData && !aiScore) return null;
+                      const currentSummary = editedAiSummary[recipe.id] !== undefined ? editedAiSummary[recipe.id] : (aiData?.summary || '');
                       return (
                         <div className="p-2.5 rounded-lg bg-muted/50 border border-border space-y-1.5">
                           <div className="flex items-center gap-2">
@@ -2379,9 +2390,12 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                               </Badge>
                             )}
                           </div>
-                          {aiData?.summary && (
-                            <p className="text-[11px] text-muted-foreground">{aiData.summary}</p>
-                          )}
+                          <textarea
+                            className="w-full min-h-[60px] text-[11px] text-muted-foreground bg-transparent border-0 resize-y focus:outline-none focus:ring-0 p-0"
+                            value={currentSummary}
+                            onChange={(e) => setEditedAiSummary(prev => ({ ...prev, [recipe.id]: e.target.value }))}
+                            placeholder="AI总结内容（可编辑）"
+                          />
                         </div>
                       );
                     })()}
