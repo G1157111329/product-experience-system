@@ -488,7 +488,7 @@ function MaterialsTab({ taskId }: { taskId: string }) {
           <Video className="h-4 w-4 mr-1.5" /> 上传视频
         </Button>
       </div>
-      <input ref={fileInputRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
+      <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
       <input ref={videoInputRef} type="file" accept="video/mp4,video/webm,video/quicktime,video/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
 
       {loading ? (
