@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Plus, Loader2, Film, Image as ImageIcon, Camera, Video } from 'lucide-react';
+import { Plus, Loader2, Film, Image as ImageIcon, Camera, Video, FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -44,7 +44,8 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
     return map;
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const fileInputRef2 = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  const albumInputRef = useRef<HTMLInputElement>(null);
 
   const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
   const setIsOpen = onOpenChange || setInternalOpen;
@@ -140,6 +141,8 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+      if (videoInputRef.current) videoInputRef.current.value = '';
+      if (albumInputRef.current) albumInputRef.current.value = '';
     }
   };
 
@@ -223,15 +226,20 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
             <div className="space-y-3">
               <div className="flex items-center gap-2 flex-wrap">
                 <Button type="button" size="sm" className="gap-1" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-                  {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-                  {uploading ? '上传中...' : '上传图片'}
+                  {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
+                  {uploading ? '上传中...' : '拍照'}
                 </Button>
                 <input ref={fileInputRef} type="file" accept="image/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={handleUpload} />
-                <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => fileInputRef2.current?.click()} disabled={uploading}>
+                <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => videoInputRef.current?.click()} disabled={uploading}>
                   {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Video className="h-3.5 w-3.5" />}
-                  {uploading ? '上传中...' : '上传视频'}
+                  {uploading ? '上传中...' : '录像'}
                 </Button>
-                <input ref={fileInputRef2} type="file" accept="video/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={handleUpload} />
+                <input ref={videoInputRef} type="file" accept="video/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={handleUpload} />
+                <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => albumInputRef.current?.click()} disabled={uploading}>
+                  <FolderOpen className="h-3.5 w-3.5" />
+                  相册
+                </Button>
+                <input ref={albumInputRef} type="file" multiple className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={handleUpload} />
                 <div className="flex gap-1 ml-auto">
                   {([['all', '全部'], ['image', '图片'], ['video', '视频']] as const).map(([val, label]) => (
                     <Button key={val} type="button" size="sm" variant={filterType === val ? 'default' : 'outline'} className="h-7 text-xs px-2"
@@ -279,15 +287,20 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
         <div className="space-y-3">
           <div className="flex items-center gap-2 flex-wrap">
             <Button type="button" size="sm" className="gap-1" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-              {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImageIcon className="h-3.5 w-3.5" />}
-              {uploading ? '上传中...' : '上传图片'}
+              {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
+              {uploading ? '上传中...' : '拍照'}
             </Button>
-            <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => fileInputRef2.current?.click()} disabled={uploading}>
-              <Film className="h-3.5 w-3.5" />
-              上传视频
+            <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => videoInputRef.current?.click()} disabled={uploading}>
+              <Video className="h-3.5 w-3.5" />
+              录像
             </Button>
             <input ref={fileInputRef} type="file" accept="image/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={handleUpload} />
-            <input ref={fileInputRef2} type="file" accept="video/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={handleUpload} />
+            <input ref={videoInputRef} type="file" accept="video/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={handleUpload} />
+            <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => albumInputRef.current?.click()} disabled={uploading}>
+              <FolderOpen className="h-3.5 w-3.5" />
+              相册
+            </Button>
+            <input ref={albumInputRef} type="file" multiple className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={handleUpload} />
             <div className="flex gap-1 ml-auto">
               {([['all', '全部'], ['image', '图片'], ['video', '视频']] as const).map(([val, label]) => (
                 <Button key={val} size="sm" variant={filterType === val ? 'default' : 'outline'} className="h-7 text-xs px-2"

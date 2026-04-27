@@ -418,9 +418,8 @@ function MaterialsTab({ taskId }: { taskId: string }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const fileInputRef2 = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
-  const videoAlbumInputRef = useRef<HTMLInputElement>(null);
+  const albumInputRef = useRef<HTMLInputElement>(null);
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
 
   const fetchMaterials = useCallback(async () => {
@@ -489,17 +488,13 @@ function MaterialsTab({ taskId }: { taskId: string }) {
         <Button variant="outline" size="sm" onClick={() => videoInputRef.current?.click()}>
           <Video className="h-4 w-4 mr-1.5" /> 录像
         </Button>
-        <Button variant="outline" size="sm" onClick={() => fileInputRef2.current?.click()}>
-          <FolderOpen className="h-4 w-4 mr-1.5" /> 相册图片
-        </Button>
-        <Button variant="outline" size="sm" onClick={() => videoAlbumInputRef.current?.click()}>
-          <FolderOpen className="h-4 w-4 mr-1.5" /> 相册视频
+        <Button variant="outline" size="sm" onClick={() => albumInputRef.current?.click()}>
+          <FolderOpen className="h-4 w-4 mr-1.5" /> 相册
         </Button>
       </div>
       <input ref={fileInputRef} type="file" accept="image/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={(e) => handleUpload(e.target.files)} />
       <input ref={videoInputRef} type="file" accept="video/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={(e) => handleUpload(e.target.files)} />
-      <input ref={fileInputRef2} type="file" accept="image/*" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={(e) => handleUpload(e.target.files)} />
-      <input ref={videoAlbumInputRef} type="file" accept="video/*" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={(e) => handleUpload(e.target.files)} />
+      <input ref={albumInputRef} type="file" multiple className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={(e) => handleUpload(e.target.files)} />
 
       {loading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{[1,2,3].map(i => <div key={i} className="aspect-square bg-muted animate-pulse rounded-lg" />)}</div>
