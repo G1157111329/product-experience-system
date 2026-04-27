@@ -419,6 +419,7 @@ function MaterialsTab({ taskId }: { taskId: string }) {
   const [editName, setEditName] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const videoAlbumInputRef = useRef<HTMLInputElement>(null);
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
 
   const fetchMaterials = useCallback(async () => {
@@ -485,11 +486,15 @@ function MaterialsTab({ taskId }: { taskId: string }) {
           <Camera className="h-4 w-4 mr-1.5" /> 上传图片
         </Button>
         <Button variant="outline" size="sm" onClick={() => videoInputRef.current?.click()}>
-          <Video className="h-4 w-4 mr-1.5" /> 上传视频
+          <Video className="h-4 w-4 mr-1.5" /> 拍摄视频
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => videoAlbumInputRef.current?.click()}>
+          <Video className="h-4 w-4 mr-1.5" /> 相册视频
         </Button>
       </div>
       <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
       <input ref={videoInputRef} type="file" accept="video/*" capture="environment" className="hidden" onChange={(e) => handleUpload(e.target.files)} />
+      <input ref={videoAlbumInputRef} type="file" accept="video/*" className="hidden" onChange={(e) => handleUpload(e.target.files)} />
 
       {loading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{[1,2,3].map(i => <div key={i} className="aspect-square bg-muted animate-pulse rounded-lg" />)}</div>
