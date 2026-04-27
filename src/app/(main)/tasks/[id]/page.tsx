@@ -496,10 +496,10 @@ function MaterialsTab({ taskId }: { taskId: string }) {
           <FolderOpen className="h-4 w-4 mr-1.5" /> 相册视频
         </Button>
       </div>
-      <input ref={fileInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleUpload(e.target.files)} />
-      <input ref={videoInputRef} type="file" accept="video/*" capture="environment" className="hidden" onChange={(e) => handleUpload(e.target.files)} />
-      <input ref={fileInputRef2} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
-      <input ref={videoAlbumInputRef} type="file" accept="video/*" className="hidden" onChange={(e) => handleUpload(e.target.files)} />
+      <input ref={fileInputRef} type="file" accept="image/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={(e) => handleUpload(e.target.files)} />
+      <input ref={videoInputRef} type="file" accept="video/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={(e) => handleUpload(e.target.files)} />
+      <input ref={fileInputRef2} type="file" accept="image/*" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={(e) => handleUpload(e.target.files)} />
+      <input ref={videoAlbumInputRef} type="file" accept="video/*" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={(e) => handleUpload(e.target.files)} />
 
       {loading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{[1,2,3].map(i => <div key={i} className="aspect-square bg-muted animate-pulse rounded-lg" />)}</div>

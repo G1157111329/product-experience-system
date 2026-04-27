@@ -497,12 +497,12 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
                                   <div className="pl-8 flex items-center gap-3">
                                     <label className="inline-flex items-center gap-1 text-[10px] text-primary cursor-pointer hover:underline">
                                       <Plus className="h-3 w-3" /> 添加图片
-                                      <input type="file" accept="image/*" className="hidden"
+                                      <input type="file" accept="image/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none"
                                         onChange={e => { const f = e.target.files?.[0]; if (f) handleDetailStepUpload(f, step.id!); }} />
                                     </label>
                                     <label className="inline-flex items-center gap-1 text-[10px] text-primary cursor-pointer hover:underline">
                                       <Plus className="h-3 w-3" /> 添加视频
-                                      <input type="file" accept="video/*" className="hidden"
+                                      <input type="file" accept="video/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none"
                                         onChange={e => { const f = e.target.files?.[0]; if (f) handleDetailStepUpload(f, step.id!); }} />
                                     </label>
                                   </div>
@@ -523,12 +523,12 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
                         <div className="flex items-center gap-2">
                           <label className="inline-flex items-center gap-1 text-[10px] text-primary cursor-pointer hover:underline shrink-0">
                             <Plus className="h-3 w-3" /> 上传图片
-                            <input type="file" accept="image/*" className="hidden"
+                            <input type="file" accept="image/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none"
                               onChange={e => { const f = e.target.files?.[0]; if (f) setDetailStepImage(f); }} />
                           </label>
                           <label className="inline-flex items-center gap-1 text-[10px] text-primary cursor-pointer hover:underline shrink-0">
                             <Plus className="h-3 w-3" /> 上传视频
-                            <input type="file" accept="video/*" className="hidden"
+                            <input type="file" accept="video/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none"
                               onChange={e => { const f = e.target.files?.[0]; if (f) setDetailStepImage(f); }} />
                           </label>
                           {detailStepImage && (
@@ -633,12 +633,12 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
                         <div className="flex items-center gap-3">
                           <label className="inline-flex items-center gap-1 text-[10px] text-primary cursor-pointer hover:underline">
                             <Plus className="h-3 w-3" /> 添加图片
-                            <input type="file" accept="image/*" className="hidden"
+                            <input type="file" accept="image/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none"
                               onChange={e => { const f = e.target.files?.[0]; if (f) handleAddStepImage(idx, f); }} />
                           </label>
                           <label className="inline-flex items-center gap-1 text-[10px] text-primary cursor-pointer hover:underline">
                             <Plus className="h-3 w-3" /> 添加视频
-                            <input type="file" accept="video/*" className="hidden"
+                            <input type="file" accept="video/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none"
                               onChange={e => { const f = e.target.files?.[0]; if (f) handleAddStepImage(idx, f); }} />
                           </label>
                         </div>
@@ -652,7 +652,7 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
                   <div className="flex items-center gap-2">
                     <label className="inline-flex items-center gap-1 text-[10px] text-primary cursor-pointer hover:underline shrink-0">
                       <Plus className="h-3 w-3" /> 上传图片
-                      <input type="file" accept="image/*" className="hidden"
+                      <input type="file" accept="image/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none"
                         onChange={e => { const f = e.target.files?.[0]; if (f && addStepOp.trim()) handleAddStepWithImage(f); }} />
                     </label>
                     <div className="flex-1" />
