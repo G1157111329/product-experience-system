@@ -494,7 +494,7 @@ function MaterialsTab({ taskId }: { taskId: string }) {
       </div>
       <input ref={fileInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleUpload(e.target.files)} />
       <input ref={videoInputRef} type="file" accept="video/*" capture="environment" className="hidden" onChange={(e) => handleUpload(e.target.files)} />
-      <input ref={albumInputRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
+      <input ref={albumInputRef} type="file" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
 
       {loading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{[1,2,3].map(i => <div key={i} className="aspect-square bg-muted animate-pulse rounded-lg" />)}</div>
