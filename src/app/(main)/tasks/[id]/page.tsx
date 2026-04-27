@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, ArrowRightLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Pencil, Trash2, Check, Link2, X, Play, GripVertical, Sparkles, Save, Star } from 'lucide-react';
+import { ArrowLeft, ArrowRightLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Pencil, Trash2, Check, Link2, X, Play, GripVertical, Sparkles, Save, Star, FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -419,7 +419,7 @@ function MaterialsTab({ taskId }: { taskId: string }) {
   const [editName, setEditName] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
-  const videoAlbumInputRef = useRef<HTMLInputElement>(null);
+  const albumInputRef = useRef<HTMLInputElement>(null);
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
 
   const fetchMaterials = useCallback(async () => {
@@ -483,18 +483,18 @@ function MaterialsTab({ taskId }: { taskId: string }) {
       {/* Upload buttons */}
       <div className="flex gap-2">
         <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
-          <Camera className="h-4 w-4 mr-1.5" /> 上传图片
+          <Camera className="h-4 w-4 mr-1.5" /> 拍照
         </Button>
         <Button variant="outline" size="sm" onClick={() => videoInputRef.current?.click()}>
-          <Video className="h-4 w-4 mr-1.5" /> 拍摄视频
+          <Video className="h-4 w-4 mr-1.5" /> 录像
         </Button>
-        <Button variant="outline" size="sm" onClick={() => videoAlbumInputRef.current?.click()}>
-          <Video className="h-4 w-4 mr-1.5" /> 相册视频
+        <Button variant="outline" size="sm" onClick={() => albumInputRef.current?.click()}>
+          <FolderOpen className="h-4 w-4 mr-1.5" /> 相册
         </Button>
       </div>
-      <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
+      <input ref={fileInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleUpload(e.target.files)} />
       <input ref={videoInputRef} type="file" accept="video/*" capture="environment" className="hidden" onChange={(e) => handleUpload(e.target.files)} />
-      <input ref={videoAlbumInputRef} type="file" accept="video/*" className="hidden" onChange={(e) => handleUpload(e.target.files)} />
+      <input ref={albumInputRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
 
       {loading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{[1,2,3].map(i => <div key={i} className="aspect-square bg-muted animate-pulse rounded-lg" />)}</div>
