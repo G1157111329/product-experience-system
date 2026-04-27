@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, ArrowRightLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Pencil, Trash2, Check, Link2, X, Play, GripVertical, Sparkles, Save, Star, FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -417,9 +417,6 @@ function MaterialsTab({ taskId }: { taskId: string }) {
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const videoInputRef = useRef<HTMLInputElement>(null);
-  const albumInputRef = useRef<HTMLInputElement>(null);
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
 
   const fetchMaterials = useCallback(async () => {
@@ -482,19 +479,23 @@ function MaterialsTab({ taskId }: { taskId: string }) {
       <PreviewComponent />
       {/* Upload buttons */}
       <div className="flex gap-2 flex-wrap">
-        <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
-          <Camera className="h-4 w-4 mr-1.5" /> 拍照
-        </Button>
-        <Button variant="outline" size="sm" onClick={() => videoInputRef.current?.click()}>
-          <Video className="h-4 w-4 mr-1.5" /> 录像
-        </Button>
-        <Button variant="outline" size="sm" onClick={() => albumInputRef.current?.click()}>
-          <FolderOpen className="h-4 w-4 mr-1.5" /> 相册
-        </Button>
+        <label className="inline-flex items-center justify-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent hover:text-accent-foreground h-8 px-3 cursor-pointer gap-1.5">
+          <Camera className="h-4 w-4" /> 拍照
+          <input type="file" accept="image/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} />
+        </label>
+        <label className="inline-flex items-center justify-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent hover:text-accent-foreground h-8 px-3 cursor-pointer gap-1.5">
+          <Video className="h-4 w-4" /> 录像
+          <input type="file" accept="video/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} />
+        </label>
+        <label className="inline-flex items-center justify-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent hover:text-accent-foreground h-8 px-3 cursor-pointer gap-1.5">
+          <FolderOpen className="h-4 w-4" /> 相册图片
+          <input type="file" accept="image/*" multiple className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} />
+        </label>
+        <label className="inline-flex items-center justify-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent hover:text-accent-foreground h-8 px-3 cursor-pointer gap-1.5">
+          <FolderOpen className="h-4 w-4" /> 相册视频
+          <input type="file" accept="video/*" multiple className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} />
+        </label>
       </div>
-      <input ref={fileInputRef} type="file" accept="image/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={(e) => handleUpload(e.target.files)} />
-      <input ref={videoInputRef} type="file" accept="video/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={(e) => handleUpload(e.target.files)} />
-      <input ref={albumInputRef} type="file" multiple className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={(e) => handleUpload(e.target.files)} />
 
       {loading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{[1,2,3].map(i => <div key={i} className="aspect-square bg-muted animate-pulse rounded-lg" />)}</div>
