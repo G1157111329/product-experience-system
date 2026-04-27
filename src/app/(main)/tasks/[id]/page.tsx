@@ -63,6 +63,7 @@ interface Recipe {
   id: string; name: string; ingredients: string | null; recipe_type: string;
   problem_count: number; recipe_steps: RecipeStep[];
   effect_description?: string | null; effect_score?: string | null; effect_problem_point?: string | null;
+  effect_ai_result?: { texture: { score: number; comment: string }; thoroughness: { score: number; comment: string }; purity: { score: number; comment: string }; stability: { score: number; comment: string }; overall: { score: number; summary: string } } | null;
   effect_materials?: Material[];
 }
 
@@ -1771,7 +1772,16 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
   const [effectMaterialIds, setEffectMaterialIds] = useState<Record<string, string[]>>({});
   const [effectSaving, setEffectSaving] = useState<Record<string, boolean>>({});
   const [aiEvaluating, setAiEvaluating] = useState<Record<string, boolean>>({});
-  const [aiResult, setAiResult] = useState<Record<string, { content: string; score: string }>>({});
+  const [aiResult, setAiResult] = useState<Record<string, {
+    result?: {
+      texture: { score: number; comment: string };
+      thoroughness: { score: number; comment: string };
+      purity: { score: number; comment: string };
+      stability: { score: number; comment: string };
+      overall: { score: number; summary: string };
+    };
+    score: string;
+  }>>({});
 
   // ── Recipe library search (Feature 7) ──
   const [recipeSearch, setRecipeSearch] = useState('');
@@ -2143,7 +2153,7 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
       if (data.code === 0) {
         setAiResult(prev => ({ ...prev, [recipe.id]: data.data }));
         fetchRecipes();
-        toast.success(`AI评分完成：${data.data.score}分`);
+        toast.success(`AI评价完成：综合${data.data.score}分`);
       } else toast.error(data.message);
     } finally {
       setAiEvaluating(prev => ({ ...prev, [recipe.id]: false }));
@@ -2376,23 +2386,57 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                         ))}
                       </div>
                     )}
-                    {/* AI result display */}
-                    {(aiResult[recipe.id] || recipe.effect_score) && (
-                      <div className="p-2.5 rounded-lg bg-muted/50 border border-border space-y-1.5">
-                        <div className="flex items-center gap-2">
-                          <Sparkles className="h-3.5 w-3.5 text-primary" />
-                          <span className="text-xs font-medium">AI评价结果</span>
-                          <Badge className="text-[10px] bg-primary text-primary-foreground">
-                            {aiResult[recipe.id]?.score || recipe.effect_score}分/10分
-                          </Badge>
+                    {/* AI result display - 4 dimensions */}
+                    {(() => {
+                      const aiData = aiResult[recipe.id]?.result || recipe.effect_ai_result;
+                      const aiScore = aiResult[recipe.id]?.score || recipe.effect_score;
+                      if (!aiData && !aiScore) return null;
+                      const dims = aiData ? [
+                        { key: 'texture', label: '质感', icon: '🧈', data: aiData.texture },
+                        { key: 'thoroughness', label: '透彻', icon: '🔥', data: aiData.thoroughness },
+                        { key: 'purity', label: '纯净', icon: '💎', data: aiData.purity },
+                        { key: 'stability', label: '恒定', icon: '⚖️', data: aiData.stability },
+                      ] : [];
+                      const getScoreColor = (s: number) => s >= 8 ? 'text-emerald-600 bg-emerald-50' : s >= 6 ? 'text-blue-600 bg-blue-50' : s >= 4 ? 'text-amber-600 bg-amber-50' : 'text-red-600 bg-red-50';
+                      return (
+                        <div className="p-2.5 rounded-lg bg-muted/50 border border-border space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="h-3.5 w-3.5 text-primary" />
+                            <span className="text-xs font-medium">AI评价结果</span>
+                            {aiScore && (
+                              <Badge className={`text-[10px] ml-auto ${Number(aiScore) >= 8 ? 'bg-emerald-600' : Number(aiScore) >= 6 ? 'bg-blue-600' : Number(aiScore) >= 4 ? 'bg-amber-600' : 'bg-red-600'} text-white`}>
+                                综合 {aiScore}分/10分
+                              </Badge>
+                            )}
+                          </div>
+                          {dims.length > 0 && dims.some(d => d.data?.score > 0) && (
+                            <div className="grid grid-cols-2 gap-1.5">
+                              {dims.map(d => (
+                                <div key={d.key} className="flex items-center gap-1.5 p-1.5 rounded bg-background/80">
+                                  <span className="text-xs">{d.icon}</span>
+                                  <span className="text-[11px] font-medium min-w-[28px]">{d.label}</span>
+                                  <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${getScoreColor(d.data?.score || 0)}`}>
+                                    {d.data?.score || 0}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {dims.map(d => d.data?.comment && (
+                            <div key={`${d.key}-comment`} className="ml-1">
+                              <span className="text-[11px] font-medium">{d.icon} {d.label}：</span>
+                              <span className="text-[11px] text-muted-foreground">{d.data.comment}</span>
+                            </div>
+                          ))}
+                          {aiData?.overall?.summary && (
+                            <div className="pt-1 border-t border-border">
+                              <span className="text-[11px] font-medium">📋 综合评价：</span>
+                              <p className="text-[11px] text-muted-foreground mt-0.5">{aiData.overall.summary}</p>
+                            </div>
+                          )}
                         </div>
-                        {aiResult[recipe.id]?.content && (
-                          <p className="text-xs text-muted-foreground whitespace-pre-wrap break-all">
-                            {aiResult[recipe.id].content}
-                          </p>
-                        )}
-                      </div>
-                    )}
+                      );
+                    })()}
                     <div className="flex gap-2">
                       <Button variant="outline" size="sm" className="flex-1"
                         onClick={() => handleSaveEffect(recipe)}
