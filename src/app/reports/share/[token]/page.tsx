@@ -23,7 +23,7 @@ interface Recipe {
   id: string; name: string; ingredients: string | null; recipe_type: string;
   problem_count: number; recipe_steps: RecipeStep[];
   effect_description?: string | null; effect_score?: string | null; effect_problem_point?: string | null;
-  effect_ai_result?: { texture: { score: number; comment: string }; thoroughness: { score: number; comment: string }; purity: { score: number; comment: string }; stability: { score: number; comment: string }; overall: { score: number; summary: string } } | null;
+  effect_ai_result?: { score: number; summary: string } | null;
   effect_materials?: Material[];
 }
 
@@ -389,46 +389,14 @@ export default function ShareReportPage() {
                               <span className="text-xs font-medium text-primary">效果/出品效果评价</span>
                               {recipe.effect_score && (
                                 <Badge className={`text-[9px] ml-auto ${Number(recipe.effect_score) >= 8 ? 'bg-emerald-600' : Number(recipe.effect_score) >= 6 ? 'bg-blue-600' : Number(recipe.effect_score) >= 4 ? 'bg-amber-600' : 'bg-red-600'} text-white`}>
-                                  综合 {recipe.effect_score}分/10分
+                                  {recipe.effect_score}分/10分
                                 </Badge>
                               )}
                             </div>
-                            {recipe.effect_ai_result && (() => {
-                              const ai = recipe.effect_ai_result;
-                              const dims = [
-                                { label: '质感', icon: '🧈', data: ai.texture },
-                                { label: '透彻', icon: '🔥', data: ai.thoroughness },
-                                { label: '纯净', icon: '💎', data: ai.purity },
-                                { label: '恒定', icon: '⚖️', data: ai.stability },
-                              ];
-                              const getScoreColor = (s: number) => s >= 8 ? 'text-emerald-600 bg-emerald-50' : s >= 6 ? 'text-blue-600 bg-blue-50' : s >= 4 ? 'text-amber-600 bg-amber-50' : 'text-red-600 bg-red-50';
-                              return (
-                                <div className="space-y-1.5 ml-4">
-                                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1">
-                                    {dims.map(d => (
-                                      <div key={d.label} className="flex items-center gap-1 p-1 rounded bg-background/80">
-                                        <span className="text-[10px]">{d.icon}</span>
-                                        <span className="text-[10px] font-medium">{d.label}</span>
-                                        <span className={`text-[10px] font-bold px-1 py-0.5 rounded-full ${getScoreColor(d.data?.score || 0)}`}>{d.data?.score || 0}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                  {dims.map(d => d.data?.comment && (
-                                    <div key={`${d.label}-cmt`}>
-                                      <span className="text-[11px] font-medium">{d.icon} {d.label}：</span>
-                                      <span className="text-[11px] text-muted-foreground">{d.data.comment}</span>
-                                    </div>
-                                  ))}
-                                  {ai.overall?.summary && (
-                                    <div className="pt-1 border-t border-border/50">
-                                      <span className="text-[11px] font-medium">📋 综合：</span>
-                                      <span className="text-[11px] text-muted-foreground">{ai.overall.summary}</span>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })()}
-                            {recipe.effect_description && !recipe.effect_ai_result && (
+                            {recipe.effect_ai_result && (
+                              <p className="text-xs text-muted-foreground whitespace-pre-wrap break-all ml-4">{recipe.effect_ai_result.summary}</p>
+                            )}
+                            {!recipe.effect_ai_result && recipe.effect_description && (
                               <p className="text-xs text-muted-foreground whitespace-pre-wrap break-all ml-4">{recipe.effect_description}</p>
                             )}
                             {recipe.effect_problem_point && (

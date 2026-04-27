@@ -19,7 +19,7 @@ interface Recipe {
   id: string; name: string; ingredients: string | null; recipe_type: string;
   problem_count: number; recipe_steps: RecipeStep[];
   effect_description?: string | null; effect_score?: string | null; effect_problem_point?: string | null;
-  effect_ai_result?: { texture: { score: number; comment: string }; thoroughness: { score: number; comment: string }; purity: { score: number; comment: string }; stability: { score: number; comment: string }; overall: { score: number; summary: string } } | null;
+  effect_ai_result?: { score: number; summary: string } | null;
   effect_materials?: Material[];
 }
 
@@ -220,42 +220,10 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
                         color: 'white' }}>综合 {recipe.effect_score}分/10分</span>
                     )}
                   </div>
-                  {recipe.effect_ai_result && (() => {
-                    const ai = recipe.effect_ai_result;
-                    const dims = [
-                      { label: '质感', icon: '🧈', data: ai.texture },
-                      { label: '透彻', icon: '🔥', data: ai.thoroughness },
-                      { label: '纯净', icon: '💎', data: ai.purity },
-                      { label: '恒定', icon: '⚖️', data: ai.stability },
-                    ];
-                    const getSc = (s: number) => s >= 8 ? '#059669' : s >= 6 ? '#2563eb' : s >= 4 ? '#d97706' : '#dc2626';
-                    return (
-                      <div style={{ marginLeft: '20px' }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '4px', marginBottom: '4px' }}>
-                          {dims.map(d => (
-                            <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: '3px', padding: '2px 4px', borderRadius: '3px', background: '#fff' }}>
-                              <span style={{ fontSize: '10px' }}>{d.icon}</span>
-                              <span style={{ fontSize: '10px', fontWeight: 500 }}>{d.label}</span>
-                              <span style={{ fontSize: '10px', fontWeight: 700, color: getSc(d.data?.score || 0) }}>{d.data?.score || 0}</span>
-                            </div>
-                          ))}
-                        </div>
-                        {dims.map(d => d.data?.comment && (
-                          <div key={`${d.label}-cmt`} style={{ fontSize: '10px', marginBottom: '1px' }}>
-                            <span style={{ fontWeight: 500 }}>{d.icon} {d.label}：</span>
-                            <span style={{ color: '#666' }}>{d.data.comment}</span>
-                          </div>
-                        ))}
-                        {ai.overall?.summary && (
-                          <div style={{ fontSize: '10px', marginTop: '3px', paddingTop: '3px', borderTop: '1px solid #d1d5db' }}>
-                            <span style={{ fontWeight: 500 }}>📋 综合：</span>
-                            <span style={{ color: '#666' }}>{ai.overall.summary}</span>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-                  {recipe.effect_description && !recipe.effect_ai_result && (
+                  {recipe.effect_ai_result && (
+                      <div style={{ fontSize: '11px', color: '#555', marginLeft: '20px', whiteSpace: 'pre-wrap' }}>{recipe.effect_ai_result.summary}</div>
+                  )}
+                  {!recipe.effect_ai_result && recipe.effect_description && (
                     <div style={{ fontSize: '11px', color: '#555', marginLeft: '20px', whiteSpace: 'pre-wrap' }}>{recipe.effect_description}</div>
                   )}
                   {recipe.effect_problem_point && (
