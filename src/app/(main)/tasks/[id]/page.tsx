@@ -2363,26 +2363,6 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                         }}
                       />
                     </div>
-                    {/* Existing effect materials preview */}
-                    {recipe.effect_materials && recipe.effect_materials.length > 0 && !effectMaterialIds[recipe.id] && (
-                      <div className="flex gap-1.5 flex-wrap">
-                        {recipe.effect_materials.map((mat) => (
-                          <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border cursor-pointer"
-                            onClick={() => open(mat.file_url)}>
-                            {mat.material_type === 'image' ? (
-                              <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center bg-muted relative">
-                                <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
-                                <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                                  <Play className="h-4 w-4 text-white fill-white" />
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
                     {/* AI result display */}
                     {(() => {
                       const aiData = aiResult[recipe.id]?.result || recipe.effect_ai_result;

@@ -197,7 +197,7 @@ export default function TasksPage() {
                 </div>
               </div>
               <div className="space-y-1.5">
-                <Label>产品型号 *</Label>
+                <Label>产品型号 {(['自研', '改型/降本/优化'].includes(form.project_type)) ? '*' : ''}</Label>
                 <Input placeholder="如：PBJ-F10U1" value={form.product_model} onChange={(e) => setForm({ ...form, product_model: e.target.value })} />
               </div>
               <div className="space-y-1.5">
@@ -240,7 +240,7 @@ export default function TasksPage() {
                 <Label>体验目的</Label>
                 <Textarea placeholder="本次体验的目标" value={form.test_purpose} onChange={(e) => setForm({ ...form, test_purpose: e.target.value })} rows={2} />
               </div>
-              <Button onClick={handleCreate} className="w-full" disabled={!form.task_name || !form.product_category || !form.product || !form.product_model || !form.project_type}>
+              <Button onClick={handleCreate} className="w-full" disabled={!form.task_name || !form.product_category || !form.product || !form.project_type || (['自研', '改型/降本/优化'].includes(form.project_type) && !form.product_model)}>
                 创建任务
               </Button>
             </div>
