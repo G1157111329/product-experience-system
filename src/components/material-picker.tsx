@@ -46,6 +46,16 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
   const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
   const setIsOpen = onOpenChange || setInternalOpen;
 
+  const triggerFilePicker = (inputId: string, directClick = false) => {
+    const input = document.getElementById(inputId) as HTMLInputElement | null;
+    if (!input) return;
+    if (directClick || typeof input.showPicker !== 'function') {
+      input.click();
+    } else {
+      input.showPicker();
+    }
+  };
+
   // Sync selected with external prop
   useEffect(() => {
     if (selectedIds) setSelected(selectedIds);
@@ -218,26 +228,22 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
             </DialogHeader>
             <div className="space-y-3">
               <div className="flex items-center gap-2 flex-wrap">
-                <label className={`inline-flex items-center justify-center gap-1 rounded-md text-sm font-medium h-8 px-3 cursor-pointer border border-input bg-background hover:bg-accent hover:text-accent-foreground ${uploading ? 'pointer-events-none opacity-50' : ''}`}>
+                <Button type="button" size="sm" className="gap-1" onClick={() => triggerFilePicker('mp-camera-photo')} disabled={uploading}>
                   {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
                   {uploading ? '上传中...' : '拍照'}
-                  <input type="file" accept="image/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={e => { handleUpload(e); e.target.value = ''; }} />
-                </label>
-                <label className={`inline-flex items-center justify-center gap-1 rounded-md text-sm font-medium h-8 px-3 cursor-pointer border border-input bg-background hover:bg-accent hover:text-accent-foreground ${uploading ? 'pointer-events-none opacity-50' : ''}`}>
+                </Button>
+                <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => triggerFilePicker('mp-camera-video')} disabled={uploading}>
                   {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Video className="h-3.5 w-3.5" />}
                   {uploading ? '上传中...' : '录像'}
-                  <input type="file" accept="video/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={e => { handleUpload(e); e.target.value = ''; }} />
-                </label>
-                <label className={`inline-flex items-center justify-center gap-1 rounded-md text-sm font-medium h-8 px-3 cursor-pointer border border-input bg-background hover:bg-accent hover:text-accent-foreground ${uploading ? 'pointer-events-none opacity-50' : ''}`}>
+                </Button>
+                <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => triggerFilePicker('mp-album-img', true)} disabled={uploading}>
                   <FolderOpen className="h-3.5 w-3.5" />
                   相册图片
-                  <input type="file" accept="image/*" multiple className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={e => { handleUpload(e); e.target.value = ''; }} />
-                </label>
-                <label className={`inline-flex items-center justify-center gap-1 rounded-md text-sm font-medium h-8 px-3 cursor-pointer border border-input bg-background hover:bg-accent hover:text-accent-foreground ${uploading ? 'pointer-events-none opacity-50' : ''}`}>
+                </Button>
+                <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => triggerFilePicker('mp-album-vid', true)} disabled={uploading}>
                   <Film className="h-3.5 w-3.5" />
                   相册视频
-                  <input type="file" accept="video/*" multiple className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={e => { handleUpload(e); e.target.value = ''; }} />
-                </label>
+                </Button>
                 <div className="flex gap-1 ml-auto">
                   {([['all', '全部'], ['image', '图片'], ['video', '视频']] as const).map(([val, label]) => (
                     <Button key={val} type="button" size="sm" variant={filterType === val ? 'default' : 'outline'} className="h-7 text-xs px-2"
@@ -245,6 +251,10 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
                   ))}
                 </div>
               </div>
+              <input id="mp-camera-photo" type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { handleUpload(e); e.target.value = ''; }} />
+              <input id="mp-camera-video" type="file" accept="video/*" capture="environment" className="hidden" onChange={e => { handleUpload(e); e.target.value = ''; }} />
+              <input id="mp-album-img" type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/bmp" multiple className="hidden" onChange={e => { handleUpload(e); e.target.value = ''; }} />
+              <input id="mp-album-vid" type="file" accept="video/mp4,video/webm,video/quicktime,video/x-msvideo,video/3gpp" multiple className="hidden" onChange={e => { handleUpload(e); e.target.value = ''; }} />
               <ScrollArea className="h-[50vh]">
                 {loading ? (
                   <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin" /></div>
@@ -284,26 +294,22 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
         </DialogHeader>
         <div className="space-y-3">
           <div className="flex items-center gap-2 flex-wrap">
-            <label className={`inline-flex items-center justify-center gap-1 rounded-md text-sm font-medium h-8 px-3 cursor-pointer border border-input bg-background hover:bg-accent hover:text-accent-foreground ${uploading ? 'pointer-events-none opacity-50' : ''}`}>
+            <Button type="button" size="sm" className="gap-1" onClick={() => triggerFilePicker('mp2-camera-photo')} disabled={uploading}>
               {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
               {uploading ? '上传中...' : '拍照'}
-              <input type="file" accept="image/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={e => { handleUpload(e); e.target.value = ''; }} />
-            </label>
-            <label className={`inline-flex items-center justify-center gap-1 rounded-md text-sm font-medium h-8 px-3 cursor-pointer border border-input bg-background hover:bg-accent hover:text-accent-foreground ${uploading ? 'pointer-events-none opacity-50' : ''}`}>
+            </Button>
+            <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => triggerFilePicker('mp2-camera-video')} disabled={uploading}>
               <Video className="h-3.5 w-3.5" />
               录像
-              <input type="file" accept="video/*" capture="environment" className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={e => { handleUpload(e); e.target.value = ''; }} />
-            </label>
-            <label className={`inline-flex items-center justify-center gap-1 rounded-md text-sm font-medium h-8 px-3 cursor-pointer border border-input bg-background hover:bg-accent hover:text-accent-foreground ${uploading ? 'pointer-events-none opacity-50' : ''}`}>
+            </Button>
+            <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => triggerFilePicker('mp2-album-img', true)} disabled={uploading}>
               <FolderOpen className="h-3.5 w-3.5" />
               相册图片
-              <input type="file" accept="image/*" multiple className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={e => { handleUpload(e); e.target.value = ''; }} />
-            </label>
-            <label className={`inline-flex items-center justify-center gap-1 rounded-md text-sm font-medium h-8 px-3 cursor-pointer border border-input bg-background hover:bg-accent hover:text-accent-foreground ${uploading ? 'pointer-events-none opacity-50' : ''}`}>
+            </Button>
+            <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => triggerFilePicker('mp2-album-vid', true)} disabled={uploading}>
               <Film className="h-3.5 w-3.5" />
               相册视频
-              <input type="file" accept="video/*" multiple className="absolute opacity-0 w-0 h-0 pointer-events-none" onChange={e => { handleUpload(e); e.target.value = ''; }} />
-            </label>
+            </Button>
             <div className="flex gap-1 ml-auto">
               {([['all', '全部'], ['image', '图片'], ['video', '视频']] as const).map(([val, label]) => (
                 <Button key={val} size="sm" variant={filterType === val ? 'default' : 'outline'} className="h-7 text-xs px-2"
@@ -311,6 +317,10 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
               ))}
             </div>
           </div>
+          <input id="mp2-camera-photo" type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { handleUpload(e); e.target.value = ''; }} />
+          <input id="mp2-camera-video" type="file" accept="video/*" capture="environment" className="hidden" onChange={e => { handleUpload(e); e.target.value = ''; }} />
+          <input id="mp2-album-img" type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/bmp" multiple className="hidden" onChange={e => { handleUpload(e); e.target.value = ''; }} />
+          <input id="mp2-album-vid" type="file" accept="video/mp4,video/webm,video/quicktime,video/x-msvideo,video/3gpp" multiple className="hidden" onChange={e => { handleUpload(e); e.target.value = ''; }} />
           <ScrollArea className="h-[50vh]">
             {loading ? (
               <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin" /></div>
