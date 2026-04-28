@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, ArrowRightLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Pencil, Trash2, Check, Link2, X, Play, GripVertical, Sparkles, Save, Star, FolderOpen } from 'lucide-react';
+import { ArrowLeft, ArrowRightLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Film, Image as ImageIcon, Pencil, Trash2, Check, Link2, X, Play, GripVertical, Sparkles, Save, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -417,16 +417,18 @@ function MaterialsTab({ taskId }: { taskId: string }) {
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  const cameraImageInputRef = useRef<HTMLInputElement>(null);
+  const cameraVideoInputRef = useRef<HTMLInputElement>(null);
+  const galleryImageInputRef = useRef<HTMLInputElement>(null);
+  const galleryVideoInputRef = useRef<HTMLInputElement>(null);
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
 
-  const triggerFilePicker = (inputId: string, directClick = false) => {
-    const input = document.getElementById(inputId) as HTMLInputElement | null;
+  const triggerFilePicker = (inputRef: React.RefObject<HTMLInputElement | null>) => {
+    const input = inputRef.current;
     if (!input) return;
-    if (directClick || typeof input.showPicker !== 'function') {
-      input.click();
-    } else {
-      input.showPicker();
-    }
+    input.click();
   };
 
   const fetchMaterials = useCallback(async () => {
@@ -489,23 +491,23 @@ function MaterialsTab({ taskId }: { taskId: string }) {
       <PreviewComponent />
       {/* Upload buttons */}
       <div className="flex gap-2 flex-wrap">
-        <Button variant="outline" size="sm" onClick={() => triggerFilePicker('mat-camera-photo')}>
+        <Button variant="outline" size="sm" onClick={() => triggerFilePicker(cameraImageInputRef)}>
           <Camera className="h-4 w-4 mr-1.5" /> 拍照
         </Button>
-        <Button variant="outline" size="sm" onClick={() => triggerFilePicker('mat-camera-video')}>
+        <Button variant="outline" size="sm" onClick={() => triggerFilePicker(cameraVideoInputRef)}>
           <Video className="h-4 w-4 mr-1.5" /> 录像
         </Button>
-        <Button variant="outline" size="sm" onClick={() => triggerFilePicker('mat-album-img', true)}>
-          <FolderOpen className="h-4 w-4 mr-1.5" /> 相册图片
+        <Button variant="outline" size="sm" onClick={() => triggerFilePicker(galleryImageInputRef)}>
+          <ImageIcon className="h-4 w-4 mr-1.5" /> 相册图片
         </Button>
-        <Button variant="outline" size="sm" onClick={() => triggerFilePicker('mat-album-vid', true)}>
-          <FolderOpen className="h-4 w-4 mr-1.5" /> 相册视频
+        <Button variant="outline" size="sm" onClick={() => triggerFilePicker(galleryVideoInputRef)}>
+          <Film className="h-4 w-4 mr-1.5" /> 相册视频
         </Button>
       </div>
-      <input id="mat-camera-photo" type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} />
-      <input id="mat-camera-video" type="file" accept="video/*" capture="environment" className="hidden" onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} />
-      <input id="mat-album-img" type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/bmp" multiple className="hidden" onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} />
-      <input id="mat-album-vid" type="file" accept="video/mp4,video/webm,video/quicktime,video/x-msvideo,video/3gpp" multiple className="hidden" onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} />
+      <input ref={cameraImageInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} />
+      <input ref={cameraVideoInputRef} type="file" accept="video/*" capture="environment" className="hidden" onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} />
+      <input ref={galleryImageInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} />
+      <input ref={galleryVideoInputRef} type="file" accept="video/*" multiple className="hidden" onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} />
 
       {loading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{[1,2,3].map(i => <div key={i} className="aspect-square bg-muted animate-pulse rounded-lg" />)}</div>

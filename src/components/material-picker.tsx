@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
-import { Plus, Loader2, Film, Image as ImageIcon, Camera, Video, FolderOpen } from 'lucide-react';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { Plus, Loader2, Film, Image as ImageIcon, Camera, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -46,14 +46,15 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
   const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
   const setIsOpen = onOpenChange || setInternalOpen;
 
-  const triggerFilePicker = (inputId: string, directClick = false) => {
-    const input = document.getElementById(inputId) as HTMLInputElement | null;
-    if (!input) return;
-    if (directClick || typeof input.showPicker !== 'function') {
-      input.click();
-    } else {
-      input.showPicker();
-    }
+  const cameraImageInputRef = useRef<HTMLInputElement>(null);
+  const cameraVideoInputRef = useRef<HTMLInputElement>(null);
+  const galleryImageInputRef = useRef<HTMLInputElement>(null);
+  const galleryVideoInputRef = useRef<HTMLInputElement>(null);
+
+  const triggerFilePicker = (inputRef: React.RefObject<HTMLInputElement | null>) => {
+    const input = inputRef.current;
+    if (!input || uploading) return;
+    input.click();
   };
 
   // Sync selected with external prop
@@ -228,19 +229,19 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
             </DialogHeader>
             <div className="space-y-3">
               <div className="flex items-center gap-2 flex-wrap">
-                <Button type="button" size="sm" className="gap-1" onClick={() => triggerFilePicker('mp-camera-photo')} disabled={uploading}>
+                <Button type="button" size="sm" className="gap-1" onClick={() => triggerFilePicker(cameraImageInputRef)} disabled={uploading}>
                   {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
                   {uploading ? '上传中...' : '拍照'}
                 </Button>
-                <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => triggerFilePicker('mp-camera-video')} disabled={uploading}>
+                <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => triggerFilePicker(cameraVideoInputRef)} disabled={uploading}>
                   {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Video className="h-3.5 w-3.5" />}
                   {uploading ? '上传中...' : '录像'}
                 </Button>
-                <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => triggerFilePicker('mp-album-img', true)} disabled={uploading}>
-                  <FolderOpen className="h-3.5 w-3.5" />
+                <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => triggerFilePicker(galleryImageInputRef)} disabled={uploading}>
+                  <ImageIcon className="h-3.5 w-3.5" />
                   相册图片
                 </Button>
-                <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => triggerFilePicker('mp-album-vid', true)} disabled={uploading}>
+                <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => triggerFilePicker(galleryVideoInputRef)} disabled={uploading}>
                   <Film className="h-3.5 w-3.5" />
                   相册视频
                 </Button>
@@ -251,10 +252,10 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
                   ))}
                 </div>
               </div>
-              <input id="mp-camera-photo" type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { handleUpload(e); e.target.value = ''; }} />
-              <input id="mp-camera-video" type="file" accept="video/*" capture="environment" className="hidden" onChange={e => { handleUpload(e); e.target.value = ''; }} />
-              <input id="mp-album-img" type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/bmp" multiple className="hidden" onChange={e => { handleUpload(e); e.target.value = ''; }} />
-              <input id="mp-album-vid" type="file" accept="video/mp4,video/webm,video/quicktime,video/x-msvideo,video/3gpp" multiple className="hidden" onChange={e => { handleUpload(e); e.target.value = ''; }} />
+              <input ref={cameraImageInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { handleUpload(e); e.target.value = ''; }} />
+              <input ref={cameraVideoInputRef} type="file" accept="video/*" capture="environment" className="hidden" onChange={e => { handleUpload(e); e.target.value = ''; }} />
+              <input ref={galleryImageInputRef} type="file" accept="image/*" multiple className="hidden" onChange={e => { handleUpload(e); e.target.value = ''; }} />
+              <input ref={galleryVideoInputRef} type="file" accept="video/*" multiple className="hidden" onChange={e => { handleUpload(e); e.target.value = ''; }} />
               <ScrollArea className="h-[50vh]">
                 {loading ? (
                   <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin" /></div>
@@ -294,19 +295,19 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
         </DialogHeader>
         <div className="space-y-3">
           <div className="flex items-center gap-2 flex-wrap">
-            <Button type="button" size="sm" className="gap-1" onClick={() => triggerFilePicker('mp2-camera-photo')} disabled={uploading}>
+            <Button type="button" size="sm" className="gap-1" onClick={() => triggerFilePicker(cameraImageInputRef)} disabled={uploading}>
               {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
               {uploading ? '上传中...' : '拍照'}
             </Button>
-            <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => triggerFilePicker('mp2-camera-video')} disabled={uploading}>
+            <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => triggerFilePicker(cameraVideoInputRef)} disabled={uploading}>
               <Video className="h-3.5 w-3.5" />
               录像
             </Button>
-            <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => triggerFilePicker('mp2-album-img', true)} disabled={uploading}>
-              <FolderOpen className="h-3.5 w-3.5" />
+            <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => triggerFilePicker(galleryImageInputRef)} disabled={uploading}>
+              <ImageIcon className="h-3.5 w-3.5" />
               相册图片
             </Button>
-            <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => triggerFilePicker('mp2-album-vid', true)} disabled={uploading}>
+            <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => triggerFilePicker(galleryVideoInputRef)} disabled={uploading}>
               <Film className="h-3.5 w-3.5" />
               相册视频
             </Button>
@@ -317,10 +318,6 @@ export function MaterialPicker({ taskId, open: controlledOpen, onOpenChange, onS
               ))}
             </div>
           </div>
-          <input id="mp2-camera-photo" type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { handleUpload(e); e.target.value = ''; }} />
-          <input id="mp2-camera-video" type="file" accept="video/*" capture="environment" className="hidden" onChange={e => { handleUpload(e); e.target.value = ''; }} />
-          <input id="mp2-album-img" type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/bmp" multiple className="hidden" onChange={e => { handleUpload(e); e.target.value = ''; }} />
-          <input id="mp2-album-vid" type="file" accept="video/mp4,video/webm,video/quicktime,video/x-msvideo,video/3gpp" multiple className="hidden" onChange={e => { handleUpload(e); e.target.value = ''; }} />
           <ScrollArea className="h-[50vh]">
             {loading ? (
               <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin" /></div>
