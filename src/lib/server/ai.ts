@@ -22,15 +22,18 @@ interface InvokeOptions {
   defaultModel?: string;
   defaultTemperature?: number;
   maxTokens?: number;
+  /** 强制使用的内置SDK模型名，忽略用户ai_config中的model设置（仅对内置SDK调用生效） */
+  forceBuiltInModel?: string;
 }
 
 export async function invokeConfiguredAI({
   request,
   client,
   messages,
-  defaultModel = 'doubao-seed-2-0-lite',
+  defaultModel = 'doubao-seed-2-0-lite-260215',
   defaultTemperature = 0.5,
   maxTokens = 2400,
+  forceBuiltInModel,
 }: InvokeOptions): Promise<string> {
   const { data: aiConfigData } = await client
     .from('platform_settings')
@@ -46,7 +49,7 @@ export async function invokeConfiguredAI({
     custom_api_key?: string;
   };
 
-  const model = aiConfig.model || defaultModel;
+  const model = forceBuiltInModel || aiConfig.model || defaultModel;
   const temperature = aiConfig.temperature ?? defaultTemperature;
 
   if (aiConfig.provider === 'custom' && aiConfig.custom_api_url && aiConfig.custom_api_key) {

@@ -78,7 +78,7 @@ JSON格式：
     const rawContent = await invokeConfiguredAI({
       request,
       client,
-      defaultModel: 'doubao-seed-2-0-lite',
+      forceBuiltInModel: 'doubao-seed-2-0-lite-260215',
       defaultTemperature: 0.35,
       messages: [
         { role: 'system', content: systemPrompt },
