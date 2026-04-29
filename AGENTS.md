@@ -13,7 +13,7 @@
 - **Styling**: Tailwind CSS 4
 - **Database**: Supabase (PostgreSQL)
 - **File Storage**: S3 兼容对象存储 (coze-coding-dev-sdk)
-- **AI/LLM**: doubao-seed-2-0-pro-260215 (标准导入解析), doubao-seed-1-6-vision-250815 (食谱效果评价, 可配置), doubao-seed-2-0-lite (其他场景)
+- **AI/LLM**: doubao-seed-2-0-pro-260215 (标准导入解析), doubao-seed-1-6-vision-250815 (食谱效果评价, 可配置), doubao-seed-2-0-lite-260215 (其他场景)
 - **PDF/Excel解析**: coze-coding-dev-sdk FetchClient + xlsx
 - **Theme**: Teal 主色 / Business 字体 / Cool 阴影
 
@@ -295,6 +295,11 @@ coze start
 55. **AI评价结果持久化**: AI评价结果完整保存到数据库effect_ai_result字段，体验计划页面和报告中心均可查看历史评价结果；重新生成报告时effect_ai_result随食谱数据保存到报告content中
 56. **效果评价素材去重**: 效果评价板块的素材仅通过MaterialPicker的initialMaterials展示，不再重复渲染预览区块
 57. **产品型号条件必填**: 新建体验计划时，产品型号仅在项目类型为"自研"或"改型/降本/优化"时必填（Label动态显示*号），其他项目类型（ODM/OEM、竞品研究、前期研究、海外产品）产品型号可选
+58. **步骤素材与问题点素材分离**: 食谱步骤中，步骤素材缩略图显示在"具体操作"文本下方，问题点素材缩略图显示在各自"问题点"文本下方；编辑步骤时通过 initialMaterials 预填充已有素材，保存时对比新旧素材列表进行关联/取消关联
+59. **步骤编辑修复**: handleEditStep 直接使用 step.materials 访问素材数据（移除 as unknown 类型转换），编辑对话框 MaterialPicker 传入 initialMaterials 正确显示已选素材
+60. **主界面固定视口滚动**: 主布局从 flex min-h-screen 改为 flex h-screen overflow-hidden，主内容区域 overflow-y-auto 实现内部滚动，侧边栏 h-full shrink-0 与视口高度保持一致，不再无限拉长页面
+61. **报告生成食谱排序**: 生成报告时，如果用户没有拖动排序食谱（所有 sort_order 为 0），则按 AI 评分（effect_score）降序排列；如果用户有拖动排序（sort_order 有非 0 值），则按用户拖拽排序呈现；无 AI 评分的食谱排在有评分食谱之后
+62. **食谱列表显示AI评分**: 任务详情页功能效果中食谱卡片新增评分显示（如"1 步骤 · 1 问题 · 8.3分"），报告详情页、打印页/PDF导出、报告分享页均同步显示 AI 评分
 
 ## 代码风格
 
@@ -353,3 +358,9 @@ coze start
 | 食谱库删除图标报错 | 重写 route.ts 时丢失 DELETE handler | 重新添加 DELETE handler，含步骤和素材级联清理 |
 | 效果评价图片重复出现 | MaterialPicker已有initialMaterials展示，下方又有独立预览区块 | 移除重复的素材预览区块，仅保留MaterialPicker |
 | 产品型号所有项目类型都必填 | 表单验证未区分项目类型 | 仅"自研"和"改型/降本/优化"时必填，其他类型可选 |
+| 食谱库/注册等RLS策略缺失 | 启用了RLS但没有策略，INSERT/UPDATE被拒绝 | 为 recipe_library, recipe_library_steps, platform_users, platform_settings, report_shares 添加公开读写策略 |
+| gen_random_uuid运行时错误 | schema.ts 中作为JS函数调用，改为 sql`gen_random_uuid()` 模板语法 | 所有 gen_random_uuid() 改为 sql`gen_random_uuid()`，导致所有API返回500 |
+| AI模型名无效 | doubao-seed-2-0-lite 缺少日期后缀 | 正确模型名为 doubao-seed-2-0-lite-260215，invokeConfiguredAI 新增 forceBuiltInModel 参数 |
+| 步骤保存后无法编辑 | handleEditStep 使用 as unknown 类型转换导致素材数据丢失 | 直接使用 step.materials 访问，编辑对话框传入 initialMaterials |
+| 侧边栏与内容长度不一致 | 主布局使用 min-h-screen 导致内容无限拉长 | 改为 h-screen overflow-hidden + overflow-y-auto 实现固定视口滚动 |
+| 编辑任务空日期报错 | PUT /api/tasks/[id] 未处理空字符串日期 | test_date: body.test_date \|\| null 转换空字符串为 null |

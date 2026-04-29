@@ -174,7 +174,7 @@
 标准批量导入功能使用 LLM 将 PDF/Excel 文档中的非结构化文本解析为标准检查项。该功能通过 `coze-coding-dev-sdk` 的 `LLMClient` 调用豆包系列模型。
 
 - **导入标准时使用**: `doubao-seed-2-0-pro-260215` (高精度)
-- **其他场景预留**: `doubao-seed-2-0-lite` (轻量级)
+- **其他场景预留**: `doubao-seed-2-0-lite-260215` (轻量级)
 
 > **注意**: LLM 功能为可选依赖。如不使用"标准批量导入"功能，可以不配置 LLM。`coze-coding-dev-sdk` 的 LLMClient 会自动从运行环境获取认证信息，独立部署时需配置对应的认证环境变量或替换为 OpenAI 兼容接口。
 
@@ -301,7 +301,7 @@ CREATE TABLE IF NOT EXISTS experience_tasks (
   task_name VARCHAR(200) NOT NULL,
   product_category VARCHAR(50) NOT NULL,        -- 品类
   product VARCHAR(200),                         -- 产品
-  product_model VARCHAR(50) NOT NULL,           -- 产品型号
+  product_model VARCHAR(50),                    -- 产品型号（自研/改型降本优化时必填）
   project_type VARCHAR(50),                     -- ODM/OEM/竞品研究/自研/前期研究/改型降本优化/海外产品
   project_phase VARCHAR(50),                    -- 手板研究/试制阶段/试产阶段/量产阶段
   test_date DATE,
@@ -310,7 +310,7 @@ CREATE TABLE IF NOT EXISTS experience_tasks (
   target_user TEXT,
   test_purpose TEXT,
   test_method TEXT,
-  status VARCHAR(20) NOT NULL DEFAULT '待执行',  -- 待执行/进行中/待审核/已完成/已驳回
+  status VARCHAR(20) NOT NULL DEFAULT '待执行',  -- 待执行/进行中/已完成
   assigned_to VARCHAR(200),                     -- 指派工程师，逗号分隔
   selected_standards JSONB,                     -- 已选标准ID列表
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -356,8 +356,10 @@ CREATE INDEX IF NOT EXISTS check_records_standard_item_id_idx ON check_records(s
 CREATE TABLE IF NOT EXISTS materials (
   id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
   record_id VARCHAR(36) REFERENCES check_records(id) ON DELETE CASCADE,
-  recipe_step_id VARCHAR(36),                   -- 外键，后续创建 recipe_steps 后添加
-  task_id VARCHAR(36) NOT NULL REFERENCES experience_tasks(id) ON DELETE CASCADE,
+  recipe_step_id VARCHAR(36),
+  recipe_library_step_id VARCHAR(36),
+  recipe_id VARCHAR(36),
+  task_id VARCHAR(36) REFERENCES experience_tasks(id) ON DELETE CASCADE,
   material_type VARCHAR(10) NOT NULL,           -- image / video
   file_name VARCHAR(200),
   file_path VARCHAR(500),
@@ -373,6 +375,8 @@ CREATE INDEX IF NOT EXISTS materials_record_id_idx ON materials(record_id);
 CREATE INDEX IF NOT EXISTS materials_task_id_idx ON materials(task_id);
 CREATE INDEX IF NOT EXISTS materials_type_idx ON materials(material_type);
 CREATE INDEX IF NOT EXISTS materials_recipe_step_id_idx ON materials(recipe_step_id);
+CREATE INDEX IF NOT EXISTS materials_recipe_library_step_id_idx ON materials(recipe_library_step_id);
+CREATE INDEX IF NOT EXISTS materials_recipe_id_idx ON materials(recipe_id);
 
 -- ============================================================
 -- 10. 食谱/功能表
@@ -384,6 +388,11 @@ CREATE TABLE IF NOT EXISTS recipes (
   ingredients TEXT,
   recipe_type VARCHAR(20) DEFAULT '食谱',       -- 食谱 / 功能
   problem_count INTEGER DEFAULT 0,
+  sort_order INTEGER DEFAULT 0,                  -- 拖拽排序顺序
+  effect_description TEXT,                        -- 效果评价描述
+  effect_score DECIMAL(3,1),                      -- AI评分（综合）
+  effect_problem_point TEXT,                      -- 效果问题点
+  effect_ai_result JSONB,                         -- AI四维评价完整结果
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -404,19 +413,6 @@ CREATE TABLE IF NOT EXISTS recipe_steps (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS recipe_steps_recipe_id_idx ON recipe_steps(recipe_id);
-
--- 添加 materials 表对 recipe_steps 的外键
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.table_constraints
-    WHERE constraint_name = 'materials_recipe_step_id_fkey'
-  ) THEN
-    ALTER TABLE materials
-    ADD CONSTRAINT materials_recipe_step_id_fkey
-    FOREIGN KEY (recipe_step_id) REFERENCES recipe_steps(id) ON DELETE SET NULL;
-  END IF;
-END $$;
 
 -- ============================================================
 -- 12. 问题整改表
@@ -447,7 +443,8 @@ CREATE TABLE IF NOT EXISTS issues (
   status VARCHAR(20) NOT NULL DEFAULT '待整改',  -- 待整改/整改中/已验证/不整改
   verification_note TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(title, source_type, task_id)
 );
 CREATE INDEX IF NOT EXISTS issues_task_id_idx ON issues(task_id);
 CREATE INDEX IF NOT EXISTS issues_status_idx ON issues(status);
@@ -477,8 +474,12 @@ CREATE TABLE IF NOT EXISTS reports (
   title VARCHAR(200),
   content JSONB,
   product_model VARCHAR(50),
-  status VARCHAR(20) NOT NULL DEFAULT '草稿',   -- 草稿/待审核/已审核
+  organizer VARCHAR(50),
+  project_type VARCHAR(50),
+  project_phase VARCHAR(50),
+  status VARCHAR(20) NOT NULL DEFAULT '已完成',
   version INTEGER DEFAULT 1,
+  created_by VARCHAR(36),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -491,6 +492,61 @@ CREATE TABLE IF NOT EXISTS health_check (
   id SERIAL NOT NULL,
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- ============================================================
+-- 16. 平台设置表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS platform_settings (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  key VARCHAR(100) NOT NULL UNIQUE,
+  value JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- ============================================================
+-- 17. 报告分享表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS report_shares (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  report_id VARCHAR(36) NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+  share_token VARCHAR(100) NOT NULL UNIQUE,
+  expires_at TIMESTAMPTZ,
+  created_by VARCHAR(36),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS report_shares_report_id_idx ON report_shares(report_id);
+CREATE INDEX IF NOT EXISTS report_shares_token_idx ON report_shares(share_token);
+
+-- ============================================================
+-- 18. 食谱库表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS recipe_library (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(200) NOT NULL UNIQUE,
+  product_category VARCHAR(50),
+  product VARCHAR(200),
+  ingredients TEXT,
+  description TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- ============================================================
+-- 19. 食谱库步骤表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS recipe_library_steps (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  recipe_library_id VARCHAR(36) NOT NULL REFERENCES recipe_library(id) ON DELETE CASCADE,
+  step_number INTEGER NOT NULL DEFAULT 1,
+  operation TEXT NOT NULL,
+  problem_point TEXT,
+  problem_points JSONB DEFAULT '[]',
+  sort_order INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS recipe_library_steps_library_id_idx ON recipe_library_steps(recipe_library_id);
 ```
 
 ### 4.2 插入种子数据（品类 + 产品）
@@ -540,8 +596,9 @@ BEGIN
     WHERE schemaname = 'public'
       AND tablename IN (
         'platform_users', 'platform_audit_requests', 'platform_categories', 'platform_products',
-        'standards', 'standard_items', 'experience_tasks', 'check_records',
-        'materials', 'issues', 'report_templates', 'reports', 'recipes', 'recipe_steps',
+        'platform_settings', 'standards', 'standard_items', 'experience_tasks', 'check_records',
+        'materials', 'issues', 'report_templates', 'reports', 'report_shares',
+        'recipes', 'recipe_steps', 'recipe_library', 'recipe_library_steps',
         'health_check'
       )
   LOOP
@@ -840,13 +897,14 @@ docker compose down
 |------|------|------|
 | 登录 | `/login` | 账号密码登录，支持注册/忘记密码（需管理员审核） |
 | 工作台 | `/dashboard` | 核心指标概览，管理员审核入口，非管理员待申请列表 |
-| 标准管理 | `/standards` | 四类标准（通用/品类/感官评价/食谱功能），支持批量导入 PDF/Excel |
+| 标准管理 | `/standards` | 双板块（体验标准+食谱库），四类标准（通用/品类/感官评价/食谱功能），支持批量导入 PDF/Excel |
 | 体验计划 | `/tasks` | 创建体验任务，品类-产品级联选择，项目类型/阶段选择 |
-| 任务详情 | `/tasks/[id]` | 基本信息/素材仓库/五感体验/功能效果 四Tab |
+| 任务详情 | `/tasks/[id]` | 基本信息/素材仓库/五感体验/功能效果 四Tab，步骤/食谱拖拽排序，AI效果评价 |
 | 问题管理 | `/issues` | 从报告自动汇总，等级分一类/二类/三类，状态流转 |
-| 报告中心 | `/reports` | 报告生成/查看/打印，同型号内容级合并 |
+| 报告中心 | `/reports` | 报告生成/查看/打印，同型号内容级合并，报告对比，报告分享 |
+| 报告分享 | `/reports/share/[token]` | 无需登录，只读查看，支持导出PDF、图片放大、视频播放 |
 | 数据分析 | `/analysis` | 多维筛选，核心指标，图表分布，管理账号可导出CSV |
-| 品类设置 | 个人信息→设置 | 管理账号专属：品类/产品增删管理 |
+| 品类设置 | 个人信息→设置 | 管理账号专属：品类/产品增删管理，通用标准选项管理，AI模型配置 |
 
 ### 权限体系
 
@@ -871,16 +929,20 @@ docker compose down
 | `platform_audit_requests` | 审核请求 | request_type(register/password_reset/name_change/role_upgrade) |
 | `platform_categories` | 品类配置 | name, sort_order |
 | `platform_products` | 产品配置 | name, category_id, sort_order |
+| `platform_settings` | 平台设置 | key(unique), value(JSONB)，含 standard_options, ai_config 等 |
 | `standards` | 标准库 | category(通用/品类/感官评价/食谱功能), product_category, product |
 | `standard_items` | 检查项 | standard_id, sensory_dimension, check_item 等 |
 | `experience_tasks` | 体验任务 | product_category, product, project_type, created_by |
 | `check_records` | 检查记录 | task_id, standard_category, evaluation_result |
-| `materials` | 素材 | task_id, material_type(image/video), file_url |
+| `materials` | 素材 | task_id(可选), material_type(image/video), file_url, 可关联record/recipe_step/recipe_library_step/recipe |
 | `issues` | 问题整改 | level(一类/二类/三类), status, source_report_id |
 | `report_templates` | 报告模板 | template_type |
 | `reports` | 报告 | task_id, product_model, content(JSONB) |
-| `recipes` | 食谱/功能 | task_id, recipe_type(食谱/功能) |
+| `report_shares` | 报告分享 | report_id, share_token(unique), expires_at, created_by |
+| `recipes` | 食谱/功能 | task_id, recipe_type(食谱/功能), effect_score, effect_ai_result(JSONB), sort_order |
 | `recipe_steps` | 食谱步骤 | recipe_id, operation, problem_points(JSONB) |
+| `recipe_library` | 食谱库 | name(unique), product_category, product |
+| `recipe_library_steps` | 食谱库步骤 | recipe_library_id, operation, problem_points(JSONB) |
 
 ---
 
@@ -913,6 +975,7 @@ docker compose down
 | GET | `/api/standard-items/search` | 跨标准检查项搜索 |
 | GET/POST | `/api/tasks` | 任务列表/创建 |
 | GET/PUT/DELETE | `/api/tasks/[id]` | 任务详情/更新/删除 |
+| POST | `/api/tasks/[id]/transfer` | 转移体验计划到其他用户（管理员） |
 | GET/POST | `/api/records` | 检查记录列表/创建 |
 | PUT/DELETE | `/api/records/[id]` | 记录更新/删除 |
 | POST | `/api/materials/upload` | 素材上传 (100MB限制) |
@@ -922,13 +985,24 @@ docker compose down
 | GET/POST | `/api/reports` | 报告列表/生成 |
 | GET/PUT/DELETE | `/api/reports/[id]` | 报告详情/更新/删除 |
 | POST | `/api/reports/export-pdf` | PDF导出辅助 |
+| POST | `/api/reports/share` | 创建分享链接（7天/30天/永久） |
+| GET | `/api/reports/share?token=xxx` | 验证分享令牌并获取报告（公开接口） |
+| GET | `/api/reports/share/list?report_id=xxx` | 获取报告的分享链接列表 |
+| DELETE | `/api/reports/share/list?id=xxx` | 撤销分享链接 |
 | GET/POST | `/api/recipes` | 食谱/功能列表/创建 |
 | GET/PUT/DELETE | `/api/recipes/[id]` | 食谱详情/更新/删除 |
+| POST | `/api/recipes/[id]/ai-evaluate` | AI效果评价（四维评价：质感/透彻/纯净/恒定） |
 | GET/POST | `/api/recipe-steps` | 步骤列表/创建 |
 | PUT/DELETE | `/api/recipe-steps/[id]` | 步骤更新/删除 |
+| GET/POST | `/api/recipe-library` | 食谱库列表/创建 |
+| GET/PUT | `/api/recipe-library/[id]` | 食谱库详情/更新 |
+| DELETE | `/api/recipe-library/[id]` | 删除食谱库项（步骤级联删除） |
+| GET/POST | `/api/recipe-library-steps` | 食谱库步骤列表/创建 |
+| PUT/DELETE | `/api/recipe-library-steps/[id]` | 食谱库步骤更新/删除 |
 | GET/POST | `/api/categories` | 品类/产品配置 (GET/POST/DELETE) |
 | GET | `/api/dashboard` | 工作台统计 |
 | GET/POST | `/api/analysis` | 数据分析/导出CSV |
+| GET/PUT | `/api/settings` | 平台设置读取/更新（管理员） |
 
 ---
 
@@ -991,3 +1065,26 @@ INSERT INTO platform_categories (name, sort_order) VALUES ('新品类', 99);
 INSERT INTO platform_products (name, category_id, sort_order)
 VALUES ('新产品', '品类ID', 1);
 ```
+
+### Q: 注册/登录提示失败
+
+1. 确认 `platform_users`、`platform_settings` 表已启用 RLS 并创建了公开读写策略
+2. 在 Supabase SQL Editor 中执行：`CREATE POLICY allow_all ON platform_users FOR ALL USING (true) WITH CHECK (true);`
+3. 同样检查 `platform_settings`、`report_shares`、`recipe_library`、`recipe_library_steps` 表的 RLS 策略
+
+### Q: API 返回 500 错误（所有接口）
+
+1. 检查 `schema.ts` 中 `gen_random_uuid()` 是否使用了 `sql\`gen_random_uuid()\`` 模板语法（不能作为 JS 函数调用）
+2. 检查 Supabase 连接是否正常
+3. 查看 `/app/work/logs/bypass/app.log` 日志
+
+### Q: 报告对比显示 "model not found"
+
+1. 确认 AI 模型名包含日期后缀（如 `doubao-seed-2-0-lite-260215`，而非 `doubao-seed-2-0-lite`）
+2. 管理员可在个人设置中检查 AI 模型配置
+
+### Q: 侧边栏与内容区域长度不一致
+
+1. 主布局应使用 `flex h-screen overflow-hidden`，主内容区域使用 `overflow-y-auto`
+2. 侧边栏使用 `h-full shrink-0` 固定高度
+3. 内容通过内部滚动加载，不再无限拉长页面
