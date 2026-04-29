@@ -427,8 +427,8 @@ export default function ReportsPage() {
                 return (
                 <Card key={r.id} className="flex flex-col">
                   <CardHeader className="pb-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <CardTitle className="text-sm min-w-0 break-all leading-tight">{idx === 0 ? 'A' : 'B'} · {r.title}</CardTitle>
+                    <div className="flex items-start justify-between gap-2">
+                      <CardTitle className="text-sm min-w-0 break-words leading-5">{idx === 0 ? 'A' : 'B'} · {r.title}</CardTitle>
                       {isWinner && <Badge className="text-[10px] shrink-0">更优</Badge>}
                     </div>
                     <div className="flex gap-1 flex-wrap">
