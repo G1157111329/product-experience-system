@@ -74,6 +74,7 @@ interface Material {
 interface Recipe {
   id: string; name: string; ingredients: string | null; recipe_type: string;
   problem_count: number; recipe_steps: RecipeStep[];
+  sort_order?: number;
   effect_description?: string | null; effect_score?: string | null; effect_problem_point?: string | null;
   effect_ai_result?: { score: number; summary: string } | null;
   effect_materials?: Material[];
@@ -2468,6 +2469,7 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                   <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
                     <span>{recipe.recipe_steps?.length || 0} 步骤</span>
                     <span>{recipe.problem_count || 0} 问题</span>
+                    {recipe.effect_score && <span className="text-primary font-medium">{recipe.effect_score}分</span>}
                   </div>
                   <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={(e) => { e.stopPropagation(); handleEditRecipe(recipe); }}>
                     <Pencil className="h-3 w-3 text-muted-foreground" />

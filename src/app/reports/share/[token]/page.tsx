@@ -416,7 +416,7 @@ export default function ShareReportPage() {
                         <div className="flex items-center gap-2 mb-2 min-w-0">
                           <Badge variant="outline" className="text-[10px] shrink-0">{recipe.recipe_type}</Badge>
                           <span className="font-medium text-sm min-w-0 break-all">{recipe.name}</span>
-                          <span className="text-xs text-muted-foreground ml-auto shrink-0">{recipe.recipe_steps?.length || 0} 步骤</span>
+                          <span className="text-xs text-muted-foreground ml-auto shrink-0">{recipe.recipe_steps?.length || 0} 步骤{recipe.effect_score ? <span className="text-primary font-medium ml-1">{recipe.effect_score}分</span> : ''}</span>
                         </div>
                         {recipe.recipe_steps?.map(step => {
                           const stepMats = step.materials || [];

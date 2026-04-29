@@ -203,7 +203,7 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
                 <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 500, background: '#e0f2fe', color: '#0c4a6e' }}>{recipe.recipe_type}</span>
                 <span style={{ fontWeight: 600, fontSize: '13px' }}>{recipe.name}</span>
-                <span style={{ color: '#666', fontSize: '11px', marginLeft: 'auto' }}>{recipe.recipe_steps?.length || 0} 步骤 | {recipe.problem_count || 0} 问题</span>
+                <span style={{ color: '#666', fontSize: '11px', marginLeft: 'auto' }}>{recipe.recipe_steps?.length || 0} 步骤 | {recipe.problem_count || 0} 问题{recipe.effect_score ? ` | ${recipe.effect_score}分` : ''}</span>
               </div>
               {recipe.recipe_steps?.map(step => {
                 const stepMats = step.materials || [];

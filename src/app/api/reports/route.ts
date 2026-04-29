@@ -124,6 +124,22 @@ export async function POST(request: NextRequest) {
     return { ...recipe, problem_count: computedProblemCount };
   });
 
+  // Sort recipes: if user has manually reordered (sort_order values differ from default 0), use sort_order;
+  // otherwise sort by AI effect_score descending
+  const hasManualSort = recipesWithCount.some((r: Record<string, unknown>) => {
+    const so = r.sort_order as number | null;
+    return so !== null && so !== 0;
+  });
+  if (hasManualSort) {
+    recipesWithCount.sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((a.sort_order as number) || 0) - ((b.sort_order as number) || 0));
+  } else {
+    recipesWithCount.sort((a: Record<string, unknown>, b: Record<string, unknown>) => {
+      const scoreA = a.effect_score ? (parseFloat(String(a.effect_score)) || 0) : -1;
+      const scoreB = b.effect_score ? (parseFloat(String(b.effect_score)) || 0) : -1;
+      return scoreB - scoreA; // descending; unscored recipes (-1) go last
+    });
+  }
+
   const reportContent = {
     task: task,
     ai_summary: aiSummaryData?.value || null,

@@ -282,6 +282,7 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
                 <Badge variant="secondary" className="text-[10px] shrink-0">{recipe.recipe_type}</Badge>
                 <span className="text-xs font-medium flex-1 min-w-0 truncate">{recipe.name}</span>
                 <span className="text-[10px] text-muted-foreground">{recipe.problem_count || 0} 问题</span>
+                {recipe.effect_score && <span className="text-[10px] text-primary font-medium">{recipe.effect_score}分</span>}
               </div>
               {recipe.recipe_steps?.map((step) => (
                 <div key={step.id} className="p-2 rounded bg-muted/30 space-y-1">
