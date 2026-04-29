@@ -917,7 +917,7 @@ function UserSection() {
 
 export function AppSidebar() {
   return (
-    <aside className="hidden lg:flex lg:w-60 lg:flex-col lg:border-r border-border bg-card/95 backdrop-blur h-screen sticky top-0">
+    <aside className="hidden lg:flex lg:w-60 lg:flex-col lg:border-r border-border bg-card/95 backdrop-blur h-full shrink-0">
       <NavContent />
     </aside>
   );

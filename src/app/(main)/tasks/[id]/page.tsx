@@ -2272,8 +2272,8 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
         : [{ text: '', material_ids: [] as string[] }];
     // Collect step-level material IDs (materials linked to this step but not to any problem_point)
     const ppMaterialIds = new Set(pps.flatMap(p => p.material_ids || []));
-    const stepMats = (step as unknown as Record<string, unknown>).materials as Material[] | undefined;
-    const stepMatIds = stepMats ? stepMats.filter(m => !ppMaterialIds.has(m.id)).map(m => m.id) : [];
+    const stepMats = step.materials || [];
+    const stepMatIds = stepMats.filter(m => !ppMaterialIds.has(m.id)).map(m => m.id);
     setEditStepForm({ operation: step.operation, step_material_ids: stepMatIds, problem_points: pps });
     setEditStepMaterialIds([]);
     setEditStepMaterials([]);
@@ -2297,24 +2297,37 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
       });
       const data = await res.json();
       if (data.code === 0) {
-        // Link step-level materials
-        if (editStepForm.step_material_ids && editStepForm.step_material_ids.length > 0) {
-          for (const matId of editStepForm.step_material_ids) {
+        // Compute all currently selected material IDs
+        const allSelectedIds = new Set([
+          ...(editStepForm.step_material_ids || []),
+          ...validPPs.flatMap(p => p.material_ids || []),
+        ]);
+        // Compute initially linked material IDs
+        const initialPps = editingStep.problem_points && editingStep.problem_points.length > 0
+          ? editingStep.problem_points
+          : editingStep.problem_point
+            ? [{ text: editingStep.problem_point, material_ids: [] as string[] }]
+            : [];
+        const initialPPMatIds = new Set(initialPps.flatMap((p: ProblemPoint) => p.material_ids || []));
+        const initialStepMatIds = (editingStep.materials || []).filter(m => !initialPPMatIds.has(m.id)).map(m => m.id);
+        const initialAllIds = new Set([...initialStepMatIds, ...initialPPMatIds]);
+
+        // Link newly selected materials
+        for (const matId of allSelectedIds) {
+          if (!initialAllIds.has(matId)) {
             await fetch('/api/materials', {
               method: 'PUT', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ id: matId, recipe_step_id: editingStep.id }),
             });
           }
         }
-        // Link per-problem-point materials
-        for (const pp of validPPs) {
-          if (pp.material_ids && pp.material_ids.length > 0) {
-            for (const matId of pp.material_ids) {
-              await fetch('/api/materials', {
-                method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: matId, recipe_step_id: editingStep.id }),
-              });
-            }
+        // Unlink deselected materials
+        for (const matId of initialAllIds) {
+          if (!allSelectedIds.has(matId)) {
+            await fetch('/api/materials', {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: matId, recipe_step_id: null }),
+            });
           }
         }
         setEditStepDialogOpen(false);
@@ -2519,7 +2532,36 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                           </Button>
                         </div>
                       </div>
-                      {/* Problem points display */}
+                      {/* Step-level materials (below operation) */}
+                      {(() => {
+                        const pps = step.problem_points && step.problem_points.length > 0
+                          ? step.problem_points.filter(p => p.text && p.text.trim())
+                          : step.problem_point
+                            ? [{ text: step.problem_point, material_ids: [] as string[] }]
+                            : [];
+                        const ppMatIds = new Set(pps.flatMap(p => p.material_ids || []));
+                        const stepMats = (step.materials || []).filter(m => !ppMatIds.has(m.id));
+                        return stepMats.length > 0 ? (
+                          <div className="flex gap-1.5 ml-7 flex-wrap">
+                            {stepMats.map((mat) => (
+                              <div key={mat.id} className="w-12 h-12 rounded-md overflow-hidden border border-border cursor-pointer"
+                                onClick={(e) => { e.stopPropagation(); open(mat.file_url); }}>
+                                {mat.material_type === 'image' ? (
+                                  <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center bg-muted relative">
+                                    <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
+                                    <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                                      <Play className="h-3 w-3 text-white fill-white" />
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null;
+                      })()}
+                      {/* Problem points display (with per-pp materials) */}
                       {(() => {
                         const pps = step.problem_points && step.problem_points.length > 0
                           ? step.problem_points.filter(p => p.text && p.text.trim())
@@ -2528,35 +2570,40 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                             : [];
                         if (pps.length === 0) return null;
                         return (
-                          <div className="ml-7 space-y-1">
-                            {pps.map((pp, ppIdx) => (
-                              <div key={ppIdx} className="flex items-start gap-1.5">
-                                {pps.length > 1 && <span className="text-[10px] text-amber-600 font-medium shrink-0">问题{ppIdx + 1}:</span>}
-                                <p className="text-xs text-amber-600">{pp.text}</p>
-                              </div>
-                            ))}
+                          <div className="ml-7 space-y-1.5">
+                            {pps.map((pp, ppIdx) => {
+                              const ppMats = (step.materials || []).filter(m => (pp.material_ids || []).includes(m.id));
+                              return (
+                                <div key={ppIdx} className="space-y-1">
+                                  <div className="flex items-start gap-1.5">
+                                    {pps.length > 1 && <span className="text-[10px] text-amber-600 font-medium shrink-0">问题{ppIdx + 1}:</span>}
+                                    <p className="text-xs text-amber-600">{pp.text}</p>
+                                  </div>
+                                  {ppMats.length > 0 && (
+                                    <div className="flex gap-1.5 flex-wrap">
+                                      {ppMats.map((mat) => (
+                                        <div key={mat.id} className="w-12 h-12 rounded-md overflow-hidden border border-border cursor-pointer"
+                                          onClick={(e) => { e.stopPropagation(); open(mat.file_url); }}>
+                                          {mat.material_type === 'image' ? (
+                                            <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
+                                          ) : (
+                                            <div className="w-full h-full flex items-center justify-center bg-muted relative">
+                                              <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
+                                              <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                                                <Play className="h-3 w-3 text-white fill-white" />
+                                              </div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         );
                       })()}
-                      {step.materials && step.materials.length > 0 && (
-                        <div className="flex gap-1.5 ml-7 flex-wrap">
-                          {step.materials.map((mat) => (
-                            <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border cursor-pointer"
-                              onClick={(e) => { e.stopPropagation(); open(mat.file_url); }}>
-                              {mat.material_type === 'image' ? (
-                                <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center bg-muted relative">
-                                  <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
-                                  <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                                    <Play className="h-4 w-4 text-white fill-white" />
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   ))}
                   <Button variant="outline" size="sm" className="w-full"
@@ -2829,6 +2876,12 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
               <MaterialPicker
                 taskId={taskId}
                 selectedIds={editStepForm.step_material_ids || []}
+                initialMaterials={(() => {
+                  if (!editingStep?.materials) return [];
+                  const pps = editStepForm.problem_points || [];
+                  const ppMatIds = new Set(pps.flatMap(p => p.material_ids || []));
+                  return editingStep.materials.filter(m => !ppMatIds.has(m.id));
+                })()}
                 onSelectionChange={(ids, mats) => {
                   setEditStepForm({ ...editStepForm, step_material_ids: ids });
                   setEditStepMaterialIds(ids);
@@ -2864,7 +2917,7 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                   <MaterialPicker
                     taskId={taskId}
                     selectedIds={pp.material_ids || []}
-
+                    initialMaterials={(editingStep?.materials || []).filter(m => (pp.material_ids || []).includes(m.id))}
                     onSelectionChange={(ids, mats) => {
                       const updated = [...editStepForm.problem_points];
                       updated[idx] = { ...updated[idx], material_ids: ids };
@@ -2876,29 +2929,6 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                 </div>
               ))}
             </div>
-            {/* Existing materials preview */}
-            {editingStep?.materials && editingStep.materials.length > 0 && (
-              <div className="space-y-1.5">
-                <Label>当前关联素材</Label>
-                <div className="flex gap-1.5 flex-wrap">
-                  {editingStep.materials.map((mat) => (
-                    <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border cursor-pointer"
-                      onClick={() => open(mat.file_url)}>
-                      {mat.material_type === 'image' ? (
-                        <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center bg-muted relative">
-                          <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
-                          <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                            <Play className="h-4 w-4 text-white fill-white" />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
             <Button onClick={handleSaveEditStep} className="w-full" disabled={!editStepForm.operation || savingEditStep}>{savingEditStep ? '保存中...' : '保存修改'}</Button>
           </div>
         </DialogContent>
