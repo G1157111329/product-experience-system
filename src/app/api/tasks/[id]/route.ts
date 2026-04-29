@@ -51,7 +51,14 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   ];
 
   for (const field of allowedFields) {
-    if (body[field] !== undefined) updateData[field] = body[field];
+    if (body[field] !== undefined) {
+      // 日期字段空字符串转为null，避免PostgreSQL类型错误
+      if (field === 'test_date' && body[field] === '') {
+        updateData[field] = null;
+      } else {
+        updateData[field] = body[field];
+      }
+    }
   }
 
   const { data, error } = await client
