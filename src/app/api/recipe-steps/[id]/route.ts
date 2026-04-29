@@ -48,6 +48,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const { data: step } = await client.from('recipe_steps').select('recipe_id').eq('id', id).single();
   const recipeId = (step as Record<string, unknown> | null)?.recipe_id as string | null;
 
+  // Unlink materials associated with this step (don't delete them, just remove the association)
+  await client.from('materials').update({ recipe_step_id: null }).eq('recipe_step_id', id);
+
   const { error } = await client.from('recipe_steps').delete().eq('id', id);
 
   if (!error && recipeId) await updateRecipeProblemCount(client, recipeId);

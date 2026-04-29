@@ -301,6 +301,7 @@ coze start
 61. **报告生成食谱排序**: 生成报告时，如果用户没有拖动排序食谱（所有 sort_order 为 0），则按 AI 评分（effect_score）降序排列；如果用户有拖动排序（sort_order 有非 0 值），则按用户拖拽排序呈现；无 AI 评分的食谱排在有评分食谱之后
 62. **食谱列表显示AI评分**: 任务详情页功能效果中食谱卡片新增评分显示（如"1 步骤 · 1 问题 · 8.3分"），报告详情页、打印页/PDF导出、报告分享页均同步显示 AI 评分
 63. **报告食谱食材/参数展示**: 报告详情页、打印页、分享页的食谱卡片头部新增食材/参数(ingredients)展示，呈现形式与体验计划功能效果中食谱列表一致（类型Badge + 名称 + 食材/参数 + 步骤数/问题数/AI评分）
+64. **素材删除保护**: 删除五感体验条目(check_record)、食谱步骤(recipe_step)、食谱(recipe)、食谱库步骤(recipe_library_step)、食谱库(recipe_library)时，仅解除素材关联（将record_id/recipe_step_id/recipe_id/recipe_library_step_id设为null），不删除素材本身；DB外键从onDelete("cascade")改为onDelete("set null")
 
 ## 代码风格
 
@@ -365,3 +366,4 @@ coze start
 | 步骤保存后无法编辑 | handleEditStep 使用 as unknown 类型转换导致素材数据丢失 | 直接使用 step.materials 访问，编辑对话框传入 initialMaterials |
 | 侧边栏与内容长度不一致 | 主布局使用 min-h-screen 导致内容无限拉长 | 改为 h-screen overflow-hidden + overflow-y-auto 实现固定视口滚动 |
 | 编辑任务空日期报错 | PUT /api/tasks/[id] 未处理空字符串日期 | test_date: body.test_date \|\| null 转换空字符串为 null |
+| 删除五感体验/食谱/步骤导致素材被删除 | DB外键 onDelete("cascade") 级联删除素材 + API显式删除素材 | DB外键改为 onDelete("set null")，API改为 update({record_id/recipe_step_id/recipe_library_step_id: null}) 解除关联 |

@@ -68,8 +68,17 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+
   // Unlink effect materials first
   await client.from('materials').update({ recipe_id: null }).eq('recipe_id', id);
+
+  // Unlink all step materials for this recipe's steps
+  const { data: steps } = await client.from('recipe_steps').select('id').eq('recipe_id', id);
+  const stepIds = (steps || []).map((s: any) => s.id);
+  if (stepIds.length > 0) {
+    await client.from('materials').update({ recipe_step_id: null }).in('recipe_step_id', stepIds);
+  }
+
   const { error } = await client.from('recipes').delete().eq('id', id);
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
   return NextResponse.json({ code: 0, message: '删除成功' });

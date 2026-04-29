@@ -398,12 +398,12 @@ export const materials = pgTable("materials", {
 			columns: [table.recordId],
 			foreignColumns: [checkRecords.id],
 			name: "materials_record_id_check_records_id_fk"
-		}).onDelete("cascade"),
+		}).onDelete("set null"),
 	foreignKey({
 			columns: [table.taskId],
 			foreignColumns: [experienceTasks.id],
 			name: "materials_task_id_experience_tasks_id_fk"
-		}).onDelete("cascade"),
+		}).onDelete("set null"),
 	pgPolicy("materials_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
 	pgPolicy("materials_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
 	pgPolicy("materials_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),

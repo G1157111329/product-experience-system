@@ -23,8 +23,8 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const { id } = await params;
   const client = getSupabaseClient();
 
-  // Delete materials associated with this step
-  await client.from('materials').delete().eq('recipe_library_step_id', id);
+  // Unlink materials associated with this step (don't delete them, just remove the association)
+  await client.from('materials').update({ recipe_library_step_id: null }).eq('recipe_library_step_id', id);
 
   const { error } = await client.from('recipe_library_steps').delete().eq('id', id);
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });

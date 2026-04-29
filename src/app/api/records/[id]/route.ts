@@ -84,6 +84,10 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+
+  // Unlink materials associated with this record (don't delete them, just remove the association)
+  await client.from('materials').update({ record_id: null }).eq('record_id', id);
+
   const { error } = await client.from('check_records').delete().eq('id', id);
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
   return NextResponse.json({ code: 0, message: '删除成功' });

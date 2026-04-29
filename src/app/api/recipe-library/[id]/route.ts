@@ -36,9 +36,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const { data: steps } = await client.from('recipe_library_steps').select('id').eq('recipe_library_id', id);
   const stepIds = (steps || []).map((s: any) => s.id);
 
-  // Delete materials associated with these steps
+  // Unlink materials associated with these steps (don't delete them, just remove the association)
   if (stepIds.length > 0) {
-    await client.from('materials').delete().in('recipe_library_step_id', stepIds);
+    await client.from('materials').update({ recipe_library_step_id: null }).in('recipe_library_step_id', stepIds);
   }
 
   // Delete steps
