@@ -280,9 +280,15 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
             <div key={recipe.id} className="border rounded-lg p-3 space-y-2">
               <div className="flex items-center gap-2">
                 <Badge variant="secondary" className="text-[10px] shrink-0">{recipe.recipe_type}</Badge>
-                <span className="text-xs font-medium flex-1 min-w-0 truncate">{recipe.name}</span>
-                <span className="text-[10px] text-muted-foreground">{recipe.problem_count || 0} 问题</span>
-                {recipe.effect_score && <span className="text-[10px] text-primary font-medium">{recipe.effect_score}分</span>}
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium truncate">{recipe.name}</p>
+                  <p className="text-[10px] text-muted-foreground truncate">{recipe.ingredients || '-'}</p>
+                </div>
+                <div className="flex items-center gap-2 text-[10px] text-muted-foreground shrink-0">
+                  <span>{recipe.recipe_steps?.length || 0} 步骤</span>
+                  <span>{recipe.problem_count || 0} 问题</span>
+                  {recipe.effect_score && <span className="text-primary font-medium">{recipe.effect_score}分</span>}
+                </div>
               </div>
               {recipe.recipe_steps?.map((step) => (
                 <div key={step.id} className="p-2 rounded bg-muted/30 space-y-1">

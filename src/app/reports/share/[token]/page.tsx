@@ -415,8 +415,15 @@ export default function ShareReportPage() {
                       <div key={recipe.id} className="border rounded-lg p-2.5 sm:p-3">
                         <div className="flex items-center gap-2 mb-2 min-w-0">
                           <Badge variant="outline" className="text-[10px] shrink-0">{recipe.recipe_type}</Badge>
-                          <span className="font-medium text-sm min-w-0 break-all">{recipe.name}</span>
-                          <span className="text-xs text-muted-foreground ml-auto shrink-0">{recipe.recipe_steps?.length || 0} 步骤{recipe.effect_score ? <span className="text-primary font-medium ml-1">{recipe.effect_score}分</span> : ''}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-sm truncate">{recipe.name}</p>
+                            <p className="text-xs text-muted-foreground truncate">{recipe.ingredients || '-'}</p>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
+                            <span>{recipe.recipe_steps?.length || 0} 步骤</span>
+                            <span>{recipe.problem_count || 0} 问题</span>
+                            {recipe.effect_score && <span className="text-primary font-medium">{recipe.effect_score}分</span>}
+                          </div>
                         </div>
                         {recipe.recipe_steps?.map(step => {
                           const stepMats = step.materials || [];
