@@ -124,6 +124,23 @@ export function MaterialPicker({
     if (nextOpen) fetchMaterials();
   };
 
+  // Sync initialMaterials into selectedMaterialMap so thumbnails and delete buttons show
+  useEffect(() => {
+    if (initialMaterials && initialMaterials.length > 0) {
+      setSelectedMaterialMap((prev) => {
+        const next = { ...prev };
+        let changed = false;
+        for (const m of initialMaterials) {
+          if (!next[m.id]) {
+            next[m.id] = m;
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }
+  }, [initialMaterials]);
+
   const resetFileInputs = () => {
     [
       galleryImageInputRef,
@@ -255,7 +272,7 @@ export function MaterialPicker({
               <MediaThumbnail url={material.file_url} type={material.material_type as 'image' | 'video'} size="sm" />
               <button
                 type="button"
-                className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center text-[8px] opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center text-[8px] opacity-70 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleDeselect(id);

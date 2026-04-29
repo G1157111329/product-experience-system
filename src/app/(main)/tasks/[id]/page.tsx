@@ -2864,6 +2864,7 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                   <MaterialPicker
                     taskId={taskId}
                     selectedIds={pp.material_ids || []}
+
                     onSelectionChange={(ids, mats) => {
                       const updated = [...editStepForm.problem_points];
                       updated[idx] = { ...updated[idx], material_ids: ids };
