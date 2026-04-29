@@ -406,14 +406,14 @@ export default function ReportsPage() {
 
       {/* Compare dialog */}
       <Dialog open={compareOpen} onOpenChange={setCompareOpen}>
-        <DialogContent className="max-w-4xl max-h-[88vh]">
+        <DialogContent className="max-w-5xl max-h-[90vh]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <BarChart3 className="h-4 w-4 text-primary" /> 报告对比
             </DialogTitle>
             <DialogDescription>基于两份报告内容生成满意度 VS 总结</DialogDescription>
           </DialogHeader>
-          <ScrollArea className="max-h-[70vh]">
+          <ScrollArea className="max-h-[72vh]">
             <div className="space-y-4 pr-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {selectedCompareReports.map((r, idx) => {
@@ -425,10 +425,10 @@ export default function ReportsPage() {
                 const score = idx === 0 ? compareResult?.satisfaction_a : compareResult?.satisfaction_b;
                 const isWinner = compareResult?.winner_report_id === r.id;
                 return (
-                <Card key={r.id}>
+                <Card key={r.id} className="flex flex-col">
                   <CardHeader className="pb-2">
                     <div className="flex items-center justify-between gap-2">
-                      <CardTitle className="text-sm min-w-0 truncate">{idx === 0 ? 'A' : 'B'} · {r.title}</CardTitle>
+                      <CardTitle className="text-sm min-w-0 break-all leading-tight">{idx === 0 ? 'A' : 'B'} · {r.title}</CardTitle>
                       {isWinner && <Badge className="text-[10px] shrink-0">更优</Badge>}
                     </div>
                     <div className="flex gap-1 flex-wrap">
@@ -437,21 +437,16 @@ export default function ReportsPage() {
                       <Badge variant="outline" className="text-[10px]">{r.status === '草稿' ? '已完成' : r.status}</Badge>
                     </div>
                   </CardHeader>
-                  <CardContent className="text-xs text-muted-foreground">
-                    <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 items-baseline">
-                      <span className="text-muted-foreground/70 shrink-0">产品型号</span>
-                      <span className="truncate">{r.product_model || '-'}</span>
-                      <span className="text-muted-foreground/70 shrink-0">版本</span>
-                      <span>V{r.version}</span>
-                      <span className="text-muted-foreground/70 shrink-0">生成时间</span>
-                      <span className="break-all">{formatBeijingTime(r.created_at)}</span>
+                  <CardContent className="text-xs text-muted-foreground flex-1">
+                    <div className="space-y-1">
+                      <div className="flex"><span className="text-muted-foreground/70 shrink-0 w-20">产品型号</span><span className="break-all min-w-0">{r.product_model || '-'}</span></div>
+                      <div className="flex"><span className="text-muted-foreground/70 shrink-0 w-20">版本</span><span>V{r.version}</span></div>
+                      <div className="flex"><span className="text-muted-foreground/70 shrink-0 w-20">生成时间</span><span className="break-all">{formatBeijingTime(r.created_at)}</span></div>
                     </div>
                     <Separator className="my-2" />
-                    <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 items-baseline">
-                      <span className="text-muted-foreground/70 shrink-0">检查项</span>
-                      <span>{records.length} / 不合格: {failed}</span>
-                      <span className="text-muted-foreground/70 shrink-0">功能效果问题</span>
-                      <span>{recipeProblems}</span>
+                    <div className="space-y-1">
+                      <div className="flex"><span className="text-muted-foreground/70 shrink-0 w-20">检查项</span><span>{records.length} / 不合格: {failed}</span></div>
+                      <div className="flex"><span className="text-muted-foreground/70 shrink-0 w-20">效果问题</span><span>{recipeProblems}</span></div>
                     </div>
                     {score !== undefined && (
                       <div className="pt-2">
@@ -460,7 +455,7 @@ export default function ReportsPage() {
                           <span className="font-semibold text-foreground">{score}/10</span>
                         </div>
                         <div className="h-2 rounded-full bg-muted overflow-hidden">
-                          <div className="h-full bg-primary" style={{ width: `${Math.min(100, Math.max(0, score * 10))}%` }} />
+                          <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${Math.min(100, Math.max(0, score * 10))}%` }} />
                         </div>
                       </div>
                     )}
