@@ -415,55 +415,93 @@ export default function ReportsPage() {
           </DialogHeader>
           <ScrollArea className="max-h-[72vh]">
             <div className="space-y-4 pr-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {selectedCompareReports.map((r, idx) => {
-                const content = (r.content || {}) as Record<string, unknown>;
-                const records = (content.records || []) as unknown[];
-                const recipes = (content.recipes || []) as Array<Record<string, unknown>>;
-                const failed = records.filter((item) => (item as Record<string, unknown>).evaluation_result === '不合格').length;
-                const recipeProblems = recipes.reduce((sum, recipe) => sum + Number(recipe.problem_count || 0), 0);
-                const score = idx === 0 ? compareResult?.satisfaction_a : compareResult?.satisfaction_b;
-                const isWinner = compareResult?.winner_report_id === r.id;
+              {/* Unified table layout for alignment */}
+              {(() => {
+                const rA = selectedCompareReports[0];
+                const rB = selectedCompareReports[1];
+                if (!rA || !rB) return null;
+                const cA = (rA.content || {}) as Record<string, unknown>;
+                const cB = (rB.content || {}) as Record<string, unknown>;
+                const recsA = (cA.records || []) as unknown[];
+                const recsB = (cB.records || []) as unknown[];
+                const recipesA = (cA.recipes || []) as Array<Record<string, unknown>>;
+                const recipesB = (cB.recipes || []) as Array<Record<string, unknown>>;
+                const failA = recsA.filter((item) => (item as Record<string, unknown>).evaluation_result === '不合格').length;
+                const failB = recsB.filter((item) => (item as Record<string, unknown>).evaluation_result === '不合格').length;
+                const rpA = recipesA.reduce((s, r) => s + Number(r.problem_count || 0), 0);
+                const rpB = recipesB.reduce((s, r) => s + Number(r.problem_count || 0), 0);
+                const scoreA = compareResult?.satisfaction_a;
+                const scoreB = compareResult?.satisfaction_b;
+                const isWinnerA = compareResult?.winner_report_id === rA.id;
+                const isWinnerB = compareResult?.winner_report_id === rB.id;
                 return (
-                <Card key={r.id} className="flex flex-col">
-                  <CardHeader className="pb-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <CardTitle className="text-sm min-w-0 break-words leading-5">{idx === 0 ? 'A' : 'B'} · {r.title}</CardTitle>
-                      {isWinner && <Badge className="text-[10px] shrink-0">更优</Badge>}
-                    </div>
-                    <div className="flex gap-1 flex-wrap">
-                      {r.product_category && <Badge variant="outline" className="text-[10px]">{r.product_category}</Badge>}
-                      {r.product && <Badge variant="outline" className="text-[10px]">{r.product}</Badge>}
-                      <Badge variant="outline" className="text-[10px]">{r.status === '草稿' ? '已完成' : r.status}</Badge>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="text-xs text-muted-foreground flex-1">
+                <div className="space-y-3">
+                  {/* Title row */}
+                  <div className="grid grid-cols-[60px_1fr_1fr] gap-2 items-start">
+                    <div />
                     <div className="space-y-1">
-                      <div className="flex"><span className="text-muted-foreground/70 shrink-0 w-20">产品型号</span><span className="break-all min-w-0">{r.product_model || '-'}</span></div>
-                      <div className="flex"><span className="text-muted-foreground/70 shrink-0 w-20">版本</span><span>V{r.version}</span></div>
-                      <div className="flex"><span className="text-muted-foreground/70 shrink-0 w-20">生成时间</span><span className="break-all">{formatBeijingTime(r.created_at)}</span></div>
-                    </div>
-                    <Separator className="my-2" />
-                    <div className="space-y-1">
-                      <div className="flex"><span className="text-muted-foreground/70 shrink-0 w-20">检查项</span><span>{records.length} / 不合格: {failed}</span></div>
-                      <div className="flex"><span className="text-muted-foreground/70 shrink-0 w-20">效果问题</span><span>{recipeProblems}</span></div>
-                    </div>
-                    {score !== undefined && (
-                      <div className="pt-2">
-                        <div className="flex items-center justify-between mb-1">
-                          <span>AI满意度</span>
-                          <span className="font-semibold text-foreground">{score}/10</span>
-                        </div>
-                        <div className="h-2 rounded-full bg-muted overflow-hidden">
-                          <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${Math.min(100, Math.max(0, score * 10))}%` }} />
-                        </div>
+                      <div className="font-medium text-sm break-words leading-5">A · {rA.title}</div>
+                      <div className="flex gap-1 flex-wrap">
+                        {rA.product_category && <Badge variant="outline" className="text-[10px]">{rA.product_category}</Badge>}
+                        {rA.product && <Badge variant="outline" className="text-[10px]">{rA.product}</Badge>}
+                        <Badge variant="outline" className="text-[10px]">{rA.status === '草稿' ? '已完成' : rA.status}</Badge>
+                        {isWinnerA && <Badge className="text-[10px] shrink-0">更优</Badge>}
                       </div>
-                    )}
-                  </CardContent>
-                </Card>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="font-medium text-sm break-words leading-5">B · {rB.title}</div>
+                      <div className="flex gap-1 flex-wrap">
+                        {rB.product_category && <Badge variant="outline" className="text-[10px]">{rB.product_category}</Badge>}
+                        {rB.product && <Badge variant="outline" className="text-[10px]">{rB.product}</Badge>}
+                        <Badge variant="outline" className="text-[10px]">{rB.status === '草稿' ? '已完成' : rB.status}</Badge>
+                        {isWinnerB && <Badge className="text-[10px] shrink-0">更优</Badge>}
+                      </div>
+                    </div>
+                  </div>
+                  <Separator />
+                  {/* Data rows - unified table for perfect alignment */}
+                  <div className="grid grid-cols-[60px_1fr_1fr] gap-x-2 gap-y-2 text-xs">
+                    <span className="text-muted-foreground/70 font-medium">产品型号</span>
+                    <span className="break-all min-w-0">{rA.product_model || '-'}</span>
+                    <span className="break-all min-w-0">{rB.product_model || '-'}</span>
+
+                    <span className="text-muted-foreground/70 font-medium">版本</span>
+                    <span>V{rA.version}</span>
+                    <span>V{rB.version}</span>
+
+                    <span className="text-muted-foreground/70 font-medium">生成时间</span>
+                    <span className="break-all">{formatBeijingTime(rA.created_at)}</span>
+                    <span className="break-all">{formatBeijingTime(rB.created_at)}</span>
+
+                    <Separator className="col-span-3 my-1" />
+
+                    <span className="text-muted-foreground/70 font-medium">检查项</span>
+                    <span>{recsA.length} / 不合格: {failA}</span>
+                    <span>{recsB.length} / 不合格: {failB}</span>
+
+                    <span className="text-muted-foreground/70 font-medium">效果问题</span>
+                    <span>{rpA}</span>
+                    <span>{rpB}</span>
+
+                    <Separator className="col-span-3 my-1" />
+
+                    <span className="text-muted-foreground/70 font-medium">AI满意度</span>
+                    <div className="space-y-1">
+                      {scoreA !== undefined ? (<><span className="font-semibold text-foreground">{scoreA}/10</span>
+                      <div className="h-2 rounded-full bg-muted overflow-hidden">
+                        <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${Math.min(100, Math.max(0, scoreA * 10))}%` }} />
+                      </div></>) : <span>-</span>}
+                    </div>
+                    <div className="space-y-1">
+                      {scoreB !== undefined ? (<><span className="font-semibold text-foreground">{scoreB}/10</span>
+                      <div className="h-2 rounded-full bg-muted overflow-hidden">
+                        <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${Math.min(100, Math.max(0, scoreB * 10))}%` }} />
+                      </div></>) : <span>-</span>}
+                    </div>
+                  </div>
+                </div>
                 );
-              })}
-              </div>
+              })()}
 
               {compareLoading && (
                 <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
