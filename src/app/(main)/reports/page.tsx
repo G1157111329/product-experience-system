@@ -437,13 +437,22 @@ export default function ReportsPage() {
                       <Badge variant="outline" className="text-[10px]">{r.status === '草稿' ? '已完成' : r.status}</Badge>
                     </div>
                   </CardHeader>
-                  <CardContent className="text-xs text-muted-foreground space-y-1">
-                    <div>产品型号: {r.product_model || '-'}</div>
-                    <div>版本: V{r.version}</div>
-                    <div>生成时间: {formatBeijingTime(r.created_at)}</div>
-                    <Separator className="my-1" />
-                    <div>检查项: {records.length} / 不合格: {failed}</div>
-                    <div>功能效果问题: {recipeProblems}</div>
+                  <CardContent className="text-xs text-muted-foreground">
+                    <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 items-baseline">
+                      <span className="text-muted-foreground/70 shrink-0">产品型号</span>
+                      <span className="truncate">{r.product_model || '-'}</span>
+                      <span className="text-muted-foreground/70 shrink-0">版本</span>
+                      <span>V{r.version}</span>
+                      <span className="text-muted-foreground/70 shrink-0">生成时间</span>
+                      <span className="break-all">{formatBeijingTime(r.created_at)}</span>
+                    </div>
+                    <Separator className="my-2" />
+                    <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 items-baseline">
+                      <span className="text-muted-foreground/70 shrink-0">检查项</span>
+                      <span>{records.length} / 不合格: {failed}</span>
+                      <span className="text-muted-foreground/70 shrink-0">功能效果问题</span>
+                      <span>{recipeProblems}</span>
+                    </div>
                     {score !== undefined && (
                       <div className="pt-2">
                         <div className="flex items-center justify-between mb-1">
