@@ -1,9 +1,6 @@
 import { pgTable, serial, timestamp, pgPolicy, varchar, jsonb, boolean, index, foreignKey, integer, text, unique, date } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
-declare function gen_random_uuid(): string;
-
-
 
 export const healthCheck = pgTable("health_check", {
 	id: serial().notNull(),
@@ -11,7 +8,7 @@ export const healthCheck = pgTable("health_check", {
 });
 
 export const reportTemplates = pgTable("report_templates", {
-	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
 	templateName: varchar("template_name", { length: 200 }).notNull(),
 	templateType: varchar("template_type", { length: 50 }),
 	content: jsonb(),
@@ -26,7 +23,7 @@ export const reportTemplates = pgTable("report_templates", {
 ]);
 
 export const reports = pgTable("reports", {
-	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
 	taskId: varchar("task_id", { length: 36 }).notNull(),
 	templateId: varchar("template_id", { length: 36 }),
 	title: varchar({ length: 200 }),
@@ -55,7 +52,7 @@ export const reports = pgTable("reports", {
 ]);
 
 export const recipes = pgTable("recipes", {
-	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
 	taskId: varchar("task_id", { length: 36 }).notNull(),
 	name: varchar({ length: 200 }).notNull(),
 	ingredients: text(),
@@ -82,7 +79,7 @@ export const recipes = pgTable("recipes", {
 ]);
 
 export const recipeSteps = pgTable("recipe_steps", {
-	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
 	recipeId: varchar("recipe_id", { length: 36 }).notNull(),
 	stepNumber: integer("step_number").default(1).notNull(),
 	operation: text().notNull(),
@@ -105,7 +102,7 @@ export const recipeSteps = pgTable("recipe_steps", {
 ]);
 
 export const standardItems = pgTable("standard_items", {
-	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
 	standardId: varchar("standard_id", { length: 36 }).notNull(),
 	sortOrder: integer("sort_order").default(0),
 	sensoryDimension: varchar("sensory_dimension", { length: 20 }),
@@ -144,7 +141,7 @@ export const standardItems = pgTable("standard_items", {
 ]);
 
 export const checkRecords = pgTable("check_records", {
-	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
 	taskId: varchar("task_id", { length: 36 }).notNull(),
 	standardItemId: varchar("standard_item_id", { length: 36 }),
 	sensoryDimension: varchar("sensory_dimension", { length: 20 }),
@@ -183,7 +180,7 @@ export const checkRecords = pgTable("check_records", {
 ]);
 
 export const issues = pgTable("issues", {
-	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
 	taskId: varchar("task_id", { length: 36 }).notNull(),
 	recordId: varchar("record_id", { length: 36 }),
 	title: varchar({ length: 200 }).notNull(),
@@ -232,7 +229,7 @@ export const issues = pgTable("issues", {
 ]);
 
 export const experienceTasks = pgTable("experience_tasks", {
-	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
 	taskName: varchar("task_name", { length: 200 }).notNull(),
 	productCategory: varchar("product_category", { length: 50 }).notNull(),
 	productModel: varchar("product_model", { length: 50 }).notNull(),
@@ -261,7 +258,7 @@ export const experienceTasks = pgTable("experience_tasks", {
 ]);
 
 export const platformUsers = pgTable("platform_users", {
-	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
 	account: varchar({ length: 50 }).notNull(),
 	passwordHash: varchar("password_hash", { length: 200 }).notNull(),
 	name: varchar({ length: 50 }),
@@ -274,7 +271,7 @@ export const platformUsers = pgTable("platform_users", {
 ]);
 
 export const reportShares = pgTable("report_shares", {
-	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
 	reportId: varchar("report_id", { length: 36 }).notNull(),
 	shareToken: varchar("share_token", { length: 64 }).notNull(),
 	expiresAt: timestamp("expires_at", { withTimezone: true, mode: 'string' }),
@@ -297,7 +294,7 @@ export const reportShares = pgTable("report_shares", {
 ]);
 
 export const platformCategories = pgTable("platform_categories", {
-	id: varchar({ length: 36 }).default((gen_random_uuid())).primaryKey().notNull(),
+	id: varchar({ length: 36 }).default((sql`gen_random_uuid()`)).primaryKey().notNull(),
 	name: varchar({ length: 100 }).notNull(),
 	sortOrder: integer("sort_order").default(0),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
@@ -306,7 +303,7 @@ export const platformCategories = pgTable("platform_categories", {
 ]);
 
 export const platformProducts = pgTable("platform_products", {
-	id: varchar({ length: 36 }).default((gen_random_uuid())).primaryKey().notNull(),
+	id: varchar({ length: 36 }).default((sql`gen_random_uuid()`)).primaryKey().notNull(),
 	name: varchar({ length: 100 }).notNull(),
 	categoryId: varchar("category_id", { length: 36 }).notNull(),
 	sortOrder: integer("sort_order").default(0),
@@ -316,7 +313,7 @@ export const platformProducts = pgTable("platform_products", {
 ]);
 
 export const standards = pgTable("standards", {
-	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
 	standardName: varchar("standard_name", { length: 200 }).notNull(),
 	category: varchar({ length: 50 }).notNull(),
 	productCategory: varchar("product_category", { length: 50 }),
@@ -336,7 +333,7 @@ export const standards = pgTable("standards", {
 ]);
 
 export const recipeLibrary = pgTable("recipe_library", {
-	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
 	productCategory: varchar("product_category", { length: 100 }),
 	product: varchar({ length: 100 }),
 	name: varchar({ length: 200 }).notNull(),
@@ -354,7 +351,7 @@ export const recipeLibrary = pgTable("recipe_library", {
 ]);
 
 export const recipeLibrarySteps = pgTable("recipe_library_steps", {
-	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
 	recipeLibraryId: varchar("recipe_library_id", { length: 36 }).notNull(),
 	stepNumber: integer("step_number").default(1).notNull(),
 	operation: text().notNull(),
@@ -376,7 +373,7 @@ export const recipeLibrarySteps = pgTable("recipe_library_steps", {
 ]);
 
 export const materials = pgTable("materials", {
-	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
 	recordId: varchar("record_id", { length: 36 }),
 	taskId: varchar("task_id", { length: 36 }),
 	materialType: varchar("material_type", { length: 10 }).notNull(),
@@ -414,7 +411,7 @@ export const materials = pgTable("materials", {
 ]);
 
 export const platformAuditRequests = pgTable("platform_audit_requests", {
-	id: varchar({ length: 36 }).default(gen_random_uuid()).primaryKey().notNull(),
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
 	userId: varchar("user_id", { length: 36 }).notNull(),
 	requestType: varchar("request_type", { length: 30 }).notNull(),
 	status: varchar({ length: 20 }).default('pending').notNull(),
