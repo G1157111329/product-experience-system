@@ -101,7 +101,7 @@ const sensoryColors: Record<string, string> = {
 const statusConfig: Record<string, { label: string; color: string }> = {
   '待执行': { label: '待执行', color: 'bg-muted text-muted-foreground' },
   '进行中': { label: '进行中', color: 'bg-primary/10 text-primary' },
-  '已完成': { label: '已完成', color: 'bg-lime-100 text-lime-800' },
+  '已完成': { label: '已完成', color: 'bg-primary text-primary-foreground' },
 };
 
 function summaryToForm(summary: AiTaskSummary) {

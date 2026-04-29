@@ -330,7 +330,7 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <ChefHat className="h-5 w-5 text-emerald-600" />
+          <ChefHat className="h-5 w-5 text-primary" />
           <h2 className="text-base font-semibold">食谱库</h2>
           <Badge variant="secondary" className="text-[10px]">{recipes.length}</Badge>
         </div>
@@ -366,7 +366,7 @@ function RecipeLibrarySection({ categories, isAdmin }: { categories: CategoryWit
         <div className="grid gap-2">{[1,2,3].map(i => <div key={i} className="h-16 bg-muted animate-pulse rounded-lg" />)}</div>
       ) : recipes.length === 0 ? (
         <Card><CardContent className="flex flex-col items-center py-8 text-center">
-          <ChefHat className="h-8 w-8 text-muted-foreground/50 mb-2" />
+          <ChefHat className="h-8 w-8 text-primary/30 mb-2" />
           <p className="text-xs text-muted-foreground">暂无食谱</p>
         </CardContent></Card>
       ) : (
