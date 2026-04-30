@@ -2639,13 +2639,7 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                       </div>
                       {/* Step-level materials (below operation) */}
                       {(() => {
-                        const pps = step.problem_points && step.problem_points.length > 0
-                          ? step.problem_points.filter(p => p.text && p.text.trim())
-                          : step.problem_point
-                            ? [{ text: step.problem_point, material_ids: [] as string[] }]
-                            : [];
-                        const ppMatIds = new Set(pps.flatMap(p => p.material_ids || []));
-                        const stepMats = (step.materials || []).filter(m => !ppMatIds.has(m.id));
+                        const stepMats = step.materials || [];
                         return stepMats.length > 0 ? (
                           <div className="flex gap-1.5 ml-7 flex-wrap">
                             {stepMats.map((mat) => (
@@ -2666,49 +2660,7 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                           </div>
                         ) : null;
                       })()}
-                      {/* Problem points display (with per-pp materials) */}
-                      {(() => {
-                        const pps = step.problem_points && step.problem_points.length > 0
-                          ? step.problem_points.filter(p => p.text && p.text.trim())
-                          : step.problem_point
-                            ? [{ text: step.problem_point, material_ids: [] as string[] }]
-                            : [];
-                        if (pps.length === 0) return null;
-                        return (
-                          <div className="ml-7 space-y-1.5">
-                            {pps.map((pp, ppIdx) => {
-                              const ppMats = (step.materials || []).filter(m => (pp.material_ids || []).includes(m.id));
-                              return (
-                                <div key={ppIdx} className="space-y-1">
-                                  <div className="flex items-start gap-1.5">
-                                    {pps.length > 1 && <span className="text-[10px] text-amber-600 font-medium shrink-0">问题{ppIdx + 1}:</span>}
-                                    <p className="text-xs text-amber-600">{pp.text}</p>
-                                  </div>
-                                  {ppMats.length > 0 && (
-                                    <div className="flex gap-1.5 flex-wrap">
-                                      {ppMats.map((mat) => (
-                                        <div key={mat.id} className="w-12 h-12 rounded-md overflow-hidden border border-border cursor-pointer"
-                                          onClick={(e) => { e.stopPropagation(); open(mat.file_url); }}>
-                                          {mat.material_type === 'image' ? (
-                                            <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
-                                          ) : (
-                                            <div className="w-full h-full flex items-center justify-center bg-muted relative">
-                                              <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
-                                              <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                                                <Play className="h-3 w-3 text-white fill-white" />
-                                              </div>
-                                            </div>
-                                          )}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        );
-                      })()}
+
                     </div>
                   ))}
                   <Button variant="outline" size="sm" className="w-full"
@@ -2977,47 +2929,6 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                 }}
               />
             </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>问题点</Label>
-                <Button type="button" variant="ghost" size="sm" className="h-6 text-xs text-primary"
-                  onClick={() => setNewStep({ ...newStep, problem_points: [...newStep.problem_points, { text: '', material_ids: [] }] })}>
-                  <Plus className="h-3 w-3 mr-1" /> 添加问题点
-                </Button>
-              </div>
-              {newStep.problem_points.map((pp, idx) => (
-                <div key={idx} className="p-2 rounded-lg border bg-muted/20 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-muted-foreground font-medium shrink-0">问题{idx + 1}</span>
-                    {newStep.problem_points.length > 1 && (
-                      <Button type="button" variant="ghost" size="icon" className="h-5 w-5 ml-auto"
-                        onClick={() => setNewStep({ ...newStep, problem_points: newStep.problem_points.filter((_, i) => i !== idx) })}>
-                        <X className="h-3 w-3" />
-                      </Button>
-                    )}
-                  </div>
-                  <Textarea placeholder="描述问题点..." value={pp.text}
-                    onChange={(e) => {
-                      const updated = [...newStep.problem_points];
-                      updated[idx] = { ...updated[idx], text: e.target.value };
-                      setNewStep({ ...newStep, problem_points: updated });
-                    }} rows={2} />
-                  <MaterialPicker
-                    taskId={taskId}
-                    selectedIds={pp.material_ids || []}
-                    onSelectionChange={(ids, mats) => {
-                      const updated = [...newStep.problem_points];
-                      updated[idx] = { ...updated[idx], material_ids: ids };
-                      setNewStep({ ...newStep, problem_points: updated });
-                      // Also update global step materials
-                      const allIds = newStep.problem_points.flatMap((p, i) => i === idx ? ids : (p.material_ids || []));
-                      setStepMaterialIds(allIds);
-                      setStepMaterials(mats);
-                    }}
-                  />
-                </div>
-              ))}
-            </div>
             <Button onClick={handleAddStep} className="w-full" disabled={!newStep.operation || savingStep}>{savingStep ? '保存中...' : '保存步骤'}</Button>
           </div>
         </DialogContent>
@@ -3039,58 +2950,13 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
               <MaterialPicker
                 taskId={taskId}
                 selectedIds={editStepForm.step_material_ids || []}
-                initialMaterials={(() => {
-                  if (!editingStep?.materials) return [];
-                  const pps = editStepForm.problem_points || [];
-                  const ppMatIds = new Set(pps.flatMap(p => p.material_ids || []));
-                  return editingStep.materials.filter(m => !ppMatIds.has(m.id));
-                })()}
+                initialMaterials={editingStep?.materials || []}
                 onSelectionChange={(ids, mats) => {
                   setEditStepForm({ ...editStepForm, step_material_ids: ids });
                   setEditStepMaterialIds(ids);
                   setEditStepMaterials(mats);
                 }}
               />
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>问题点</Label>
-                <Button type="button" variant="ghost" size="sm" className="h-6 text-xs text-primary"
-                  onClick={() => setEditStepForm({ ...editStepForm, problem_points: [...editStepForm.problem_points, { text: '', material_ids: [] }] })}>
-                  <Plus className="h-3 w-3 mr-1" /> 添加问题点
-                </Button>
-              </div>
-              {editStepForm.problem_points.map((pp, idx) => (
-                <div key={idx} className="p-2 rounded-lg border bg-muted/20 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-muted-foreground font-medium shrink-0">问题{idx + 1}</span>
-                    {editStepForm.problem_points.length > 1 && (
-                      <Button type="button" variant="ghost" size="icon" className="h-5 w-5 ml-auto"
-                        onClick={() => setEditStepForm({ ...editStepForm, problem_points: editStepForm.problem_points.filter((_, i) => i !== idx) })}>
-                        <X className="h-3 w-3" />
-                      </Button>
-                    )}
-                  </div>
-                  <Textarea placeholder="描述问题点..." value={pp.text}
-                    onChange={(e) => {
-                      const updated = [...editStepForm.problem_points];
-                      updated[idx] = { ...updated[idx], text: e.target.value };
-                      setEditStepForm({ ...editStepForm, problem_points: updated });
-                    }} rows={2} />
-                  <MaterialPicker
-                    taskId={taskId}
-                    selectedIds={pp.material_ids || []}
-                    initialMaterials={(editingStep?.materials || []).filter(m => (pp.material_ids || []).includes(m.id))}
-                    onSelectionChange={(ids, mats) => {
-                      const updated = [...editStepForm.problem_points];
-                      updated[idx] = { ...updated[idx], material_ids: ids };
-                      setEditStepForm({ ...editStepForm, problem_points: updated });
-                      setEditStepMaterialIds(ids);
-                      setEditStepMaterials(mats);
-                    }}
-                  />
-                </div>
-              ))}
             </div>
             <Button onClick={handleSaveEditStep} className="w-full" disabled={!editStepForm.operation || savingEditStep}>{savingEditStep ? '保存中...' : '保存修改'}</Button>
           </div>

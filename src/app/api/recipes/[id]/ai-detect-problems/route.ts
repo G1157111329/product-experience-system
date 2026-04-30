@@ -33,15 +33,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       contextText += '\n【步骤信息】\n';
       for (const step of steps) {
         contextText += `步骤${step.step_number}：${step.operation || '未描述'}\n`;
-        // Include step problem points
-        if (step.problem_points && Array.isArray(step.problem_points) && step.problem_points.length > 0) {
-          for (const pp of step.problem_points) {
-            if (pp.text) contextText += `  - 步骤问题点：${pp.text}\n`;
-          }
-        }
-        if (step.problem_point && !step.problem_points?.length) {
-          contextText += `  - 步骤问题点：${step.problem_point}\n`;
-        }
       }
     }
 
@@ -49,17 +40,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       contextText += `\n【效果/出品效果评价】\n${recipe.effect_description}\n`;
     }
 
-    if (recipe.effect_problem_point) {
-      contextText += `已知问题点：${recipe.effect_problem_point}\n`;
-    }
+    const systemPrompt = `你是一位专业产品评价官，擅长从用户体验角度识别产品问题。
 
-    const systemPrompt = `你是一位产品体验专家，擅长从用户描述中识别负面情绪和问题点。
-根据提供的食谱步骤描述和效果评价信息，识别出所有潜在的问题点和负面体验。
+你的任务分两层：
 
-请仔细分析以下内容：
-1. 步骤描述中的负面表述（如"不均匀"、"困难"、"无法"、"失败"、"不好"、"差"等）
-2. 效果评价中的负面描述
-3. 隐含的问题（如"需要多次尝试"、"容易溢出"等暗示操作不顺畅的表述）
+**第一层：负面情绪语言总结**
+从步骤描述和效果评价中，识别用户表达中的负面情绪语言（如"不均匀"、"困难"、"无法"、"失败"、"不好"、"差"、"容易溢出"、"需要多次尝试"等），如实总结这些负面表述。
+
+**第二层：期待vs实际体验差距分析**
+"问题"本质上是我们对期待的结果和实际的体验之间的差距描述。请你作为一个专业产品评价官，基于该食谱/功能在互联网中用户普遍表达的期待状态，对比步骤描述和效果评价中反映的实际体验，识别出期待与实际之间的差距。
+
+分析维度：
+1. 步骤操作是否顺畅、是否符合用户直觉
+2. 效果/出品是否达到该类产品在互联网中的用户普遍期待
+3. 是否存在用户期待能实现但实际未能满足的功能或效果
 
 请以JSON数组格式输出问题点列表，每个问题点包含text字段（准确的问题描述），严格按以下格式输出：
 [
@@ -67,8 +61,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   {"text": "问题描述2"}
 ]
 
-如果未发现任何问题点，输出空数组 []。
-注意：只输出JSON数组，不要添加任何其他文字或解释。每个问题描述应简洁明确，一句话概括一个问题。`;
+要求：
+- 第一层（负面情绪）问题排前面，第二层（期待差距）问题排后面
+- 问题描述应简洁明确，一句话概括一个问题
+- 不要过度解读，仅基于明确的负面表述和合理的期待差距
+- 如果未发现任何问题点，输出空数组 []
+- 只输出JSON数组，不要添加任何其他文字或解释`;
 
     // Fetch AI config
     const { data: aiConfigData } = await client

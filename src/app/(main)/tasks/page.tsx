@@ -177,7 +177,7 @@ export default function TasksPage() {
             <div className="space-y-3 mt-2">
               <div className="space-y-1.5">
                 <Label>任务名称</Label>
-                <Input placeholder="留空自动生成：品类+产品名称+型号+类型+时间+组织者" value={form.task_name} onChange={(e) => setForm({ ...form, task_name: e.target.value })} />
+                <Input placeholder="留空自动生成：品类产品名型号项目类型日期-组织者" value={form.task_name} onChange={(e) => setForm({ ...form, task_name: e.target.value })} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">

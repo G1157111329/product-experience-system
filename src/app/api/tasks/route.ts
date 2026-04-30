@@ -38,8 +38,14 @@ export async function POST(request: NextRequest) {
   const client = getSupabaseClient();
   const body = await request.json();
 
+  let taskName = body.task_name;
+  if (!taskName || !taskName.trim()) {
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    taskName = `${body.product_category || ''}${body.product || ''}${body.product_model || ''}${body.project_type || ''}${dateStr}${body.organizer ? '-' + body.organizer : ''}`;
+  }
+
   const { data, error } = await client.from('experience_tasks').insert({
-    task_name: body.task_name,
+    task_name: taskName,
     product_category: body.product_category,
     product: body.product || null,
     product_model: body.product_model,
