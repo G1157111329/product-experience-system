@@ -34,6 +34,8 @@ interface CheckRecord {
 interface IssueItem {
   id: string; title: string; description: string | null; level: string | null;
   status: string; source_report_id: string | null; source_type: string | null;
+  category?: string; improve_plan?: string; responsible_person?: string;
+  plan_complete_date?: string; verification_note?: string;
   [key: string]: unknown;
 }
 
@@ -141,15 +143,53 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
         <>
           <h3 style={{ fontSize: '15px', margin: '16px 0 8px', color: '#0d9488', borderBottom: '1px solid #0d9488', paddingBottom: '4px' }}>问题清单 ({liveIssues.length})</h3>
           {liveIssues.map((issue, idx) => (
-            <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px', background: '#f9fafb', borderRadius: '3px', margin: '3px 0', fontSize: '12px' }}>
-              <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 500,
-                background: issue.level === '一类' ? '#fee2e2' : issue.level === '二类' ? '#fef3c7' : '#e0f2fe',
-                color: issue.level === '一类' ? '#991b1b' : issue.level === '二类' ? '#92400e' : '#0c4a6e'
-              }}>{String(issue.level || '二类')}</span>
-              <span style={{ flex: 1 }}>{String(issue.title || '')}</span>
-              <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 500,
-                background: STATUS_BG[issue.status] || '#fef3c7', color: STATUS_FG[issue.status] || '#92400e'
-              }}>{issue.status}</span>
+            <div key={idx} style={{ padding: '8px', background: '#f9fafb', borderRadius: '4px', margin: '4px 0', fontSize: '12px', border: '1px solid #e5e7eb' }}>
+              {/* Row 1: Level + Title + Status */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 500,
+                  background: issue.level === '一类' ? '#fee2e2' : issue.level === '二类' ? '#fef3c7' : '#e0f2fe',
+                  color: issue.level === '一类' ? '#991b1b' : issue.level === '二类' ? '#92400e' : '#0c4a6e'
+                }}>{String(issue.level || '二类')}</span>
+                {issue.source_type === 'recipe_problem' && (
+                  <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', border: '1px solid #d1d5db' }}>食谱/功能</span>
+                )}
+                <span style={{ flex: 1, fontWeight: 500 }}>{String(issue.title || '')}</span>
+                <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 500,
+                  background: STATUS_BG[issue.status] || '#fef3c7', color: STATUS_FG[issue.status] || '#92400e'
+                }}>{issue.status}</span>
+              </div>
+              {/* Row 2: Standard/Category */}
+              {issue.category && (
+                <div style={{ marginTop: '4px', paddingLeft: '4px' }}>
+                  <span style={{ color: '#6b7280', fontSize: '10px' }}>标准: </span>
+                  <span style={{ color: '#6b7280', fontSize: '10px' }}>{String(issue.category)}</span>
+                </div>
+              )}
+              {/* Row 3: Problem description */}
+              {issue.description && (
+                <div style={{ marginTop: '4px', paddingLeft: '4px' }}>
+                  <span style={{ color: '#6b7280', fontSize: '10px' }}>问题描述: </span>
+                  <span style={{ color: '#6b7280', fontSize: '10px' }}>{String(issue.description)}</span>
+                </div>
+              )}
+              {/* Row 4: Rectification plan */}
+              {(issue.improve_plan || issue.responsible_person || issue.plan_complete_date) && (
+                <div style={{ marginTop: '4px', paddingLeft: '4px' }}>
+                  <span style={{ color: '#6b7280', fontSize: '10px' }}>整改方案: </span>
+                  <span style={{ color: '#6b7280', fontSize: '10px' }}>
+                    {issue.improve_plan && String(issue.improve_plan)}
+                    {issue.responsible_person && <span> ({String(issue.responsible_person)})</span>}
+                    {issue.plan_complete_date && <span> 截止: {String(issue.plan_complete_date)}</span>}
+                  </span>
+                </div>
+              )}
+              {/* Row 5: Verification result */}
+              {issue.verification_note && (
+                <div style={{ marginTop: '4px', paddingLeft: '4px' }}>
+                  <span style={{ color: '#6b7280', fontSize: '10px' }}>验证结果: </span>
+                  <span style={{ color: '#6b7280', fontSize: '10px' }}>{String(issue.verification_note)}</span>
+                </div>
+              )}
             </div>
           ))}
         </>

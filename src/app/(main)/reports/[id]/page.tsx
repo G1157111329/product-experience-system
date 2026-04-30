@@ -49,6 +49,7 @@ interface IssueItem {
   id: string; title: string; description: string | null; level: string | null;
   status: string; source_report_id: string | null; source_type: string | null;
   category: string | null; improve_plan: string | null; responsible_person: string | null;
+  plan_complete_date: string | null; verification_note: string | null;
   [key: string]: unknown;
 }
 
@@ -193,7 +194,8 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
         <div className="space-y-1.5">
           <p className="text-xs font-medium text-muted-foreground">问题清单 ({liveIssues.length})</p>
           {liveIssues.map((issue) => (
-            <div key={issue.id} className="p-2 rounded bg-muted/30 space-y-1">
+            <div key={issue.id} className="p-2.5 rounded bg-muted/30 space-y-1.5">
+              {/* Row 1: Level + Source type + Status */}
               <div className="flex items-center gap-2">
                 <Badge className={cn('text-[10px] shrink-0', LEVEL_COLORS[issue.level || '二类'] || LEVEL_COLORS['二类'])}>
                   {issue.level || '二类'}
@@ -201,7 +203,7 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
                 {issue.source_type === 'recipe_problem' && (
                   <Badge variant="outline" className="text-[10px] shrink-0">食谱/功能</Badge>
                 )}
-                <span className="text-xs flex-1 truncate">{issue.title}</span>
+                <span className="text-xs flex-1 min-w-0 truncate font-medium">{issue.title}</span>
                 <button
                   onClick={() => onStatusClick(issue)}
                   className={cn('text-[10px] px-1.5 py-0.5 rounded cursor-pointer font-medium transition-colors hover:opacity-80 shrink-0',
@@ -210,8 +212,37 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
                   {issue.status || '待整改'}
                 </button>
               </div>
+              {/* Row 2: Standard/Category (if exists) */}
+              {issue.category && (
+                <div className="flex items-start gap-1.5 pl-1">
+                  <span className="text-[10px] text-muted-foreground shrink-0">标准:</span>
+                  <span className="text-[10px] text-muted-foreground break-all">{issue.category}</span>
+                </div>
+              )}
+              {/* Row 3: Problem description (if exists) */}
               {issue.description && (
-                <p className="text-[10px] text-muted-foreground pl-1 break-all">{issue.description}</p>
+                <div className="flex items-start gap-1.5 pl-1">
+                  <span className="text-[10px] text-muted-foreground shrink-0">问题描述:</span>
+                  <span className="text-[10px] text-muted-foreground break-all">{issue.description}</span>
+                </div>
+              )}
+              {/* Row 4: Rectification plan (if exists) */}
+              {(issue.improve_plan || issue.responsible_person || issue.plan_complete_date) && (
+                <div className="flex items-start gap-1.5 pl-1">
+                  <span className="text-[10px] text-muted-foreground shrink-0">整改方案:</span>
+                  <div className="text-[10px] text-muted-foreground break-all">
+                    {issue.improve_plan && <span>{issue.improve_plan}</span>}
+                    {issue.responsible_person && <span className="ml-1">({issue.responsible_person})</span>}
+                    {issue.plan_complete_date && <span className="ml-1">截止: {issue.plan_complete_date}</span>}
+                  </div>
+                </div>
+              )}
+              {/* Row 5: Verification result (if exists) */}
+              {issue.verification_note && (
+                <div className="flex items-start gap-1.5 pl-1">
+                  <span className="text-[10px] text-muted-foreground shrink-0">验证结果:</span>
+                  <span className="text-[10px] text-muted-foreground break-all">{issue.verification_note}</span>
+                </div>
               )}
             </div>
           ))}

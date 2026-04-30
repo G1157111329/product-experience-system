@@ -344,6 +344,7 @@ export default function ReportsPage() {
                     <div className="flex gap-1 mt-1 flex-wrap">
                       {r.product_category && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{r.product_category}</Badge>}
                       {r.product && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{r.product}</Badge>}
+                      {r.product_model && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{r.product_model}</Badge>}
                       {r.project_type && <Badge variant="outline" className="text-[10px]">{r.project_type}</Badge>}
                       <Badge variant={r.status === '已审核' ? 'default' : 'secondary'} className="text-[10px]">{r.status === '草稿' ? '已完成' : r.status}</Badge>
                     </div>
@@ -444,6 +445,7 @@ export default function ReportsPage() {
                       <div className="flex gap-1 flex-wrap">
                         {rA.product_category && <Badge variant="outline" className="text-[10px]">{rA.product_category}</Badge>}
                         {rA.product && <Badge variant="outline" className="text-[10px]">{rA.product}</Badge>}
+                        {rA.product_model && <Badge variant="outline" className="text-[10px]">{rA.product_model}</Badge>}
                         <Badge variant="outline" className="text-[10px]">{rA.status === '草稿' ? '已完成' : rA.status}</Badge>
                         {isWinnerA && <Badge className="text-[10px] shrink-0">更优</Badge>}
                       </div>
@@ -453,6 +455,7 @@ export default function ReportsPage() {
                       <div className="flex gap-1 flex-wrap">
                         {rB.product_category && <Badge variant="outline" className="text-[10px]">{rB.product_category}</Badge>}
                         {rB.product && <Badge variant="outline" className="text-[10px]">{rB.product}</Badge>}
+                        {rB.product_model && <Badge variant="outline" className="text-[10px]">{rB.product_model}</Badge>}
                         <Badge variant="outline" className="text-[10px]">{rB.status === '草稿' ? '已完成' : rB.status}</Badge>
                         {isWinnerB && <Badge className="text-[10px] shrink-0">更优</Badge>}
                       </div>

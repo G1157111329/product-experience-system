@@ -38,7 +38,9 @@ interface CheckRecord {
 
 interface IssueItem {
   id: string; title: string; description: string | null; level: string | null;
-  status: string; [key: string]: unknown;
+  status: string; category?: string; source_type?: string;
+  improve_plan?: string; responsible_person?: string; plan_complete_date?: string;
+  verification_note?: string; [key: string]: unknown;
 }
 
 interface ReportContent {
@@ -322,20 +324,53 @@ export default function ShareReportPage() {
                     <h3 className="font-semibold text-sm text-primary">问题清单 ({liveIssues.length})</h3>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
                       {liveIssues.map((issue, idx) => (
-                        <div key={idx} className="flex items-center gap-1.5 sm:gap-2 py-1.5 px-2 rounded bg-muted/30 text-sm min-w-0">
-                          <span className={cn('text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0',
-                            issue.level === '一类' ? 'bg-red-100 text-red-700' :
-                            issue.level === '二类' ? 'bg-amber-100 text-amber-700' :
-                            'bg-blue-100 text-blue-700'
-                          )}>{issue.level || '二类'}</span>
-                          <span className="flex-1 min-w-0 break-all text-xs sm:text-sm">{issue.title}</span>
-                          <span className={cn('text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0')}
-                            style={{
-                              background: STATUS_BG[issue.status] || '#fef3c7',
-                              color: STATUS_FG[issue.status] || '#92400e',
-                            }}>{issue.status}</span>
+                        <div key={idx} className="py-2 px-3 rounded-md bg-muted/30 text-sm border border-border/50">
+                          {/* Row 1: Level + Title + Status */}
+                          <div className="flex items-center gap-1.5 sm:gap-2">
+                            <span className={cn('text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0',
+                              issue.level === '一类' ? 'bg-red-100 text-red-700' :
+                              issue.level === '二类' ? 'bg-amber-100 text-amber-700' :
+                              'bg-blue-100 text-blue-700'
+                            )}>{issue.level || '二类'}</span>
+                            {issue.source_type === 'recipe_problem' && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded border border-border shrink-0">食谱/功能</span>
+                            )}
+                            <span className="flex-1 min-w-0 break-all text-xs sm:text-sm font-medium">{issue.title}</span>
+                            <span className={cn('text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0')}
+                              style={{
+                                background: STATUS_BG[issue.status] || '#fef3c7',
+                                color: STATUS_FG[issue.status] || '#92400e',
+                              }}>{issue.status}</span>
+                          </div>
+                          {/* Row 2: Standard/Category */}
+                          {issue.category && (
+                            <div className="mt-1.5 pl-1 text-xs text-muted-foreground">
+                              <span className="font-medium">标准: </span>{String(issue.category)}
+                            </div>
+                          )}
+                          {/* Row 3: Problem description */}
+                          {issue.description && (
+                            <div className="mt-1 pl-1 text-xs text-muted-foreground">
+                              <span className="font-medium">问题描述: </span>{String(issue.description)}
+                            </div>
+                          )}
+                          {/* Row 4: Rectification plan */}
+                          {(issue.improve_plan || issue.responsible_person || issue.plan_complete_date) && (
+                            <div className="mt-1 pl-1 text-xs text-muted-foreground">
+                              <span className="font-medium">整改方案: </span>
+                              {issue.improve_plan && String(issue.improve_plan)}
+                              {issue.responsible_person && <span> ({String(issue.responsible_person)})</span>}
+                              {issue.plan_complete_date && <span> 截止: {String(issue.plan_complete_date)}</span>}
+                            </div>
+                          )}
+                          {/* Row 5: Verification result */}
+                          {issue.verification_note && (
+                            <div className="mt-1 pl-1 text-xs text-muted-foreground">
+                              <span className="font-medium">验证结果: </span>{String(issue.verification_note)}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
