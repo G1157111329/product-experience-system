@@ -54,7 +54,7 @@
 │   │   │   │   └── share/       # 报告分享API（创建/验证/列表/撤销）
 │   │   │   ├── recipes/         # 食谱/功能 CRUD（含effect_description/effect_score/effect_problem_point/effect_ai_result效果评价字段）
 │   │   │   │   ├── [id]/ai-evaluate/ # AI效果评价（四维评价：质感/透彻/纯净/恒定，基于描述+图片生成评分）
-│   │   │   │   └── [id]/ai-detect-problems/ # AI问题点识别（索引步骤+效果描述，识别负面情绪/问题点）
+│   │   │   │   └── [id]/ai-detect-problems/ # AI问题点识别（索引步骤+效果描述+AI评价结果，识别负面情绪/问题点）
 │   │   │   ├── recipe-steps/    # 食谱步骤 CRUD
 │   │   │   ├── recipe-library/  # 食谱库 CRUD（名称全局唯一，步骤级联删除）
 │   │   │   ├── recipe-library-steps/ # 食谱库步骤 CRUD（含批量排序）
@@ -157,7 +157,7 @@
 | GET/POST | `/api/recipes` | 食谱/功能列表/创建；GET 支持 library=1&keyword 跨任务搜索食谱库；含effect_description/effect_score/effect_problem_point/effect_ai_result |
 | GET/PUT/DELETE | `/api/recipes/[id]` | 食谱详情/更新/删除（含effect_description/effect_score/effect_problem_point/effect_material_ids） |
 | POST | `/api/recipes/[id]/ai-evaluate` | AI效果评价（四维评价：质感/透彻/纯净/恒定，基于描述+图片生成评分，使用内置或自定义AI模型） |
-| POST | `/api/recipes/[id]/ai-detect-problems` | AI问题点识别（索引步骤+效果描述，识别负面情绪/问题点表述，返回结构化问题列表） |
+| POST | `/api/recipes/[id]/ai-detect-problems` | AI问题点识别（索引步骤+效果描述+AI评价结果，识别负面情绪/问题点表述，返回结构化问题列表） |
 | GET/POST | `/api/recipe-steps` | 步骤列表/创建；PUT 批量更新步骤排序（steps 数组） |
 | PUT/DELETE | `/api/recipe-steps/[id]` | 步骤更新/删除 |
 | GET | `/api/dashboard` | 仪表盘统计数据（支持created_by按用户过滤） |
@@ -312,7 +312,7 @@ coze start
 68. **素材库原生相机**: 移动端拍照和录像调用设备原生相机（input capture="environment"），而非浏览器摄像头(getUserMedia)；桌面端仍使用浏览器摄像头
 69. **素材库图片编辑**: 素材仓库图片新增在线编辑功能（裁剪、旋转、缩放），使用 react-easy-crop 组件；编辑后保存为新素材替换原图
 70. **报告列表型号标签**: 报告中心列表中增加产品型号Badge显示（如有），与品类/项目类型Badge同行
-71. **报告问题点清单分行呈现**: 报告详情页、打印页、分享页的问题清单优化为多行结构化呈现——第一行：等级+标题+状态；第二行：标准/分类（如有）；第三行：问题描述；第四行：整改方案（含责任人、计划完成日期）；第五行：验证结果（如有）
+71. **报告问题点清单分行呈现**: 报告详情页、打印页、分享页的问题清单优化为多行结构化呈现——第一行：等级+标题+状态；第二行：标准/分类（如有）；第三行：问题来源；第四行：整改方案（含责任人、计划完成日期）；第五行：验证结果（如有）
 
 ## 代码风格
 

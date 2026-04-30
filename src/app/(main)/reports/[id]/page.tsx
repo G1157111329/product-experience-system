@@ -222,7 +222,7 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
               {/* Row 3: Problem description (if exists) */}
               {issue.description && (
                 <div className="flex items-start gap-1.5 pl-1">
-                  <span className="text-[10px] text-muted-foreground shrink-0">问题描述:</span>
+                  <span className="text-[10px] text-muted-foreground shrink-0">问题来源:</span>
                   <span className="text-[10px] text-muted-foreground break-all">{issue.description}</span>
                 </div>
               )}

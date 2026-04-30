@@ -168,7 +168,7 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
               {/* Row 3: Problem description */}
               {issue.description && (
                 <div style={{ marginTop: '4px', paddingLeft: '4px' }}>
-                  <span style={{ color: '#6b7280', fontSize: '10px' }}>问题描述: </span>
+                  <span style={{ color: '#6b7280', fontSize: '10px' }}>问题来源: </span>
                   <span style={{ color: '#6b7280', fontSize: '10px' }}>{String(issue.description)}</span>
                 </div>
               )}

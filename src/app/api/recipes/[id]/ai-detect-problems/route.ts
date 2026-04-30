@@ -40,15 +40,33 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       contextText += `\n【效果/出品效果评价】\n${recipe.effect_description}\n`;
     }
 
+    if (recipe.effect_ai_result) {
+      try {
+        const aiResult = typeof recipe.effect_ai_result === 'string'
+          ? JSON.parse(recipe.effect_ai_result)
+          : recipe.effect_ai_result;
+        if (aiResult) {
+          contextText += '\n【AI效果评价结果】\n';
+          if (aiResult.score) contextText += `综合评分：${aiResult.score}/10\n`;
+          if (aiResult.summary) contextText += `评价总结：${aiResult.summary}\n`;
+          if (aiResult.dimensions && Array.isArray(aiResult.dimensions)) {
+            for (const dim of aiResult.dimensions) {
+              contextText += `- ${dim.name || dim.dimension}：${dim.score}/10，${dim.comment || dim.description || ''}\n`;
+            }
+          }
+        }
+      } catch { /* ignore parse error */ }
+    }
+
     const systemPrompt = `你是一位专业产品评价官，擅长从用户体验角度识别产品问题。
 
 你的任务分两层：
 
 **第一层：负面情绪语言总结**
-从步骤描述和效果评价中，识别用户表达中的负面情绪语言（如"不均匀"、"困难"、"无法"、"失败"、"不好"、"差"、"容易溢出"、"需要多次尝试"等），如实总结这些负面表述。
+从步骤描述和效果评价中，识别用户表达中的负面情绪语言（如"不均匀"、"困难"、"无法"、"失败"、"不好"、"差"、"容易溢出"、"需要多次尝试"等），如实总结这些负面表述。如果存在AI效果评价结果，需重点关注评分较低的维度及其评语。
 
 **第二层：期待vs实际体验差距分析**
-"问题"本质上是我们对期待的结果和实际的体验之间的差距描述。请你作为一个专业产品评价官，基于该食谱/功能在互联网中用户普遍表达的期待状态，对比步骤描述和效果评价中反映的实际体验，识别出期待与实际之间的差距。
+"问题"本质上是我们对期待的结果和实际的体验之间的差距描述。请你作为一个专业产品评价官，基于该食谱/功能在互联网中用户普遍表达的期待状态，对比步骤描述和效果评价中反映的实际体验，识别出期待与实际之间的差距。AI效果评价结果中评分较低的维度也是问题点的重要参考。
 
 分析维度：
 1. 步骤操作是否顺畅、是否符合用户直觉

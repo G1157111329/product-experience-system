@@ -101,9 +101,8 @@ export default function TasksPage() {
     let taskName = form.task_name.trim();
     if (!taskName) {
       const now = new Date();
-      const dateStr = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-      const parts = [form.product_category, form.product, form.product_model, form.project_type, dateStr, form.organizer].filter(Boolean);
-      taskName = parts.join('+') || '未命名任务';
+      const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+      taskName = `${form.product_category || ''}${form.product || ''}${form.product_model || ''}${form.project_type || ''}${dateStr}${form.organizer ? '-' + form.organizer : ''}` || '未命名任务';
     }
     const res = await fetch('/api/tasks', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

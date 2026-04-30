@@ -353,7 +353,7 @@ export default function ShareReportPage() {
                           {/* Row 3: Problem description */}
                           {issue.description && (
                             <div className="mt-1 pl-1 text-xs text-muted-foreground">
-                              <span className="font-medium">问题描述: </span>{String(issue.description)}
+                              <span className="font-medium">问题来源: </span>{String(issue.description)}
                             </div>
                           )}
                           {/* Row 4: Rectification plan */}
