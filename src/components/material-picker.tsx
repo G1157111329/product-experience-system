@@ -1,11 +1,11 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Plus, Loader2, Film, Image as ImageIcon, Camera, Video } from 'lucide-react';
+import { Plus, Loader2, Film, Image as ImageIcon, Camera, Video, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { MediaThumbnail } from './image-preview';
+import { MediaThumbnail, useImagePreview, ImagePreview } from './image-preview';
 import { MediaCaptureDialog } from './media-capture-dialog';
 import { toast } from 'sonner';
 
@@ -31,6 +31,7 @@ interface MaterialPickerProps {
   selectedIds?: string[];
   initialMaterials?: Material[];
   onSelectionChange?: (ids: string[], materials: Material[]) => void;
+  onPreview?: (url: string) => void;
 }
 
 type FilterType = 'all' | 'image' | 'video';
@@ -46,6 +47,7 @@ export function MaterialPicker({
   selectedIds,
   initialMaterials,
   onSelectionChange,
+  onPreview,
 }: MaterialPickerProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const [materials, setMaterials] = useState<Material[]>([]);
@@ -53,6 +55,7 @@ export function MaterialPicker({
   const [loading, setLoading] = useState(false);
   const [filterType, setFilterType] = useState<FilterType>('all');
   const [captureMode, setCaptureMode] = useState<'image' | 'video' | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>(selectedIds || []);
   const [selectedMaterialMap, setSelectedMaterialMap] = useState<Record<string, Material>>(() => {
     const map: Record<string, Material> = {};
@@ -268,7 +271,8 @@ export function MaterialPicker({
           if (!material) return null;
 
           return (
-            <div key={id} className="relative w-12 h-12 rounded-md overflow-hidden border border-border group">
+            <div key={id} className="relative w-12 h-12 rounded-md overflow-hidden border border-border group cursor-pointer"
+              onClick={(e) => { e.stopPropagation(); setPreviewUrl(material.file_url); }}>
               <MediaThumbnail url={material.file_url} type={material.material_type as 'image' | 'video'} size="sm" />
               <button
                 type="button"
@@ -283,6 +287,24 @@ export function MaterialPicker({
             </div>
           );
         })}
+      </div>
+    );
+  };
+
+  const renderPreviewModal = () => {
+    if (!previewUrl) return null;
+    return (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.85)' }}
+        onClick={() => setPreviewUrl(null)}>
+        <div className="relative max-w-[90vw] max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+          {previewUrl.match(/\.(mp4|webm|mov)/i) || previewUrl.includes('video') ? (
+            <video src={previewUrl} controls autoPlay className="max-w-full max-h-[85vh] rounded-lg" />
+          ) : (
+            <img src={previewUrl} alt="预览" className="max-w-full max-h-[85vh] object-contain rounded-lg" />
+          )}
+          <button type="button" className="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-white/90 text-gray-800 flex items-center justify-center text-lg font-bold shadow-lg hover:bg-white"
+            onClick={() => setPreviewUrl(null)}>×</button>
+        </div>
       </div>
     );
   };
@@ -425,19 +447,23 @@ export function MaterialPicker({
             {renderDialogBody()}
           </DialogContent>
         </Dialog>
+        {renderPreviewModal()}
       </>
     );
   }
 
   return (
-    <Dialog modal={false} open={isOpen} onOpenChange={handleOpen}>
-      <DialogContent className="max-w-lg max-h-[85vh]">
-        <DialogHeader>
-          <DialogTitle>选择素材</DialogTitle>
-          <DialogDescription>从素材库选择，或通过独立入口直接上传图片/视频</DialogDescription>
-        </DialogHeader>
-        {renderDialogBody()}
-      </DialogContent>
-    </Dialog>
+    <>
+      <Dialog modal={false} open={isOpen} onOpenChange={handleOpen}>
+        <DialogContent className="max-w-lg max-h-[85vh]">
+          <DialogHeader>
+            <DialogTitle>选择素材</DialogTitle>
+            <DialogDescription>从素材库选择，或通过独立入口直接上传图片/视频</DialogDescription>
+          </DialogHeader>
+          {renderDialogBody()}
+        </DialogContent>
+      </Dialog>
+      {renderPreviewModal()}
+    </>
   );
 }
