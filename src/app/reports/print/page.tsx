@@ -269,9 +269,18 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
                   {!recipe.effect_ai_result && recipe.effect_description && (
                     <div style={{ fontSize: '11px', color: '#555', marginLeft: '20px', whiteSpace: 'pre-wrap' }}>{recipe.effect_description}</div>
                   )}
-                  {recipe.effect_problem_point && (
-                    <div style={{ fontSize: '11px', color: '#d97706', marginLeft: '20px' }}>问题: {recipe.effect_problem_point}</div>
-                  )}
+                  {recipe.effect_problem_point && (() => {
+                    let pps: string[] = [];
+                    try {
+                      const parsed = JSON.parse(recipe.effect_problem_point);
+                      if (Array.isArray(parsed)) {
+                        pps = parsed.filter((p: unknown) => typeof p === 'object' && p !== null && typeof (p as Record<string, unknown>).text === 'string').map((p: { text: string }) => p.text);
+                      } else { pps = [recipe.effect_problem_point]; }
+                    } catch { pps = [recipe.effect_problem_point]; }
+                    return pps.map((pp, i) => (
+                      <div key={i} style={{ fontSize: '11px', color: '#d97706', marginLeft: '20px' }}>问题{i > 0 ? i + 1 : ''}: {pp}</div>
+                    ));
+                  })()}
                   {recipe.effect_materials && recipe.effect_materials.length > 0 && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px', marginLeft: '20px' }}>
                       {recipe.effect_materials.filter(m => m.material_type === 'image').map(mat => (

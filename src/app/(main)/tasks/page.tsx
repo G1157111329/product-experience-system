@@ -98,9 +98,16 @@ export default function TasksPage() {
   };
 
   const handleCreate = async () => {
+    let taskName = form.task_name.trim();
+    if (!taskName) {
+      const now = new Date();
+      const dateStr = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+      const parts = [form.product_category, form.product, form.product_model, form.project_type, dateStr, form.organizer].filter(Boolean);
+      taskName = parts.join('+') || '未命名任务';
+    }
     const res = await fetch('/api/tasks', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, created_by: user?.id }),
+      body: JSON.stringify({ ...form, task_name: taskName, created_by: user?.id }),
     });
     const data = await res.json();
     if (data.code === 0) {
@@ -169,8 +176,8 @@ export default function TasksPage() {
             <DialogHeader><DialogTitle>创建体验任务</DialogTitle></DialogHeader>
             <div className="space-y-3 mt-2">
               <div className="space-y-1.5">
-                <Label>任务名称 *</Label>
-                <Input placeholder="如：PBJ-F10U1新品体验" value={form.task_name} onChange={(e) => setForm({ ...form, task_name: e.target.value })} />
+                <Label>任务名称</Label>
+                <Input placeholder="留空自动生成：品类+产品名称+型号+类型+时间+组织者" value={form.task_name} onChange={(e) => setForm({ ...form, task_name: e.target.value })} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
@@ -240,7 +247,7 @@ export default function TasksPage() {
                 <Label>体验目的</Label>
                 <Textarea placeholder="本次体验的目标" value={form.test_purpose} onChange={(e) => setForm({ ...form, test_purpose: e.target.value })} rows={2} />
               </div>
-              <Button onClick={handleCreate} className="w-full" disabled={!form.task_name || !form.product_category || !form.product || !form.project_type || (['自研', '改型/降本/优化'].includes(form.project_type) && !form.product_model)}>
+              <Button onClick={handleCreate} className="w-full" disabled={!form.product_category || !form.product || !form.project_type || (['自研', '改型/降本/优化'].includes(form.project_type) && !form.product_model)}>
                 创建任务
               </Button>
             </div>

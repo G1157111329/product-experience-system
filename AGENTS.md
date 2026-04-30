@@ -53,7 +53,8 @@
 │   │   │   │   ├── export-pdf/  # PDF导出API
 │   │   │   │   └── share/       # 报告分享API（创建/验证/列表/撤销）
 │   │   │   ├── recipes/         # 食谱/功能 CRUD（含effect_description/effect_score/effect_problem_point/effect_ai_result效果评价字段）
-│   │   │   │   └── [id]/ai-evaluate/ # AI效果评价（四维评价：质感/透彻/纯净/恒定，基于描述+图片生成评分）
+│   │   │   │   ├── [id]/ai-evaluate/ # AI效果评价（四维评价：质感/透彻/纯净/恒定，基于描述+图片生成评分）
+│   │   │   │   └── [id]/ai-detect-problems/ # AI问题点识别（索引步骤+效果描述，识别负面情绪/问题点）
 │   │   │   ├── recipe-steps/    # 食谱步骤 CRUD
 │   │   │   ├── recipe-library/  # 食谱库 CRUD（名称全局唯一，步骤级联删除）
 │   │   │   ├── recipe-library-steps/ # 食谱库步骤 CRUD（含批量排序）
@@ -63,7 +64,9 @@
 │   ├── components/
 │   │   ├── navigation.tsx       # 导航组件（桌面侧栏 + 移动端底部/顶部 + RoleSwitcher + AiConfigSettings）
 │   │   ├── image-preview.tsx    # 共享图片预览组件
+│   │   ├── image-editor-dialog.tsx # 图片在线编辑组件（裁剪/旋转/缩放，react-easy-crop）
 │   │   ├── material-picker.tsx  # 素材选择器组件（引用/上传，支持initialMaterials预填充）
+│   │   └── media-capture-dialog.tsx # 拍照/录像对话框（移动端原生相机，桌面端浏览器摄像头）
 │   │   └── ui/                  # Shadcn UI 组件库
 │   ├── storage/database/
 │   │   ├── supabase-client.ts   # Supabase 客户端
@@ -154,6 +157,7 @@
 | GET/POST | `/api/recipes` | 食谱/功能列表/创建；GET 支持 library=1&keyword 跨任务搜索食谱库；含effect_description/effect_score/effect_problem_point/effect_ai_result |
 | GET/PUT/DELETE | `/api/recipes/[id]` | 食谱详情/更新/删除（含effect_description/effect_score/effect_problem_point/effect_material_ids） |
 | POST | `/api/recipes/[id]/ai-evaluate` | AI效果评价（四维评价：质感/透彻/纯净/恒定，基于描述+图片生成评分，使用内置或自定义AI模型） |
+| POST | `/api/recipes/[id]/ai-detect-problems` | AI问题点识别（索引步骤+效果描述，识别负面情绪/问题点表述，返回结构化问题列表） |
 | GET/POST | `/api/recipe-steps` | 步骤列表/创建；PUT 批量更新步骤排序（steps 数组） |
 | PUT/DELETE | `/api/recipe-steps/[id]` | 步骤更新/删除 |
 | GET | `/api/dashboard` | 仪表盘统计数据（支持created_by按用户过滤） |
@@ -302,6 +306,11 @@ coze start
 62. **食谱列表显示AI评分**: 任务详情页功能效果中食谱卡片新增评分显示（如"1 步骤 · 1 问题 · 8.3分"），报告详情页、打印页/PDF导出、报告分享页均同步显示 AI 评分
 63. **报告食谱食材/参数展示**: 报告详情页、打印页、分享页的食谱卡片头部新增食材/参数(ingredients)展示，呈现形式与体验计划功能效果中食谱列表一致（类型Badge + 名称 + 食材/参数 + 步骤数/问题数/AI评分）
 64. **素材删除保护**: 删除五感体验条目(check_record)、食谱步骤(recipe_step)、食谱(recipe)、食谱库步骤(recipe_library_step)、食谱库(recipe_library)时，仅解除素材关联（将record_id/recipe_step_id/recipe_id/recipe_library_step_id设为null），不删除素材本身；DB外键从onDelete("cascade")改为onDelete("set null")
+65. **任务名称自动填充**: 新建体验计划时任务名称非必填；用户未填写时自动生成：品类+产品名称+型号+类型+时间(yymmdd)+组织者
+66. **食谱问题点独立板块**: 功能效果中问题点从效果评价中分离，与"步骤"、"效果/出品效果评价"并列为第三板块；问题点改为结构化列表（文本框+上传素材），支持多条问题点增删；数据存储在 effect_problem_point 字段（JSON数组格式）
+67. **问题点AI识别**: 问题点板块新增AI识别功能，索引步骤+效果评价所有描述，识别负面情绪/问题点表述，自动创建问题点列表；API: POST /api/recipes/[id]/ai-detect-problems
+68. **素材库原生相机**: 移动端拍照和录像调用设备原生相机（input capture="environment"），而非浏览器摄像头(getUserMedia)；桌面端仍使用浏览器摄像头
+69. **素材库图片编辑**: 素材仓库图片新增在线编辑功能（裁剪、旋转、缩放），使用 react-easy-crop 组件；编辑后保存为新素材替换原图
 
 ## 代码风格
 

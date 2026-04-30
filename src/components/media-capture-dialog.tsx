@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, Loader2, Square, Video } from 'lucide-react';
+import { Camera, Image as ImageIcon, Loader2, Square, Video, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
@@ -25,10 +25,18 @@ export function MediaCaptureDialog({
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const discardRecordingRef = useRef(false);
+  const nativeInputRef = useRef<HTMLInputElement>(null);
   const [starting, setStarting] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState('');
+  const [useNative, setUseNative] = useState(true);
+
+  // Detect mobile device
+  const isMobile = useCallback(() => {
+    if (typeof navigator === 'undefined') return false;
+    return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  }, []);
 
   const stopStream = useCallback(() => {
     const recorder = recorderRef.current;
@@ -76,7 +84,9 @@ export function MediaCaptureDialog({
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play().catch(() => undefined);
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current?.play().catch(() => undefined);
+        };
       }
     } catch {
       setError('无法打开摄像头，请检查浏览器权限后重试');
@@ -85,20 +95,49 @@ export function MediaCaptureDialog({
     }
   }, [mode, stopStream]);
 
+  // On open: if mobile, use native camera; otherwise start browser stream
   useEffect(() => {
     if (open) {
-      startStream();
+      if (isMobile()) {
+        setUseNative(true);
+        // Auto-trigger native camera input
+        setTimeout(() => nativeInputRef.current?.click(), 100);
+      } else {
+        setUseNative(false);
+        startStream();
+      }
     } else {
       stopStream();
       setError('');
       setCapturing(false);
     }
     return () => stopStream();
-  }, [open, startStream, stopStream]);
+  }, [open, startStream, stopStream, isMobile]);
+
+  // Handle native file input change
+  const handleNativeCapture = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) {
+      onOpenChange(false);
+      return;
+    }
+    setCapturing(true);
+    try {
+      await onCapture(file);
+      onOpenChange(false);
+    } catch {
+      setError('文件处理失败，请重试');
+    } finally {
+      setCapturing(false);
+      // Reset input so the same file can be selected again
+      if (nativeInputRef.current) nativeInputRef.current.value = '';
+    }
+  }, [onCapture, onOpenChange]);
 
   const handleCaptureImage = async () => {
     const video = videoRef.current;
     if (!video || !streamRef.current || capturing || busy) return;
+    if (video.videoWidth === 0) return;
 
     setCapturing(true);
     try {
@@ -193,21 +232,62 @@ export function MediaCaptureDialog({
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <div className="px-4 pb-4 space-y-3">
-          <div className="relative aspect-[3/4] sm:aspect-video overflow-hidden rounded-lg bg-black">
-            <video ref={videoRef} className="h-full w-full object-cover" playsInline muted autoPlay />
-            {(starting || capturing || busy) && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-white text-sm">
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                {starting ? '正在打开摄像头...' : '正在处理...'}
+          {/* Hidden native file input for mobile camera */}
+          <input
+            ref={nativeInputRef}
+            type="file"
+            accept={mode === 'image' ? 'image/*' : 'video/*'}
+            capture="environment"
+            className="hidden"
+            onChange={handleNativeCapture}
+          />
+
+          {useNative ? (
+            /* Mobile: show native camera trigger UI */
+            <div className="space-y-3">
+              <div
+                className="relative aspect-[3/4] sm:aspect-video overflow-hidden rounded-lg bg-muted flex flex-col items-center justify-center cursor-pointer"
+                onClick={() => nativeInputRef.current?.click()}
+              >
+                {(capturing || busy) ? (
+                  <>
+                    <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
+                    <p className="text-sm text-muted-foreground">正在处理...</p>
+                  </>
+                ) : (
+                  <>
+                    {mode === 'image' ? (
+                      <Camera className="h-10 w-10 text-muted-foreground/50 mb-2" />
+                    ) : (
+                      <Video className="h-10 w-10 text-muted-foreground/50 mb-2" />
+                    )}
+                    <p className="text-sm text-muted-foreground">点击打开相机</p>
+                  </>
+                )}
               </div>
-            )}
-            {error && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/70 px-6 text-center text-sm text-white">
-                {error}
-              </div>
-            )}
-          </div>
-          {error ? (
+              {error && (
+                <p className="text-xs text-destructive text-center">{error}</p>
+              )}
+            </div>
+          ) : (
+            /* Desktop: browser camera stream */
+            <div className="relative aspect-[3/4] sm:aspect-video overflow-hidden rounded-lg bg-black">
+              <video ref={videoRef} className="h-full w-full object-cover" playsInline muted autoPlay />
+              {(starting || capturing || busy) && (
+                <div className="absolute inset-0 flex items-center justify-center text-white text-sm" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  {starting ? '正在打开摄像头...' : '正在处理...'}
+                </div>
+              )}
+              {error && (
+                <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-sm text-white" style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}>
+                  {error}
+                </div>
+              )}
+            </div>
+          )}
+
+          {useNative ? null : error ? (
             <Button type="button" variant="outline" className="w-full" onClick={startStream} disabled={starting}>
               重试
             </Button>

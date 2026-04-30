@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, ArrowRightLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Film, Image as ImageIcon, Pencil, Trash2, Check, Link2, X, Play, GripVertical, Sparkles, Save, Star } from 'lucide-react';
+import { ArrowLeft, ArrowRightLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Film, Image as ImageIcon, Pencil, Trash2, Check, Link2, X, Play, GripVertical, Sparkles, Save, Star, AlertTriangle, Crop } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -18,6 +18,7 @@ import { toast } from 'sonner';
 import { useImagePreview } from '@/components/image-preview';
 import { MaterialPicker } from '@/components/material-picker';
 import { MediaCaptureDialog } from '@/components/media-capture-dialog';
+import { ImageEditorDialog } from '@/components/image-editor-dialog';
 
 /* ─── Types ─── */
 interface CategoryWithProducts {
@@ -76,6 +77,7 @@ interface Recipe {
   problem_count: number; recipe_steps: RecipeStep[];
   sort_order?: number;
   effect_description?: string | null; effect_score?: string | null; effect_problem_point?: string | null;
+  effect_problem_points?: ProblemPoint[];
   effect_ai_result?: { score: number; summary: string } | null;
   effect_materials?: Material[];
 }
@@ -639,6 +641,7 @@ function MaterialsTab({ taskId }: { taskId: string }) {
   const [editName, setEditName] = useState('');
   const [captureMode, setCaptureMode] = useState<'image' | 'video' | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [editingImage, setEditingImage] = useState<{ id: string; url: string; name: string } | null>(null);
   const galleryImageInputRef = useRef<HTMLInputElement>(null);
   const galleryVideoInputRef = useRef<HTMLInputElement>(null);
   const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
@@ -697,6 +700,33 @@ function MaterialsTab({ taskId }: { taskId: string }) {
     }
   };
 
+  const handleEditImageSave = async (editedFile: File) => {
+    // Upload the edited image as a new material, then delete the old one
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', editedFile);
+      formData.append('task_id', taskId);
+      const res = await fetch('/api/materials/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.code === 0) {
+        toast.success('图片编辑已保存');
+        // Delete the original image
+        if (editingImage?.id) {
+          await fetch(`/api/materials?id=${editingImage.id}`, { method: 'DELETE' });
+        }
+        fetchMaterials();
+      } else {
+        toast.error(data.message || '保存失败');
+      }
+    } catch {
+      toast.error('保存编辑图片失败');
+    } finally {
+      setUploading(false);
+      setEditingImage(null);
+    }
+  };
+
   const handleDelete = async (id: string) => {
     const res = await fetch(`/api/materials?id=${id}`, { method: 'DELETE' });
     const data = await res.json();
@@ -732,6 +762,13 @@ function MaterialsTab({ taskId }: { taskId: string }) {
         onOpenChange={(open) => setCaptureMode(open ? (captureMode || 'image') : null)}
         onCapture={(file) => handleUpload([file])}
         busy={uploading}
+      />
+      <ImageEditorDialog
+        open={editingImage !== null}
+        onOpenChange={(open) => { if (!open) setEditingImage(null); }}
+        imageUrl={editingImage?.url || ''}
+        fileName={editingImage?.name || 'image'}
+        onSave={handleEditImageSave}
       />
 
       {loading ? (
@@ -770,7 +807,10 @@ function MaterialsTab({ taskId }: { taskId: string }) {
                       ) : (
                         <div className="flex items-center justify-between">
                           <p className="text-[10px] text-white truncate flex-1">{mat.file_name}</p>
-                          <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex gap-0.5 opacity-70 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => { setEditingImage({ id: mat.id, url: mat.file_url, name: mat.file_name }); }} className="p-0.5 text-white/70 hover:text-white">
+                              <Crop className="h-3 w-3" />
+                            </button>
                             <button onClick={() => { setEditingId(mat.id); setEditName(mat.file_name); }} className="p-0.5 text-white/70 hover:text-white">
                               <Pencil className="h-3 w-3" />
                             </button>
@@ -1844,6 +1884,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
     }
   };
 
+
   return (
     <div className="space-y-4">
       <PreviewComponent />
@@ -2012,6 +2053,8 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
   // ── Effect evaluation states ──
   const [effectDesc, setEffectDesc] = useState<Record<string, string>>({});
   const [effectProblem, setEffectProblem] = useState<Record<string, string>>({});
+  const [effectProblemPoints, setEffectProblemPoints] = useState<Record<string, ProblemPoint[]>>({});
+  const [aiDetectingProblems, setAiDetectingProblems] = useState<Record<string, boolean>>({});
   const [effectMaterialIds, setEffectMaterialIds] = useState<Record<string, string[]>>({});
   const [effectSaving, setEffectSaving] = useState<Record<string, boolean>>({});
   const [aiEvaluating, setAiEvaluating] = useState<Record<string, boolean>>({});
@@ -2056,7 +2099,20 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
           // Fetch effect materials
           const effectMatRes = await fetch(`/api/materials?recipe_id=${recipe.id}`);
           const effectMatData = await effectMatRes.json();
-          return { ...recipe, recipe_steps: stepsWithMats, effect_materials: effectMatData.data || [] };
+          // Parse effect_problem_points from JSON string
+          let parsedProblemPoints: ProblemPoint[] = [];
+          if (recipe.effect_problem_point) {
+            try {
+              const parsed = JSON.parse(recipe.effect_problem_point);
+              if (Array.isArray(parsed)) {
+                parsedProblemPoints = parsed.filter((p: unknown) => typeof p === 'object' && p !== null && typeof (p as Record<string, unknown>).text === 'string');
+              }
+            } catch {
+              // Old format: plain text string, convert to single problem point
+              parsedProblemPoints = [{ text: recipe.effect_problem_point, material_ids: [] }];
+            }
+          }
+          return { ...recipe, recipe_steps: stepsWithMats, effect_materials: effectMatData.data || [], effect_problem_points: parsedProblemPoints };
         })
       );
       setRecipes(enriched);
@@ -2371,7 +2427,8 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
     setEffectSaving(prev => ({ ...prev, [recipe.id]: true }));
     try {
       const desc = effectDesc[recipe.id] ?? recipe.effect_description ?? '';
-      const pp = effectProblem[recipe.id] ?? recipe.effect_problem_point ?? '';
+      const pps = effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? [];
+      const ppJson = JSON.stringify(pps.filter(p => p.text.trim()));
       const matIds = effectMaterialIds[recipe.id] ?? (recipe.effect_materials || []).map(m => m.id);
       const res = await fetch(`/api/recipes/${recipe.id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -2379,7 +2436,7 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
           name: recipe.name, ingredients: recipe.ingredients,
           recipe_type: recipe.recipe_type, problem_count: recipe.problem_count,
           effect_description: desc,
-          effect_problem_point: pp,
+          effect_problem_point: ppJson,
           effect_material_ids: matIds,
         }),
       });
@@ -2411,6 +2468,52 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
     } finally {
       setAiEvaluating(prev => ({ ...prev, [recipe.id]: false }));
     }
+  };
+
+  // ── AI detect problems for recipe ──
+  const handleAiDetectProblems = async (recipe: Recipe) => {
+    setAiDetectingProblems(prev => ({ ...prev, [recipe.id]: true }));
+    try {
+      const res = await fetch(`/api/recipes/${recipe.id}/ai-detect-problems`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (data.code === 0 && data.data?.problems?.length > 0) {
+        const existingPPs = effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? [];
+        const newPPs = [...existingPPs, ...data.data.problems.map((p: { text: string }) => ({ text: p.text, material_ids: [] as string[] }))];
+        setEffectProblemPoints(prev => ({ ...prev, [recipe.id]: newPPs }));
+        toast.success(`AI识别到${data.data.problems.length}个问题点`);
+      } else if (data.code === 0) {
+        toast.info('AI未识别到问题点');
+      } else {
+        toast.error(data.message);
+      }
+    } catch {
+      toast.error('AI识别失败');
+    } finally {
+      setAiDetectingProblems(prev => ({ ...prev, [recipe.id]: false }));
+    }
+  };
+
+  // ── Add problem point for recipe ──
+  const handleAddProblemPoint = (recipeId: string) => {
+    const existing = effectProblemPoints[recipeId] ?? [];
+    setEffectProblemPoints(prev => ({ ...prev, [recipeId]: [...existing, { text: '', material_ids: [] }] }));
+  };
+
+  // ── Remove problem point for recipe ──
+  const handleRemoveProblemPoint = (recipeId: string, index: number) => {
+    const existing = effectProblemPoints[recipeId] ?? [];
+    setEffectProblemPoints(prev => ({ ...prev, [recipeId]: existing.filter((_, i) => i !== index) }));
+  };
+
+  // ── Update problem point text for recipe ──
+  const handleUpdateProblemPoint = (recipeId: string, index: number, text: string) => {
+    const existing = effectProblemPoints[recipeId] ?? [];
+    setEffectProblemPoints(prev => ({
+      ...prev,
+      [recipeId]: existing.map((pp, i) => i === index ? { ...pp, text } : pp),
+    }));
   };
 
   return (
@@ -2633,15 +2736,7 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                         rows={3}
                       />
                     </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">问题点</Label>
-                      <Textarea
-                        placeholder="记录效果评价中发现的问题..."
-                        value={effectProblem[recipe.id] ?? recipe.effect_problem_point ?? ''}
-                        onChange={(e) => setEffectProblem(prev => ({ ...prev, [recipe.id]: e.target.value }))}
-                        rows={2}
-                      />
-                    </div>
+
                     <div className="space-y-1.5">
                       <Label className="text-xs">附件素材</Label>
                       <p className="text-[11px] text-muted-foreground">上传效果图片或视频，AI将结合文字和图片进行评价</p>
@@ -2688,6 +2783,72 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                         disabled={aiEvaluating[recipe.id] || (!effectDesc[recipe.id] && !recipe.effect_description && (!effectMaterialIds[recipe.id]?.length && !recipe.effect_materials?.length))}>
                         <Sparkles className="h-3.5 w-3.5 mr-1" />
                         {aiEvaluating[recipe.id] ? 'AI评价中...' : 'AI总结评分'}
+                      </Button>
+                    </div>
+                  </div>
+                  {/* Problem Points Section (standalone, same level as steps and effect) */}
+                  <div className="mt-3 p-3 rounded-lg border border-amber-200 bg-amber-50/50 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 text-amber-600" />
+                      <span className="text-sm font-medium">问题点</span>
+                      <span className="text-[10px] text-muted-foreground ml-1">
+                        ({(effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? []).filter(p => p.text.trim()).length}条)
+                      </span>
+                    </div>
+                    {/* Problem point list */}
+                    {(effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? []).length > 0 && (
+                      <div className="space-y-2">
+                        {(effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? []).map((pp, ppIdx) => (
+                          <div key={ppIdx} className="p-2 rounded-md border border-amber-200/60 bg-white space-y-2">
+                            <div className="flex items-start gap-1.5">
+                              <span className="text-[10px] text-amber-600 font-medium shrink-0 mt-1.5">问题{ppIdx + 1}</span>
+                              <div className="flex-1 min-w-0">
+                                <Input
+                                  placeholder="描述问题点..."
+                                  value={pp.text}
+                                  onChange={(e) => handleUpdateProblemPoint(recipe.id, ppIdx, e.target.value)}
+                                  className="text-xs"
+                                />
+                              </div>
+                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0 text-muted-foreground hover:text-red-500"
+                                onClick={() => handleRemoveProblemPoint(recipe.id, ppIdx)}>
+                                <X className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                            {/* Per-problem-point material picker */}
+                            <div className="ml-8">
+                              <MaterialPicker
+                                taskId={taskId}
+                                selectedIds={pp.material_ids || []}
+                                onSelectionChange={(ids) => {
+                                  const existing = effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? [];
+                                  setEffectProblemPoints(prev => ({
+                                    ...prev,
+                                    [recipe.id]: existing.map((item, i) => i === ppIdx ? { ...item, material_ids: ids } : item),
+                                  }));
+                                }}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" className="flex-1"
+                        onClick={() => handleAddProblemPoint(recipe.id)}>
+                        <Plus className="h-3.5 w-3.5 mr-1" /> 新增问题点
+                      </Button>
+                      <Button size="sm" className="flex-1"
+                        onClick={() => handleAiDetectProblems(recipe)}
+                        disabled={aiDetectingProblems[recipe.id]}>
+                        <Sparkles className="h-3.5 w-3.5 mr-1" />
+                        {aiDetectingProblems[recipe.id] ? 'AI识别中...' : 'AI识别问题点'}
+                      </Button>
+                      <Button variant="outline" size="sm"
+                        onClick={() => handleSaveEffect(recipe)}
+                        disabled={effectSaving[recipe.id]}>
+                        <Save className="h-3.5 w-3.5 mr-1" />
+                        {effectSaving[recipe.id] ? '保存中...' : '保存'}
                       </Button>
                     </div>
                   </div>

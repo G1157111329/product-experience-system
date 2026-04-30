@@ -486,9 +486,18 @@ export default function ShareReportPage() {
                             {!recipe.effect_ai_result && recipe.effect_description && (
                               <p className="text-xs text-muted-foreground whitespace-pre-wrap break-all ml-4">{recipe.effect_description}</p>
                             )}
-                            {recipe.effect_problem_point && (
-                              <p className="text-xs text-amber-600 break-all ml-4">问题: {recipe.effect_problem_point}</p>
-                            )}
+                            {recipe.effect_problem_point && (() => {
+                              let pps: string[] = [];
+                              try {
+                                const parsed = JSON.parse(recipe.effect_problem_point);
+                                if (Array.isArray(parsed)) {
+                                  pps = parsed.filter((p: unknown) => typeof p === 'object' && p !== null && typeof (p as Record<string, unknown>).text === 'string').map((p: { text: string }) => p.text);
+                                } else { pps = [recipe.effect_problem_point]; }
+                              } catch { pps = [recipe.effect_problem_point]; }
+                              return pps.map((pp, i) => (
+                                <p key={i} className="text-xs text-amber-600 break-all ml-4">问题{i > 0 ? i + 1 : ''}: {pp}</p>
+                              ));
+                            })()}
                             {recipe.effect_materials && recipe.effect_materials.length > 0 && (
                               <div className="flex gap-1.5 flex-wrap ml-4">
                                 {recipe.effect_materials.map(mat => (

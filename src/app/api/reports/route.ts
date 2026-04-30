@@ -117,9 +117,18 @@ export async function POST(request: NextRequest) {
         computedProblemCount += 1;
       }
     }
-    // Count effect problem point
+    // Count effect problem points (structured format)
     if (recipe.effect_problem_point && String(recipe.effect_problem_point).trim() !== '') {
-      computedProblemCount += 1;
+      try {
+        const parsed = JSON.parse(String(recipe.effect_problem_point));
+        if (Array.isArray(parsed)) {
+          computedProblemCount += parsed.filter((p: unknown) => typeof p === 'object' && p !== null && typeof (p as Record<string, unknown>).text === 'string' && (p as { text: string }).text.trim()).length;
+        } else {
+          computedProblemCount += 1; // Old plain text format
+        }
+      } catch {
+        computedProblemCount += 1; // Plain text format
+      }
     }
     return { ...recipe, problem_count: computedProblemCount };
   });
@@ -241,25 +250,42 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Create issues from recipe effect problem points
+        // Create issues from recipe effect problem points (supports structured format)
         if (recipe.effect_problem_point && String(recipe.effect_problem_point).trim()) {
-          const effectPP = String(recipe.effect_problem_point).trim();
-          const issueTitle = effectPP.substring(0, 200);
-          const issueKey = `recipe_problem::${issueTitle}`;
-          if (!createdKeys.has(issueKey)) {
-            const { error: insertError } = await client.from('issues').insert({
-              task_id: body.task_id,
-              title: issueTitle,
-              product_model: (task as Record<string, unknown>)?.product_model || null,
-              level: '二类',
-              source: `${reportTitle} - 食谱效果问题(${(recipe as Record<string, unknown>).name || ''})`,
-              source_report_id: reportId,
-              source_type: 'recipe_problem',
-              description: '效果/出品效果评价问题',
-              status: '待整改',
-            });
-            if (!insertError) {
-              createdKeys.add(issueKey);
+          const effectPPStr = String(recipe.effect_problem_point).trim();
+          let effectPPs: string[] = [];
+          try {
+            const parsed = JSON.parse(effectPPStr);
+            if (Array.isArray(parsed)) {
+              effectPPs = parsed
+                .filter((p: unknown) => typeof p === 'object' && p !== null && typeof (p as Record<string, unknown>).text === 'string')
+                .map((p: { text: string }) => p.text.trim())
+                .filter((t: string) => t);
+            } else {
+              effectPPs = [effectPPStr];
+            }
+          } catch {
+            effectPPs = [effectPPStr];
+          }
+
+          for (const ppText of effectPPs) {
+            const issueTitle = ppText.substring(0, 200);
+            const issueKey = `recipe_problem::${issueTitle}`;
+            if (!createdKeys.has(issueKey)) {
+              const { error: insertError } = await client.from('issues').insert({
+                task_id: body.task_id,
+                title: issueTitle,
+                product_model: (task as Record<string, unknown>)?.product_model || null,
+                level: '二类',
+                source: `${reportTitle} - 食谱效果问题(${(recipe as Record<string, unknown>).name || ''})`,
+                source_report_id: reportId,
+                source_type: 'recipe_problem',
+                description: '效果/出品效果评价问题',
+                status: '待整改',
+              });
+              if (!insertError) {
+                createdKeys.add(issueKey);
+              }
             }
           }
         }
