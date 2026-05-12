@@ -101,7 +101,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       custom_api_key?: string;
     };
 
-    const model = aiConfig.model || 'doubao-seed-2-0-lite-260215';
+    const model = aiConfig.model || 'kimi-k2-5-260127';
     const temperature = aiConfig.temperature ?? 0.3;
 
     const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);

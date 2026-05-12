@@ -30,7 +30,7 @@ export async function invokeConfiguredAI({
   request,
   client,
   messages,
-  defaultModel = 'doubao-seed-2-0-lite-260215',
+  defaultModel = 'kimi-k2-5-260127',
   defaultTemperature = 0.5,
   maxTokens = 2400,
   forceBuiltInModel,

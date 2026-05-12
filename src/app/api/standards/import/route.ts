@@ -112,7 +112,7 @@ ${textChunk}`;
 
   // Use pro model for better accuracy
   const response = await llmClient.invoke(messages, {
-    model: 'doubao-seed-2-0-pro-260215',
+    model: 'kimi-k2-5-260127',
     temperature: 0.05,
   });
 

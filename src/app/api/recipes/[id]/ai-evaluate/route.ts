@@ -45,7 +45,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       custom_api_key?: string;
     };
 
-    const model = aiConfig.model || 'doubao-seed-1-6-vision-250815';
+    const model = aiConfig.model || 'kimi-k2-5-260127';
     const temperature = aiConfig.temperature ?? 0.7;
 
     // Build the evaluation prompt with 4-dimension framework as internal methodology
