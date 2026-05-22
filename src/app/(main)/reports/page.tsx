@@ -3,11 +3,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { FileText, Printer, BarChart3, Users, User as UserIcon, ChevronRight, Trash2, Loader2, Share2, Copy, X, Search, Sparkles } from 'lucide-react';
+import { FileText, Printer, BarChart3, Users, User as UserIcon, ChevronRight, Trash2, Share2, Copy, X, Sparkles, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -15,6 +14,7 @@ import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
+import { ActionDock, EmptyState, FilterBar, LoadingState, PageHeader, PageShell, SearchField } from '@/components/app';
 
 interface Report {
   id: string; title: string; product_model: string | null;
@@ -222,14 +222,12 @@ export default function ReportsPage() {
   };
 
   return (
-    <div className="px-3 py-4 sm:p-4 lg:p-6 space-y-4 sm:space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border bg-card p-3 shadow-sm sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold">报告中心</h1>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-1">查看和管理体验报告</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
+    <PageShell className="space-y-4 sm:space-y-6">
+      <PageHeader
+        title="报告中心"
+        description="查看和管理体验报告"
+        actions={
+        <>
           {/* Toggle: 显示全部 / 显示个人 */}
           <Button
             variant="outline"
@@ -245,19 +243,16 @@ export default function ReportsPage() {
               <BarChart3 className="h-3.5 w-3.5" /> 报告对比 ({compareIds.length})
             </Button>
           )}
-        </div>
-      </div>
+        </>
+        }
+      />
 
-      <div className="sticky top-14 z-20 -mx-3 flex flex-col gap-2 border-y bg-background/95 px-3 py-2 backdrop-blur sm:static sm:mx-0 sm:flex-row sm:border-0 sm:bg-transparent sm:px-0 sm:py-0">
-        <div className="relative flex-1 min-w-0">
-          <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={keyword}
-            onChange={(e) => { setKeyword(e.target.value); setCompareIds([]); }}
-            placeholder="搜索报告名称、型号、品类、产品"
-            className="h-11 pl-9 sm:h-10"
-          />
-        </div>
+      <FilterBar>
+        <SearchField
+          value={keyword}
+          onChange={(e) => { setKeyword(e.target.value); setCompareIds([]); }}
+          placeholder="搜索报告名称、型号、品类、产品"
+        />
         <Select value={categoryFilter} onValueChange={(v) => { setCategoryFilter(v); setCompareIds([]); }}>
           <SelectTrigger className="h-11 w-full sm:h-10 sm:w-48">
             <SelectValue placeholder="按品类筛选" />
@@ -269,19 +264,17 @@ export default function ReportsPage() {
             ))}
           </SelectContent>
         </Select>
-      </div>
+      </FilterBar>
 
       {/* Content */}
       {loading ? (
-        <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>
+        <LoadingState label="正在加载报告" />
       ) : visibleReports.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            <FileText className="h-10 w-10 mx-auto mb-3 opacity-30" />
-            <p className="text-sm">暂无匹配报告</p>
-            <p className="text-xs mt-1">{keyword || categoryFilter !== 'all' ? '调整搜索或筛选条件后再试' : '在体验计划详情页中生成报告'}</p>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={FileText}
+          title="暂无匹配报告"
+          description={keyword || categoryFilter !== 'all' ? '调整搜索或筛选条件后再试。' : '在体验计划详情页中生成报告。'}
+        />
       ) : (
         <div className="space-y-4">
           {/* Grouped reports (merged) */}
@@ -376,7 +369,7 @@ export default function ReportsPage() {
       )}
 
       {compareIds.length > 0 && (
-        <div className="fixed inset-x-3 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-40 rounded-lg border bg-card/95 p-2 shadow-lg backdrop-blur sm:hidden">
+        <ActionDock>
           <div className="flex items-center gap-2">
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium">已选择 {compareIds.length}/2 份报告</p>
@@ -384,14 +377,14 @@ export default function ReportsPage() {
                 {selectedCompareReports.map((r) => r.title).join(' · ') || '请选择两份报告进行AI对比'}
               </p>
             </div>
-            <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => setCompareIds([])}>
+            <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => setCompareIds([])} aria-label="清空已选报告">
               <X className="h-4 w-4" />
             </Button>
             <Button size="sm" className="shrink-0 gap-1.5" disabled={compareIds.length !== 2} onClick={handleOpenCompare}>
               <BarChart3 className="h-3.5 w-3.5" /> 对比
             </Button>
           </div>
-        </div>
+        </ActionDock>
       )}
 
       {/* Delete confirm */}
@@ -673,6 +666,6 @@ export default function ReportsPage() {
           </div>
         </SheetContent>
       </Sheet>
-    </div>
+    </PageShell>
   );
 }

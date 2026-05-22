@@ -779,11 +779,11 @@ function UserSection() {
         </button>
         {/* Admin: Settings icon directly in sidebar footer */}
         {isAdmin && (
-          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setSettingsOpen(true)} title="品类与产品设置">
+          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setSettingsOpen(true)} title="品类与产品设置" aria-label="品类与产品设置">
             <Settings className="h-3.5 w-3.5" />
           </Button>
         )}
-        <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={logout}>
+        <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={logout} aria-label="退出登录">
           <LogOut className="h-3.5 w-3.5" />
         </Button>
       </div>
@@ -864,9 +864,6 @@ function UserSection() {
                 <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setAiConfigOpen(true), 100); }}>
                   <Sparkles className="h-4 w-4" /> AI模型配置
                 </Button>
-                <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setAiConfigOpen(true), 100); }}>
-                  <Sparkles className="h-4 w-4" /> AI模型配置
-                </Button>
               </>
             )}
 
@@ -929,7 +926,7 @@ export function MobileNav() {
     <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-card/95 backdrop-blur-md border-b border-border/80 h-14 flex items-center px-3 shadow-sm">
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-10 w-10 shrink-0"><Menu className="h-5 w-5" /></Button>
+          <Button variant="ghost" size="icon" className="h-10 w-10 shrink-0" aria-label="打开导航菜单"><Menu className="h-5 w-5" /></Button>
         </SheetTrigger>
         <SheetContent side="left" className="w-[82vw] max-w-72 p-0">
           <SheetTitle className="sr-only">导航菜单</SheetTitle>
@@ -957,7 +954,7 @@ function MobileUserIcon() {
   if (!user) return null;
   return (
     <>
-      <button onClick={() => setProfileOpen(true)} className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center ring-1 ring-primary/10">
+      <button onClick={() => setProfileOpen(true)} className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center ring-1 ring-primary/10" aria-label="打开个人信息">
         <User className="h-4 w-4 text-primary" />
       </button>
       <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
@@ -987,6 +984,9 @@ function MobileUserIcon() {
                 </Button>
                 <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setStandardOptionsOpen(true), 100); }}>
                   <Settings className="h-4 w-4" /> 通用标准选项设置
+                </Button>
+                <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setAiConfigOpen(true), 100); }}>
+                  <Sparkles className="h-4 w-4" /> AI模型配置
                 </Button>
               </>
             )}

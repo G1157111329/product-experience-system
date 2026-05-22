@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
+import { MetricCard, PageHeader, PageShell } from '@/components/app';
 
 interface CoreMetrics {
   totalTasks: number; completedTasks: number; completionRate: number;
@@ -144,31 +145,28 @@ export default function AnalysisPage() {
 
   if (loading && !metrics) {
     return (
-      <div className="p-4 lg:p-6 space-y-6">
+      <PageShell className="space-y-6">
         <div className="animate-pulse space-y-4">
           <div className="h-8 bg-muted rounded w-48" />
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {[1, 2, 3, 4].map(i => <div key={i} className="h-28 bg-muted rounded-lg" />)}
           </div>
         </div>
-      </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="p-4 lg:p-6 space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-xl lg:text-2xl font-semibold">数据分析</h1>
-          <p className="text-sm text-muted-foreground mt-1">产品体验核心数据看板</p>
-        </div>
-        {isAdmin && (
+    <PageShell className="space-y-5">
+      <PageHeader
+        title="数据分析"
+        description="产品体验核心数据看板"
+        actions={isAdmin && (
           <Button variant="outline" size="sm" onClick={handleExport} className="gap-1.5">
             <Download className="h-4 w-4" /> 导出数据
           </Button>
         )}
-      </div>
+      />
 
       {/* Filters */}
       <Card>
@@ -247,44 +245,10 @@ export default function AnalysisPage() {
         <>
           {/* Core Metrics */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="rounded-lg p-1.5 bg-primary/10"><ClipboardList className="h-4 w-4 text-primary" /></div>
-                  <span className="text-xs text-muted-foreground">任务总数</span>
-                </div>
-                <p className="text-3xl font-bold">{metrics.totalTasks}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="rounded-lg p-1.5 bg-emerald-100"><CheckCircle2 className="h-4 w-4 text-emerald-600" /></div>
-                  <span className="text-xs text-muted-foreground">完成率</span>
-                </div>
-                <p className="text-3xl font-bold text-emerald-600">{metrics.completionRate}%</p>
-                <p className="text-xs text-muted-foreground mt-1">{metrics.completedTasks}/{metrics.totalTasks} 已完成</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="rounded-lg p-1.5 bg-amber-100"><AlertTriangle className="h-4 w-4 text-amber-600" /></div>
-                  <span className="text-xs text-muted-foreground">问题总数</span>
-                </div>
-                <p className="text-3xl font-bold">{metrics.totalIssues}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="rounded-lg p-1.5 bg-blue-100"><TrendingUp className="h-4 w-4 text-blue-600" /></div>
-                  <span className="text-xs text-muted-foreground">问题整改率</span>
-                </div>
-                <p className="text-3xl font-bold text-blue-600">{metrics.rectificationRate}%</p>
-                <p className="text-xs text-muted-foreground mt-1">{metrics.rectifiedIssues}/{metrics.totalIssues} 已验证</p>
-              </CardContent>
-            </Card>
+            <MetricCard label="任务总数" value={metrics.totalTasks} icon={ClipboardList} />
+            <MetricCard label="完成率" value={`${metrics.completionRate}%`} icon={CheckCircle2} tone="success" helper={`${metrics.completedTasks}/${metrics.totalTasks} 已完成`} />
+            <MetricCard label="问题总数" value={metrics.totalIssues} icon={AlertTriangle} tone="warning" />
+            <MetricCard label="问题整改率" value={`${metrics.rectificationRate}%`} icon={TrendingUp} tone="info" helper={`${metrics.rectifiedIssues}/${metrics.totalIssues} 已验证`} />
           </div>
 
           <div className="grid lg:grid-cols-2 gap-4">
@@ -544,6 +508,6 @@ export default function AnalysisPage() {
           </Card>
         </>
       )}
-    </div>
+    </PageShell>
   );
 }
