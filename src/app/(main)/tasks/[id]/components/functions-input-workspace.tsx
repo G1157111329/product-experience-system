@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ChefHat, ClipboardList, Pencil, Plus, Star } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -26,11 +26,25 @@ export function FunctionsInputWorkspace({
   onBindingTargetChange,
   renderEffectEditor,
 }: FunctionsInputWorkspaceProps) {
-  const [selectedRecipeId, setSelectedRecipeId] = useState(recipes[0]?.id || '');
+  const [selectedRecipeId, setSelectedRecipeId] = useState('');
   const selectedRecipe = useMemo(
     () => recipes.find((recipe) => recipe.id === selectedRecipeId) || recipes[0] || null,
     [recipes, selectedRecipeId]
   );
+
+  useEffect(() => {
+    if (recipes.length === 0) {
+      if (selectedRecipeId) setSelectedRecipeId('');
+      return;
+    }
+
+    const currentRecipeStillExists = recipes.some((recipe) => recipe.id === selectedRecipeId);
+    if (!selectedRecipeId || !currentRecipeStillExists) {
+      const firstRecipe = recipes[0];
+      setSelectedRecipeId(firstRecipe.id);
+      onBindingTargetChange({ type: 'recipe_effect', id: firstRecipe.id, label: '当前效果评价' });
+    }
+  }, [onBindingTargetChange, recipes, selectedRecipeId]);
 
   const selectRecipe = (recipe: Recipe) => {
     setSelectedRecipeId(recipe.id);

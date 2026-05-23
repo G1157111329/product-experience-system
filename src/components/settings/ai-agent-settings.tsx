@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Sparkles, Save, Power, Plus } from 'lucide-react';
+import { Sparkles, Save, Power, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -142,6 +142,19 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
     }
   };
 
+  const openPromptEditor = (template: SkillTemplate) => {
+    setEditingSkill({
+      ...template,
+      active_version: template.active_version || {
+        id: '',
+        version: 0,
+        system_prompt: '',
+        user_prompt_template: '',
+        output_schema: {},
+      },
+    });
+  };
+
   const createSkillVersion = async () => {
     if (!user?.id || !editingSkill?.active_version) return;
     const version = editingSkill.active_version;
@@ -267,6 +280,9 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
                 <h3 className="text-sm font-semibold">Prompt 模板</h3>
                 <p className="text-xs text-muted-foreground">Skills 以 Prompt 形式存在，编辑会创建新版本，历史版本不会被覆盖。</p>
               </div>
+              <div className="rounded-md border bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
+                选择一个模板后，下方会出现 System Prompt 和 User Prompt Template 两个录入框。保存后会创建并启用新版本。
+              </div>
               <div className="space-y-2">
                 {skills.map((skill) => (
                   <div key={skill.id} className="rounded-md border p-3">
@@ -285,22 +301,33 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
                       <Switch checked={skill.is_enabled} onCheckedChange={(checked) => toggleSkill(skill, checked)} />
                     </div>
                     <div className="mt-3 flex justify-end">
-                      <Button variant="outline" size="sm" className="gap-1" onClick={() => setEditingSkill(skill)}>
-                        <Plus className="h-3.5 w-3.5" /> 编辑 Prompt
+                      <Button variant={editingSkill?.id === skill.id ? 'default' : 'outline'} size="sm" className="gap-1" onClick={() => openPromptEditor(skill)}>
+                        <Pencil className="h-3.5 w-3.5" /> 打开录入框
                       </Button>
                     </div>
                   </div>
                 ))}
+                {skills.length === 0 && (
+                  <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
+                    暂无 Prompt 模板，请先执行 AI Agent Skills 初始化 SQL。
+                  </div>
+                )}
               </div>
             </section>
           </div>
         </ScrollArea>
 
         {editingSkill?.active_version && (
-          <div className="space-y-3 border-t pt-4">
+          <div className="space-y-3 border-t bg-background pt-4">
             <div className="flex items-center justify-between">
-              <div className="text-sm font-medium">{editingSkill.name} · Prompt 新版本</div>
-              <Button size="sm" onClick={createSkillVersion}>保存并启用</Button>
+              <div>
+                <div className="text-sm font-medium">Prompt 录入框</div>
+                <div className="text-xs text-muted-foreground">{editingSkill.name} · 新版本</div>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => setEditingSkill(null)}>取消</Button>
+                <Button size="sm" onClick={createSkillVersion}>保存并启用</Button>
+              </div>
             </div>
             <div className="grid gap-3 lg:grid-cols-2">
               <div className="space-y-2">

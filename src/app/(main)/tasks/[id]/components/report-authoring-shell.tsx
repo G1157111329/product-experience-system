@@ -1,7 +1,7 @@
 'use client';
 
 import type { ComponentType, ReactNode } from 'react';
-import { Bot, Eye, FileText, Wrench } from 'lucide-react';
+import { Eye, FileText, Sparkles, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { AgentAssistPanel } from './agent-assist-panel';
@@ -40,12 +40,13 @@ export function ReportAuthoringShell({
           </div>
           <Button
             variant={agentOpen ? 'default' : 'outline'}
-            size="icon"
-            className="h-9 w-9"
+            size="sm"
+            className="h-9 gap-1.5 px-2.5"
             onClick={() => onAgentOpenChange(!agentOpen)}
             aria-label={agentOpen ? '关闭 AI助手' : '唤醒 AI助手'}
           >
-            <Bot className="h-4 w-4" />
+            <Sparkles className="h-4 w-4" />
+            <span className="text-xs">AI辅助</span>
           </Button>
         </div>
 

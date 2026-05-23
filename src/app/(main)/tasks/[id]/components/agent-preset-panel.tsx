@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Bot, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
+import { CheckCircle2, Loader2, WandSparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -116,14 +116,14 @@ export function AgentPresetPanel({
   return (
     <>
       <Button variant="outline" size="sm" className="min-w-0 sm:flex-none" onClick={() => setOpen(true)}>
-        <Bot className="h-4 w-4 mr-1.5" /> AI体验方案
+        <WandSparkles className="h-4 w-4 mr-1.5" /> AI体验方案
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5" /> AI体验方案
+              <WandSparkles className="h-5 w-5" /> AI体验方案
             </DialogTitle>
             <DialogDescription>选择建议后写入草稿，检查结果、问题描述和素材保持空白</DialogDescription>
           </DialogHeader>
@@ -136,7 +136,7 @@ export function AgentPresetPanel({
               {running ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : null}食谱/功能
             </Button>
             <Button size="sm" onClick={() => runAgent(['senses_standard_preset', 'recipe_scene_preset'])} disabled={running}>
-              {running ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Sparkles className="h-4 w-4 mr-1.5" />}一键运行
+              {running ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <WandSparkles className="h-4 w-4 mr-1.5" />}一键运行
             </Button>
           </div>
 

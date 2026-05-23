@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Bot, Loader2, Send, X } from 'lucide-react';
+import { Loader2, Send, Sparkles, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -61,8 +61,8 @@ export function AgentAssistPanel({ taskId, onClose }: AgentAssistPanelProps) {
       <div className="flex items-start justify-between gap-3 border-b p-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <Bot className="h-4 w-4 text-primary" />
-            <h2 className="text-sm font-semibold">AI助手</h2>
+            <Sparkles className="h-4 w-4 text-primary" />
+            <h2 className="text-sm font-semibold">AI辅助</h2>
           </div>
         </div>
         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose} aria-label="关闭AI助手">
