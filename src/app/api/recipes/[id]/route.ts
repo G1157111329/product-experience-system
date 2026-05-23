@@ -74,7 +74,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
   // Unlink all step materials for this recipe's steps
   const { data: steps } = await client.from('recipe_steps').select('id').eq('recipe_id', id);
-  const stepIds = (steps || []).map((s: any) => s.id);
+  const stepIds = ((steps || []) as Array<{ id: string }>).map((s) => s.id);
   if (stepIds.length > 0) {
     await client.from('materials').update({ recipe_step_id: null }).in('recipe_step_id', stepIds);
   }

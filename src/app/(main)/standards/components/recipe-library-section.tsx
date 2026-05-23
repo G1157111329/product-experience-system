@@ -1,5 +1,7 @@
 'use client';
 
+/* eslint-disable @next/next/no-img-element */
+
 import { useEffect, useState, useCallback } from 'react';
 import { ChefHat, Loader2, Pencil, Trash2, Plus, X, ChevronDown, ChevronUp, GripVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';

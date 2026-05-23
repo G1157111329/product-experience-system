@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Plus, Trash2, Edit2, Save, Shield, Lock, ImageIcon } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Edit2, Save, Shield, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -14,7 +14,6 @@ import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth-context';
-import { ImagePreview, useImagePreview } from '@/components/image-preview';
 
 // ── Types ──────────────────────────────────────────────────────────
 interface StandardItem {
@@ -73,7 +72,6 @@ export default function StandardDetailPage() {
   const [standard, setStandard] = useState<Standard | null>(null);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const { previewUrl: _, open: openPreview, PreviewComponent } = useImagePreview();
 
   // General standard form
   const [generalForm, setGeneralForm] = useState({ ...emptyGeneral });
@@ -101,14 +99,14 @@ export default function StandardDetailPage() {
     }).catch(() => {});
   }, []);
 
-  const fetchStandard = async () => {
+  const fetchStandard = useCallback(async () => {
     const res = await fetch(`/api/standards/${id}`);
     const data = await res.json();
     if (data.code === 0) setStandard(data.data);
     setLoading(false);
-  };
+  }, [id]);
 
-  useEffect(() => { fetchStandard(); }, [id]);
+  useEffect(() => { fetchStandard(); }, [fetchStandard]);
 
   if (loading) return <div className="p-6 animate-pulse space-y-4"><div className="h-8 bg-muted rounded w-64" /><div className="h-40 bg-muted rounded" /></div>;
   if (!standard) return <div className="p-6">标准不存在</div>;
@@ -366,7 +364,6 @@ export default function StandardDetailPage() {
 
   return (
     <div className="p-4 lg:p-6 space-y-4">
-      <PreviewComponent />
       {/* Header */}
       <div className="flex items-start gap-3">
         <Button variant="ghost" size="icon" className="shrink-0" onClick={() => router.back()}><ArrowLeft className="h-4 w-4" /></Button>

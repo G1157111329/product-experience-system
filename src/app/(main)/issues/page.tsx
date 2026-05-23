@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
+import { PageShell } from '@/components/app';
 
 interface Issue {
   id: string; title: string; product_model: string | null;
@@ -257,7 +258,7 @@ export default function IssuesPage() {
   const verifiedCount = issues.filter(i => i.status === '已验证').length;
 
   return (
-    <div className="p-4 lg:p-6 space-y-4">
+    <PageShell size="wide" className="space-y-4 sm:space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold">问题管理</h1>
@@ -266,16 +267,16 @@ export default function IssuesPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
           { label: '问题总数', value: totalIssues, color: '' },
           { label: '待整改', value: pendingCount, color: 'text-amber-600' },
           { label: '整改中', value: inProgressCount, color: 'text-blue-600' },
           { label: '已验证', value: verifiedCount, color: 'text-emerald-600' },
         ].map((stat) => (
-          <Card key={stat.label}>
+          <Card key={stat.label} className="lg:py-4">
             <CardContent className="p-4 text-center">
-              <p className={cn('text-2xl font-bold', stat.color)}>{stat.value}</p>
+              <p className={cn('text-2xl font-bold tabular-nums lg:text-3xl', stat.color)}>{stat.value}</p>
               <p className="text-xs text-muted-foreground mt-1">{stat.label}</p>
             </CardContent>
           </Card>
@@ -309,10 +310,10 @@ export default function IssuesPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-3">
+        <div className="grid gap-3 xl:grid-cols-2">
           {reportGroups.map((group) => (
-            <Card key={group.report_id} className="overflow-hidden">
-              <CardHeader className="pb-2 cursor-pointer" onClick={() => setSelectedGroup(selectedGroup?.report_id === group.report_id ? null : group)}>
+            <Card key={group.report_id} className="overflow-hidden transition-colors hover:border-primary/30">
+              <CardHeader className="border-b bg-muted/20 pb-3 cursor-pointer" onClick={() => setSelectedGroup(selectedGroup?.report_id === group.report_id ? null : group)}>
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-sm font-medium">{group.report_title}</CardTitle>
                   <Badge variant="secondary" className="text-xs">{group.issues.length}个问题</Badge>
@@ -322,17 +323,17 @@ export default function IssuesPage() {
                 <CardContent className="pt-0 space-y-2">
                   {group.issues.map((issue) => (
                     <div key={issue.id}
-                      className="flex items-center gap-2 p-2 rounded-lg bg-background border cursor-pointer hover:bg-muted/30"
+                      className="group flex items-center gap-2 p-2 rounded-lg bg-background border cursor-pointer transition-colors hover:bg-muted/30 flex-wrap sm:flex-nowrap"
                       onClick={() => { setSelectedIssue(issue); setDetailOpen(true); }}>
                       <Badge className={cn('text-[10px] shrink-0', LEVEL_COLORS[issue.level || '二类'] || LEVEL_COLORS['二类'])}>{issue.level || '二类'}</Badge>
                       {issue.source_type === 'recipe_problem' && (
                         <Badge variant="outline" className="text-[10px] shrink-0">食谱/功能</Badge>
                       )}
-                      <span className="text-sm flex-1 truncate">{issue.title}</span>
-                      <div className="flex gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <span className="text-sm flex-1 min-w-0 truncate">{issue.title}</span>
+                      <div className="flex gap-1 shrink-0 w-full sm:w-auto" onClick={(e) => e.stopPropagation()}>
                         {STATUS_LIST.map(s => (
                           <button key={s} onClick={() => handleStatusChange(issue.id, s)}
-                            className={cn('px-1.5 py-0.5 rounded text-[10px] transition-colors',
+                            className={cn('px-1.5 py-0.5 rounded text-[10px] transition-colors flex-1 sm:flex-none lg:min-w-14',
                               issue.status === s ? STATUS_COLORS[s] + ' font-medium' : 'text-muted-foreground hover:bg-muted/50')}>
                             {s}
                           </button>
@@ -426,6 +427,6 @@ export default function IssuesPage() {
           )}
         </DialogContent>
       </Dialog>
-    </div>
+    </PageShell>
   );
 }

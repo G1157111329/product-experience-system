@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { Download, Play, Loader2, AlertCircle, X } from 'lucide-react';
+import { Download, Loader2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { useImagePreview } from '@/components/image-preview';
+import { MediaGallery } from '@/components/app/media-gallery';
 
 interface Material {
   id: string; material_type: string; file_name: string; file_url: string; file_size: number;
@@ -38,9 +40,7 @@ interface CheckRecord {
 
 interface IssueItem {
   id: string; title: string; description: string | null; level: string | null;
-  status: string; category?: string; source_type?: string;
-  improve_plan?: string; responsible_person?: string; plan_complete_date?: string;
-  verification_note?: string; [key: string]: unknown;
+  status: string; [key: string]: unknown;
 }
 
 interface ReportContent {
@@ -139,8 +139,7 @@ export default function ShareReportPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expired, setExpired] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewIsVideo, setPreviewIsVideo] = useState(false);
+  const { open: openPreview, PreviewComponent } = useImagePreview();
 
   useEffect(() => {
     if (!token) return;
@@ -169,12 +168,6 @@ export default function ShareReportPage() {
   const handleExportPDF = () => {
     if (!report) return;
     window.open(`/reports/print?id=${report.id}`, '_blank');
-  };
-
-  const openPreview = (url: string) => {
-    const isVideo = /\.(mp4|webm|mov|avi|mkv)(\?|$)/i.test(url) || url.includes('/video/');
-    setPreviewIsVideo(isVideo);
-    setPreviewUrl(url);
   };
 
   if (loading) {
@@ -324,53 +317,20 @@ export default function ShareReportPage() {
                     <h3 className="font-semibold text-sm text-primary">问题清单 ({liveIssues.length})</h3>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-1.5">
+                    <div className="space-y-1">
                       {liveIssues.map((issue, idx) => (
-                        <div key={idx} className="py-2 px-3 rounded-md bg-muted/30 text-sm border border-border/50">
-                          {/* Row 1: Level + Title + Status */}
-                          <div className="flex items-center gap-1.5 sm:gap-2">
-                            <span className={cn('text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0',
-                              issue.level === '一类' ? 'bg-red-100 text-red-700' :
-                              issue.level === '二类' ? 'bg-amber-100 text-amber-700' :
-                              'bg-blue-100 text-blue-700'
-                            )}>{issue.level || '二类'}</span>
-                            {issue.source_type === 'recipe_problem' && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded border border-border shrink-0">食谱/功能</span>
-                            )}
-                            <span className="flex-1 min-w-0 break-all text-xs sm:text-sm font-medium">{issue.title}</span>
-                            <span className={cn('text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0')}
-                              style={{
-                                background: STATUS_BG[issue.status] || '#fef3c7',
-                                color: STATUS_FG[issue.status] || '#92400e',
-                              }}>{issue.status}</span>
-                          </div>
-                          {/* Row 2: Standard/Category */}
-                          {issue.category && (
-                            <div className="mt-1.5 pl-1 text-xs text-muted-foreground">
-                              <span className="font-medium">标准: </span>{String(issue.category)}
-                            </div>
-                          )}
-                          {/* Row 3: Problem description */}
-                          {issue.description && (
-                            <div className="mt-1 pl-1 text-xs text-muted-foreground">
-                              <span className="font-medium">问题来源: </span>{String(issue.description)}
-                            </div>
-                          )}
-                          {/* Row 4: Rectification plan */}
-                          {(issue.improve_plan || issue.responsible_person || issue.plan_complete_date) && (
-                            <div className="mt-1 pl-1 text-xs text-muted-foreground">
-                              <span className="font-medium">整改方案: </span>
-                              {issue.improve_plan && String(issue.improve_plan)}
-                              {issue.responsible_person && <span> ({String(issue.responsible_person)})</span>}
-                              {issue.plan_complete_date && <span> 截止: {String(issue.plan_complete_date)}</span>}
-                            </div>
-                          )}
-                          {/* Row 5: Verification result */}
-                          {issue.verification_note && (
-                            <div className="mt-1 pl-1 text-xs text-muted-foreground">
-                              <span className="font-medium">验证结果: </span>{String(issue.verification_note)}
-                            </div>
-                          )}
+                        <div key={idx} className="flex items-center gap-1.5 sm:gap-2 py-1.5 px-2 rounded bg-muted/30 text-sm min-w-0">
+                          <span className={cn('text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0',
+                            issue.level === '一类' ? 'bg-red-100 text-red-700' :
+                            issue.level === '二类' ? 'bg-amber-100 text-amber-700' :
+                            'bg-blue-100 text-blue-700'
+                          )}>{issue.level || '二类'}</span>
+                          <span className="flex-1 min-w-0 break-all text-xs sm:text-sm">{issue.title}</span>
+                          <span className={cn('text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0')}
+                            style={{
+                              background: STATUS_BG[issue.status] || '#fef3c7',
+                              color: STATUS_FG[issue.status] || '#92400e',
+                            }}>{issue.status}</span>
                         </div>
                       ))}
                     </div>
@@ -413,26 +373,7 @@ export default function ShareReportPage() {
                           </div>
                         )}
                         {record.problem_description && <div className="text-xs text-muted-foreground break-all">{record.problem_description}</div>}
-                        {recordMats.length > 0 && (
-                          <div className="flex gap-1.5 flex-wrap">
-                            {recordMats.map(mat => (
-                              <div key={mat.id}
-                                className="w-12 h-12 sm:w-14 sm:h-14 rounded-md overflow-hidden border border-border cursor-pointer relative shrink-0"
-                                onClick={() => openPreview(mat.file_url)}>
-                                {mat.material_type === 'image' ? (
-                                  <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
-                                ) : (
-                                  <>
-                                    <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
-                                    <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-                                      <Play className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white fill-white" />
-                                    </div>
-                                  </>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        <MediaGallery materials={recordMats} responsive columns={{ mobile: 2, sm: 3, lg: 4 }} onPreview={openPreview} />
                       </div>
                     );
                   }) : <p className="text-sm text-muted-foreground text-center py-4">暂无记录</p>}
@@ -450,15 +391,8 @@ export default function ShareReportPage() {
                       <div key={recipe.id} className="border rounded-lg p-2.5 sm:p-3">
                         <div className="flex items-center gap-2 mb-2 min-w-0">
                           <Badge variant="outline" className="text-[10px] shrink-0">{recipe.recipe_type}</Badge>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-sm truncate">{recipe.name}</p>
-                            <p className="text-xs text-muted-foreground truncate">{recipe.ingredients || '-'}</p>
-                          </div>
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
-                            <span>{recipe.recipe_steps?.length || 0} 步骤</span>
-                            <span>{recipe.problem_count || 0} 问题</span>
-                            {recipe.effect_score && <span className="text-primary font-medium">{recipe.effect_score}分</span>}
-                          </div>
+                          <span className="font-medium text-sm min-w-0 break-all">{recipe.name}</span>
+                          <span className="text-xs text-muted-foreground ml-auto shrink-0">{recipe.recipe_steps?.length || 0} 步骤</span>
                         </div>
                         {recipe.recipe_steps?.map(step => {
                           const stepMats = step.materials || [];
@@ -481,26 +415,7 @@ export default function ShareReportPage() {
                                   </div>
                                 );
                               })()}
-                              {stepMats.length > 0 && (
-                                <div className="flex gap-1.5 mt-1.5 ml-7 flex-wrap">
-                                  {stepMats.map(mat => (
-                                    <div key={mat.id}
-                                      className="w-12 h-12 sm:w-14 sm:h-14 rounded-md overflow-hidden border border-border cursor-pointer relative shrink-0"
-                                      onClick={() => openPreview(mat.file_url)}>
-                                      {mat.material_type === 'image' ? (
-                                        <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
-                                      ) : (
-                                        <>
-                                          <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
-                                          <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-                                            <Play className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white fill-white" />
-                                          </div>
-                                        </>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
+                              <MediaGallery materials={stepMats} responsive columns={{ mobile: 2, sm: 3, lg: 4 }} className="ml-7 mt-1.5" onPreview={openPreview} />
                             </div>
                           );
                         })}
@@ -521,38 +436,10 @@ export default function ShareReportPage() {
                             {!recipe.effect_ai_result && recipe.effect_description && (
                               <p className="text-xs text-muted-foreground whitespace-pre-wrap break-all ml-4">{recipe.effect_description}</p>
                             )}
-                            {recipe.effect_problem_point && (() => {
-                              let pps: string[] = [];
-                              try {
-                                const parsed = JSON.parse(recipe.effect_problem_point);
-                                if (Array.isArray(parsed)) {
-                                  pps = parsed.filter((p: unknown) => typeof p === 'object' && p !== null && typeof (p as Record<string, unknown>).text === 'string').map((p: { text: string }) => p.text);
-                                } else { pps = [recipe.effect_problem_point]; }
-                              } catch { pps = [recipe.effect_problem_point]; }
-                              return pps.map((pp, i) => (
-                                <p key={i} className="text-xs text-amber-600 break-all ml-4">问题{i > 0 ? i + 1 : ''}: {pp}</p>
-                              ));
-                            })()}
-                            {recipe.effect_materials && recipe.effect_materials.length > 0 && (
-                              <div className="flex gap-1.5 flex-wrap ml-4">
-                                {recipe.effect_materials.map(mat => (
-                                  <div key={mat.id}
-                                    className="w-12 h-12 sm:w-14 sm:h-14 rounded-md overflow-hidden border border-border cursor-pointer relative shrink-0"
-                                    onClick={() => openPreview(mat.file_url)}>
-                                    {mat.material_type === 'image' ? (
-                                      <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
-                                    ) : (
-                                      <>
-                                        <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
-                                        <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-                                          <Play className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white fill-white" />
-                                        </div>
-                                      </>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
+                            {recipe.effect_problem_point && (
+                              <p className="text-xs text-amber-600 break-all ml-4">问题: {recipe.effect_problem_point}</p>
                             )}
+                            <MediaGallery materials={recipe.effect_materials || []} responsive columns={{ mobile: 2, sm: 3, lg: 4 }} className="ml-4" onPreview={openPreview} />
                           </div>
                         )}
                       </div>
@@ -567,20 +454,7 @@ export default function ShareReportPage() {
       </div>
 
       {/* Media preview overlay */}
-      {previewUrl && (
-        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center" onClick={() => setPreviewUrl(null)}>
-          <button className="absolute top-3 right-3 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white" onClick={() => setPreviewUrl(null)}>
-            <X className="h-5 w-5" />
-          </button>
-          <div className="w-full h-full flex items-center justify-center p-2" onClick={e => e.stopPropagation()}>
-            {previewIsVideo ? (
-              <video src={previewUrl} controls autoPlay className="max-w-full max-h-full object-contain rounded" />
-            ) : (
-              <img src={previewUrl} alt="预览" className="max-w-full max-h-full object-contain rounded" />
-            )}
-          </div>
-        </div>
-      )}
+      <PreviewComponent />
 
       {/* Footer */}
       <div className="border-t mt-4 sm:mt-8 py-4 text-center text-xs text-muted-foreground px-4">

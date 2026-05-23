@@ -15,7 +15,7 @@ export const reportTemplates = pgTable("report_templates", {
 	isDefault: boolean("is_default").default(false),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
-}, (table) => [
+}, () => [
 	pgPolicy("report_templates_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
 	pgPolicy("report_templates_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
 	pgPolicy("report_templates_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),

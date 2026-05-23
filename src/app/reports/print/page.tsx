@@ -1,5 +1,7 @@
 'use client';
 
+/* eslint-disable @next/next/no-img-element */
+
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';

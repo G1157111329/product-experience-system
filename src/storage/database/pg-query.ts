@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Supabase-compatible query builder backed by Drizzle ORM + pg driver.
  * Provides a drop-in replacement for @supabase/supabase-js in API routes.

@@ -1,5 +1,7 @@
 'use client';
 
+/* eslint-disable @next/next/no-img-element */
+
 import { useState, useCallback } from 'react';
 import { X, ZoomIn, ZoomOut, Play } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -69,15 +71,18 @@ export function ImagePreview({ url, onClose }: ImagePreviewProps) {
 }
 
 /** Renders a thumbnail that plays video on click, or opens image preview */
-export function MediaThumbnail({ url, type, onClick, size = 'md' }: {
-  url: string; type: 'image' | 'video'; onClick?: () => void; size?: 'sm' | 'md' | 'lg';
+export function MediaThumbnail({ url, type, onClick, size = 'md', responsive }: {
+  url: string; type: 'image' | 'video'; onClick?: () => void;
+  size?: 'xs' | 'sm' | 'md' | 'lg'; responsive?: boolean;
 }) {
-  const sizeMap = { sm: 'w-12 h-12', md: 'w-20 h-20', lg: 'w-28 h-28' };
+  const sizeMap = { xs: 'w-8 h-8', sm: 'w-12 h-12', md: 'w-20 h-20', lg: 'w-28 h-28' };
+  const responsiveClass = 'w-full aspect-square min-w-0';
+  const sizeClass = responsive ? responsiveClass : sizeMap[size];
   const isVideo = type === 'video';
 
   return (
     <div
-      className={`relative ${sizeMap[size]} rounded-lg overflow-hidden border border-border bg-muted cursor-pointer group shrink-0`}
+      className={`relative ${sizeClass} rounded-lg overflow-hidden border border-border bg-muted cursor-pointer group ${responsive ? '' : 'shrink-0'}`}
       onClick={onClick}
     >
       {isVideo ? (

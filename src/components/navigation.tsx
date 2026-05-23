@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   LayoutDashboard, BookOpen, ClipboardList, AlertTriangle, FileText,
   BarChart3, Menu, ChevronRight, User, LogOut, Key, Pencil,
@@ -432,7 +432,7 @@ function StandardOptionsSettings({ open, onOpenChange }: { open: boolean; onOpen
   const [saving, setSaving] = useState(false);
   const { user } = useAuth();
 
-  const defaultOptions = {
+  const defaultOptions = useMemo(() => ({
     test_phases: ['开箱', '首次安装', '产品使用', '清洁收纳', '其他'],
     experience_flows: {
       '开箱': ['拿取外包装', '拆开内包装'],
@@ -442,7 +442,7 @@ function StandardOptionsSettings({ open, onOpenChange }: { open: boolean; onOpen
       '其他': ['其他'],
     } as Record<string, string[]>,
     sensory_dimensions: ['视觉', '听觉', '触觉', '嗅觉', '味觉'],
-  };
+  }), []);
 
   const fetchOptions = useCallback(async () => {
     const res = await fetch('/api/settings?key=standard_options');
@@ -453,7 +453,7 @@ function StandardOptionsSettings({ open, onOpenChange }: { open: boolean; onOpen
       // Initialize with defaults
       setOptions(defaultOptions);
     }
-  }, []);
+  }, [defaultOptions]);
 
   useEffect(() => {
     if (open) fetchOptions();

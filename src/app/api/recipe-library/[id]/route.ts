@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 
+type IdRow = { id: string };
+
 // PUT: Update a recipe library item (name, product_category, product, ingredients, recipe_type)
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -34,7 +36,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
   // Get all step IDs for this recipe
   const { data: steps } = await client.from('recipe_library_steps').select('id').eq('recipe_library_id', id);
-  const stepIds = (steps || []).map((s: any) => s.id);
+  const stepIds = ((steps || []) as IdRow[]).map((s) => s.id);
 
   // Unlink materials associated with these steps (don't delete them, just remove the association)
   if (stepIds.length > 0) {

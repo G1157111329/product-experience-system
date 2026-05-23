@@ -1,11 +1,13 @@
 'use client';
 
+/* eslint-disable @next/next/no-img-element */
+
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Plus, Loader2, Film, Image as ImageIcon, Camera, Video, Eye } from 'lucide-react';
+import { Plus, Loader2, Film, Image as ImageIcon, Camera, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { MediaThumbnail, useImagePreview, ImagePreview } from './image-preview';
+import { MediaThumbnail } from './image-preview';
 import { MediaCaptureDialog } from './media-capture-dialog';
 import { toast } from 'sonner';
 
@@ -165,7 +167,7 @@ export function MaterialPicker({
     setUploading(true);
     try {
       let nextSelected = [...selected];
-      let nextMaterials = materials.filter((material) => nextSelected.includes(material.id));
+      const nextMaterials = materials.filter((material) => nextSelected.includes(material.id));
       let uploadedCount = 0;
 
       for (const file of files) {
@@ -272,7 +274,14 @@ export function MaterialPicker({
 
           return (
             <div key={id} className="relative w-12 h-12 rounded-md overflow-hidden border border-border group cursor-pointer"
-              onClick={(e) => { e.stopPropagation(); setPreviewUrl(material.file_url); }}>
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onPreview) {
+                  onPreview(material.file_url);
+                } else {
+                  setPreviewUrl(material.file_url);
+                }
+              }}>
               <MediaThumbnail url={material.file_url} type={material.material_type as 'image' | 'video'} size="sm" />
               <button
                 type="button"
@@ -403,7 +412,7 @@ export function MaterialPicker({
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
             {filteredMaterials.map((material) => (
               <div key={material.id} className="relative cursor-pointer" onClick={() => handleSelect(material)}>
-                <MediaThumbnail url={material.file_url} type={material.material_type as 'image' | 'video'} size="lg" />
+                <MediaThumbnail url={material.file_url} type={material.material_type as 'image' | 'video'} responsive />
                 <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate rounded-b-lg">
                   {material.material_type === 'video'
                     ? <Film className="h-2.5 w-2.5 inline mr-0.5" />

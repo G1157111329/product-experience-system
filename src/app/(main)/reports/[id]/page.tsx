@@ -2,16 +2,18 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Download, Play, Share2, Copy, X, Loader2, Star, Sparkles } from 'lucide-react';
+import { ArrowLeft, Download, Share2, Copy, X, Loader2, Star, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { useImagePreview } from '@/components/image-preview';
 import { toast } from 'sonner';
+import { PageShell } from '@/components/app';
+import { MediaGallery } from '@/components/app/media-gallery';
 
 interface Material {
   id: string; material_type: string; file_name: string; file_url: string; file_size: number;
@@ -49,7 +51,6 @@ interface IssueItem {
   id: string; title: string; description: string | null; level: string | null;
   status: string; source_report_id: string | null; source_type: string | null;
   category: string | null; improve_plan: string | null; responsible_person: string | null;
-  plan_complete_date: string | null; verification_note: string | null;
   [key: string]: unknown;
 }
 
@@ -159,21 +160,21 @@ function AiSummaryBlock({ summary }: { summary?: AiTaskSummary | null }) {
   );
 }
 
-function ReportSection({ report, liveIssues, onStatusClick, open }: {
+function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
   report: ReportDetail;
   liveIssues: IssueItem[];
   onStatusClick: (issue: IssueItem) => void;
-  open: (url: string) => void;
+  onPreview: (url: string) => void;
 }) {
   const records = report.content?.records || [];
   const recipes = report.content?.recipes || [];
   const task = report.content?.task;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {/* Task Info */}
       {task && (
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
           {Object.entries(task)
             .filter(([k]) => !['id', 'selected_standards', 'created_by'].includes(k))
             .map(([key, value]) => (
@@ -194,8 +195,7 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
         <div className="space-y-1.5">
           <p className="text-xs font-medium text-muted-foreground">问题清单 ({liveIssues.length})</p>
           {liveIssues.map((issue) => (
-            <div key={issue.id} className="p-2.5 rounded bg-muted/30 space-y-1.5">
-              {/* Row 1: Level + Source type + Status */}
+            <div key={issue.id} className="p-2 rounded bg-muted/30 space-y-1">
               <div className="flex items-center gap-2">
                 <Badge className={cn('text-[10px] shrink-0', LEVEL_COLORS[issue.level || '二类'] || LEVEL_COLORS['二类'])}>
                   {issue.level || '二类'}
@@ -203,7 +203,7 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
                 {issue.source_type === 'recipe_problem' && (
                   <Badge variant="outline" className="text-[10px] shrink-0">食谱/功能</Badge>
                 )}
-                <span className="text-xs flex-1 min-w-0 truncate font-medium">{issue.title}</span>
+                <span className="text-xs flex-1 truncate">{issue.title}</span>
                 <button
                   onClick={() => onStatusClick(issue)}
                   className={cn('text-[10px] px-1.5 py-0.5 rounded cursor-pointer font-medium transition-colors hover:opacity-80 shrink-0',
@@ -212,37 +212,8 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
                   {issue.status || '待整改'}
                 </button>
               </div>
-              {/* Row 2: Standard/Category (if exists) */}
-              {issue.category && (
-                <div className="flex items-start gap-1.5 pl-1">
-                  <span className="text-[10px] text-muted-foreground shrink-0">标准:</span>
-                  <span className="text-[10px] text-muted-foreground break-all">{issue.category}</span>
-                </div>
-              )}
-              {/* Row 3: Problem description (if exists) */}
               {issue.description && (
-                <div className="flex items-start gap-1.5 pl-1">
-                  <span className="text-[10px] text-muted-foreground shrink-0">问题来源:</span>
-                  <span className="text-[10px] text-muted-foreground break-all">{issue.description}</span>
-                </div>
-              )}
-              {/* Row 4: Rectification plan (if exists) */}
-              {(issue.improve_plan || issue.responsible_person || issue.plan_complete_date) && (
-                <div className="flex items-start gap-1.5 pl-1">
-                  <span className="text-[10px] text-muted-foreground shrink-0">整改方案:</span>
-                  <div className="text-[10px] text-muted-foreground break-all">
-                    {issue.improve_plan && <span>{issue.improve_plan}</span>}
-                    {issue.responsible_person && <span className="ml-1">({issue.responsible_person})</span>}
-                    {issue.plan_complete_date && <span className="ml-1">截止: {issue.plan_complete_date}</span>}
-                  </div>
-                </div>
-              )}
-              {/* Row 5: Verification result (if exists) */}
-              {issue.verification_note && (
-                <div className="flex items-start gap-1.5 pl-1">
-                  <span className="text-[10px] text-muted-foreground shrink-0">验证结果:</span>
-                  <span className="text-[10px] text-muted-foreground break-all">{issue.verification_note}</span>
-                </div>
+                <p className="text-[10px] text-muted-foreground pl-1 break-all">{issue.description}</p>
               )}
             </div>
           ))}
@@ -255,10 +226,8 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
           <p className="text-xs font-medium text-muted-foreground">检查记录 ({records.length})</p>
           {records.map((record) => {
             const recordMats = record.materials || [];
-            const recordImages = recordMats.filter((m) => m.material_type === 'image');
-            const recordVideos = recordMats.filter((m) => m.material_type === 'video');
             return (
-              <div key={record.id} className="p-2 rounded-lg bg-muted/30 space-y-1.5">
+              <div key={record.id} className="p-2.5 sm:p-3 rounded-lg bg-muted/30 space-y-2">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className={cn(
                     'text-[10px] font-medium px-1.5 py-0.5 rounded',
@@ -280,23 +249,7 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
                 {record.problem_description && (
                   <p className="text-[10px] text-muted-foreground break-all">{record.problem_description}</p>
                 )}
-                {(recordImages.length > 0 || recordVideos.length > 0) && (
-                  <div className="flex gap-1 flex-wrap">
-                    {recordImages.map((mat) => (
-                      <div key={mat.id} className="w-12 h-12 rounded overflow-hidden border cursor-pointer" onClick={() => open(mat.file_url)}>
-                        <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
-                      </div>
-                    ))}
-                    {recordVideos.map((mat) => (
-                      <div key={mat.id} className="w-12 h-12 rounded overflow-hidden border cursor-pointer relative" onClick={() => open(mat.file_url)}>
-                        <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                          <Play className="h-3 w-3 text-white fill-white" />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <MediaGallery materials={recordMats} responsive columns={{ mobile: 2, sm: 3, lg: 4 }} onPreview={onPreview} />
               </div>
             );
           })}
@@ -311,15 +264,8 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
             <div key={recipe.id} className="border rounded-lg p-3 space-y-2">
               <div className="flex items-center gap-2">
                 <Badge variant="secondary" className="text-[10px] shrink-0">{recipe.recipe_type}</Badge>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium truncate">{recipe.name}</p>
-                  <p className="text-[10px] text-muted-foreground truncate">{recipe.ingredients || '-'}</p>
-                </div>
-                <div className="flex items-center gap-2 text-[10px] text-muted-foreground shrink-0">
-                  <span>{recipe.recipe_steps?.length || 0} 步骤</span>
-                  <span>{recipe.problem_count || 0} 问题</span>
-                  {recipe.effect_score && <span className="text-primary font-medium">{recipe.effect_score}分</span>}
-                </div>
+                <span className="text-xs font-medium flex-1 min-w-0 truncate">{recipe.name}</span>
+                <span className="text-[10px] text-muted-foreground">{recipe.problem_count || 0} 问题</span>
               </div>
               {recipe.recipe_steps?.map((step) => (
                 <div key={step.id} className="p-2 rounded bg-muted/30 space-y-1">
@@ -343,20 +289,7 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
                       </div>
                     );
                   })()}
-                  {step.materials?.map((mat) => (
-                    mat.material_type === 'image' ? (
-                      <div key={mat.id} className="w-10 h-10 rounded overflow-hidden border cursor-pointer ml-5 inline-block" onClick={() => open(mat.file_url)}>
-                        <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
-                      </div>
-                    ) : (
-                      <div key={mat.id} className="w-10 h-10 rounded overflow-hidden border cursor-pointer ml-5 inline-block relative" onClick={() => open(mat.file_url)}>
-                        <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                          <Play className="h-2.5 w-2.5 text-white fill-white" />
-                        </div>
-                      </div>
-                    )
-                  ))}
+                  <MediaGallery materials={step.materials || []} responsive columns={{ mobile: 2, sm: 3, lg: 4 }} className="ml-5" onPreview={onPreview} />
                 </div>
               ))}
               {/* Effect Evaluation */}
@@ -377,36 +310,10 @@ function ReportSection({ report, liveIssues, onStatusClick, open }: {
                   {!recipe.effect_ai_result && recipe.effect_description && (
                     <p className="text-[11px] text-muted-foreground whitespace-pre-wrap break-all ml-5">{recipe.effect_description}</p>
                   )}
-                  {recipe.effect_problem_point && (() => {
-                    let pps: string[] = [];
-                    try {
-                      const parsed = JSON.parse(recipe.effect_problem_point);
-                      if (Array.isArray(parsed)) {
-                        pps = parsed.filter((p: unknown) => typeof p === 'object' && p !== null && typeof (p as Record<string, unknown>).text === 'string').map((p: { text: string }) => p.text);
-                      } else { pps = [recipe.effect_problem_point]; }
-                    } catch { pps = [recipe.effect_problem_point]; }
-                    return pps.map((pp, i) => (
-                      <p key={i} className="text-[10px] text-amber-600 break-all ml-5">问题{i > 0 ? i + 1 : ''}: {pp}</p>
-                    ));
-                  })()}
-                  {recipe.effect_materials && recipe.effect_materials.length > 0 && (
-                    <div className="flex gap-1.5 flex-wrap ml-5">
-                      {recipe.effect_materials.map((mat) => (
-                        mat.material_type === 'image' ? (
-                          <div key={mat.id} className="w-10 h-10 rounded overflow-hidden border cursor-pointer" onClick={() => open(mat.file_url)}>
-                            <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
-                          </div>
-                        ) : (
-                          <div key={mat.id} className="w-10 h-10 rounded overflow-hidden border cursor-pointer relative" onClick={() => open(mat.file_url)}>
-                            <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                              <Play className="h-2.5 w-2.5 text-white fill-white" />
-                            </div>
-                          </div>
-                        )
-                      ))}
-                    </div>
+                  {recipe.effect_problem_point && (
+                    <p className="text-[10px] text-amber-600 break-all ml-5">问题: {recipe.effect_problem_point}</p>
                   )}
+                  <MediaGallery materials={recipe.effect_materials || []} responsive columns={{ mobile: 2, sm: 3, lg: 4 }} className="ml-5" onPreview={onPreview} />
                 </div>
               )}
             </div>
@@ -437,7 +344,7 @@ export default function ReportDetailPage() {
   const [shareCreating, setShareCreating] = useState(false);
   const [shareLink, setShareLink] = useState<string | null>(null);
   const [shareLinks, setShareLinks] = useState<Array<{ id: string; share_token: string; expires_at: string | null; is_expired: boolean; created_at: string }>>([]);
-  const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
+  const { open, PreviewComponent } = useImagePreview();
 
   const fetchReport = useCallback(async () => {
     setLoading(true);
@@ -614,21 +521,21 @@ export default function ReportDetailPage() {
   const totalRecipePC = totalRecipes.reduce((s, r) => s + (r.problem_count || 0), 0);
 
   return (
-    <div className="p-4 lg:p-6 space-y-4">
+    <PageShell size="wide" className="space-y-4">
       <PreviewComponent />
-      <div className="flex items-start gap-3 flex-wrap">
-        <Button variant="ghost" size="icon" className="shrink-0" onClick={() => router.back()}>
+      <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 shadow-sm lg:flex-row lg:items-start lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
+        <Button variant="ghost" size="icon" className="h-10 w-10 shrink-0" onClick={() => router.back()}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="flex-1 min-w-0">
-          <h1 className="text-xl font-semibold truncate">{report.product_model || report.title} {isMerged && <Badge variant="secondary" className="text-[10px] ml-1">合并 {allReports.length} 份报告</Badge>}</h1>
+          <h1 className="text-xl font-semibold leading-tight break-words lg:text-2xl">{report.product_model || report.title} {isMerged && <Badge variant="secondary" className="text-[10px] ml-1 align-middle">合并 {allReports.length} 份报告</Badge>}</h1>
           <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground flex-wrap">
             <Badge variant="secondary" className="text-[10px]">{report.status}</Badge>
             {projectType && <span>{projectType}</span>}
             {taskPhase && <span>{taskPhase}</span>}
           </div>
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="grid grid-cols-2 gap-2 shrink-0 sm:flex lg:ml-auto">
           <Button size="sm" onClick={handleExportPDF}>
             <Download className="h-4 w-4 mr-1.5" /> 导出PDF
           </Button>
@@ -639,7 +546,7 @@ export default function ReportDetailPage() {
       </div>
 
       {/* Summary Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 lg:gap-3">
         {[
           { label: '检查项总数', value: totalRecords.length, color: '' },
           { label: '合格', value: totalPass, color: 'text-emerald-600' },
@@ -647,9 +554,9 @@ export default function ReportDetailPage() {
           { label: '问题整改', value: allLiveIssues.length, color: 'text-amber-600' },
           { label: '食谱/功能问题', value: totalRecipePC, color: 'text-orange-600' },
         ].map((stat) => (
-          <Card key={stat.label}>
-            <CardContent className="p-4 text-center">
-              <p className={cn('text-2xl font-bold', stat.color)}>{stat.value}</p>
+          <Card key={stat.label} className="lg:py-4">
+            <CardContent className="p-3 text-center sm:p-4">
+              <p className={cn('text-2xl font-bold tabular-nums lg:text-3xl', stat.color)}>{stat.value}</p>
               <p className="text-xs text-muted-foreground mt-1">{stat.label}</p>
             </CardContent>
           </Card>
@@ -663,8 +570,8 @@ export default function ReportDetailPage() {
         const rptDate = rptTask?.test_date as string | undefined;
         const rptType = rptTask?.project_type as string | undefined;
         return (
-          <Card key={rpt.id}>
-            <CardHeader className="pb-2">
+          <Card key={rpt.id} className="overflow-hidden">
+            <CardHeader className="border-b bg-muted/20 pb-3">
               <div className="flex items-center justify-between gap-2">
                 <CardTitle className="text-sm font-medium min-w-0 break-all">
                   {isMerged ? (
@@ -682,7 +589,7 @@ export default function ReportDetailPage() {
                 )}
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-4">
               {idx > 0 && (
                 <div className="border-t border-dashed mb-3 pt-2">
                   <p className="text-[10px] text-muted-foreground">以下为独立报告内容，与上方报告以分割线区分</p>
@@ -692,7 +599,7 @@ export default function ReportDetailPage() {
                 report={rpt}
                 liveIssues={liveIssuesMap[rpt.id] || []}
                 onStatusClick={handleOpenStatusDialog}
-                open={open}
+                onPreview={open}
               />
             </CardContent>
           </Card>
@@ -860,6 +767,6 @@ export default function ReportDetailPage() {
           </div>
         </SheetContent>
       </Sheet>
-    </div>
+    </PageShell>
   );
 }

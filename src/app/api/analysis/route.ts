@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 
+type DataRow = Record<string, string | null | undefined> & {
+  id: string;
+  status: string;
+  created_at: string;
+};
+
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
   const { searchParams } = new URL(request.url);
@@ -27,8 +33,8 @@ export async function GET(request: NextRequest) {
   if (date_to) taskQuery = taskQuery.lte('created_at', date_to + 'T23:59:59');
 
   const { data: tasks } = await taskQuery;
-  const taskList = tasks || [];
-  const taskIds = taskList.map((t: any) => t.id);
+  const taskList = (tasks || []) as DataRow[];
+  const taskIds = taskList.map((t) => t.id as string).filter(Boolean);
 
   // 2. Fetch issues for these tasks
   let issueList: Array<Record<string, unknown>> = [];
@@ -43,7 +49,7 @@ export async function GET(request: NextRequest) {
 
   // 3. Core metrics
   const totalTasks = taskList.length;
-  const completedTasks = taskList.filter((t: any) => t.status === '已完成').length;
+  const completedTasks = taskList.filter((t) => t.status === '已完成').length;
   const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
   const totalIssues = issueList.length;
   const rectifiedIssues = issueList.filter(i => (i.status as string) === '已验证').length;
@@ -161,12 +167,12 @@ export async function GET(request: NextRequest) {
   // 12. Available filter options from platform config
   const { data: catData } = await client.from('platform_categories').select('id, name, sort_order').order('sort_order');
   const { data: prodData } = await client.from('platform_products').select('id, name, category_id, sort_order').order('sort_order');
-  const categories = (catData || []).map((c: any) => ({
+  const categories = ((catData || []) as DataRow[]).map((c) => ({
     ...c,
-    products: (prodData || []).filter((p: any) => p.category_id === c.id),
+    products: ((prodData || []) as DataRow[]).filter((p) => p.category_id === c.id),
   }));
   const projectTypes = ['ODM/OEM', '竞品研究', '自研', '前期研究', '改型/降本/优化', '海外产品'];
-  const organizers = [...new Set(taskList.map((t: any) => t.organizer).filter(Boolean))];
+  const organizers = [...new Set(taskList.map((t) => t.organizer).filter(Boolean))];
 
   return NextResponse.json({
     code: 0,
@@ -200,13 +206,13 @@ export async function POST(request: NextRequest) {
 
   if (format === 'csv') {
     const taskHeaders = '任务名称,品类,产品,型号,项目类型,项目阶段,组织者,状态,创建时间\n';
-    const taskRows = (tasks || []).map((t: any) =>
+    const taskRows = ((tasks || []) as DataRow[]).map((t) =>
       `"${t.task_name}","${t.product_category || ''}","${t.product || ''}","${t.product_model}","${t.project_type || ''}","${t.project_phase || ''}","${t.organizer || ''}","${t.status}","${t.created_at}"`
     ).join('\n');
 
     const issueHeaders = '问题标题,等级,状态,来源类型,产品型号,整改方案,责任人,创建时间\n';
-    const issueRows = (issues || []).map((i: any) =>
-      `"${i.title}","${i.level || ''}","${i.status}","${i.source_type || ''}","${i.product_model || ''}","${(i.improve_plan || '').replace(/"/g, '""')}","${i.responsible_person || ''}","${i.created_at}"`
+    const issueRows = ((issues || []) as DataRow[]).map((i) =>
+      `"${i.title}","${i.level || ''}","${i.status}","${i.source_type || ''}","${i.product_model || ''}","${String(i.improve_plan || '').replace(/"/g, '""')}","${i.responsible_person || ''}","${i.created_at}"`
     ).join('\n');
 
     return NextResponse.json({

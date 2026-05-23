@@ -1,12 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient as createClient } from '@/storage/database/supabase-client';
-import crypto from 'crypto';
-
-const HASH_SALT = 'xp_experience_platform';
-
-function hashPassword(password: string): string {
-  return crypto.createHash('sha256').update(HASH_SALT + password).digest('hex');
-}
 
 // GET: list pending audit requests
 // - admin_user_id: admin sees all pending requests

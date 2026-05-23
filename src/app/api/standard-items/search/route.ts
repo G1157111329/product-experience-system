@@ -1,6 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 
+type StandardRow = {
+  id: string;
+  product?: string | null;
+  product_category?: string | null;
+  [key: string]: unknown;
+};
+
+type StandardItemRow = {
+  id: string;
+  standard_id: string;
+  [key: string]: unknown;
+};
+
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
   const { searchParams } = new URL(request.url);
@@ -41,9 +54,9 @@ export async function GET(request: NextRequest) {
   }
 
   // Filter by product if specified: keep standards that match product OR have no product
-  let filteredStandards = standards;
+  let filteredStandards = (standards || []) as StandardRow[];
   if (product) {
-    filteredStandards = standards.filter((s: any) => {
+    filteredStandards = filteredStandards.filter((s) => {
       // 通用标准 (no product_category) always matches
       if (!s.product_category) return true;
       // 品类标准: match if product matches or product is null
@@ -52,12 +65,12 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const standardIds = filteredStandards.map((s: any) => s.id);
+  const standardIds = filteredStandards.map((s) => s.id);
   if (standardIds.length === 0) {
     return NextResponse.json({ code: 0, message: 'success', data: [] });
   }
 
-  const standardMap = Object.fromEntries(filteredStandards.map((s: any) => [s.id, s]));
+  const standardMap = Object.fromEntries(filteredStandards.map((s) => [s.id, s]));
 
   // Then get matching items from those standards
   let itemQuery = client
@@ -80,7 +93,7 @@ export async function GET(request: NextRequest) {
   if (itemError) return NextResponse.json({ code: 1, message: itemError.message }, { status: 500 });
 
   // Attach standard info to each item
-  const result = (items || []).map((item: any) => ({
+  const result = ((items || []) as StandardItemRow[]).map((item) => ({
     ...item,
     standard: standardMap[item.standard_id] || null,
   }));

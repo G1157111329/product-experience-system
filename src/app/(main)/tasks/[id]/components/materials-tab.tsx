@@ -1,11 +1,12 @@
 'use client';
 
+/* eslint-disable @next/next/no-img-element */
+
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Camera, Video, Film, Image as ImageIcon, Pencil, Trash2, Check, Package } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useImagePreview } from '@/components/image-preview';
 import { MediaCaptureDialog } from '@/components/media-capture-dialog';
@@ -20,7 +21,7 @@ export function MaterialsTab({ taskId }: { taskId: string }) {
   const [uploading, setUploading] = useState(false);
   const galleryImageInputRef = useRef<HTMLInputElement>(null);
   const galleryVideoInputRef = useRef<HTMLInputElement>(null);
-  const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
+  const { open, PreviewComponent } = useImagePreview();
 
   const fetchMaterials = useCallback(async () => {
     const res = await fetch(`/api/materials?task_id=${taskId}`);

@@ -222,7 +222,7 @@ export default function ReportsPage() {
   };
 
   return (
-    <PageShell className="space-y-4 sm:space-y-6">
+    <PageShell size="wide" className="space-y-4 sm:space-y-6">
       <PageHeader
         title="报告中心"
         description="查看和管理体验报告"
@@ -276,13 +276,13 @@ export default function ReportsPage() {
           description={keyword || categoryFilter !== 'all' ? '调整搜索或筛选条件后再试。' : '在体验计划详情页中生成报告。'}
         />
       ) : (
-        <div className="space-y-4">
+        <div className="grid gap-3 xl:grid-cols-2">
           {/* Grouped reports (merged) */}
           {grouped.map(group => {
             const latestReport = group.reports[0];
             return (
-              <Card key={group.key}>
-                <CardHeader className="pb-2">
+              <Card key={group.key} className="overflow-hidden transition-colors hover:border-primary/30">
+                <CardHeader className="border-b bg-muted/20 pb-3">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
                       <CardTitle className="text-base sm:text-lg truncate">{group.model}</CardTitle>
@@ -294,27 +294,28 @@ export default function ReportsPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openShareDialog(latestReport.id)}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" title="分享" aria-label="分享" onClick={() => openShareDialog(latestReport.id)}>
                         <Share2 className="h-3.5 w-3.5" />
                       </Button>
-                      <Button variant="outline" size="sm" className="shrink-0 text-xs gap-1" onClick={() => handlePrint(latestReport.id)}>
+                      <Button variant="outline" size="sm" className="shrink-0 text-xs gap-1" title="打印" onClick={() => handlePrint(latestReport.id)}>
                         <Printer className="h-3 w-3" /> 打印
                       </Button>
                     </div>
                   </div>
                 </CardHeader>
                 <CardContent className="pt-0">
-                  <div className="space-y-1">
+                  <div className="divide-y rounded-md border bg-background">
                     {group.reports.map((r) => (
-                      <div key={r.id} className="flex items-center gap-2 py-1.5 px-2 rounded-md hover:bg-muted/50 text-sm cursor-pointer" onClick={() => router.push(`/reports/${r.id}`)}>
-                        <input type="checkbox" checked={compareIds.includes(r.id)} onClick={(e) => e.stopPropagation()} onChange={() => toggleCompare(r.id)}
+                      <div key={r.id} className="flex items-center gap-2 px-2.5 py-2 text-sm transition-colors hover:bg-muted/50">
+                        <input type="checkbox" checked={compareIds.includes(r.id)} onChange={() => toggleCompare(r.id)}
                           className="h-3.5 w-3.5 shrink-0 rounded border-border" />
-                        <span className="flex-1 min-w-0 truncate" onClick={(e) => e.stopPropagation()}>{r.title}</span>
+                        <span className="flex-1 min-w-0 truncate">{r.title}</span>
                         <Badge variant="outline" className="text-[9px] shrink-0">{r.status === '草稿' ? '已完成' : r.status}</Badge>
                         <span className="text-[10px] text-muted-foreground shrink-0 hidden sm:inline">
                           {formatBeijingTime(r.created_at)}
                         </span>
-                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0 cursor-pointer"
+                          onClick={() => router.push(`/reports/${r.id}`)} />
                       </div>
                     ))}
                   </div>
@@ -325,7 +326,7 @@ export default function ReportsPage() {
 
           {/* Ungrouped reports */}
           {ungrouped.map(r => (
-            <Card key={r.id} className="cursor-pointer transition-shadow hover:border-primary/30 hover:shadow-md"
+            <Card key={r.id} className="cursor-pointer transition-colors hover:border-primary/30 hover:bg-muted/20"
               onClick={() => router.push(`/reports/${r.id}`)}>
               <CardContent className="py-3 sm:py-4">
                 <div className="flex min-w-0 items-start gap-3">
@@ -337,7 +338,6 @@ export default function ReportsPage() {
                     <div className="flex gap-1 mt-1 flex-wrap">
                       {r.product_category && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{r.product_category}</Badge>}
                       {r.product && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{r.product}</Badge>}
-                      {r.product_model && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{r.product_model}</Badge>}
                       {r.project_type && <Badge variant="outline" className="text-[10px]">{r.project_type}</Badge>}
                       <Badge variant={r.status === '已审核' ? 'default' : 'secondary'} className="text-[10px]">{r.status === '草稿' ? '已完成' : r.status}</Badge>
                     </div>
@@ -349,14 +349,14 @@ export default function ReportsPage() {
                   <div className="grid grid-cols-2 gap-1 shrink-0 sm:flex sm:items-center" onClick={e => e.stopPropagation()}>
                     <input type="checkbox" checked={compareIds.includes(r.id)} onChange={() => toggleCompare(r.id)}
                       className="h-3.5 w-3.5 rounded border-border" />
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openShareDialog(r.id)}>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" title="分享" aria-label="分享" onClick={() => openShareDialog(r.id)}>
                       <Share2 className="h-3.5 w-3.5" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handlePrint(r.id)}>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" title="打印" aria-label="打印" onClick={() => handlePrint(r.id)}>
                       <Printer className="h-3.5 w-3.5" />
                     </Button>
                     {isAdmin && (
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => setDeleteId(r.id)}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" title="删除" aria-label="删除" onClick={() => setDeleteId(r.id)}>
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     )}
@@ -369,7 +369,7 @@ export default function ReportsPage() {
       )}
 
       {compareIds.length > 0 && (
-        <ActionDock>
+        <ActionDock mobileOnly={false} className="sm:left-auto sm:right-6 sm:bottom-6 sm:w-[28rem]">
           <div className="flex items-center gap-2">
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium">已选择 {compareIds.length}/2 份报告</p>
@@ -400,104 +400,60 @@ export default function ReportsPage() {
 
       {/* Compare dialog */}
       <Dialog open={compareOpen} onOpenChange={setCompareOpen}>
-        <DialogContent className="max-w-5xl max-h-[90vh]">
+        <DialogContent className="max-w-4xl max-h-[88vh]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <BarChart3 className="h-4 w-4 text-primary" /> 报告对比
             </DialogTitle>
             <DialogDescription>基于两份报告内容生成满意度 VS 总结</DialogDescription>
           </DialogHeader>
-          <ScrollArea className="max-h-[72vh]">
+          <ScrollArea className="max-h-[70vh]">
             <div className="space-y-4 pr-3">
-              {/* Unified table layout for alignment */}
-              {(() => {
-                const rA = selectedCompareReports[0];
-                const rB = selectedCompareReports[1];
-                if (!rA || !rB) return null;
-                const cA = (rA.content || {}) as Record<string, unknown>;
-                const cB = (rB.content || {}) as Record<string, unknown>;
-                const recsA = (cA.records || []) as unknown[];
-                const recsB = (cB.records || []) as unknown[];
-                const recipesA = (cA.recipes || []) as Array<Record<string, unknown>>;
-                const recipesB = (cB.recipes || []) as Array<Record<string, unknown>>;
-                const failA = recsA.filter((item) => (item as Record<string, unknown>).evaluation_result === '不合格').length;
-                const failB = recsB.filter((item) => (item as Record<string, unknown>).evaluation_result === '不合格').length;
-                const rpA = recipesA.reduce((s, r) => s + Number(r.problem_count || 0), 0);
-                const rpB = recipesB.reduce((s, r) => s + Number(r.problem_count || 0), 0);
-                const scoreA = compareResult?.satisfaction_a;
-                const scoreB = compareResult?.satisfaction_b;
-                const isWinnerA = compareResult?.winner_report_id === rA.id;
-                const isWinnerB = compareResult?.winner_report_id === rB.id;
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {selectedCompareReports.map((r, idx) => {
+                const content = (r.content || {}) as Record<string, unknown>;
+                const records = (content.records || []) as unknown[];
+                const recipes = (content.recipes || []) as Array<Record<string, unknown>>;
+                const failed = records.filter((item) => (item as Record<string, unknown>).evaluation_result === '不合格').length;
+                const recipeProblems = recipes.reduce((sum, recipe) => sum + Number(recipe.problem_count || 0), 0);
+                const score = idx === 0 ? compareResult?.satisfaction_a : compareResult?.satisfaction_b;
+                const isWinner = compareResult?.winner_report_id === r.id;
                 return (
-                <div className="space-y-3">
-                  {/* Title row */}
-                  <div className="grid grid-cols-[60px_1fr_1fr] gap-2 items-start">
-                    <div />
-                    <div className="space-y-1">
-                      <div className="font-medium text-sm break-words leading-5">A · {rA.title}</div>
-                      <div className="flex gap-1 flex-wrap">
-                        {rA.product_category && <Badge variant="outline" className="text-[10px]">{rA.product_category}</Badge>}
-                        {rA.product && <Badge variant="outline" className="text-[10px]">{rA.product}</Badge>}
-                        {rA.product_model && <Badge variant="outline" className="text-[10px]">{rA.product_model}</Badge>}
-                        <Badge variant="outline" className="text-[10px]">{rA.status === '草稿' ? '已完成' : rA.status}</Badge>
-                        {isWinnerA && <Badge className="text-[10px] shrink-0">更优</Badge>}
+                <Card key={r.id}>
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <CardTitle className="text-sm min-w-0 truncate">{idx === 0 ? 'A' : 'B'} · {r.title}</CardTitle>
+                      {isWinner && <Badge className="text-[10px] shrink-0">更优</Badge>}
+                    </div>
+                    <div className="flex gap-1 flex-wrap">
+                      {r.product_category && <Badge variant="outline" className="text-[10px]">{r.product_category}</Badge>}
+                      {r.product && <Badge variant="outline" className="text-[10px]">{r.product}</Badge>}
+                      <Badge variant="outline" className="text-[10px]">{r.status === '草稿' ? '已完成' : r.status}</Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="text-xs text-muted-foreground space-y-1">
+                    <div>产品型号: {r.product_model || '-'}</div>
+                    <div>版本: V{r.version}</div>
+                    <div>生成时间: {formatBeijingTime(r.created_at)}</div>
+                    <Separator className="my-1" />
+                    <div>检查项: {records.length} / 不合格: {failed}</div>
+                    <div>功能效果问题: {recipeProblems}</div>
+                    {score !== undefined && (
+                      <div className="pt-2">
+                        <div className="flex items-center justify-between mb-1">
+                          <span>AI满意度</span>
+                          <span className="font-semibold text-foreground">{score}/10</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-muted overflow-hidden">
+                          <div className="h-full bg-primary" style={{ width: `${Math.min(100, Math.max(0, score * 10))}%` }} />
+                        </div>
                       </div>
-                    </div>
-                    <div className="space-y-1">
-                      <div className="font-medium text-sm break-words leading-5">B · {rB.title}</div>
-                      <div className="flex gap-1 flex-wrap">
-                        {rB.product_category && <Badge variant="outline" className="text-[10px]">{rB.product_category}</Badge>}
-                        {rB.product && <Badge variant="outline" className="text-[10px]">{rB.product}</Badge>}
-                        {rB.product_model && <Badge variant="outline" className="text-[10px]">{rB.product_model}</Badge>}
-                        <Badge variant="outline" className="text-[10px]">{rB.status === '草稿' ? '已完成' : rB.status}</Badge>
-                        {isWinnerB && <Badge className="text-[10px] shrink-0">更优</Badge>}
-                      </div>
-                    </div>
-                  </div>
-                  <Separator />
-                  {/* Data rows - unified table for perfect alignment */}
-                  <div className="grid grid-cols-[60px_1fr_1fr] gap-x-2 gap-y-2 text-xs">
-                    <span className="text-muted-foreground/70 font-medium">产品型号</span>
-                    <span className="break-all min-w-0">{rA.product_model || '-'}</span>
-                    <span className="break-all min-w-0">{rB.product_model || '-'}</span>
-
-                    <span className="text-muted-foreground/70 font-medium">版本</span>
-                    <span>V{rA.version}</span>
-                    <span>V{rB.version}</span>
-
-                    <span className="text-muted-foreground/70 font-medium">生成时间</span>
-                    <span className="break-all">{formatBeijingTime(rA.created_at)}</span>
-                    <span className="break-all">{formatBeijingTime(rB.created_at)}</span>
-
-                    <Separator className="col-span-3 my-1" />
-
-                    <span className="text-muted-foreground/70 font-medium">检查项</span>
-                    <span>{recsA.length} / 不合格: {failA}</span>
-                    <span>{recsB.length} / 不合格: {failB}</span>
-
-                    <span className="text-muted-foreground/70 font-medium">效果问题</span>
-                    <span>{rpA}</span>
-                    <span>{rpB}</span>
-
-                    <Separator className="col-span-3 my-1" />
-
-                    <span className="text-muted-foreground/70 font-medium">AI满意度</span>
-                    <div className="space-y-1">
-                      {scoreA !== undefined ? (<><span className="font-semibold text-foreground">{scoreA}/10</span>
-                      <div className="h-2 rounded-full bg-muted overflow-hidden">
-                        <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${Math.min(100, Math.max(0, scoreA * 10))}%` }} />
-                      </div></>) : <span>-</span>}
-                    </div>
-                    <div className="space-y-1">
-                      {scoreB !== undefined ? (<><span className="font-semibold text-foreground">{scoreB}/10</span>
-                      <div className="h-2 rounded-full bg-muted overflow-hidden">
-                        <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${Math.min(100, Math.max(0, scoreB * 10))}%` }} />
-                      </div></>) : <span>-</span>}
-                    </div>
-                  </div>
-                </div>
+                    )}
+                  </CardContent>
+                </Card>
                 );
-              })()}
+              })}
+              </div>
 
               {compareLoading && (
                 <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">

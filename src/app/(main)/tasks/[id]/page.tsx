@@ -1,8 +1,10 @@
 'use client';
 
+/* eslint-disable @next/next/no-img-element */
+
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, ArrowRightLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Film, Image as ImageIcon, Pencil, Trash2, Check, Link2, X, Play, GripVertical, Sparkles, Save, Star, AlertTriangle, Crop } from 'lucide-react';
+import { ArrowLeft, ArrowRightLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Film, Image as ImageIcon, Pencil, Trash2, Check, X, Play, GripVertical, Sparkles, Save, Star, AlertTriangle, Crop } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -19,6 +21,8 @@ import { useImagePreview } from '@/components/image-preview';
 import { MaterialPicker } from '@/components/material-picker';
 import { MediaCaptureDialog } from '@/components/media-capture-dialog';
 import { ImageEditorDialog } from '@/components/image-editor-dialog';
+import { PageShell } from '@/components/app';
+import { MediaGallery } from '@/components/app/media-gallery';
 
 /* ─── Types ─── */
 interface CategoryWithProducts {
@@ -305,7 +309,7 @@ export default function TaskDetailPage() {
   if (!task) return <div className="p-6">任务不存在</div>;
 
   return (
-    <div className="px-3 py-4 sm:p-4 lg:p-6 space-y-4">
+    <PageShell size="wide" className="space-y-4">
       {/* Header */}
       <div className="flex items-start gap-3 flex-wrap sm:flex-nowrap rounded-lg border bg-card p-3 shadow-sm sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none">
         <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => router.back()}>
@@ -351,7 +355,7 @@ export default function TaskDetailPage() {
       )}
 
       {/* Tab Navigation */}
-      <div className="sticky top-14 z-20 -mx-3 flex gap-2 overflow-x-auto border-y bg-background/95 px-3 py-2 backdrop-blur scrollbar-none sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0">
+      <div className="sticky top-14 z-20 -mx-3 flex gap-2 overflow-x-auto border-y bg-background/95 px-3 py-2 backdrop-blur scrollbar-none sm:static sm:mx-0 sm:grid sm:grid-cols-4 sm:overflow-visible sm:rounded-lg sm:border sm:bg-muted/40 sm:p-1">
         {[
           { key: 'info' as const, label: '基本信息', icon: null },
           { key: 'materials' as const, label: '素材仓库', icon: Package },
@@ -362,10 +366,10 @@ export default function TaskDetailPage() {
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
             className={cn(
-              'flex min-w-[5.6rem] flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors sm:flex-none sm:px-4 sm:py-2',
+              'flex min-w-[5.6rem] flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors sm:min-w-0 sm:flex-none sm:px-4 sm:py-2',
               activeTab === tab.key
                 ? 'bg-primary text-primary-foreground shadow-sm'
-                : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                : 'bg-muted text-muted-foreground hover:bg-muted/80 sm:bg-transparent'
             )}
           >
             {tab.icon && <tab.icon className="h-4 w-4" />}
@@ -498,7 +502,7 @@ export default function TaskDetailPage() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageShell>
   );
 }
 
@@ -644,7 +648,7 @@ function MaterialsTab({ taskId }: { taskId: string }) {
   const [editingImage, setEditingImage] = useState<{ id: string; url: string; name: string } | null>(null);
   const galleryImageInputRef = useRef<HTMLInputElement>(null);
   const galleryVideoInputRef = useRef<HTMLInputElement>(null);
-  const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
+  const { open, PreviewComponent } = useImagePreview();
 
   const fetchMaterials = useCallback(async () => {
     const res = await fetch(`/api/materials?task_id=${taskId}`);
@@ -788,7 +792,7 @@ function MaterialsTab({ taskId }: { taskId: string }) {
                 {images.map((mat) => (
                   <div key={mat.id} className="group relative rounded-lg overflow-hidden bg-muted border border-border">
                     <div className="aspect-square cursor-pointer" onClick={() => open(mat.file_url)}>
-                      <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
+                      <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" loading="lazy" />
                     </div>
                     <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">
                       {editingId === mat.id ? (
@@ -829,32 +833,34 @@ function MaterialsTab({ taskId }: { taskId: string }) {
           {videos.length > 0 && (
             <div>
               <p className="text-xs font-medium text-muted-foreground mb-2">视频 ({videos.length})</p>
-              <div className="space-y-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {videos.map((mat) => (
-                  <div key={mat.id} className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 border border-border group">
-                    <div className="w-10 h-10 rounded bg-muted flex items-center justify-center shrink-0">
-                      <Video className="h-5 w-5 text-muted-foreground" />
+                  <div key={mat.id} className="group relative rounded-lg overflow-hidden bg-muted border border-border">
+                    <div className="aspect-video cursor-pointer" onClick={() => open(mat.file_url)}>
+                      <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/40 transition-colors">
+                        <Play className="h-6 w-6 text-white fill-white" />
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
+                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">
                       {editingId === mat.id ? (
                         <div className="flex gap-1">
-                          <Input className="h-6 text-xs" value={editName} onChange={(e) => setEditName(e.target.value)}
+                          <Input className="h-6 text-xs bg-background/90" value={editName} onChange={(e) => setEditName(e.target.value)}
                             onKeyDown={(e) => e.key === 'Enter' && handleRename(mat.id)} autoFocus />
-                          <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => handleRename(mat.id)}>
+                          <Button size="icon" variant="ghost" className="h-6 w-6 text-white hover:text-white" onClick={() => handleRename(mat.id)}>
                             <Check className="h-3 w-3" />
                           </Button>
                         </div>
                       ) : (
-                        <p className="text-sm truncate">{mat.file_name}</p>
+                        <p className="text-xs text-white truncate">{mat.file_name}</p>
                       )}
-                      <p className="text-[10px] text-muted-foreground">{(mat.file_size / 1024 / 1024).toFixed(1)} MB</p>
                     </div>
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setEditingId(mat.id); setEditName(mat.file_name); }}>
+                    <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button size="icon" variant="ghost" className="h-7 w-7 bg-black/40 text-white hover:text-white hover:bg-black/60" onClick={() => { setEditingId(mat.id); setEditName(mat.file_name); }}>
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
-                      <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleDelete(mat.id)}>
-                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                      <Button size="icon" variant="ghost" className="h-7 w-7 bg-black/40 text-white hover:text-white hover:bg-black/60" onClick={() => handleDelete(mat.id)}>
+                        <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     </div>
                   </div>
@@ -909,7 +915,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
   const [, setSelectedMaterials] = useState<Material[]>([]);
   const [initialMaterialIds, setInitialMaterialIds] = useState<string[]>([]);
   const [recordMaterials, setRecordMaterials] = useState<Record<string, Material[]>>({});
-  const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
+  const { open, PreviewComponent } = useImagePreview();
 
   // ── Edit mode ──
   const [editRecordId, setEditRecordId] = useState<string | null>(null);
@@ -957,9 +963,6 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
   const [fuzzyLoading, setFuzzyLoading] = useState(false);
 
   // ── Record status edit dialog ──
-  const [statusEditOpen, setStatusEditOpen] = useState(false);
-  const [statusEditRecord, setStatusEditRecord] = useState<CheckRecord | null>(null);
-  const [statusEditValue, setStatusEditValue] = useState('待定');
 
   // ── 通用标准: fetch matching items when 3 selects are chosen ──
   useEffect(() => {
@@ -1176,7 +1179,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
         if (match) setGeneralForm(prev => ({ ...prev, selectedItemId: match.id }));
       }
     }
-  }, [editRecordId, formCategory, generalItems, records]);
+  }, [editRecordId, formCategory, generalForm.selectedItemId, generalItems, records]);
 
   useEffect(() => {
     if (!editRecordId) return;
@@ -1190,7 +1193,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
         if (match) setCategoryForm(prev => ({ ...prev, selectedItemId: match.id }));
       }
     }
-  }, [editRecordId, formCategory, categoryItems, records]);
+  }, [editRecordId, formCategory, categoryForm.selectedItemId, categoryItems, records]);
 
   const handleAdd = async () => {
     if (savingRecord) return;
@@ -1952,25 +1955,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
                       </Button>
                     </div>
                     {/* Thumbnails per problem point */}
-                    {mats.length > 0 && (
-                      <div className="flex gap-1.5 ml-5 mt-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
-                        {mats.map((mat) => (
-                          <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border cursor-pointer relative"
-                            onClick={() => open(mat.file_url)}>
-                            {mat.material_type === 'image' ? (
-                              <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
-                            ) : (
-                              <>
-                                <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
-                                <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-                                  <Play className="h-3.5 w-3.5 text-white fill-white" />
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    <MediaGallery materials={mats} responsive columns={{ mobile: 3, sm: 4 }} className="ml-5 mt-2" onPreview={open} />
                   </div>
                 );
               })}
@@ -2040,7 +2025,7 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
   const [stepMaterialIds, setStepMaterialIds] = useState<string[]>([]);
   const [, setStepMaterials] = useState<Material[]>([]);
   const [editStepForm, setEditStepForm] = useState({ operation: '', step_material_ids: [] as string[], problem_points: [{ text: '', material_ids: [] as string[] }] });
-  const [editStepMaterialIds, setEditStepMaterialIds] = useState<string[]>([]);
+  const [, setEditStepMaterialIds] = useState<string[]>([]);
   const [, setEditStepMaterials] = useState<Material[]>([]);
   // Drag state for step reorder
   const [dragStepIdx, setDragStepIdx] = useState<number | null>(null);
@@ -2048,11 +2033,10 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
   // Drag state for recipe reorder
   const [dragRecipeIdx, setDragRecipeIdx] = useState<number | null>(null);
   const [dragRecipeOverIdx, setDragRecipeOverIdx] = useState<number | null>(null);
-  const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
+  const { open, PreviewComponent } = useImagePreview();
 
   // ── Effect evaluation states ──
   const [effectDesc, setEffectDesc] = useState<Record<string, string>>({});
-  const [effectProblem, setEffectProblem] = useState<Record<string, string>>({});
   const [effectProblemPoints, setEffectProblemPoints] = useState<Record<string, ProblemPoint[]>>({});
   const [aiDetectingProblems, setAiDetectingProblems] = useState<Record<string, boolean>>({});
   const [effectMaterialIds, setEffectMaterialIds] = useState<Record<string, string[]>>({});
@@ -2660,7 +2644,7 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                           </div>
                         ) : null;
                       })()}
-
+                      <MediaGallery materials={step.materials || []} responsive columns={{ mobile: 3, sm: 4 }} className="ml-7" onPreview={open} />
                     </div>
                   ))}
                   <Button variant="outline" size="sm" className="w-full"
@@ -2958,6 +2942,52 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                 }}
               />
             </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>问题点</Label>
+                <Button type="button" variant="ghost" size="sm" className="h-6 text-xs text-primary"
+                  onClick={() => setEditStepForm({ ...editStepForm, problem_points: [...editStepForm.problem_points, { text: '', material_ids: [] }] })}>
+                  <Plus className="h-3 w-3 mr-1" /> 添加问题点
+                </Button>
+              </div>
+              {editStepForm.problem_points.map((pp, idx) => (
+                <div key={idx} className="p-2 rounded-lg border bg-muted/20 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-muted-foreground font-medium shrink-0">问题{idx + 1}</span>
+                    {editStepForm.problem_points.length > 1 && (
+                      <Button type="button" variant="ghost" size="icon" className="h-5 w-5 ml-auto"
+                        onClick={() => setEditStepForm({ ...editStepForm, problem_points: editStepForm.problem_points.filter((_, i) => i !== idx) })}>
+                        <X className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+                  <Textarea placeholder="描述问题点..." value={pp.text}
+                    onChange={(e) => {
+                      const updated = [...editStepForm.problem_points];
+                      updated[idx] = { ...updated[idx], text: e.target.value };
+                      setEditStepForm({ ...editStepForm, problem_points: updated });
+                    }} rows={2} />
+                  <MaterialPicker
+                    taskId={taskId}
+                    selectedIds={pp.material_ids || []}
+                    onSelectionChange={(ids, mats) => {
+                      const updated = [...editStepForm.problem_points];
+                      updated[idx] = { ...updated[idx], material_ids: ids };
+                      setEditStepForm({ ...editStepForm, problem_points: updated });
+                      setEditStepMaterialIds(ids);
+                      setEditStepMaterials(mats);
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+            {/* Existing materials preview */}
+            {editingStep?.materials && editingStep.materials.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>当前关联素材</Label>
+                <MediaGallery materials={editingStep.materials} responsive columns={{ mobile: 3, sm: 4 }} onPreview={open} />
+              </div>
+            )}
             <Button onClick={handleSaveEditStep} className="w-full" disabled={!editStepForm.operation || savingEditStep}>{savingEditStep ? '保存中...' : '保存修改'}</Button>
           </div>
         </DialogContent>

@@ -1,5 +1,7 @@
 'use client';
 
+/* eslint-disable @next/next/no-img-element */
+
 import { useState, useEffect, useCallback } from 'react';
 import { Wrench, Plus, Pencil, Trash2, Play, GripVertical, Sparkles, Save, Star, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -15,7 +17,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useImagePreview } from '@/components/image-preview';
 import { MaterialPicker } from '@/components/material-picker';
-import type { Recipe, RecipeStep, Material, ProblemPoint, RecipeLibRef } from '../types';
+import type { Recipe, RecipeStep, Material, RecipeLibRef } from '../types';
 
 export function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpdate: () => void }) {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
@@ -36,7 +38,7 @@ export function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onSta
   const [stepMaterialIds, setStepMaterialIds] = useState<string[]>([]);
   const [, setStepMaterials] = useState<Material[]>([]);
   const [editStepForm, setEditStepForm] = useState({ operation: '', step_material_ids: [] as string[], problem_points: [{ text: '', material_ids: [] as string[] }] });
-  const [editStepMaterialIds, setEditStepMaterialIds] = useState<string[]>([]);
+  const [, setEditStepMaterialIds] = useState<string[]>([]);
   const [, setEditStepMaterials] = useState<Material[]>([]);
   // Drag state for step reorder
   const [dragStepIdx, setDragStepIdx] = useState<number | null>(null);
@@ -44,7 +46,7 @@ export function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onSta
   // Drag state for recipe reorder
   const [dragRecipeIdx, setDragRecipeIdx] = useState<number | null>(null);
   const [dragRecipeOverIdx, setDragRecipeOverIdx] = useState<number | null>(null);
-  const { previewUrl: _, open, close: __, PreviewComponent } = useImagePreview();
+  const { open, PreviewComponent } = useImagePreview();
 
   // ── Effect evaluation states ──
   const [effectDesc, setEffectDesc] = useState<Record<string, string>>({});

@@ -124,6 +124,7 @@ export function ImageEditorDialog({
       ctx.strokeRect(cropRect.x * s, cropRect.y * s, cropRect.w * s, cropRect.h * s);
       ctx.setLineDash([]);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rotation, imgSize, actions, currentAction, tool, cropRect]);
 
   useEffect(() => { redraw(); }, [redraw]);
@@ -261,8 +262,6 @@ export function ImageEditorDialog({
     if (w < 5 || h < 5) return;
     const img = imageRef.current;
     const isRotated = rotation % 180 !== 0;
-    const s = scaleRef.current;
-
     // Create a temp canvas with the current full image (rotated)
     const tempCanvas = document.createElement('canvas');
     const dw = isRotated ? imgSize.h : imgSize.w;

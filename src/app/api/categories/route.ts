@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 
+type CategoryRow = { id: string; name: string; sort_order?: number | null };
+type ProductRow = { id: string; name: string; category_id: string; sort_order?: number | null };
+
 // GET: list categories with their products
 export async function GET() {
   const client = getSupabaseClient();
@@ -20,9 +23,9 @@ export async function GET() {
   if (prodError) return NextResponse.json({ code: 1, message: prodError.message }, { status: 500 });
 
   // Attach products to categories
-  const result = (categories || []).map((cat: any) => ({
+  const result = ((categories || []) as CategoryRow[]).map((cat) => ({
     ...cat,
-    products: (products || []).filter((p: any) => p.category_id === cat.id),
+    products: ((products || []) as ProductRow[]).filter((p) => p.category_id === cat.id),
   }));
 
   return NextResponse.json({ code: 0, data: result });
