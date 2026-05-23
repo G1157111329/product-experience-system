@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, CheckCircle2, ClipboardList, Clock, Shield, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ClipboardList, Clock, Plus, Shield, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -189,9 +189,17 @@ export default function DashboardPage() {
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between gap-3">
               <CardTitle className="text-sm font-semibold">最近体验计划</CardTitle>
-              <Link href="/tasks" className="text-xs text-primary hover:underline">
-                查看全部
-              </Link>
+              <div className="flex items-center gap-2">
+                <Button asChild variant="outline" size="sm" className="h-8 gap-1.5 text-xs">
+                  <Link href="/tasks?create=1">
+                    <Plus className="h-3.5 w-3.5" />
+                    快速新建项目
+                  </Link>
+                </Button>
+                <Link href="/tasks" className="text-xs text-primary hover:underline">
+                  查看全部
+                </Link>
+              </div>
             </div>
           </CardHeader>
           <CardContent>

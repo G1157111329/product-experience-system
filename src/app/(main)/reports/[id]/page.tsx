@@ -691,7 +691,6 @@ export default function ReportDetailPage() {
       <div className="mx-auto max-w-6xl rounded-xl border bg-background p-3 shadow-sm lg:flex lg:items-center lg:justify-between lg:gap-4">
         <div className="min-w-0">
           <p className="text-xs font-medium text-muted-foreground">报告导航</p>
-          <p className="mt-1 text-sm font-medium">按阶段阅读报告，随时打开图/视频证据查看细节</p>
         </div>
         <div className="mt-3 flex gap-2 overflow-x-auto lg:mt-0 lg:justify-end">
           {allReports.map((rpt, idx) => {

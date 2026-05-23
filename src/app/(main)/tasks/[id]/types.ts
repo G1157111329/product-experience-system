@@ -105,6 +105,7 @@ export interface Recipe {
   effect_description?: string | null;
   effect_score?: string | null;
   effect_problem_point?: string | null;
+  effect_problem_points?: ProblemPoint[];
   effect_ai_result?: { score: number; summary: string } | null;
   effect_materials?: Material[];
 }

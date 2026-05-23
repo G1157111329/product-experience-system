@@ -528,6 +528,80 @@ function StandardOptionsSettings({ open, onOpenChange }: { open: boolean; onOpen
   );
 }
 
+function PlatformSettingsDialog({
+  open,
+  onOpenChange,
+  onOpenCategory,
+  onOpenStandardOptions,
+  onOpenAiAgent,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onOpenCategory: () => void;
+  onOpenStandardOptions: () => void;
+  onOpenAiAgent: () => void;
+}) {
+  const openSetting = (handler: () => void) => {
+    onOpenChange(false);
+    setTimeout(handler, 120);
+  };
+
+  const settingItems = [
+    {
+      title: '品类与产品',
+      description: '维护体验计划和标准引用使用的品类、产品型号基础数据。',
+      icon: Settings,
+      action: onOpenCategory,
+    },
+    {
+      title: '通用标准选项',
+      description: '管理产品使用阶段、体验流程、感官维度等通用标准字段。',
+      icon: BookOpen,
+      action: onOpenStandardOptions,
+    },
+    {
+      title: 'AI Agent / Prompt 模板',
+      description: '配置 AI 模型、API 信息，以及各模块使用的 Prompt 模板。',
+      icon: Sparkles,
+      action: onOpenAiAgent,
+    },
+  ];
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Settings className="h-5 w-5" /> 平台设置
+          </DialogTitle>
+          <DialogDescription>
+            统一管理基础资料、标准字段和 AI Prompt 配置。
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-3 py-2 sm:grid-cols-3">
+          {settingItems.map((item) => (
+            <button
+              key={item.title}
+              type="button"
+              onClick={() => openSetting(item.action)}
+              className="group flex min-h-36 flex-col rounded-lg border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <span className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-primary/10 text-primary">
+                <item.icon className="h-4 w-4" />
+              </span>
+              <span className="text-sm font-medium text-foreground">{item.title}</span>
+              <span className="mt-2 text-xs leading-relaxed text-muted-foreground">{item.description}</span>
+              <span className="mt-auto pt-4 text-xs font-medium text-primary opacity-0 transition-opacity group-hover:opacity-100">
+                打开设置
+              </span>
+            </button>
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function UserSection() {
   const { user, isAdmin, logout } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
@@ -536,6 +610,7 @@ function UserSection() {
   const [editLoading, setEditLoading] = useState(false);
   const [allUsers, setAllUsers] = useState<Array<{ id: string; account: string; name: string; role: string }>>([]);
   const [roleLoading, setRoleLoading] = useState(false);
+  const [platformSettingsOpen, setPlatformSettingsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // ── Standard options settings (admin-only global, stored in DB) ──
   const [standardOptionsOpen, setStandardOptionsOpen] = useState(false);
@@ -619,7 +694,7 @@ function UserSection() {
         </button>
         {/* Admin: Settings icon directly in sidebar footer */}
         {isAdmin && (
-          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setSettingsOpen(true)} title="品类与产品设置" aria-label="品类与产品设置">
+          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setPlatformSettingsOpen(true)} title="平台设置" aria-label="平台设置">
             <Settings className="h-3.5 w-3.5" />
           </Button>
         )}
@@ -682,29 +757,21 @@ function UserSection() {
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label className="text-xs text-muted-foreground">通用标准选项</Label>
+                <Label className="text-xs text-muted-foreground">平台设置</Label>
                 {isAdmin && (
-                  <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={() => setStandardOptionsOpen(true)}>
-                    <Settings className="h-3 w-3" /> 设置
+                  <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={() => { setProfileOpen(false); setTimeout(() => setPlatformSettingsOpen(true), 100); }}>
+                    <Settings className="h-3 w-3" /> 打开
                   </Button>
                 )}
               </div>
-              <p className="text-[11px] text-muted-foreground">管理产品使用阶段、体验流程、感官维度选项</p>
+              <p className="text-[11px] text-muted-foreground">集中管理品类产品、通用标准选项、AI Agent 与 Prompt 模板</p>
             </div>
 
             {/* Admin: Settings button in profile dialog */}
             {isAdmin && (
-              <>
-                <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setSettingsOpen(true), 100); }}>
-                  <Settings className="h-4 w-4" /> 品类与产品设置
-                </Button>
-                <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setStandardOptionsOpen(true), 100); }}>
-                  <Settings className="h-4 w-4" /> 通用标准选项设置
-                </Button>
-                <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setAiConfigOpen(true), 100); }}>
-                  <Sparkles className="h-4 w-4" /> AI Agent 设置
-                </Button>
-              </>
+              <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setPlatformSettingsOpen(true), 100); }}>
+                <Settings className="h-4 w-4" /> 平台设置
+              </Button>
             )}
 
             {isAdmin && allUsers.length > 0 && (
@@ -745,6 +812,13 @@ function UserSection() {
       </Dialog>
 
       {/* Settings Dialog (Admin only) */}
+      <PlatformSettingsDialog
+        open={platformSettingsOpen}
+        onOpenChange={setPlatformSettingsOpen}
+        onOpenCategory={() => setSettingsOpen(true)}
+        onOpenStandardOptions={() => setStandardOptionsOpen(true)}
+        onOpenAiAgent={() => setAiConfigOpen(true)}
+      />
       <CategoryProductSettings open={settingsOpen} onOpenChange={setSettingsOpen} />
       <StandardOptionsSettings open={standardOptionsOpen} onOpenChange={setStandardOptionsOpen} />
       <AiAgentSettings open={aiConfigOpen} onOpenChange={setAiConfigOpen} />
@@ -787,6 +861,7 @@ export function MobileNav() {
 function MobileUserIcon() {
   const { user, isAdmin, logout } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
+  const [platformSettingsOpen, setPlatformSettingsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [standardOptionsOpen, setStandardOptionsOpen] = useState(false);
   const [aiConfigOpen, setAiConfigOpen] = useState(false);
@@ -809,26 +884,18 @@ function MobileUserIcon() {
             <div><span className="text-xs text-muted-foreground">角色：</span><Badge variant={isAdmin ? 'default' : 'secondary'} className="text-xs">{isAdmin ? '管理账号' : '使用账号'}</Badge></div>
             <Separator />
             <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">通用标准选项</span>
+              <span className="text-xs text-muted-foreground">平台设置</span>
               {isAdmin && (
-                <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={() => setStandardOptionsOpen(true)}>
-                  <Settings className="h-3 w-3" /> 设置
+                <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={() => { setProfileOpen(false); setTimeout(() => setPlatformSettingsOpen(true), 100); }}>
+                  <Settings className="h-3 w-3" /> 打开
                 </Button>
               )}
             </div>
-            <p className="text-[11px] text-muted-foreground">管理产品使用阶段、体验流程、感官维度选项</p>
+            <p className="text-[11px] text-muted-foreground">集中管理品类产品、通用标准选项、AI Agent 与 Prompt 模板</p>
             {isAdmin && (
-              <>
-                <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setSettingsOpen(true), 100); }}>
-                  <Settings className="h-4 w-4" /> 品类与产品设置
-                </Button>
-                <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setStandardOptionsOpen(true), 100); }}>
-                  <Settings className="h-4 w-4" /> 通用标准选项设置
-                </Button>
-                <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setAiConfigOpen(true), 100); }}>
-                  <Sparkles className="h-4 w-4" /> AI Agent 设置
-                </Button>
-              </>
+              <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setPlatformSettingsOpen(true), 100); }}>
+                <Settings className="h-4 w-4" /> 平台设置
+              </Button>
             )}
             <div className="flex gap-2">
               <Button variant="outline" size="sm" className="flex-1" onClick={() => setProfileOpen(false)}>关闭</Button>
@@ -837,6 +904,13 @@ function MobileUserIcon() {
           </div>
         </DialogContent>
       </Dialog>
+      <PlatformSettingsDialog
+        open={platformSettingsOpen}
+        onOpenChange={setPlatformSettingsOpen}
+        onOpenCategory={() => setSettingsOpen(true)}
+        onOpenStandardOptions={() => setStandardOptionsOpen(true)}
+        onOpenAiAgent={() => setAiConfigOpen(true)}
+      />
       <CategoryProductSettings open={settingsOpen} onOpenChange={setSettingsOpen} />
       <StandardOptionsSettings open={standardOptionsOpen} onOpenChange={setStandardOptionsOpen} />
       <AiAgentSettings open={aiConfigOpen} onOpenChange={setAiConfigOpen} />

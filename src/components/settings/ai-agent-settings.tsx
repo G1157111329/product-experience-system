@@ -55,6 +55,13 @@ const emptyModel: ModelConfig = {
   custom_api_key: '',
 };
 
+const skillModuleLabels: Record<string, string> = {
+  senses_standard_preset: 'AI体验方案 · 五感体验',
+  recipe_scene_preset: 'AI体验方案 · 功能效果',
+  effect_evaluation: '功能效果 · 效果评价',
+  report_summary: 'AI总结/报告',
+};
+
 export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenChange: (value: boolean) => void }) {
   const { user } = useAuth();
   const [models, setModels] = useState<ModelConfig[]>([]);
@@ -172,7 +179,7 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-5 w-5" /> AI Agent 设置
           </DialogTitle>
-          <DialogDescription>管理模型接入、Skills 模板版本、启停与审计能力</DialogDescription>
+          <DialogDescription>管理模型接入、Prompt 模板版本、启停与审计能力</DialogDescription>
         </DialogHeader>
 
         <ScrollArea className="max-h-[68vh] pr-3">
@@ -257,8 +264,8 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
 
             <section className="space-y-3">
               <div>
-                <h3 className="text-sm font-semibold">Skills 模板</h3>
-                <p className="text-xs text-muted-foreground">编辑会创建新版本，历史版本不会被覆盖</p>
+                <h3 className="text-sm font-semibold">Prompt 模板</h3>
+                <p className="text-xs text-muted-foreground">Skills 以 Prompt 形式存在，编辑会创建新版本，历史版本不会被覆盖。</p>
               </div>
               <div className="space-y-2">
                 {skills.map((skill) => (
@@ -271,12 +278,15 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
                           <Badge variant={skill.is_enabled ? 'default' : 'secondary'} className="text-[10px]">{skill.is_enabled ? '启用' : '停用'}</Badge>
                         </div>
                         <p className="mt-1 text-xs text-muted-foreground">{skill.description}</p>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          作用模块：{skillModuleLabels[skill.skill_key] || skill.skill_key}
+                        </p>
                       </div>
                       <Switch checked={skill.is_enabled} onCheckedChange={(checked) => toggleSkill(skill, checked)} />
                     </div>
                     <div className="mt-3 flex justify-end">
                       <Button variant="outline" size="sm" className="gap-1" onClick={() => setEditingSkill(skill)}>
-                        <Plus className="h-3.5 w-3.5" /> 新版本
+                        <Plus className="h-3.5 w-3.5" /> 编辑 Prompt
                       </Button>
                     </div>
                   </div>
@@ -289,7 +299,7 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
         {editingSkill?.active_version && (
           <div className="space-y-3 border-t pt-4">
             <div className="flex items-center justify-between">
-              <div className="text-sm font-medium">{editingSkill.name} · 新版本</div>
+              <div className="text-sm font-medium">{editingSkill.name} · Prompt 新版本</div>
               <Button size="sm" onClick={createSkillVersion}>保存并启用</Button>
             </div>
             <div className="grid gap-3 lg:grid-cols-2">

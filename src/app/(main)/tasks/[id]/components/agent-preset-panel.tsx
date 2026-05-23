@@ -58,14 +58,14 @@ export function AgentPresetPanel({
       });
       const data = await res.json();
       if (data.code !== 0) {
-        toast.error(data.message || 'Agent预设失败');
+        toast.error(data.message || 'AI体验方案生成失败');
         return;
       }
       const nextResult = data.data as AgentPresetResponse;
       setResult(nextResult);
       setSelectedStandards(nextResult.suggestions.standards.map((item) => item.standardItemId));
       setSelectedRecipes(nextResult.suggestions.recipes.map((item) => item.name));
-      toast.success('Agent预设建议已生成');
+      toast.success('AI体验方案已生成');
     } finally {
       setRunning(false);
     }
@@ -97,7 +97,7 @@ export function AgentPresetPanel({
         toast.error(data.message || '写入草稿失败');
         return;
       }
-      toast.success('Agent建议已写入草稿');
+      toast.success('AI体验方案已写入草稿');
       setOpen(false);
       onAccepted();
     } finally {
@@ -116,14 +116,14 @@ export function AgentPresetPanel({
   return (
     <>
       <Button variant="outline" size="sm" className="min-w-0 sm:flex-none" onClick={() => setOpen(true)}>
-        <Bot className="h-4 w-4 mr-1.5" /> Agent预设
+        <Bot className="h-4 w-4 mr-1.5" /> AI体验方案
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5" /> Agent预设建议
+              <Sparkles className="h-5 w-5" /> AI体验方案
             </DialogTitle>
             <DialogDescription>选择建议后写入草稿，检查结果、问题描述和素材保持空白</DialogDescription>
           </DialogHeader>
@@ -157,7 +157,7 @@ export function AgentPresetPanel({
                         <Checkbox checked={selectedStandards.includes(item.standardItemId)} onCheckedChange={() => toggleStandard(item.standardItemId)} />
                         <span className="min-w-0 flex-1">
                           <span className="block text-sm font-medium break-all">{item.focus || item.standardItemId}</span>
-                          <span className="block text-xs text-muted-foreground break-all">{item.reason || 'Agent推荐重点检查'}</span>
+                          <span className="block text-xs text-muted-foreground break-all">{item.reason || 'AI推荐重点检查'}</span>
                         </span>
                       </label>
                     ))}

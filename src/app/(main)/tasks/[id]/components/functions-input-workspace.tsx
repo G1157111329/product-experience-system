@@ -1,7 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { ChefHat, ClipboardList, Plus, Star } from 'lucide-react';
+import { useMemo, useState, type ReactNode } from 'react';
+import { ChefHat, ClipboardList, Pencil, Plus, Star } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -14,6 +14,7 @@ type FunctionsInputWorkspaceProps = {
   onAddStep: (recipe: Recipe) => void;
   onEditStep: (step: RecipeStep, recipe: Recipe) => void;
   onBindingTargetChange: (target: EvidenceBindingTarget | null) => void;
+  renderEffectEditor?: (recipe: Recipe) => ReactNode;
 };
 
 export function FunctionsInputWorkspace({
@@ -23,6 +24,7 @@ export function FunctionsInputWorkspace({
   onAddStep,
   onEditStep,
   onBindingTargetChange,
+  renderEffectEditor,
 }: FunctionsInputWorkspaceProps) {
   const [selectedRecipeId, setSelectedRecipeId] = useState(recipes[0]?.id || '');
   const selectedRecipe = useMemo(
@@ -63,12 +65,15 @@ export function FunctionsInputWorkspace({
                 <ChefHat className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{recipe.name}</div>
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    <Badge variant="outline" className="text-[10px]">{recipe.recipe_steps?.length || 0} 步</Badge>
+                  <div className="mt-1 grid grid-cols-2 gap-1">
+                    <Badge variant="outline" className="justify-center text-[10px]">{recipe.recipe_steps?.length || 0} 步</Badge>
                     <Badge variant={recipe.effect_description ? 'secondary' : 'outline'} className="text-[10px]">
                       {recipe.effect_description ? '有效果评价' : '缺效果评价'}
                     </Badge>
-                    {recipe.effect_score && <Badge className="text-[10px]">{recipe.effect_score} 分</Badge>}
+                    <Badge variant={(recipe.problem_count || 0) > 0 ? 'destructive' : 'outline'} className="justify-center text-[10px]">
+                      {recipe.problem_count || 0} 问题
+                    </Badge>
+                    {recipe.effect_score && <Badge className="justify-center text-[10px]">{recipe.effect_score} 分</Badge>}
                   </div>
                 </div>
               </div>
@@ -86,7 +91,9 @@ export function FunctionsInputWorkspace({
                   <h3 className="truncate text-base font-semibold">{selectedRecipe.name}</h3>
                   <p className="mt-1 text-xs text-muted-foreground">{selectedRecipe.ingredients || '暂无参数/食材'}</p>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => onEditRecipe(selectedRecipe)}>编辑功能</Button>
+                <Button variant="outline" size="sm" onClick={() => onEditRecipe(selectedRecipe)}>
+                  <Pencil className="mr-1.5 h-3.5 w-3.5" />编辑
+                </Button>
               </div>
             </div>
 
@@ -140,6 +147,8 @@ export function FunctionsInputWorkspace({
                 </div>
               </button>
             </div>
+
+            {renderEffectEditor?.(selectedRecipe)}
           </>
         ) : (
           <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">

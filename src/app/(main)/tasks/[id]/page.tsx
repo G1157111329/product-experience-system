@@ -425,65 +425,21 @@ export default function TaskDetailPage() {
         </div>
         <div className="grid grid-cols-2 gap-2 shrink-0 w-full sm:flex sm:w-auto sm:justify-end">
           <AgentPresetPanel taskId={id} userId={user?.id} onAccepted={handleAgentAccepted} />
-          <Button variant="outline" size="sm" className="min-w-0 sm:flex-none" onClick={aiSummary ? openAiSummaryDialog : handleGenerateAiSummary} disabled={aiSummarizing}>
-            <Sparkles className="h-4 w-4 mr-1.5" /> {aiSummarizing ? '总结中...' : aiSummary ? 'AI总结' : '生成AI总结'}
-          </Button>
           {isAdmin && (
             <Button variant="outline" size="sm" className="min-w-0 sm:flex-none" onClick={handleOpenTransfer}>
               <ArrowRightLeft className="h-4 w-4 mr-1.5" /> 转移
             </Button>
           )}
-          <Button size="sm" className="col-span-2 min-w-0 sm:col-span-1 sm:flex-none" onClick={handleRequestGenerateReport} disabled={generatingReport}>
-            <FileText className="h-4 w-4 mr-1.5" /> {generatingReport ? '生成中...' : '报告生成'}
-          </Button>
         </div>
       </div>
 
-      {aiSummary && (
-        <button
-          type="button"
-          onClick={openAiSummaryDialog}
-          className="w-full text-left rounded-lg border bg-primary/5 border-primary/20 p-3 shadow-sm transition-colors hover:bg-primary/10"
-        >
-          <div className="flex flex-wrap items-center gap-2 min-w-0">
-            <Badge className="shrink-0 text-[10px]">{aiSummary.tag || 'AI总结'}</Badge>
-            <span className="text-sm font-medium shrink-0">{aiSummary.satisfaction_score}/10</span>
-            <span className="basis-full text-xs text-muted-foreground line-clamp-2 min-w-0 sm:basis-auto sm:truncate">{aiSummary.summary || '点击查看和编辑AI总结'}</span>
-            <Pencil className="h-3.5 w-3.5 text-muted-foreground shrink-0 ml-auto" />
-          </div>
-        </button>
-      )}
-
       <ReportAuthoringShell
+        taskId={id}
         activeTab={activeTab}
         agentOpen={agentAssistOpen}
-        readiness={reportReadiness}
         onTabChange={setActiveTab}
         onAgentOpenChange={setAgentAssistOpen}
       >
-      <div className="hidden">
-        {[
-          { key: 'info' as const, label: '基本信息', icon: null },
-          { key: 'materials' as const, label: '素材仓库', icon: Package },
-          { key: 'senses' as const, label: '五感体验', icon: Eye },
-          { key: 'functions' as const, label: '功能效果', icon: Wrench },
-        ].map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={cn(
-              'flex min-w-[5.6rem] flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors sm:min-w-0 sm:flex-none sm:px-4 sm:py-2',
-              activeTab === tab.key
-                ? 'bg-primary text-primary-foreground shadow-sm'
-                : 'bg-muted text-muted-foreground hover:bg-muted/80 sm:bg-transparent'
-            )}
-          >
-            {tab.icon && <tab.icon className="h-4 w-4" />}
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
       {activeTab !== 'info' && (
         <MaterialEvidenceRail
           taskId={id}
@@ -493,7 +449,19 @@ export default function TaskDetailPage() {
       )}
 
       {/* Tab Content */}
-      {activeTab === 'info' && <BasicInfoTab task={task} onRefresh={fetchTask} />}
+      {activeTab === 'info' && (
+        <div className="space-y-4">
+          <BasicInfoTab task={task} onRefresh={fetchTask} />
+          <ReportActionsPanel
+            aiSummary={aiSummary}
+            aiSummarizing={aiSummarizing}
+            generatingReport={generatingReport}
+            onOpenAiSummary={openAiSummaryDialog}
+            onGenerateAiSummary={handleGenerateAiSummary}
+            onGenerateReport={handleRequestGenerateReport}
+          />
+        </div>
+      )}
       {activeTab === 'materials' && <MaterialsTab taskId={id} />}
         {activeTab === 'senses' && <SensesTab taskId={id} records={task.records || []} taskProductCategory={task.product_category} taskProduct={task.product} onRefresh={fetchTask} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onBindingTargetChange={setEvidenceBindingTarget} />}
         {activeTab === 'functions' && <FunctionsTab taskId={id} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onRecipesChange={setReportRecipes} onBindingTargetChange={setEvidenceBindingTarget} />}
@@ -541,7 +509,7 @@ export default function TaskDetailPage() {
               <div className="rounded-lg border bg-muted/30 p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm font-medium">输入完整度 {reportReadiness.score}/100</p>
+                    <p className="text-sm font-medium">生成前确认</p>
                     <p className="text-xs text-muted-foreground">
                       {reportReadiness.status === 'ready' ? '关键输入已完整，可以生成报告。' : '仍有输入缺口，建议先补齐再生成。'}
                     </p>
@@ -674,6 +642,65 @@ export default function TaskDetailPage() {
 }
 
 /* ─── Tab: 基本信息 ─── */
+function ReportActionsPanel({
+  aiSummary,
+  aiSummarizing,
+  generatingReport,
+  onOpenAiSummary,
+  onGenerateAiSummary,
+  onGenerateReport,
+}: {
+  aiSummary: AiTaskSummary | null;
+  aiSummarizing: boolean;
+  generatingReport: boolean;
+  onOpenAiSummary: () => void;
+  onGenerateAiSummary: () => void;
+  onGenerateReport: () => void;
+}) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <FileText className="h-4 w-4 text-primary" />
+          AI总结/报告
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {aiSummary ? (
+          <button
+            type="button"
+            onClick={onOpenAiSummary}
+            className="w-full rounded-lg border bg-muted/20 p-3 text-left transition-colors hover:bg-muted/40"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge className="text-[10px]">{aiSummary.tag || 'AI总结'}</Badge>
+              <span className="text-sm font-medium">{aiSummary.satisfaction_score}/10</span>
+              <span className="basis-full text-xs text-muted-foreground line-clamp-2 sm:basis-auto sm:flex-1">
+                {aiSummary.summary || '点击查看和编辑AI总结'}
+              </span>
+              <Pencil className="ml-auto h-3.5 w-3.5 text-muted-foreground" />
+            </div>
+          </button>
+        ) : (
+          <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+            尚未生成AI总结。
+          </div>
+        )}
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Button variant="outline" onClick={aiSummary ? onOpenAiSummary : onGenerateAiSummary} disabled={aiSummarizing}>
+            <Sparkles className="mr-1.5 h-4 w-4" />
+            {aiSummarizing ? '总结中...' : aiSummary ? '编辑AI总结' : '生成AI总结'}
+          </Button>
+          <Button onClick={onGenerateReport} disabled={generatingReport}>
+            <FileText className="mr-1.5 h-4 w-4" />
+            {generatingReport ? '生成中...' : '生成报告'}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function BasicInfoTab({ task, onRefresh }: { task: TaskDetail; onRefresh: () => void }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -2675,6 +2702,119 @@ function FunctionsTab({ taskId, onStatusUpdate, onRecipesChange, onBindingTarget
         onAddStep={(recipe) => { setSelectedRecipe(recipe); setAddStepDialogOpen(true); }}
         onEditStep={(step) => handleEditStep(step)}
         onBindingTargetChange={(target) => onBindingTargetChange?.(target)}
+        renderEffectEditor={(recipe) => (
+          <div className="rounded-lg border bg-card p-3 shadow-sm space-y-3">
+            <div className="flex items-center gap-2">
+              <Star className="h-4 w-4 text-primary" />
+              <span className="text-sm font-medium">编辑效果/出品评价</span>
+              {recipe.effect_score && (
+                <Badge className="ml-auto text-[10px]">
+                  {recipe.effect_score}分
+                </Badge>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">评价描述</Label>
+              <Textarea
+                placeholder="描述该功能/食谱的出品效果、使用感受和关键观察..."
+                value={effectDesc[recipe.id] ?? recipe.effect_description ?? ''}
+                onChange={(e) => setEffectDesc(prev => ({ ...prev, [recipe.id]: e.target.value }))}
+                rows={3}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">效果素材</Label>
+              <MaterialPicker
+                taskId={taskId}
+                selectedIds={effectMaterialIds[recipe.id] ?? (recipe.effect_materials || []).map(m => m.id)}
+                initialMaterials={recipe.effect_materials || []}
+                onSelectionChange={(ids) => {
+                  setEffectMaterialIds(prev => ({ ...prev, [recipe.id]: ids }));
+                }}
+                selectedPreviewSize="md"
+              />
+            </div>
+            {(() => {
+              const aiData = aiResult[recipe.id]?.result || recipe.effect_ai_result;
+              const aiScore = aiResult[recipe.id]?.score || recipe.effect_score;
+              if (!aiData && !aiScore) return null;
+              return (
+                <div className="rounded-lg border bg-muted/40 p-2.5 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-3.5 w-3.5 text-primary" />
+                    <span className="text-xs font-medium">AI评价结果</span>
+                    {aiScore && <Badge className="ml-auto text-[10px]">{aiScore}分</Badge>}
+                  </div>
+                  {aiData?.summary && <p className="text-[11px] text-muted-foreground">{aiData.summary}</p>}
+                </div>
+              );
+            })()}
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Button variant="outline" size="sm" onClick={() => handleSaveEffect(recipe)} disabled={effectSaving[recipe.id]}>
+                <Save className="h-3.5 w-3.5 mr-1" />
+                {effectSaving[recipe.id] ? '保存中...' : '保存评价'}
+              </Button>
+              <Button size="sm" onClick={() => handleAiEvaluate(recipe)}
+                disabled={aiEvaluating[recipe.id] || (!effectDesc[recipe.id] && !recipe.effect_description && (!effectMaterialIds[recipe.id]?.length && !recipe.effect_materials?.length))}>
+                <Sparkles className="h-3.5 w-3.5 mr-1" />
+                {aiEvaluating[recipe.id] ? 'AI评价中...' : 'AI总结评分'}
+              </Button>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 space-y-3">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                <span className="text-sm font-medium">问题点</span>
+                <span className="text-[10px] text-muted-foreground">
+                  ({(effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? []).filter(p => p.text.trim()).length}条)
+                </span>
+              </div>
+              {(effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? []).map((pp, ppIdx) => (
+                <div key={ppIdx} className="space-y-2 rounded-md border border-amber-200/60 bg-background p-2">
+                  <div className="flex items-start gap-2">
+                    <span className="mt-2 shrink-0 text-[10px] font-medium text-amber-600">问题{ppIdx + 1}</span>
+                    <Input
+                      placeholder="描述问题点..."
+                      value={pp.text}
+                      onChange={(e) => handleUpdateProblemPoint(recipe.id, ppIdx, e.target.value)}
+                      className="text-xs"
+                    />
+                    <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                      onClick={() => handleRemoveProblemPoint(recipe.id, ppIdx)}>
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                  <div className="ml-12">
+                    <MaterialPicker
+                      taskId={taskId}
+                      selectedIds={pp.material_ids || []}
+                      selectedPreviewSize="md"
+                      onSelectionChange={(ids) => {
+                        const existing = effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? [];
+                        setEffectProblemPoints(prev => ({
+                          ...prev,
+                          [recipe.id]: existing.map((item, i) => i === ppIdx ? { ...item, material_ids: ids } : item),
+                        }));
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+              <div className="grid gap-2 sm:grid-cols-3">
+                <Button variant="outline" size="sm" onClick={() => handleAddProblemPoint(recipe.id)}>
+                  <Plus className="h-3.5 w-3.5 mr-1" /> 新增问题点
+                </Button>
+                <Button size="sm" onClick={() => handleAiDetectProblems(recipe)} disabled={aiDetectingProblems[recipe.id]}>
+                  <Sparkles className="h-3.5 w-3.5 mr-1" />
+                  {aiDetectingProblems[recipe.id] ? '识别中...' : 'AI识别问题点'}
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => handleSaveEffect(recipe)} disabled={effectSaving[recipe.id]}>
+                  <Save className="h-3.5 w-3.5 mr-1" />
+                  {effectSaving[recipe.id] ? '保存中...' : '保存'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       />
 
       <div className="hidden">

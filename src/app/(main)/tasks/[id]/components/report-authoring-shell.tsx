@@ -1,52 +1,49 @@
 'use client';
 
 import type { ComponentType, ReactNode } from 'react';
-import { Bot, Eye, FileText, Package, Wrench } from 'lucide-react';
+import { Bot, Eye, FileText, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { AgentAssistPanel } from './agent-assist-panel';
-import type { ReportReadinessResult } from '@/lib/report-readiness';
 
 type TaskTabKey = 'info' | 'materials' | 'senses' | 'functions';
 
 type ReportAuthoringShellProps = {
+  taskId: string;
   activeTab: TaskTabKey;
   agentOpen: boolean;
-  readiness: ReportReadinessResult | null;
   onTabChange: (tab: TaskTabKey) => void;
   onAgentOpenChange: (open: boolean) => void;
   children: ReactNode;
 };
 
 const navItems: Array<{ key: TaskTabKey; label: string; icon: ComponentType<{ className?: string }> | null }> = [
-  { key: 'materials', label: '素材证据', icon: Package },
   { key: 'senses', label: '五感体验', icon: Eye },
   { key: 'functions', label: '功能效果', icon: Wrench },
   { key: 'info', label: 'AI总结/报告', icon: FileText },
 ];
 
 export function ReportAuthoringShell({
+  taskId,
   activeTab,
   agentOpen,
-  readiness,
   onTabChange,
   onAgentOpenChange,
   children,
 }: ReportAuthoringShellProps) {
   return (
-    <div className={cn('grid gap-4 lg:items-start', agentOpen ? 'lg:grid-cols-[220px_minmax(0,1fr)_280px]' : 'lg:grid-cols-[220px_minmax(0,1fr)]')}>
+    <div className={cn('grid gap-4 lg:items-start', agentOpen ? 'lg:grid-cols-[220px_minmax(0,1fr)_320px]' : 'lg:grid-cols-[220px_minmax(0,1fr)]')}>
       <aside className="rounded-lg border bg-card p-3 shadow-sm lg:sticky lg:top-4">
         <div className="mb-3 flex items-center justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold">录入目录</h2>
-            <p className="text-xs text-muted-foreground">先素材，再组织记录。</p>
           </div>
           <Button
             variant={agentOpen ? 'default' : 'outline'}
             size="icon"
             className="h-9 w-9"
             onClick={() => onAgentOpenChange(!agentOpen)}
-            aria-label={agentOpen ? '关闭 Agent 辅助' : '唤醒 Agent 辅助'}
+            aria-label={agentOpen ? '关闭 AI助手' : '唤醒 AI助手'}
           >
             <Bot className="h-4 w-4" />
           </Button>
@@ -74,9 +71,7 @@ export function ReportAuthoringShell({
 
       {agentOpen && (
         <AgentAssistPanel
-          readiness={readiness}
-          activeTab={activeTab}
-          onTabChange={onTabChange}
+          taskId={taskId}
           onClose={() => onAgentOpenChange(false)}
         />
       )}

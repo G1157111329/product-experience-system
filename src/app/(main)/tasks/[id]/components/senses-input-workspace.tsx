@@ -118,7 +118,7 @@ export function SensesInputWorkspace({
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <h3 className="truncate text-base font-semibold">{getRecordTitle(selectedRecord)}</h3>
-                <p className="mt-1 text-xs text-muted-foreground">选中后，顶部素材证据栏可直接绑定图片/视频。</p>
+                <p className="mt-1 text-xs text-muted-foreground">选中记录后可绑定图片/视频。</p>
               </div>
               <div className="flex shrink-0 gap-2">
                 <Button variant="outline" size="sm" onClick={() => onEditRecord(selectedRecord)}>完整编辑</Button>

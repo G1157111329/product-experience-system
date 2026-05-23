@@ -126,6 +126,15 @@ export default function TasksPage() {
     if (user?.id) fetchTasks();
   }, [fetchTasks, user?.id]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('create') === '1') {
+      setDialogOpen(true);
+      window.history.replaceState(null, '', '/tasks');
+    }
+  }, []);
+
   const selectedCategoryData = categories.find((category) => category.name === form.product_category);
   const availableProducts = selectedCategoryData?.products || [];
   const productModelRequired = SELF_DEVELOPMENT_TYPES.includes(form.project_type);

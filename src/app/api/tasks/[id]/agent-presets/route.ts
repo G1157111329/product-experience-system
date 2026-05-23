@@ -92,7 +92,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   return NextResponse.json({
     code: 0,
-    message: 'Agent预设建议已生成',
+    message: 'AI体验方案已生成',
     data: {
       intent,
       suggestions: dedupeSuggestions(merged),
@@ -255,7 +255,7 @@ async function acceptStandardSuggestions(client: ReturnType<typeof getSupabaseCl
     touch_point: item.touch_point || null,
     check_dimension: item.check_dimension || null,
     sub_check_dimension: item.sub_check_dimension || null,
-    check_item: item.check_item || 'Agent预设检查项',
+    check_item: item.check_item || 'AI体验方案检查项',
     check_requirement: item.check_requirement || null,
     check_standard: item.check_standard || null,
     experience_standard: item.experience_standard || null,

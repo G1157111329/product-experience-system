@@ -66,7 +66,7 @@ export function ReportInputPanel({
         <div className="flex items-end justify-between">
           <div>
             <div className="text-3xl font-semibold tracking-normal">{readiness.score}</div>
-            <p className="text-xs text-muted-foreground">输入完整度</p>
+            <p className="text-xs text-muted-foreground">生成前确认</p>
           </div>
           <p className="text-xs text-muted-foreground">
             {criticalCount > 0 ? `${criticalCount} 项关键缺口` : '关键项已完整'}
@@ -103,7 +103,6 @@ export function ReportInputPanel({
           {[
             ['info', '基础信息'],
             ['senses', '五感记录'],
-            ['materials', '素材证据'],
             ['functions', '功能效果'],
           ].map(([key, label]) => (
             <button
