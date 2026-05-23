@@ -6,6 +6,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { buildDisplayReportContent, type AiSummaryLike, type ReportContentWithReview, type ReportReviewOverrides } from '@/lib/report-review-overrides';
+import { mapWithConcurrency, normalizePrintMode, uniqueUrls, type PrintMode } from '@/lib/print-assets';
 
 interface Material {
   id: string; material_type: string; file_name: string; file_url: string; file_size: number;
@@ -77,16 +78,44 @@ const taskFieldLabels: Record<string, string> = {
   assigned_to: '负责人', created_at: '创建时间', updated_at: '更新时间',
 };
 
-async function imageUrlToBase64(url: string): Promise<string> {
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function imageUrlToPrintableDataUrl(url: string, mode: PrintMode): Promise<string> {
   try {
     const response = await fetch(url);
     const blob = await response.blob();
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
+    if (mode === 'high') return blobToDataUrl(blob);
+
+    const objectUrl = URL.createObjectURL(blob);
+    try {
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = objectUrl;
+      });
+      const maxSide = 1200;
+      const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+      const width = Math.max(1, Math.round(image.naturalWidth * scale));
+      const height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return blobToDataUrl(blob);
+      ctx.drawImage(image, 0, 0, width, height);
+      const compressed = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.72));
+      return compressed ? blobToDataUrl(compressed) : blobToDataUrl(blob);
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
   } catch {
     return url;
   }
@@ -368,11 +397,13 @@ export default function ReportPrintPage() {
 function ReportPrintContent() {
   const searchParams = useSearchParams();
   const reportId = searchParams.get('id');
+  const printMode = normalizePrintMode(searchParams.get('mode'));
   const [report, setReport] = useState<ReportData | null>(null);
   const [siblingReports, setSiblingReports] = useState<ReportData[]>([]);
   const [liveIssuesMap, setLiveIssuesMap] = useState<Record<string, IssueItem[]>>({});
   const [loading, setLoading] = useState(true);
   const [imagesLoaded, setImagesLoaded] = useState(false);
+  const [imageProgress, setImageProgress] = useState({ total: 0, done: 0 });
 
   useEffect(() => {
     if (!reportId) return;
@@ -430,9 +461,17 @@ function ReportPrintContent() {
     });
   }, [siblingReports]);
 
-  // Convert images to base64
+  // Convert images for printing. Fast mode dedupes and compresses; high mode keeps originals.
   useEffect(() => {
     if (!report) return;
+    setImagesLoaded(false);
+    setImageProgress({ total: 0, done: 0 });
+
+    if (printMode === 'text') {
+      setImagesLoaded(true);
+      return;
+    }
+
     const convertImages = async () => {
       const allReports = [report, ...siblingReports];
       const allImageUrls: string[] = [];
@@ -458,18 +497,22 @@ function ReportPrintContent() {
         });
       });
 
-      await Promise.all(allImageUrls.map(async (url) => {
+      const imageUrls = uniqueUrls(allImageUrls);
+      setImageProgress({ total: imageUrls.length, done: 0 });
+
+      await mapWithConcurrency(imageUrls, printMode === 'high' ? 3 : 5, async (url) => {
         try {
-          const base64 = await imageUrlToBase64(url);
+          const base64 = await imageUrlToPrintableDataUrl(url, printMode);
           const imgs = document.querySelectorAll(`img[src="${url}"]`);
           imgs.forEach(img => { (img as HTMLImageElement).src = base64; });
         } catch { /* ignore */ }
-      }));
+        setImageProgress((current) => ({ total: current.total, done: current.done + 1 }));
+      });
       setImagesLoaded(true);
     };
     const timer = setTimeout(convertImages, 500);
     return () => clearTimeout(timer);
-  }, [report, siblingReports]);
+  }, [report, siblingReports, printMode]);
 
   useEffect(() => {
     if (report && imagesLoaded) {
@@ -509,7 +552,13 @@ function ReportPrintContent() {
   });
 
   return (
-    <div className="print-container" style={{ padding: '40px', maxWidth: '1000px', margin: '0 auto', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif', color: '#1a1a1a', lineHeight: 1.6, fontSize: '14px' }}>
+    <>
+      {!imagesLoaded && printMode !== 'text' && (
+        <div className="print-status" style={{ position: 'fixed', top: 16, right: 16, zIndex: 50, padding: '10px 12px', borderRadius: '8px', background: '#0f766e', color: 'white', fontSize: '12px', boxShadow: '0 8px 24px rgba(0,0,0,0.16)' }}>
+          正在处理图片 {imageProgress.done}/{imageProgress.total || '-'} · {printMode === 'high' ? '高清模式' : '快速模式'}
+        </div>
+      )}
+    <div className={`print-container ${printMode === 'text' ? 'print-text-mode' : ''}`} style={{ padding: '40px', maxWidth: '1000px', margin: '0 auto', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif', color: '#1a1a1a', lineHeight: 1.6, fontSize: '14px' }}>
       {/* Title */}
       <h1 style={{ fontSize: '24px', marginBottom: '8px', color: '#0d9488' }}>
         {report.product_model || displayReport.title}
@@ -580,12 +629,16 @@ function ReportPrintContent() {
       <style>{`
         @media print {
           body { margin: 0; padding: 0; }
+          .print-status { display: none !important; }
           .print-container { padding: 20px !important; }
+          .print-text-mode img, .print-text-mode video { display: none !important; }
           h2, h3 { page-break-after: avoid; }
           img { page-break-inside: avoid; max-width: 100%; }
         }
+        .print-text-mode img, .print-text-mode video { display: none !important; }
         @page { size: A4; margin: 20mm; }
       `}</style>
     </div>
+    </>
   );
 }

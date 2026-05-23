@@ -24,7 +24,12 @@ import { ImageEditorDialog } from '@/components/image-editor-dialog';
 import { PageShell } from '@/components/app';
 import { MediaGallery } from '@/components/app/media-gallery';
 import { buildReportReadiness } from '@/lib/report-readiness';
-import { ReportInputPanel } from './components/report-input-panel';
+import { AgentPresetPanel } from './components/agent-preset-panel';
+import { MaterialEvidenceRail } from './components/material-evidence-rail';
+import { ReportAuthoringShell } from './components/report-authoring-shell';
+import { SensesInputWorkspace } from './components/senses-input-workspace';
+import { FunctionsInputWorkspace } from './components/functions-input-workspace';
+import type { EvidenceBindingTarget } from './types';
 
 /* ─── Types ─── */
 interface CategoryWithProducts {
@@ -186,6 +191,8 @@ export default function TaskDetailPage() {
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'info' | 'materials' | 'senses' | 'functions'>('info');
+  const [evidenceBindingTarget, setEvidenceBindingTarget] = useState<EvidenceBindingTarget | null>(null);
+  const [agentAssistOpen, setAgentAssistOpen] = useState(false);
   const [generateConfirmOpen, setGenerateConfirmOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferUsers, setTransferUsers] = useState<Array<{ id: string; name: string; account: string }>>([]);
@@ -225,6 +232,17 @@ export default function TaskDetailPage() {
     setReportRecipes(await loadRecipesForTask(id));
   }, [id]);
 
+  const handleAgentAccepted = useCallback(() => {
+    fetchTask();
+    fetchReportRecipes();
+    setActiveTab('senses');
+  }, [fetchReportRecipes, fetchTask]);
+
+  const handleMaterialsChanged = useCallback(() => {
+    fetchTask();
+    fetchReportRecipes();
+  }, [fetchReportRecipes, fetchTask]);
+
   useEffect(() => { fetchTask().finally(() => setLoading(false)); }, [fetchTask]);
   useEffect(() => { fetchAiSummary(); }, [fetchAiSummary]);
   useEffect(() => { fetchReportRecipes(); }, [fetchReportRecipes]);
@@ -234,6 +252,9 @@ export default function TaskDetailPage() {
       setActiveTab(tab);
     }
   }, [searchParams]);
+  useEffect(() => {
+    setEvidenceBindingTarget(null);
+  }, [activeTab]);
 
   const reportReadiness = useMemo(() => {
     if (!task) return null;
@@ -403,6 +424,7 @@ export default function TaskDetailPage() {
           <p className="text-xs sm:text-sm text-muted-foreground mt-1 break-all">{task.product_model} | {task.product_category}{task.product ? ` - ${task.product}` : ''}{task.project_type ? ` | ${task.project_type}` : ''}{task.project_phase ? ` | ${task.project_phase}` : ''}</p>
         </div>
         <div className="grid grid-cols-2 gap-2 shrink-0 w-full sm:flex sm:w-auto sm:justify-end">
+          <AgentPresetPanel taskId={id} userId={user?.id} onAccepted={handleAgentAccepted} />
           <Button variant="outline" size="sm" className="min-w-0 sm:flex-none" onClick={aiSummary ? openAiSummaryDialog : handleGenerateAiSummary} disabled={aiSummarizing}>
             <Sparkles className="h-4 w-4 mr-1.5" /> {aiSummarizing ? '总结中...' : aiSummary ? 'AI总结' : '生成AI总结'}
           </Button>
@@ -432,10 +454,14 @@ export default function TaskDetailPage() {
         </button>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
-        <div className="order-2 min-w-0 space-y-4 lg:order-1">
-      {/* Tab Navigation */}
-      <div className="sticky top-14 z-20 -mx-3 flex gap-2 overflow-x-auto border-y bg-background/95 px-3 py-2 backdrop-blur scrollbar-none sm:static sm:mx-0 sm:grid sm:grid-cols-4 sm:overflow-visible sm:rounded-lg sm:border sm:bg-muted/40 sm:p-1">
+      <ReportAuthoringShell
+        activeTab={activeTab}
+        agentOpen={agentAssistOpen}
+        readiness={reportReadiness}
+        onTabChange={setActiveTab}
+        onAgentOpenChange={setAgentAssistOpen}
+      >
+      <div className="hidden">
         {[
           { key: 'info' as const, label: '基本信息', icon: null },
           { key: 'materials' as const, label: '素材仓库', icon: Package },
@@ -458,29 +484,20 @@ export default function TaskDetailPage() {
         ))}
       </div>
 
+      {activeTab !== 'info' && (
+        <MaterialEvidenceRail
+          taskId={id}
+          bindingTarget={evidenceBindingTarget}
+          onMaterialsChange={handleMaterialsChanged}
+        />
+      )}
+
       {/* Tab Content */}
       {activeTab === 'info' && <BasicInfoTab task={task} onRefresh={fetchTask} />}
       {activeTab === 'materials' && <MaterialsTab taskId={id} />}
-      {activeTab === 'senses' && <SensesTab taskId={id} records={task.records || []} taskProductCategory={task.product_category} taskProduct={task.product} onRefresh={fetchTask} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} />}
-      {activeTab === 'functions' && <FunctionsTab taskId={id} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onRecipesChange={setReportRecipes} />}
-        </div>
-
-        {reportReadiness && (
-          <div className="order-1 lg:order-2">
-            <ReportInputPanel
-              readiness={reportReadiness}
-              activeTab={activeTab}
-              generatingReport={generatingReport}
-              aiSummaryExists={Boolean(aiSummary)}
-              aiSummarizing={aiSummarizing}
-              onTabChange={setActiveTab}
-              onGenerateReport={handleRequestGenerateReport}
-              onOpenAiSummary={openAiSummaryDialog}
-              onGenerateAiSummary={handleGenerateAiSummary}
-            />
-          </div>
-        )}
-      </div>
+        {activeTab === 'senses' && <SensesTab taskId={id} records={task.records || []} taskProductCategory={task.product_category} taskProduct={task.product} onRefresh={fetchTask} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onBindingTargetChange={setEvidenceBindingTarget} />}
+        {activeTab === 'functions' && <FunctionsTab taskId={id} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onRecipesChange={setReportRecipes} onBindingTargetChange={setEvidenceBindingTarget} />}
+      </ReportAuthoringShell>
 
       {/* Transfer Dialog */}
       <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
@@ -1058,7 +1075,7 @@ const defaultFlowByPhase: Record<string, string[]> = {
 };
 const standardCategoryOptions = ['通用标准', '品类标准', '感官评价标准', '非标准'];
 
-function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefresh, onStatusUpdate }: { taskId: string; records: CheckRecord[]; taskProductCategory?: string; taskProduct?: string | null; onRefresh: () => void; onStatusUpdate: () => void }) {
+function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefresh, onStatusUpdate, onBindingTargetChange }: { taskId: string; records: CheckRecord[]; taskProductCategory?: string; taskProduct?: string | null; onRefresh: () => void; onStatusUpdate: () => void; onBindingTargetChange?: (target: EvidenceBindingTarget | null) => void }) {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [savingRecord, setSavingRecord] = useState(false);
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
@@ -2027,6 +2044,28 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
     return <div className="space-y-3">{categorySelector}<p className="text-sm text-muted-foreground text-center py-4">请选择标准类型</p></div>;
   };
 
+  const openCreateRecordDialog = async () => {
+    setEditRecordId(null);
+    setEditRecordData(null);
+    resetForms();
+    try {
+      const res = await fetch('/api/settings?key=senses_defaults');
+      const d = await res.json();
+      if (d.code === 0 && d.data) {
+        const defaults = d.data;
+        if (defaults.test_phase) {
+          setGeneralForm(prev => ({ ...prev, test_phase: defaults.test_phase, experience_flow: defaults.experience_flow || '' }));
+        }
+        if (defaults.sensory_dimension) {
+          setGeneralForm(prev => ({ ...prev, sensory_dimension: defaults.sensory_dimension }));
+          setCategoryForm(prev => ({ ...prev, sensory_dimension: defaults.sensory_dimension }));
+          setSensoryForm(prev => ({ ...prev, sensory_dimension: defaults.sensory_dimension }));
+        }
+      }
+    } catch {}
+    setAddDialogOpen(true);
+  };
+
   const handleDeleteRecord = async (record: CheckRecord) => {
     const res = await fetch(`/api/records/${record.id}`, { method: 'DELETE' });
     const data = await res.json();
@@ -2042,6 +2081,17 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
     <div className="space-y-4">
       <PreviewComponent />
 
+      <SensesInputWorkspace
+        records={records}
+        recordMaterials={recordMaterials}
+        onCreateRecord={openCreateRecordDialog}
+        onEditRecord={handleEditRecord}
+        onDeleteRecord={handleDeleteRecord}
+        onPreview={open}
+        onBindingTargetChange={(target) => onBindingTargetChange?.(target)}
+      />
+
+      <div className="hidden">
       {records.length === 0 ? (
         <Card><CardContent className="flex flex-col items-center py-12 text-center">
           <Eye className="h-10 w-10 text-muted-foreground/50 mb-3" />
@@ -2141,6 +2191,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
           <Plus className="h-4 w-4 mr-1.5" /> 新增问题点
         </Button>
       </div>
+      </div>
 
       {/* Add/Edit dialog */}
       <Dialog open={addDialogOpen} onOpenChange={(v) => { setAddDialogOpen(v); if (!v) { resetForms(); setEditRecordId(null); } }}>
@@ -2156,7 +2207,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
 
 
 /* ─── Tab: 功能效果 ─── */
-function FunctionsTab({ taskId, onStatusUpdate, onRecipesChange }: { taskId: string; onStatusUpdate: () => void; onRecipesChange?: (recipes: Recipe[]) => void }) {
+function FunctionsTab({ taskId, onStatusUpdate, onRecipesChange, onBindingTargetChange }: { taskId: string; onStatusUpdate: () => void; onRecipesChange?: (recipes: Recipe[]) => void; onBindingTargetChange?: (target: EvidenceBindingTarget | null) => void }) {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingRecipe, setSavingRecipe] = useState(false);
@@ -2617,6 +2668,16 @@ function FunctionsTab({ taskId, onStatusUpdate, onRecipesChange }: { taskId: str
     <div className="space-y-4">
       <PreviewComponent />
 
+      <FunctionsInputWorkspace
+        recipes={recipes}
+        onCreateRecipe={() => setAddDialogOpen(true)}
+        onEditRecipe={handleEditRecipe}
+        onAddStep={(recipe) => { setSelectedRecipe(recipe); setAddStepDialogOpen(true); }}
+        onEditStep={(step) => handleEditStep(step)}
+        onBindingTargetChange={(target) => onBindingTargetChange?.(target)}
+      />
+
+      <div className="hidden">
       {loading ? (
         <div className="space-y-2">{[1,2].map(i => <div key={i} className="h-16 bg-muted animate-pulse rounded-lg" />)}</div>
       ) : recipes.length === 0 ? (
@@ -2914,6 +2975,8 @@ function FunctionsTab({ taskId, onStatusUpdate, onRecipesChange }: { taskId: str
         <Button className="w-full" onClick={() => setAddDialogOpen(true)}>
           <Plus className="h-4 w-4 mr-1.5" /> 新增食谱/功能
         </Button>
+      </div>
+
       </div>
 
       {/* Add recipe dialog */}

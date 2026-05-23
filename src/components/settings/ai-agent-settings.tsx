@@ -1,0 +1,312 @@
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+import { Sparkles, Save, Power, Plus } from 'lucide-react';
+import { toast } from 'sonner';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
+import { useAuth } from '@/lib/auth-context';
+
+interface ModelConfig {
+  id?: string;
+  name: string;
+  provider: string;
+  model: string;
+  temperature: number;
+  max_tokens: number;
+  supports_vision: boolean;
+  custom_api_url: string;
+  custom_api_key?: string;
+  is_active?: boolean;
+}
+
+interface SkillTemplate {
+  id: string;
+  skill_key: string;
+  name: string;
+  description?: string;
+  is_enabled: boolean;
+  active_version_id: string | null;
+  active_version?: {
+    id: string;
+    version: number;
+    system_prompt: string;
+    user_prompt_template: string;
+    output_schema: Record<string, unknown>;
+  } | null;
+}
+
+const emptyModel: ModelConfig = {
+  name: '默认AI模型',
+  provider: 'builtin',
+  model: 'kimi-k2-5-260127',
+  temperature: 0.5,
+  max_tokens: 2400,
+  supports_vision: true,
+  custom_api_url: '',
+  custom_api_key: '',
+};
+
+export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenChange: (value: boolean) => void }) {
+  const { user } = useAuth();
+  const [models, setModels] = useState<ModelConfig[]>([]);
+  const [modelForm, setModelForm] = useState<ModelConfig>(emptyModel);
+  const [skills, setSkills] = useState<SkillTemplate[]>([]);
+  const [editingSkill, setEditingSkill] = useState<SkillTemplate | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const fetchData = useCallback(async () => {
+    const [modelsRes, skillsRes] = await Promise.all([
+      fetch('/api/ai/model-configs'),
+      fetch(`/api/ai/skill-templates?admin_user_id=${user?.id || ''}`),
+    ]);
+    const modelsData = await modelsRes.json();
+    const skillsData = await skillsRes.json();
+    if (modelsData.code === 0) {
+      setModels(modelsData.data || []);
+      const active = (modelsData.data || []).find((item: ModelConfig) => item.is_active);
+      if (active) setModelForm({ ...emptyModel, ...active, custom_api_key: '' });
+    }
+    if (skillsData.code === 0) setSkills(skillsData.data || []);
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (open) fetchData();
+  }, [fetchData, open]);
+
+  const saveModel = async () => {
+    if (!user?.id) return;
+    setSaving(true);
+    try {
+      const res = await fetch('/api/ai/model-configs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...modelForm, admin_user_id: user.id }),
+      });
+      const data = await res.json();
+      if (data.code !== 0) {
+        toast.error(data.message || '模型配置保存失败');
+        return;
+      }
+      toast.success('模型配置已保存');
+      await fetchData();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const activateModel = async (id: string) => {
+    if (!user?.id) return;
+    const res = await fetch('/api/ai/model-configs', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, admin_user_id: user.id }),
+    });
+    const data = await res.json();
+    if (data.code === 0) {
+      toast.success('模型配置已启用');
+      fetchData();
+    } else {
+      toast.error(data.message || '启用失败');
+    }
+  };
+
+  const toggleSkill = async (template: SkillTemplate, enabled: boolean) => {
+    if (!user?.id) return;
+    const res = await fetch('/api/ai/skill-templates', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ template_id: template.id, is_enabled: enabled, admin_user_id: user.id }),
+    });
+    const data = await res.json();
+    if (data.code === 0) {
+      toast.success(enabled ? 'Skill已启用' : 'Skill已停用');
+      fetchData();
+    } else {
+      toast.error(data.message || '保存失败');
+    }
+  };
+
+  const createSkillVersion = async () => {
+    if (!user?.id || !editingSkill?.active_version) return;
+    const version = editingSkill.active_version;
+    const res = await fetch('/api/ai/skill-templates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        template_id: editingSkill.id,
+        system_prompt: version.system_prompt,
+        user_prompt_template: version.user_prompt_template,
+        output_schema: version.output_schema || {},
+        notes: '管理员调整模板',
+        admin_user_id: user.id,
+      }),
+    });
+    const data = await res.json();
+    if (data.code === 0) {
+      await fetch('/api/ai/skill-templates', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ template_id: editingSkill.id, active_version_id: data.data.id, admin_user_id: user.id }),
+      });
+      toast.success('Skill新版本已启用');
+      setEditingSkill(null);
+      fetchData();
+    } else {
+      toast.error(data.message || '版本创建失败');
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl max-h-[88vh]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5" /> AI Agent 设置
+          </DialogTitle>
+          <DialogDescription>管理模型接入、Skills 模板版本、启停与审计能力</DialogDescription>
+        </DialogHeader>
+
+        <ScrollArea className="max-h-[68vh] pr-3">
+          <div className="grid gap-5 lg:grid-cols-[320px_1fr]">
+            <section className="space-y-3">
+              <div>
+                <h3 className="text-sm font-semibold">模型接入</h3>
+                <p className="text-xs text-muted-foreground">当前启用模型将作为 Agent 默认模型</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs">配置名称</Label>
+                <Input value={modelForm.name} onChange={(event) => setModelForm({ ...modelForm, name: event.target.value })} />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-2">
+                  <Label className="text-xs">服务</Label>
+                  <Select value={modelForm.provider} onValueChange={(value) => setModelForm({ ...modelForm, provider: value })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="builtin">内置模型</SelectItem>
+                      <SelectItem value="custom">自定义API</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs">温度</Label>
+                  <Input type="number" min={0} max={1} step={0.1} value={modelForm.temperature}
+                    onChange={(event) => setModelForm({ ...modelForm, temperature: Number(event.target.value) })} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs">模型名</Label>
+                <Input value={modelForm.model} onChange={(event) => setModelForm({ ...modelForm, model: event.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs">最大 token</Label>
+                <Input type="number" value={modelForm.max_tokens}
+                  onChange={(event) => setModelForm({ ...modelForm, max_tokens: Number(event.target.value) })} />
+              </div>
+              <div className="flex items-center justify-between rounded-md border px-3 py-2">
+                <Label className="text-xs">支持视觉输入</Label>
+                <Switch checked={modelForm.supports_vision} onCheckedChange={(checked) => setModelForm({ ...modelForm, supports_vision: checked })} />
+              </div>
+              {modelForm.provider === 'custom' && (
+                <>
+                  <div className="space-y-2">
+                    <Label className="text-xs">API 地址</Label>
+                    <Input value={modelForm.custom_api_url} onChange={(event) => setModelForm({ ...modelForm, custom_api_url: event.target.value })} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">API Key</Label>
+                    <Input type="password" value={modelForm.custom_api_key || ''} onChange={(event) => setModelForm({ ...modelForm, custom_api_key: event.target.value })} />
+                  </div>
+                </>
+              )}
+              <Button className="w-full gap-2" onClick={saveModel} disabled={saving}>
+                <Save className="h-4 w-4" /> 保存模型配置
+              </Button>
+
+              {models.length > 0 && (
+                <div className="space-y-2">
+                  <Separator />
+                  {models.map((model) => (
+                    <div key={model.id} className="flex items-center justify-between rounded-md border px-3 py-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">{model.name}</div>
+                        <div className="truncate text-xs text-muted-foreground">{model.model}</div>
+                      </div>
+                      {model.is_active ? (
+                        <Badge>启用中</Badge>
+                      ) : (
+                        <Button variant="outline" size="sm" className="gap-1" onClick={() => model.id && activateModel(model.id)}>
+                          <Power className="h-3.5 w-3.5" /> 启用
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="space-y-3">
+              <div>
+                <h3 className="text-sm font-semibold">Skills 模板</h3>
+                <p className="text-xs text-muted-foreground">编辑会创建新版本，历史版本不会被覆盖</p>
+              </div>
+              <div className="space-y-2">
+                {skills.map((skill) => (
+                  <div key={skill.id} className="rounded-md border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium text-sm">{skill.name}</span>
+                          <Badge variant="outline" className="text-[10px]">v{skill.active_version?.version || '-'}</Badge>
+                          <Badge variant={skill.is_enabled ? 'default' : 'secondary'} className="text-[10px]">{skill.is_enabled ? '启用' : '停用'}</Badge>
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">{skill.description}</p>
+                      </div>
+                      <Switch checked={skill.is_enabled} onCheckedChange={(checked) => toggleSkill(skill, checked)} />
+                    </div>
+                    <div className="mt-3 flex justify-end">
+                      <Button variant="outline" size="sm" className="gap-1" onClick={() => setEditingSkill(skill)}>
+                        <Plus className="h-3.5 w-3.5" /> 新版本
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        </ScrollArea>
+
+        {editingSkill?.active_version && (
+          <div className="space-y-3 border-t pt-4">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-medium">{editingSkill.name} · 新版本</div>
+              <Button size="sm" onClick={createSkillVersion}>保存并启用</Button>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-2">
+              <div className="space-y-2">
+                <Label className="text-xs">System Prompt</Label>
+                <Textarea className="min-h-28" value={editingSkill.active_version.system_prompt}
+                  onChange={(event) => setEditingSkill({ ...editingSkill, active_version: { ...editingSkill.active_version!, system_prompt: event.target.value } })} />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs">User Prompt Template</Label>
+                <Textarea className="min-h-28" value={editingSkill.active_version.user_prompt_template}
+                  onChange={(event) => setEditingSkill({ ...editingSkill, active_version: { ...editingSkill.active_version!, user_prompt_template: event.target.value } })} />
+              </div>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}

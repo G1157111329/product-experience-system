@@ -15,7 +15,6 @@ import { toast } from 'sonner';
 import { PageShell } from '@/components/app';
 import { MediaGallery } from '@/components/app/media-gallery';
 import { buildDisplayReportContent, type AiSummaryLike, type ReportContentWithReview, type ReportReviewOverrides } from '@/lib/report-review-overrides';
-import { ReportReviewEditor } from './components/report-review-editor';
 
 interface Material {
   id: string; material_type: string; file_name: string; file_url: string; file_size: number;
@@ -533,7 +532,7 @@ export default function ReportDetailPage() {
   };
 
   const handleExportPDF = () => {
-    window.open(`/reports/print?id=${id}`, '_blank');
+    window.open(`/reports/print?id=${id}&mode=fast`, '_blank');
   };
 
   const openShareDialog = async () => {
@@ -620,9 +619,6 @@ export default function ReportDetailPage() {
           <h1 className="text-xl font-semibold leading-tight break-words lg:text-2xl">{report.product_model || displayReport.title} {isMerged && <Badge variant="secondary" className="text-[10px] ml-1 align-middle">合并 {allReports.length} 份报告</Badge>}</h1>
           <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground flex-wrap">
             <Badge variant="secondary" className="text-[10px]">{report.status}</Badge>
-            <Badge variant="outline" className="text-[10px]">
-              {displayReport.review_status === 'published' ? '已发布' : displayReport.review_status === 'reviewed' ? '已评审' : '待评审'}
-            </Badge>
             {projectType && <span>{projectType}</span>}
             {taskPhase && <span>{taskPhase}</span>}
           </div>
@@ -637,8 +633,6 @@ export default function ReportDetailPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
-        <div className="min-w-0 space-y-4">
       {/* Summary Stats */}
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 lg:gap-3">
         {[
@@ -659,8 +653,8 @@ export default function ReportDetailPage() {
 
       <div className="rounded-lg border bg-card p-3 shadow-sm lg:flex lg:items-center lg:justify-between lg:gap-4">
         <div className="min-w-0">
-          <p className="text-xs font-medium text-muted-foreground">评审导航</p>
-          <p className="mt-1 text-sm font-medium">按阶段阅读报告，随时打开图/视频证据核对结论</p>
+          <p className="text-xs font-medium text-muted-foreground">报告导航</p>
+          <p className="mt-1 text-sm font-medium">按阶段阅读报告，随时打开图/视频证据查看细节</p>
         </div>
         <div className="mt-3 flex gap-2 overflow-x-auto lg:mt-0 lg:justify-end">
           {allReports.map((rpt, idx) => {
@@ -724,23 +718,6 @@ export default function ReportDetailPage() {
           </Card>
         );
       })}
-        </div>
-
-        <ReportReviewEditor
-          report={{
-            id: report.id,
-            title: report.title,
-            content: report.content as ReportContentWithReview | null,
-          }}
-          onSaved={(updated) => {
-            setReport((prev) => prev ? {
-              ...prev,
-              title: updated.title,
-              content: updated.content as unknown as ReportContent,
-            } : prev);
-          }}
-        />
-      </div>
 
       {/* Issue Status Quick Edit Dialog */}
       <Dialog open={statusDialogOpen} onOpenChange={(v) => { if (!v) { setStatusDialogOpen(false); setEditingIssue(null); } else setStatusDialogOpen(v); }}>

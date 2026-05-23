@@ -1,8 +1,7 @@
 'use client';
 
-import { AlertTriangle, CheckCircle2, CircleDot, FileText, Image as ImageIcon, Sparkles } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, CircleDot, Image as ImageIcon } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 import type { ReportReadinessItem, ReportReadinessResult } from '@/lib/report-readiness';
@@ -12,13 +11,7 @@ type TaskTabKey = 'info' | 'materials' | 'senses' | 'functions';
 type ReportInputPanelProps = {
   readiness: ReportReadinessResult;
   activeTab: TaskTabKey;
-  generatingReport: boolean;
-  aiSummaryExists: boolean;
-  aiSummarizing: boolean;
   onTabChange: (tab: TaskTabKey) => void;
-  onGenerateReport: () => void;
-  onOpenAiSummary: () => void;
-  onGenerateAiSummary: () => void;
 };
 
 const itemTabMap: Record<string, TaskTabKey> = {
@@ -48,13 +41,7 @@ function getItemIcon(item: ReportReadinessItem) {
 export function ReportInputPanel({
   readiness,
   activeTab,
-  generatingReport,
-  aiSummaryExists,
-  aiSummarizing,
   onTabChange,
-  onGenerateReport,
-  onOpenAiSummary,
-  onGenerateAiSummary,
 }: ReportInputPanelProps) {
   const attentionItems = readiness.items.filter((item) => item.status !== 'ok');
   const primaryItems = attentionItems.length > 0 ? attentionItems : readiness.items.slice(0, 4);
@@ -157,21 +144,6 @@ export function ReportInputPanel({
             </button>
           );
         })}
-      </div>
-
-      <div className="mt-4 grid gap-2">
-        <Button onClick={onGenerateReport} disabled={generatingReport}>
-          <FileText className="mr-1.5 h-4 w-4" />
-          {generatingReport ? '生成中...' : '生成报告'}
-        </Button>
-        <Button
-          variant="outline"
-          onClick={aiSummaryExists ? onOpenAiSummary : onGenerateAiSummary}
-          disabled={aiSummarizing}
-        >
-          <Sparkles className="mr-1.5 h-4 w-4" />
-          {aiSummarizing ? '总结中...' : aiSummaryExists ? '查看 AI总结' : '生成 AI总结'}
-        </Button>
       </div>
 
       <p className="mt-3 text-xs leading-relaxed text-muted-foreground">

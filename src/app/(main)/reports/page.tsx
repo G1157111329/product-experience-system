@@ -15,7 +15,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 import { ActionDock, EmptyState, FilterBar, LoadingState, PageHeader, PageShell, SearchField } from '@/components/app';
-import { buildDisplayReportContent, type ReportContentWithReview } from '@/lib/report-review-overrides';
 
 interface Report {
   id: string; title: string; product_model: string | null;
@@ -79,16 +78,6 @@ function getReportReviewStats(report: Report) {
   };
 }
 
-function getReviewStatusLabel(report: Report) {
-  const display = buildDisplayReportContent({
-    title: report.title,
-    content: report.content as ReportContentWithReview | null,
-  });
-  if (display.review_status === 'published') return '已发布';
-  if (display.review_status === 'reviewed') return '已评审';
-  return '待评审';
-}
-
 export default function ReportsPage() {
   const { user, isAdmin } = useAuth();
   const router = useRouter();
@@ -136,7 +125,7 @@ export default function ReportsPage() {
   };
 
   const handlePrint = (id: string) => {
-    window.open(`/reports/print?id=${id}`, '_blank');
+    window.open(`/reports/print?id=${id}&mode=fast`, '_blank');
   };
 
   const openShareDialog = async (reportId: string) => {
@@ -194,14 +183,6 @@ export default function ReportsPage() {
     ? reports
     : reports.filter(r => r.product_category === categoryFilter);
   const selectedCompareReports = visibleReports.filter(r => compareIds.includes(r.id));
-  const reviewTotals = visibleReports.reduce((acc, report) => {
-    const stats = getReportReviewStats(report);
-    acc.failedRecords += stats.failedRecords;
-    acc.recipeProblems += stats.recipeProblems;
-    acc.media += stats.media;
-    return acc;
-  }, { failedRecords: 0, recipeProblems: 0, media: 0 });
-
   const handleOpenCompare = async () => {
     if (compareIds.length !== 2) {
       toast.error('请选择两份报告进行对比');
@@ -307,27 +288,6 @@ export default function ReportsPage() {
         </Select>
       </FilterBar>
 
-      <div className="grid gap-2 rounded-lg border bg-card p-3 shadow-sm sm:grid-cols-4 lg:p-4">
-        <div className="sm:col-span-1">
-          <p className="text-xs font-medium text-muted-foreground">评审视图</p>
-          <p className="mt-1 text-sm font-medium">先筛报告，再看结论、证据和风险</p>
-        </div>
-        <div className="grid grid-cols-3 gap-2 sm:col-span-3">
-          <div className="rounded-md bg-muted/40 p-2">
-            <p className="text-lg font-semibold tabular-nums">{visibleReports.length}</p>
-            <p className="text-xs text-muted-foreground">报告数</p>
-          </div>
-          <div className="rounded-md bg-muted/40 p-2">
-            <p className="text-lg font-semibold tabular-nums text-destructive">{reviewTotals.failedRecords}</p>
-            <p className="text-xs text-muted-foreground">不合格检查</p>
-          </div>
-          <div className="rounded-md bg-muted/40 p-2">
-            <p className="text-lg font-semibold tabular-nums">{reviewTotals.media}</p>
-            <p className="text-xs text-muted-foreground">证据素材</p>
-          </div>
-        </div>
-      </div>
-
       {/* Content */}
       {loading ? (
         <LoadingState label="正在加载报告" />
@@ -360,7 +320,6 @@ export default function ReportsPage() {
                         {latestReport.product_category && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{latestReport.product_category}</Badge>}
                         {latestReport.product && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{latestReport.product}</Badge>}
                         <Badge variant="secondary" className="text-[10px]">{group.reports.length} 份报告</Badge>
-                        <Badge variant="outline" className="text-[10px]">{getReviewStatusLabel(latestReport)}</Badge>
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
@@ -424,7 +383,6 @@ export default function ReportsPage() {
                       {r.product && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{r.product}</Badge>}
                       {r.project_type && <Badge variant="outline" className="text-[10px]">{r.project_type}</Badge>}
                       <Badge variant={r.status === '已审核' ? 'default' : 'secondary'} className="text-[10px]">{r.status === '草稿' ? '已完成' : r.status}</Badge>
-                      <Badge variant="outline" className="text-[10px]">{getReviewStatusLabel(r)}</Badge>
                     </div>
                     <div className="text-[10px] text-muted-foreground mt-1 truncate">
                       {r.task_name && <span>{r.task_name}</span>}

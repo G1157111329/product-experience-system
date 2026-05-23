@@ -86,6 +86,15 @@ export interface Material {
   recipe_id: string | null;
 }
 
+export type MaterialEvidenceFilter = 'all' | 'unlinked' | 'linked' | 'image' | 'video' | 'senses' | 'functions' | 'effect';
+
+export type EvidenceBindingTarget =
+  | { type: 'record'; id: string; label: string }
+  | { type: 'recipe_step'; id: string; label: string }
+  | { type: 'recipe_effect'; id: string; label: string };
+
+export type AuthoringSection = 'materials' | 'senses' | 'functions' | 'summary';
+
 export interface Recipe {
   id: string;
   name: string;

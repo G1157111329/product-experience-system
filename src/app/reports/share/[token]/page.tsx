@@ -200,7 +200,7 @@ export default function ShareReportPage() {
 
   const handleExportPDF = () => {
     if (!report) return;
-    window.open(`/reports/print?id=${report.id}`, '_blank');
+    window.open(`/reports/print?id=${report.id}&mode=fast`, '_blank');
   };
 
   if (loading) {

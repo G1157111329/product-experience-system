@@ -431,3 +431,131 @@ export const platformSettings = pgTable("platform_settings", {
 	value: jsonb().default({}).notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 });
+
+export const aiModelConfigs = pgTable("ai_model_configs", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	name: varchar({ length: 100 }).notNull(),
+	provider: varchar({ length: 20 }).default('builtin').notNull(),
+	model: varchar({ length: 100 }).notNull(),
+	temperature: integer().default(5).notNull(),
+	maxTokens: integer("max_tokens").default(2400).notNull(),
+	supportsVision: boolean("supports_vision").default(false).notNull(),
+	customApiUrl: text("custom_api_url"),
+	customApiKeyEncrypted: text("custom_api_key_encrypted"),
+	isActive: boolean("is_active").default(false).notNull(),
+	createdBy: varchar("created_by", { length: 36 }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+}, (table) => [
+	index("ai_model_configs_active_idx").using("btree", table.isActive.asc().nullsLast().op("bool_ops")),
+	foreignKey({
+		columns: [table.createdBy],
+		foreignColumns: [platformUsers.id],
+		name: "ai_model_configs_created_by_fkey"
+	}).onDelete("set null"),
+	pgPolicy("ai_model_configs_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
+	pgPolicy("ai_model_configs_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
+	pgPolicy("ai_model_configs_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),
+	pgPolicy("ai_model_configs_允许公开删除", { as: "permissive", for: "delete", to: ["public"] }),
+]);
+
+export const agentSkillTemplates = pgTable("agent_skill_templates", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	skillKey: varchar("skill_key", { length: 50 }).notNull(),
+	name: varchar({ length: 100 }).notNull(),
+	description: text(),
+	isEnabled: boolean("is_enabled").default(true).notNull(),
+	activeVersionId: varchar("active_version_id", { length: 36 }),
+	modelConfigId: varchar("model_config_id", { length: 36 }),
+	createdBy: varchar("created_by", { length: 36 }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+}, (table) => [
+	index("agent_skill_templates_key_idx").using("btree", table.skillKey.asc().nullsLast().op("text_ops")),
+	foreignKey({
+		columns: [table.modelConfigId],
+		foreignColumns: [aiModelConfigs.id],
+		name: "agent_skill_templates_model_config_id_fkey"
+	}).onDelete("set null"),
+	foreignKey({
+		columns: [table.createdBy],
+		foreignColumns: [platformUsers.id],
+		name: "agent_skill_templates_created_by_fkey"
+	}).onDelete("set null"),
+	unique("agent_skill_templates_skill_key_key").on(table.skillKey),
+	pgPolicy("agent_skill_templates_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
+	pgPolicy("agent_skill_templates_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
+	pgPolicy("agent_skill_templates_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),
+	pgPolicy("agent_skill_templates_允许公开删除", { as: "permissive", for: "delete", to: ["public"] }),
+]);
+
+export const agentSkillVersions = pgTable("agent_skill_versions", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	templateId: varchar("template_id", { length: 36 }).notNull(),
+	version: integer().notNull(),
+	systemPrompt: text("system_prompt").notNull(),
+	userPromptTemplate: text("user_prompt_template").notNull(),
+	outputSchema: jsonb("output_schema").default({}).notNull(),
+	notes: text(),
+	createdBy: varchar("created_by", { length: 36 }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("agent_skill_versions_template_id_idx").using("btree", table.templateId.asc().nullsLast().op("text_ops")),
+	foreignKey({
+		columns: [table.templateId],
+		foreignColumns: [agentSkillTemplates.id],
+		name: "agent_skill_versions_template_id_fkey"
+	}).onDelete("cascade"),
+	foreignKey({
+		columns: [table.createdBy],
+		foreignColumns: [platformUsers.id],
+		name: "agent_skill_versions_created_by_fkey"
+	}).onDelete("set null"),
+	unique("agent_skill_versions_template_version_key").on(table.templateId, table.version),
+	pgPolicy("agent_skill_versions_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
+	pgPolicy("agent_skill_versions_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
+	pgPolicy("agent_skill_versions_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),
+	pgPolicy("agent_skill_versions_允许公开删除", { as: "permissive", for: "delete", to: ["public"] }),
+]);
+
+export const agentSkillAuditLogs = pgTable("agent_skill_audit_logs", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	skillKey: varchar("skill_key", { length: 50 }).notNull(),
+	templateId: varchar("template_id", { length: 36 }),
+	versionId: varchar("version_id", { length: 36 }),
+	action: varchar({ length: 50 }).notNull(),
+	actorUserId: varchar("actor_user_id", { length: 36 }),
+	taskId: varchar("task_id", { length: 36 }),
+	requestSnapshot: jsonb("request_snapshot").default({}),
+	responseSnapshot: jsonb("response_snapshot").default({}),
+	status: varchar({ length: 20 }).default('success').notNull(),
+	errorMessage: text("error_message"),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("agent_skill_audit_logs_skill_key_idx").using("btree", table.skillKey.asc().nullsLast().op("text_ops")),
+	index("agent_skill_audit_logs_task_id_idx").using("btree", table.taskId.asc().nullsLast().op("text_ops")),
+	foreignKey({
+		columns: [table.templateId],
+		foreignColumns: [agentSkillTemplates.id],
+		name: "agent_skill_audit_logs_template_id_fkey"
+	}).onDelete("set null"),
+	foreignKey({
+		columns: [table.versionId],
+		foreignColumns: [agentSkillVersions.id],
+		name: "agent_skill_audit_logs_version_id_fkey"
+	}).onDelete("set null"),
+	foreignKey({
+		columns: [table.actorUserId],
+		foreignColumns: [platformUsers.id],
+		name: "agent_skill_audit_logs_actor_user_id_fkey"
+	}).onDelete("set null"),
+	foreignKey({
+		columns: [table.taskId],
+		foreignColumns: [experienceTasks.id],
+		name: "agent_skill_audit_logs_task_id_fkey"
+	}).onDelete("set null"),
+	pgPolicy("agent_skill_audit_logs_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
+	pgPolicy("agent_skill_audit_logs_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
+	pgPolicy("agent_skill_audit_logs_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),
+	pgPolicy("agent_skill_audit_logs_允许公开删除", { as: "permissive", for: "delete", to: ["public"] }),
+]);
