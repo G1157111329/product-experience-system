@@ -352,13 +352,18 @@ export default function ReportsPage() {
                       <div key={r.id} className="flex items-center gap-2 px-2.5 py-2 text-sm transition-colors hover:bg-muted/50">
                         <input type="checkbox" checked={compareIds.includes(r.id)} onChange={() => toggleCompare(r.id)}
                           className="h-3.5 w-3.5 shrink-0 rounded border-border" />
-                        <span className="flex-1 min-w-0 truncate">{r.title}</span>
-                        <Badge variant="outline" className="text-[9px] shrink-0">{r.status === '草稿' ? '已完成' : r.status}</Badge>
-                        <span className="text-[10px] text-muted-foreground shrink-0 hidden sm:inline">
-                          {formatBeijingTime(r.created_at)}
-                        </span>
-                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0 cursor-pointer"
-                          onClick={() => router.push(`/reports/${r.id}`)} />
+                        <button
+                          type="button"
+                          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                          onClick={() => router.push(`/reports/${r.id}`)}
+                        >
+                          <span className="flex-1 min-w-0 truncate">{r.title}</span>
+                          <Badge variant="outline" className="text-[9px] shrink-0">{r.status === '草稿' ? '已完成' : r.status}</Badge>
+                          <span className="text-[10px] text-muted-foreground shrink-0 hidden sm:inline">
+                            {formatBeijingTime(r.created_at)}
+                          </span>
+                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        </button>
                       </div>
                     ))}
                   </div>
