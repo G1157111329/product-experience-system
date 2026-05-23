@@ -3,28 +3,83 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { assertAdmin, ensureDefaultSkillTemplates, logAgentAudit } from '@/lib/server/agent-skills';
 import type { AgentSkillKey } from '@/lib/agent-skills';
 
-export async function GET(request: NextRequest) {
-  const client = getSupabaseClient();
-  const adminUserId = request.nextUrl.searchParams.get('admin_user_id');
-  await ensureDefaultSkillTemplates(client, adminUserId);
+function readField<T>(row: Record<string, unknown>, snakeKey: string, camelKey: string, fallback: T): T {
+  return (row[snakeKey] ?? row[camelKey] ?? fallback) as T;
+}
 
+function formatSkillTemplateError(err: unknown, fallback: string) {
+  const message = err instanceof Error ? err.message : fallback;
+  if (message.includes('ECONNREFUSED') || message.includes('Failed query')) {
+    return 'Prompt 模板读取失败，请确认数据库已连接，并已执行 AI Agent Skills 初始化 SQL。';
+  }
+  return message || fallback;
+}
+
+async function listSkillTemplates(client: ReturnType<typeof getSupabaseClient>) {
   const { data, error } = await client
     .from('agent_skill_templates')
-    .select('*, agent_skill_versions(*)')
+    .select('*')
     .order('created_at', { ascending: true });
 
-  if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
+  if (error) return { templates: [], error };
+
+  const { data: versionData, error: versionError } = await client
+    .from('agent_skill_versions')
+    .select('*')
+    .order('version', { ascending: false });
+
+  if (versionError) return { templates: [], error: versionError };
+
+  const versionsByTemplate = new Map<string, Array<Record<string, unknown>>>();
+  for (const rawVersion of (versionData || []) as Array<Record<string, unknown>>) {
+    const version = {
+      ...rawVersion,
+      template_id: readField(rawVersion, 'template_id', 'templateId', ''),
+      system_prompt: readField(rawVersion, 'system_prompt', 'systemPrompt', ''),
+      user_prompt_template: readField(rawVersion, 'user_prompt_template', 'userPromptTemplate', ''),
+      output_schema: readField(rawVersion, 'output_schema', 'outputSchema', {}),
+      created_by: readField(rawVersion, 'created_by', 'createdBy', null),
+      created_at: readField(rawVersion, 'created_at', 'createdAt', null),
+    };
+    const templateId = version.template_id as string;
+    versionsByTemplate.set(templateId, [...(versionsByTemplate.get(templateId) || []), version]);
+  }
 
   const templates = (data || []).map((template: Record<string, unknown>) => {
-    const versions = (template.agent_skill_versions || []) as Array<Record<string, unknown>>;
+    const id = readField(template, 'id', 'id', '');
+    const activeVersionId = readField<string | null>(template, 'active_version_id', 'activeVersionId', null);
+    const versions = (versionsByTemplate.get(id) || []).sort((a, b) => Number(b.version || 0) - Number(a.version || 0));
     return {
       ...template,
-      active_version: versions.find((version) => version.id === template.active_version_id) || null,
-      agent_skill_versions: versions.sort((a, b) => Number(b.version || 0) - Number(a.version || 0)),
+      id,
+      skill_key: readField(template, 'skill_key', 'skillKey', ''),
+      is_enabled: readField(template, 'is_enabled', 'isEnabled', true),
+      active_version_id: activeVersionId,
+      model_config_id: readField(template, 'model_config_id', 'modelConfigId', null),
+      created_by: readField(template, 'created_by', 'createdBy', null),
+      created_at: readField(template, 'created_at', 'createdAt', null),
+      updated_at: readField(template, 'updated_at', 'updatedAt', null),
+      active_version: versions.find((version) => version.id === activeVersionId) || null,
+      agent_skill_versions: versions,
     };
   });
 
-  return NextResponse.json({ code: 0, message: 'success', data: templates });
+  return { templates, error: null };
+}
+
+export async function GET(request: NextRequest) {
+  const client = getSupabaseClient();
+  const adminUserId = request.nextUrl.searchParams.get('admin_user_id');
+  try {
+    const initResult = await ensureDefaultSkillTemplates(client, adminUserId);
+    const { templates, error } = await listSkillTemplates(client);
+
+    if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
+
+    return NextResponse.json({ code: 0, message: 'success', data: templates, meta: initResult });
+  } catch (err) {
+    return NextResponse.json({ code: 1, message: formatSkillTemplateError(err, 'Prompt 模板读取失败') }, { status: 500 });
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -36,6 +91,20 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : '无权限';
     return NextResponse.json({ code: 1, message }, { status: 403 });
+  }
+
+  if (body.action === 'ensure_defaults') {
+    try {
+      const initResult = await ensureDefaultSkillTemplates(client, body.admin_user_id);
+      const { templates, error } = await listSkillTemplates(client);
+      if (error) return NextResponse.json({ code: 1, message: error.message, meta: initResult }, { status: 500 });
+      if (templates.length === 0 && initResult.errors.length > 0) {
+        return NextResponse.json({ code: 1, message: initResult.errors.join('；'), data: templates, meta: initResult }, { status: 500 });
+      }
+      return NextResponse.json({ code: 0, message: 'Prompt 模板已初始化', data: templates, meta: initResult });
+    } catch (err) {
+      return NextResponse.json({ code: 1, message: formatSkillTemplateError(err, 'Prompt 模板初始化失败') }, { status: 500 });
+    }
   }
 
   if (!body.template_id) return NextResponse.json({ code: 1, message: '缺少 Skill ID' }, { status: 400 });

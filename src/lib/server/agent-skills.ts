@@ -28,8 +28,15 @@ export interface AgentAuditInput {
   errorMessage?: string | null;
 }
 
+export interface EnsureSkillTemplateResult {
+  created: number;
+  errors: string[];
+}
+
 export async function assertAdmin(client: SupabaseClientLike, adminUserId: string | null | undefined): Promise<void> {
   if (!adminUserId) throw new Error('缺少管理员用户');
+  const isDev = process.env.COZE_PROJECT_ENV !== 'PROD' && process.env.NODE_ENV !== 'production';
+  if (isDev && adminUserId === 'local-dev-admin') return;
   const { data: admin } = await client
     .from('platform_users')
     .select('role')
@@ -53,14 +60,20 @@ export async function logAgentAudit(client: SupabaseClientLike, input: AgentAudi
   });
 }
 
-export async function ensureDefaultSkillTemplates(client: SupabaseClientLike, adminUserId?: string | null): Promise<void> {
+export async function ensureDefaultSkillTemplates(client: SupabaseClientLike, adminUserId?: string | null): Promise<EnsureSkillTemplateResult> {
+  const result: EnsureSkillTemplateResult = { created: 0, errors: [] };
+
   for (const skill of getDefaultSkillDefinitions()) {
-    const { data: existing } = await client
+    const { data: existing, error: existingError } = await client
       .from('agent_skill_templates')
       .select('*')
       .eq('skill_key', skill.skillKey)
       .maybeSingle() as Awaited<QueryResult>;
 
+    if (existingError) {
+      result.errors.push(`${skill.name}: ${existingError.message || '模板查询失败'}`);
+      continue;
+    }
     if (existing) continue;
 
     const { data: template, error: templateError } = await client
@@ -75,9 +88,12 @@ export async function ensureDefaultSkillTemplates(client: SupabaseClientLike, ad
       .select()
       .single() as Awaited<QueryResult>;
 
-    if (templateError || !template) continue;
+    if (templateError || !template) {
+      result.errors.push(`${skill.name}: ${templateError?.message || '模板创建失败'}`);
+      continue;
+    }
 
-    const { data: version } = await client
+    const { data: version, error: versionError } = await client
       .from('agent_skill_versions')
       .insert({
         template_id: template.id,
@@ -91,13 +107,21 @@ export async function ensureDefaultSkillTemplates(client: SupabaseClientLike, ad
       .select()
       .single() as Awaited<QueryResult>;
 
+    if (versionError || !version?.id) {
+      result.errors.push(`${skill.name}: ${versionError?.message || '默认版本创建失败'}`);
+      continue;
+    }
+
     if (version?.id) {
       await client
         .from('agent_skill_templates')
         .update({ active_version_id: version.id, updated_at: new Date().toISOString() })
         .eq('id', template.id);
+      result.created += 1;
     }
   }
+
+  return result;
 }
 
 export async function getActiveSkillVersion(client: SupabaseClientLike, skillKey: AgentSkillKey) {

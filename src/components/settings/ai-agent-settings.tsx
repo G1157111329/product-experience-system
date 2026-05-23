@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Sparkles, Save, Power, Pencil } from 'lucide-react';
+import { Sparkles, Save, Power, Pencil, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -69,20 +69,37 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
   const [skills, setSkills] = useState<SkillTemplate[]>([]);
   const [editingSkill, setEditingSkill] = useState<SkillTemplate | null>(null);
   const [saving, setSaving] = useState(false);
+  const [initializingSkills, setInitializingSkills] = useState(false);
+  const [skillsError, setSkillsError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
-    const [modelsRes, skillsRes] = await Promise.all([
-      fetch('/api/ai/model-configs'),
-      fetch(`/api/ai/skill-templates?admin_user_id=${user?.id || ''}`),
-    ]);
-    const modelsData = await modelsRes.json();
-    const skillsData = await skillsRes.json();
-    if (modelsData.code === 0) {
-      setModels(modelsData.data || []);
-      const active = (modelsData.data || []).find((item: ModelConfig) => item.is_active);
-      if (active) setModelForm({ ...emptyModel, ...active, custom_api_key: '' });
+    setSkillsError(null);
+    try {
+      const modelsRes = await fetch('/api/ai/model-configs');
+      const modelsData = await modelsRes.json();
+      if (modelsData.code === 0) {
+        setModels(modelsData.data || []);
+        const active = (modelsData.data || []).find((item: ModelConfig) => item.is_active);
+        if (active) setModelForm({ ...emptyModel, ...active, custom_api_key: '' });
+      }
+    } catch {
+      setModels([]);
     }
-    if (skillsData.code === 0) setSkills(skillsData.data || []);
+
+    try {
+      const skillsRes = await fetch(`/api/ai/skill-templates?admin_user_id=${user?.id || ''}`);
+      const skillsData = await skillsRes.json();
+      if (skillsData.code === 0) {
+        setSkills(skillsData.data || []);
+        if ((skillsData.data || []).length === 0 && skillsData.meta?.errors?.length) {
+          setSkillsError(skillsData.meta.errors.join('；'));
+        }
+      } else {
+        setSkillsError(skillsData.message || 'Prompt 模板读取失败');
+      }
+    } catch (err) {
+      setSkillsError(err instanceof Error ? err.message : 'Prompt 模板读取失败');
+    }
   }, [user?.id]);
 
   useEffect(() => {
@@ -155,6 +172,33 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
     });
   };
 
+  const initializeSkillTemplates = async () => {
+    if (!user?.id) return;
+    setInitializingSkills(true);
+    setSkillsError(null);
+    try {
+      const res = await fetch('/api/ai/skill-templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'ensure_defaults', admin_user_id: user.id }),
+      });
+      const data = await res.json();
+      if (data.code !== 0) {
+        setSkillsError(data.message || 'Prompt 模板初始化失败');
+        toast.error(data.message || 'Prompt 模板初始化失败');
+        return;
+      }
+      setSkills(data.data || []);
+      toast.success('Prompt 模板已初始化');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Prompt 模板初始化失败';
+      setSkillsError(message);
+      toast.error(message);
+    } finally {
+      setInitializingSkills(false);
+    }
+  };
+
   const createSkillVersion = async () => {
     if (!user?.id || !editingSkill?.active_version) return;
     const version = editingSkill.active_version;
@@ -185,9 +229,36 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
     }
   };
 
+  const promptEditor = editingSkill?.active_version ? (
+    <div className="space-y-3 rounded-lg border bg-background p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <div className="text-sm font-medium">Prompt 录入框</div>
+          <div className="truncate text-xs text-muted-foreground">{editingSkill.name} · 新版本</div>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => setEditingSkill(null)}>取消</Button>
+          <Button size="sm" onClick={createSkillVersion}>保存并启用</Button>
+        </div>
+      </div>
+      <div className="grid gap-3 xl:grid-cols-2">
+        <div className="space-y-2">
+          <Label className="text-xs">System Prompt</Label>
+          <Textarea className="min-h-40 resize-y" value={editingSkill.active_version.system_prompt}
+            onChange={(event) => setEditingSkill({ ...editingSkill, active_version: { ...editingSkill.active_version!, system_prompt: event.target.value } })} />
+        </div>
+        <div className="space-y-2">
+          <Label className="text-xs">User Prompt Template</Label>
+          <Textarea className="min-h-40 resize-y" value={editingSkill.active_version.user_prompt_template}
+            onChange={(event) => setEditingSkill({ ...editingSkill, active_version: { ...editingSkill.active_version!, user_prompt_template: event.target.value } })} />
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[88vh]">
+      <DialogContent className="max-h-[90vh] w-[min(1120px,calc(100vw-2rem))] max-w-none">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-5 w-5" /> AI Agent 设置
@@ -195,9 +266,9 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
           <DialogDescription>管理模型接入、Prompt 模板版本、启停与审计能力</DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="max-h-[68vh] pr-3">
-          <div className="grid gap-5 lg:grid-cols-[320px_1fr]">
-            <section className="space-y-3">
+        <ScrollArea className="max-h-[72vh] pr-3">
+          <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
+            <section className="min-w-0 space-y-3">
               <div>
                 <h3 className="text-sm font-semibold">模型接入</h3>
                 <p className="text-xs text-muted-foreground">当前启用模型将作为 Agent 默认模型</p>
@@ -308,41 +379,28 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
                   </div>
                 ))}
                 {skills.length === 0 && (
-                  <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
-                    暂无 Prompt 模板，请先执行 AI Agent Skills 初始化 SQL。
+                  <div className="space-y-3 rounded-md border border-dashed p-4 text-center">
+                    <div>
+                      <div className="text-sm font-medium">暂无 Prompt 模板</div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        可以先初始化系统内置模板，然后直接在这里编辑 System Prompt 和 User Prompt Template。
+                      </p>
+                    </div>
+                    <Button variant="outline" className="gap-2" onClick={initializeSkillTemplates} disabled={initializingSkills || !user?.id}>
+                      <RefreshCw className={initializingSkills ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+                      初始化 Prompt 模板
+                    </Button>
+                    {skillsError && <p className="text-xs text-destructive">{skillsError}</p>}
+                    <p className="text-[11px] text-muted-foreground">
+                      若初始化失败，请确认已执行 docs/superpowers/sql/2026-05-23-ai-agent-skills.sql。
+                    </p>
                   </div>
                 )}
               </div>
+              {promptEditor}
             </section>
           </div>
         </ScrollArea>
-
-        {editingSkill?.active_version && (
-          <div className="space-y-3 border-t bg-background pt-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm font-medium">Prompt 录入框</div>
-                <div className="text-xs text-muted-foreground">{editingSkill.name} · 新版本</div>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => setEditingSkill(null)}>取消</Button>
-                <Button size="sm" onClick={createSkillVersion}>保存并启用</Button>
-              </div>
-            </div>
-            <div className="grid gap-3 lg:grid-cols-2">
-              <div className="space-y-2">
-                <Label className="text-xs">System Prompt</Label>
-                <Textarea className="min-h-28" value={editingSkill.active_version.system_prompt}
-                  onChange={(event) => setEditingSkill({ ...editingSkill, active_version: { ...editingSkill.active_version!, system_prompt: event.target.value } })} />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-xs">User Prompt Template</Label>
-                <Textarea className="min-h-28" value={editingSkill.active_version.user_prompt_template}
-                  onChange={(event) => setEditingSkill({ ...editingSkill, active_version: { ...editingSkill.active_version!, user_prompt_template: event.target.value } })} />
-              </div>
-            </div>
-          </div>
-        )}
       </DialogContent>
     </Dialog>
   );

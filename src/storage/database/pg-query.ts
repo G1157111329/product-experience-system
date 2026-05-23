@@ -32,6 +32,10 @@ import {
   recipeLibrary,
   recipeLibrarySteps,
   platformSettings,
+  aiModelConfigs,
+  agentSkillTemplates,
+  agentSkillVersions,
+  agentSkillAuditLogs,
   healthCheck,
 } from './shared/schema';
 
@@ -55,11 +59,29 @@ const tableSchemaMap: Record<string, any> = {
   recipe_library: recipeLibrary,
   recipe_library_steps: recipeLibrarySteps,
   platform_settings: platformSettings,
+  ai_model_configs: aiModelConfigs,
+  agent_skill_templates: agentSkillTemplates,
+  agent_skill_versions: agentSkillVersions,
+  agent_skill_audit_logs: agentSkillAuditLogs,
   health_check: healthCheck,
 } as any;
 
 type EqCondition = { field: string; value: unknown };
 type OrderCondition = { field: string; order?: 'asc' | 'desc' };
+
+function toCamelCase(value: string) {
+  return value.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
+}
+
+function resolveColumn(schema: any, field: string) {
+  return schema[field] || schema[toCamelCase(field)];
+}
+
+function normalizeWriteData(schema: any, data: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(data).map(([key, value]) => [schema[key] ? key : toCamelCase(key), value])
+  );
+}
 
 class QueryBuilder {
   private tableName: string;
@@ -113,8 +135,11 @@ class QueryBuilder {
     return this;
   }
 
-  order(field: string, order?: 'asc' | 'desc'): QueryBuilder {
-    this.orderConditions.push({ field, order: order || 'asc' });
+  order(field: string, order?: 'asc' | 'desc' | { ascending?: boolean }): QueryBuilder {
+    const direction = typeof order === 'object'
+      ? order.ascending === false ? 'desc' : 'asc'
+      : order || 'asc';
+    this.orderConditions.push({ field, order: direction });
     return this;
   }
 
@@ -164,9 +189,11 @@ class QueryBuilder {
     const db = getDb();
     const { and, eq, inArray, asc, desc } = await import('drizzle-orm').then((m) => m);
 
+    if (!this.schema) throw new Error(`Unknown table: ${this.tableName}`);
+
     const allConditions = [
-      ...this.eqConditions.map((c) => eq(this.schema[c.field], c.value)),
-      ...this.inConditions.map((c) => inArray(this.schema[c.field], c.values)),
+      ...this.eqConditions.map((c) => eq(resolveColumn(this.schema, c.field), c.value)),
+      ...this.inConditions.map((c) => inArray(resolveColumn(this.schema, c.field), c.values)),
     ];
     const whereClause = allConditions.length > 0 ? and(...allConditions) : undefined;
 
@@ -174,13 +201,13 @@ class QueryBuilder {
       case 'select': {
         const fields = this.selectFields[0] === '*'
           ? this.schema
-          : this.selectFields.reduce((acc: any, f) => ({ ...acc, [f]: this.schema[f] }), {});
+          : this.selectFields.reduce((acc: any, f) => ({ ...acc, [toCamelCase(f)]: resolveColumn(this.schema, f) }), {});
 
         let query: any = db.select(fields as any).from(this.schema as any);
         if (whereClause) query = query.where(whereClause);
         if (this.orderConditions.length > 0) {
           const orders = this.orderConditions.map((o) =>
-            o.order === 'desc' ? desc(this.schema[o.field]) : asc(this.schema[o.field])
+            o.order === 'desc' ? desc(resolveColumn(this.schema, o.field)) : asc(resolveColumn(this.schema, o.field))
           );
           query = query.orderBy(...orders);
         }
@@ -190,14 +217,14 @@ class QueryBuilder {
       }
       case 'insert': {
         if (!this.insertData) return [];
-        const result = await db.insert(this.schema as any).values(this.insertData as any).returning();
+        const result = await db.insert(this.schema as any).values(normalizeWriteData(this.schema, this.insertData) as any).returning();
         return result as unknown[];
       }
       case 'update': {
         if (!this.updateData || !whereClause) return [];
         const result = await db
           .update(this.schema as any)
-          .set(this.updateData as any)
+          .set(normalizeWriteData(this.schema, this.updateData) as any)
           .where(whereClause)
           .returning();
         return result as unknown[];

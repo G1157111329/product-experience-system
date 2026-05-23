@@ -17,7 +17,8 @@ import { createClient } from '@supabase/supabase-js';
 export { platformUsers, platformAuditRequests, platformCategories, platformProducts,
   standards, standardItems, experienceTasks, checkRecords, materials, recipes,
   recipeSteps, issues, reportTemplates, reports, reportShares, recipeLibrary,
-  recipeLibrarySteps, platformSettings } from './shared/schema';
+  recipeLibrarySteps, platformSettings, aiModelConfigs, agentSkillTemplates,
+  agentSkillVersions, agentSkillAuditLogs } from './shared/schema';
 
 function getSupabaseUrl(): string | undefined {
   return process.env.COZE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
