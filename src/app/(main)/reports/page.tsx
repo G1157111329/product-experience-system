@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 import { ActionDock, EmptyState, FilterBar, LoadingState, PageHeader, PageShell, SearchField } from '@/components/app';
+import { buildDisplayReportContent, type ReportContentWithReview } from '@/lib/report-review-overrides';
 
 interface Report {
   id: string; title: string; product_model: string | null;
@@ -53,6 +54,39 @@ function formatBeijingTime(isoStr: string | null | undefined): string {
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${beijing.getFullYear()}-${pad(beijing.getMonth() + 1)}-${pad(beijing.getDate())} ${pad(beijing.getHours())}:${pad(beijing.getMinutes())}:${pad(beijing.getSeconds())}`;
   } catch { return String(isoStr); }
+}
+
+function getReportReviewStats(report: Report) {
+  const content = (report.content || {}) as Record<string, unknown>;
+  const records = Array.isArray(content.records) ? content.records as Array<Record<string, unknown>> : [];
+  const recipes = Array.isArray(content.recipes) ? content.recipes as Array<Record<string, unknown>> : [];
+  const failedRecords = records.filter((record) => String(record.evaluation_result || '').includes('不合格')).length;
+  const recipeProblems = recipes.reduce((sum, recipe) => sum + Number(recipe.problem_count || 0), 0);
+  const recordMedia = records.reduce((sum, record) => sum + (Array.isArray(record.materials) ? record.materials.length : 0), 0);
+  const recipeMedia = recipes.reduce((sum, recipe) => {
+    const steps = Array.isArray(recipe.recipe_steps) ? recipe.recipe_steps as Array<Record<string, unknown>> : [];
+    const stepMedia = steps.reduce((stepSum, step) => stepSum + (Array.isArray(step.materials) ? step.materials.length : 0), 0);
+    const effectMedia = Array.isArray(recipe.effect_materials) ? recipe.effect_materials.length : 0;
+    return sum + stepMedia + effectMedia;
+  }, 0);
+
+  return {
+    records: records.length,
+    failedRecords,
+    recipes: recipes.length,
+    recipeProblems,
+    media: recordMedia + recipeMedia,
+  };
+}
+
+function getReviewStatusLabel(report: Report) {
+  const display = buildDisplayReportContent({
+    title: report.title,
+    content: report.content as ReportContentWithReview | null,
+  });
+  if (display.review_status === 'published') return '已发布';
+  if (display.review_status === 'reviewed') return '已评审';
+  return '待评审';
 }
 
 export default function ReportsPage() {
@@ -160,6 +194,13 @@ export default function ReportsPage() {
     ? reports
     : reports.filter(r => r.product_category === categoryFilter);
   const selectedCompareReports = visibleReports.filter(r => compareIds.includes(r.id));
+  const reviewTotals = visibleReports.reduce((acc, report) => {
+    const stats = getReportReviewStats(report);
+    acc.failedRecords += stats.failedRecords;
+    acc.recipeProblems += stats.recipeProblems;
+    acc.media += stats.media;
+    return acc;
+  }, { failedRecords: 0, recipeProblems: 0, media: 0 });
 
   const handleOpenCompare = async () => {
     if (compareIds.length !== 2) {
@@ -266,6 +307,27 @@ export default function ReportsPage() {
         </Select>
       </FilterBar>
 
+      <div className="grid gap-2 rounded-lg border bg-card p-3 shadow-sm sm:grid-cols-4 lg:p-4">
+        <div className="sm:col-span-1">
+          <p className="text-xs font-medium text-muted-foreground">评审视图</p>
+          <p className="mt-1 text-sm font-medium">先筛报告，再看结论、证据和风险</p>
+        </div>
+        <div className="grid grid-cols-3 gap-2 sm:col-span-3">
+          <div className="rounded-md bg-muted/40 p-2">
+            <p className="text-lg font-semibold tabular-nums">{visibleReports.length}</p>
+            <p className="text-xs text-muted-foreground">报告数</p>
+          </div>
+          <div className="rounded-md bg-muted/40 p-2">
+            <p className="text-lg font-semibold tabular-nums text-destructive">{reviewTotals.failedRecords}</p>
+            <p className="text-xs text-muted-foreground">不合格检查</p>
+          </div>
+          <div className="rounded-md bg-muted/40 p-2">
+            <p className="text-lg font-semibold tabular-nums">{reviewTotals.media}</p>
+            <p className="text-xs text-muted-foreground">证据素材</p>
+          </div>
+        </div>
+      </div>
+
       {/* Content */}
       {loading ? (
         <LoadingState label="正在加载报告" />
@@ -280,6 +342,13 @@ export default function ReportsPage() {
           {/* Grouped reports (merged) */}
           {grouped.map(group => {
             const latestReport = group.reports[0];
+            const groupStats = group.reports.reduce((acc, report) => {
+              const stats = getReportReviewStats(report);
+              acc.records += stats.records;
+              acc.failedRecords += stats.failedRecords;
+              acc.media += stats.media;
+              return acc;
+            }, { records: 0, failedRecords: 0, media: 0 });
             return (
               <Card key={group.key} className="overflow-hidden transition-colors hover:border-primary/30">
                 <CardHeader className="border-b bg-muted/20 pb-3">
@@ -291,6 +360,7 @@ export default function ReportsPage() {
                         {latestReport.product_category && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{latestReport.product_category}</Badge>}
                         {latestReport.product && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{latestReport.product}</Badge>}
                         <Badge variant="secondary" className="text-[10px]">{group.reports.length} 份报告</Badge>
+                        <Badge variant="outline" className="text-[10px]">{getReviewStatusLabel(latestReport)}</Badge>
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
@@ -304,6 +374,20 @@ export default function ReportsPage() {
                   </div>
                 </CardHeader>
                 <CardContent className="pt-0">
+                  <div className="grid grid-cols-3 gap-2 py-3 text-xs">
+                    <div className="rounded-md bg-muted/30 p-2">
+                      <p className="font-semibold tabular-nums">{groupStats.records}</p>
+                      <p className="text-muted-foreground">检查项</p>
+                    </div>
+                    <div className="rounded-md bg-muted/30 p-2">
+                      <p className="font-semibold tabular-nums text-destructive">{groupStats.failedRecords}</p>
+                      <p className="text-muted-foreground">不合格</p>
+                    </div>
+                    <div className="rounded-md bg-muted/30 p-2">
+                      <p className="font-semibold tabular-nums">{groupStats.media}</p>
+                      <p className="text-muted-foreground">证据</p>
+                    </div>
+                  </div>
                   <div className="divide-y rounded-md border bg-background">
                     {group.reports.map((r) => (
                       <div key={r.id} className="flex items-center gap-2 px-2.5 py-2 text-sm transition-colors hover:bg-muted/50">
@@ -340,10 +424,16 @@ export default function ReportsPage() {
                       {r.product && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{r.product}</Badge>}
                       {r.project_type && <Badge variant="outline" className="text-[10px]">{r.project_type}</Badge>}
                       <Badge variant={r.status === '已审核' ? 'default' : 'secondary'} className="text-[10px]">{r.status === '草稿' ? '已完成' : r.status}</Badge>
+                      <Badge variant="outline" className="text-[10px]">{getReviewStatusLabel(r)}</Badge>
                     </div>
                     <div className="text-[10px] text-muted-foreground mt-1 truncate">
                       {r.task_name && <span>{r.task_name}</span>}
                       <span className="ml-2">{formatBeijingTime(r.created_at)}</span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-3 gap-1 text-[10px] text-muted-foreground sm:max-w-md">
+                      <span className="rounded bg-muted/40 px-2 py-1">检查 {getReportReviewStats(r).records}</span>
+                      <span className="rounded bg-muted/40 px-2 py-1">不合格 {getReportReviewStats(r).failedRecords}</span>
+                      <span className="rounded bg-muted/40 px-2 py-1">证据 {getReportReviewStats(r).media}</span>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-1 shrink-0 sm:flex sm:items-center" onClick={e => e.stopPropagation()}>

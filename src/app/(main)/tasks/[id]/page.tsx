@@ -2,8 +2,8 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, ArrowRightLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Film, Image as ImageIcon, Pencil, Trash2, Check, X, Play, GripVertical, Sparkles, Save, Star, AlertTriangle, Crop } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -23,6 +23,8 @@ import { MediaCaptureDialog } from '@/components/media-capture-dialog';
 import { ImageEditorDialog } from '@/components/image-editor-dialog';
 import { PageShell } from '@/components/app';
 import { MediaGallery } from '@/components/app/media-gallery';
+import { buildReportReadiness } from '@/lib/report-readiness';
+import { ReportInputPanel } from './components/report-input-panel';
 
 /* ─── Types ─── */
 interface CategoryWithProducts {
@@ -127,15 +129,64 @@ function linesToList(value: string) {
   return value.split('\n').map((line) => line.trim()).filter(Boolean);
 }
 
+async function loadRecipesForTask(taskId: string): Promise<Recipe[]> {
+  const res = await fetch(`/api/recipes?task_id=${taskId}`);
+  const data = await res.json();
+  if (data.code !== 0) return [];
+
+  const recipesData: Recipe[] = data.data || [];
+  const seen = new Set<string>();
+  const deduped = recipesData.filter((recipe) => {
+    if (seen.has(recipe.id)) return false;
+    seen.add(recipe.id);
+    return true;
+  });
+
+  return Promise.all(
+    deduped.map(async (recipe) => {
+      const stepsWithMats = await Promise.all(
+        (recipe.recipe_steps || []).map(async (step) => {
+          const matRes = await fetch(`/api/materials?recipe_step_id=${step.id}`);
+          const matData = await matRes.json();
+          return { ...step, materials: matData.data || [] };
+        })
+      );
+
+      const effectMatRes = await fetch(`/api/materials?recipe_id=${recipe.id}`);
+      const effectMatData = await effectMatRes.json();
+      let parsedProblemPoints: ProblemPoint[] = [];
+      if (recipe.effect_problem_point) {
+        try {
+          const parsed = JSON.parse(recipe.effect_problem_point);
+          if (Array.isArray(parsed)) {
+            parsedProblemPoints = parsed.filter((p: unknown) => typeof p === 'object' && p !== null && typeof (p as Record<string, unknown>).text === 'string');
+          }
+        } catch {
+          parsedProblemPoints = [{ text: recipe.effect_problem_point, material_ids: [] }];
+        }
+      }
+
+      return {
+        ...recipe,
+        recipe_steps: stepsWithMats,
+        effect_materials: effectMatData.data || [],
+        effect_problem_points: parsedProblemPoints,
+      };
+    })
+  );
+}
+
 /* ─── Main Page ─── */
 export default function TaskDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, isAdmin } = useAuth();
   const id = params.id as string;
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'info' | 'materials' | 'senses' | 'functions'>('info');
+  const [generateConfirmOpen, setGenerateConfirmOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferUsers, setTransferUsers] = useState<Array<{ id: string; name: string; account: string }>>([]);
   const [transferTargetId, setTransferTargetId] = useState('');
@@ -144,6 +195,7 @@ export default function TaskDetailPage() {
   const [aiSummaryOpen, setAiSummaryOpen] = useState(false);
   const [aiSummarizing, setAiSummarizing] = useState(false);
   const [aiSummarySaving, setAiSummarySaving] = useState(false);
+  const [reportRecipes, setReportRecipes] = useState<Recipe[]>([]);
   const [summaryForm, setSummaryForm] = useState({
     tag: '',
     satisfaction_score: '0',
@@ -169,8 +221,29 @@ export default function TaskDetailPage() {
     }
   }, [id]);
 
+  const fetchReportRecipes = useCallback(async () => {
+    setReportRecipes(await loadRecipesForTask(id));
+  }, [id]);
+
   useEffect(() => { fetchTask().finally(() => setLoading(false)); }, [fetchTask]);
   useEffect(() => { fetchAiSummary(); }, [fetchAiSummary]);
+  useEffect(() => { fetchReportRecipes(); }, [fetchReportRecipes]);
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab === 'info' || tab === 'materials' || tab === 'senses' || tab === 'functions') {
+      setActiveTab(tab);
+    }
+  }, [searchParams]);
+
+  const reportReadiness = useMemo(() => {
+    if (!task) return null;
+    return buildReportReadiness({
+      task,
+      records: task.records || [],
+      recipes: reportRecipes,
+      aiSummary,
+    });
+  }, [task, reportRecipes, aiSummary]);
 
   // Transfer task to another user
   const handleTransfer = async () => {
@@ -222,8 +295,13 @@ export default function TaskDetailPage() {
 
   const [generatingReport, setGeneratingReport] = useState(false);
 
+  const handleRequestGenerateReport = () => {
+    setGenerateConfirmOpen(true);
+  };
+
   const handleGenerateReport = async () => {
     if (generatingReport) return; // Prevent double-click
+    setGenerateConfirmOpen(false);
     setGeneratingReport(true);
     try {
       const res = await fetch('/api/reports', {
@@ -333,7 +411,7 @@ export default function TaskDetailPage() {
               <ArrowRightLeft className="h-4 w-4 mr-1.5" /> 转移
             </Button>
           )}
-          <Button size="sm" className="col-span-2 min-w-0 sm:col-span-1 sm:flex-none" onClick={handleGenerateReport} disabled={generatingReport}>
+          <Button size="sm" className="col-span-2 min-w-0 sm:col-span-1 sm:flex-none" onClick={handleRequestGenerateReport} disabled={generatingReport}>
             <FileText className="h-4 w-4 mr-1.5" /> {generatingReport ? '生成中...' : '报告生成'}
           </Button>
         </div>
@@ -354,6 +432,8 @@ export default function TaskDetailPage() {
         </button>
       )}
 
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
+        <div className="order-2 min-w-0 space-y-4 lg:order-1">
       {/* Tab Navigation */}
       <div className="sticky top-14 z-20 -mx-3 flex gap-2 overflow-x-auto border-y bg-background/95 px-3 py-2 backdrop-blur scrollbar-none sm:static sm:mx-0 sm:grid sm:grid-cols-4 sm:overflow-visible sm:rounded-lg sm:border sm:bg-muted/40 sm:p-1">
         {[
@@ -382,7 +462,25 @@ export default function TaskDetailPage() {
       {activeTab === 'info' && <BasicInfoTab task={task} onRefresh={fetchTask} />}
       {activeTab === 'materials' && <MaterialsTab taskId={id} />}
       {activeTab === 'senses' && <SensesTab taskId={id} records={task.records || []} taskProductCategory={task.product_category} taskProduct={task.product} onRefresh={fetchTask} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} />}
-      {activeTab === 'functions' && <FunctionsTab taskId={id} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} />}
+      {activeTab === 'functions' && <FunctionsTab taskId={id} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onRecipesChange={setReportRecipes} />}
+        </div>
+
+        {reportReadiness && (
+          <div className="order-1 lg:order-2">
+            <ReportInputPanel
+              readiness={reportReadiness}
+              activeTab={activeTab}
+              generatingReport={generatingReport}
+              aiSummaryExists={Boolean(aiSummary)}
+              aiSummarizing={aiSummarizing}
+              onTabChange={setActiveTab}
+              onGenerateReport={handleRequestGenerateReport}
+              onOpenAiSummary={openAiSummaryDialog}
+              onGenerateAiSummary={handleGenerateAiSummary}
+            />
+          </div>
+        )}
+      </div>
 
       {/* Transfer Dialog */}
       <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
@@ -410,6 +508,58 @@ export default function TaskDetailPage() {
               {transferring ? '转移中...' : '确认转移'}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={generateConfirmOpen} onOpenChange={setGenerateConfirmOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>生成报告前确认</DialogTitle>
+            <DialogDescription>
+              系统会从当前任务源数据生成报告事实快照。报告生成后，标题、总评、风险和建议可在报告详情页继续润色。
+            </DialogDescription>
+          </DialogHeader>
+          {reportReadiness && (
+            <div className="space-y-3">
+              <div className="rounded-lg border bg-muted/30 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">输入完整度 {reportReadiness.score}/100</p>
+                    <p className="text-xs text-muted-foreground">
+                      {reportReadiness.status === 'ready' ? '关键输入已完整，可以生成报告。' : '仍有输入缺口，建议先补齐再生成。'}
+                    </p>
+                  </div>
+                  <Badge variant={reportReadiness.status === 'ready' ? 'default' : reportReadiness.status === 'attention' ? 'secondary' : 'destructive'}>
+                    {reportReadiness.status === 'ready' ? '可生成' : reportReadiness.status === 'attention' ? '需确认' : '待补充'}
+                  </Badge>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {reportReadiness.items.filter((item) => item.status !== 'ok').slice(0, 5).map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="w-full rounded-md border bg-background p-2 text-left text-sm hover:bg-muted/50"
+                    onClick={() => {
+                      const targetTab = item.id.includes('recipe') || item.id.includes('raw-json') ? 'functions' : item.id.includes('record') ? 'senses' : 'info';
+                      setActiveTab(targetTab);
+                      setGenerateConfirmOpen(false);
+                    }}
+                  >
+                    <span className="font-medium">{item.label}</span>
+                    <span className="mt-1 block text-xs text-muted-foreground">{item.description}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button variant="outline" onClick={() => setGenerateConfirmOpen(false)}>继续补充</Button>
+                <Button onClick={handleGenerateReport} disabled={generatingReport}>
+                  <FileText className="mr-1.5 h-4 w-4" />
+                  {generatingReport ? '生成中...' : '确认生成报告'}
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -2006,7 +2156,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
 
 
 /* ─── Tab: 功能效果 ─── */
-function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpdate: () => void }) {
+function FunctionsTab({ taskId, onStatusUpdate, onRecipesChange }: { taskId: string; onStatusUpdate: () => void; onRecipesChange?: (recipes: Recipe[]) => void }) {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingRecipe, setSavingRecipe] = useState(false);
@@ -2061,48 +2211,11 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
   const [stepRefLoading, setStepRefLoading] = useState(false);
 
   const fetchRecipes = useCallback(async () => {
-    const res = await fetch(`/api/recipes?task_id=${taskId}`);
-    const data = await res.json();
-    if (data.code === 0) {
-      const recipesData: Recipe[] = (data.data || []);
-      const seen = new Set<string>();
-      const deduped = recipesData.filter(r => {
-        if (seen.has(r.id)) return false;
-        seen.add(r.id);
-        return true;
-      });
-      const enriched = await Promise.all(
-        deduped.map(async (recipe: Recipe) => {
-          const stepsWithMats = await Promise.all(
-            (recipe.recipe_steps || []).map(async (step) => {
-              const matRes = await fetch(`/api/materials?recipe_step_id=${step.id}`);
-              const matData = await matRes.json();
-              return { ...step, materials: matData.data || [] };
-            })
-          );
-          // Fetch effect materials
-          const effectMatRes = await fetch(`/api/materials?recipe_id=${recipe.id}`);
-          const effectMatData = await effectMatRes.json();
-          // Parse effect_problem_points from JSON string
-          let parsedProblemPoints: ProblemPoint[] = [];
-          if (recipe.effect_problem_point) {
-            try {
-              const parsed = JSON.parse(recipe.effect_problem_point);
-              if (Array.isArray(parsed)) {
-                parsedProblemPoints = parsed.filter((p: unknown) => typeof p === 'object' && p !== null && typeof (p as Record<string, unknown>).text === 'string');
-              }
-            } catch {
-              // Old format: plain text string, convert to single problem point
-              parsedProblemPoints = [{ text: recipe.effect_problem_point, material_ids: [] }];
-            }
-          }
-          return { ...recipe, recipe_steps: stepsWithMats, effect_materials: effectMatData.data || [], effect_problem_points: parsedProblemPoints };
-        })
-      );
-      setRecipes(enriched);
-    }
+    const enriched = await loadRecipesForTask(taskId);
+    setRecipes(enriched);
+    onRecipesChange?.(enriched);
     setLoading(false);
-  }, [taskId]);
+  }, [taskId, onRecipesChange]);
 
   useEffect(() => { fetchRecipes(); }, [fetchRecipes]);
 

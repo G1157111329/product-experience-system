@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { preserveReviewOverrides, type ReportContentWithReview } from '@/lib/report-review-overrides';
 
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
@@ -70,6 +71,13 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const client = getSupabaseClient();
   const body = await request.json();
+  const { data: previousReport } = await client
+    .from('reports')
+    .select('content')
+    .eq('task_id', body.task_id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
   // 自动生成报告 - 从任务和记录中填充内容
   const { data: task } = await client.from('experience_tasks').select('*').eq('id', body.task_id).single();
@@ -157,6 +165,11 @@ export async function POST(request: NextRequest) {
     materials: materials || [],
     generatedAt: new Date().toISOString(),
   };
+  const finalReportContent = preserveReviewOverrides(
+    previousReport?.content as ReportContentWithReview | null | undefined,
+    reportContent,
+    { preserve: body.preserve_review_overrides !== false },
+  );
 
   // Delete any older reports for the same task FIRST (before creating new one)
   await client.from('reports').delete().eq('task_id', body.task_id);
@@ -171,7 +184,7 @@ export async function POST(request: NextRequest) {
     template_id: body.template_id || null,
     title: body.title || `${task?.task_name || '体验'}报告`,
     product_model: task?.product_model || null,
-    content: reportContent,
+    content: finalReportContent,
     status: '已完成',
   }).select().single();
 

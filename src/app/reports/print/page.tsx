@@ -5,6 +5,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
+import { buildDisplayReportContent, type AiSummaryLike, type ReportContentWithReview, type ReportReviewOverrides } from '@/lib/report-review-overrides';
 
 interface Material {
   id: string; material_type: string; file_name: string; file_url: string; file_size: number;
@@ -49,6 +50,7 @@ interface ReportContent {
   recipes: Recipe[];
   materials: Material[];
   generatedAt: string;
+  review_overrides?: ReportReviewOverrides;
 }
 
 interface AiTaskSummary {
@@ -90,7 +92,7 @@ async function imageUrlToBase64(url: string): Promise<string> {
   }
 }
 
-function PrintAiSummary({ summary }: { summary?: AiTaskSummary | null }) {
+function PrintAiSummary({ summary }: { summary?: AiSummaryLike | null }) {
   if (!summary || (!summary.summary && !summary.tag && !summary.historical_position)) return null;
   return (
     <>
@@ -116,6 +118,7 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
   const task = content.task;
   const records = content.records || [];
   const recipes = content.recipes || [];
+  const display = buildDisplayReportContent({ title: report.title, content: content as unknown as ReportContentWithReview });
   const STATUS_BG: Record<string, string> = { '待整改': '#fef3c7', '整改中': '#dbeafe', '已验证': '#d1fae5', '不整改': '#e5e7eb' };
   const STATUS_FG: Record<string, string> = { '待整改': '#92400e', '整改中': '#1e40af', '已验证': '#065f46', '不整改': '#374151' };
 
@@ -138,7 +141,12 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
         </>
       )}
 
-      <PrintAiSummary summary={content.ai_summary} />
+      <PrintAiSummary summary={display.ai_summary} />
+      {display.review_note && (
+        <div style={{ padding: '10px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', margin: '8px 0', fontSize: '12px', whiteSpace: 'pre-wrap' }}>
+          <strong>评审备注：</strong>{display.review_note}
+        </div>
+      )}
 
       {/* Issues with live status */}
       {liveIssues.length > 0 && (
@@ -495,12 +503,16 @@ function ReportPrintContent() {
   const totalPass = totalRecords.filter(r => r.evaluation_result === '合格').length;
   const totalFail = totalRecords.filter(r => r.evaluation_result === '不合格').length;
   const totalRecipePC = totalRecipes.reduce((s, r) => s + (r.problem_count || 0), 0);
+  const displayReport = buildDisplayReportContent({
+    title: report.title,
+    content: report.content as unknown as ReportContentWithReview,
+  });
 
   return (
     <div className="print-container" style={{ padding: '40px', maxWidth: '1000px', margin: '0 auto', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif', color: '#1a1a1a', lineHeight: 1.6, fontSize: '14px' }}>
       {/* Title */}
       <h1 style={{ fontSize: '24px', marginBottom: '8px', color: '#0d9488' }}>
-        {report.product_model || report.title}
+        {report.product_model || displayReport.title}
         {isMerged && <span style={{ fontSize: '14px', color: '#666', fontWeight: 400, marginLeft: '8px' }}>(合并 {allReports.length} 份报告)</span>}
       </h1>
       <div style={{ color: '#666', fontSize: '12px', marginBottom: '20px' }}>

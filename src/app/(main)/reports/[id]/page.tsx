@@ -14,6 +14,8 @@ import { useImagePreview } from '@/components/image-preview';
 import { toast } from 'sonner';
 import { PageShell } from '@/components/app';
 import { MediaGallery } from '@/components/app/media-gallery';
+import { buildDisplayReportContent, type AiSummaryLike, type ReportContentWithReview, type ReportReviewOverrides } from '@/lib/report-review-overrides';
+import { ReportReviewEditor } from './components/report-review-editor';
 
 interface Material {
   id: string; material_type: string; file_name: string; file_url: string; file_size: number;
@@ -62,6 +64,7 @@ interface ReportContent {
   recipes: Recipe[];
   materials: Material[];
   generatedAt: string;
+  review_overrides?: ReportReviewOverrides;
 }
 
 interface AiTaskSummary {
@@ -151,7 +154,7 @@ function getBoundMaterials(materials: Material[] | undefined, ids: string[] | un
   return materials.filter((material) => idSet.has(material.id));
 }
 
-function AiSummaryBlock({ summary }: { summary?: AiTaskSummary | null }) {
+function AiSummaryBlock({ summary }: { summary?: AiSummaryLike | null }) {
   if (!summary || (!summary.summary && !summary.tag && !summary.historical_position)) return null;
   return (
     <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-3">
@@ -200,6 +203,10 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
   const records = report.content?.records || [];
   const recipes = report.content?.recipes || [];
   const task = report.content?.task;
+  const display = buildDisplayReportContent({
+    title: report.title,
+    content: report.content as ReportContentWithReview | null,
+  });
 
   return (
     <div className="space-y-4">
@@ -219,7 +226,26 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
         </div>
       )}
 
-      <AiSummaryBlock summary={report.content?.ai_summary} />
+      <div className="flex flex-wrap gap-2 rounded-lg border bg-muted/20 p-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium">事实内容回源编辑</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">检查记录、素材、食谱步骤和效果评价以任务源数据为准。</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => window.location.href = `/tasks/${report.task_id}?tab=senses`}>
+          编辑五感记录
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => window.location.href = `/tasks/${report.task_id}?tab=functions`}>
+          编辑功能效果
+        </Button>
+      </div>
+
+      <AiSummaryBlock summary={display.ai_summary} />
+      {display.review_note && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-3 text-xs leading-relaxed text-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+          <p className="mb-1 font-medium">评审备注</p>
+          <p className="whitespace-pre-wrap break-all">{display.review_note}</p>
+        </div>
+      )}
 
       {/* Issues with live status */}
       {liveIssues.length > 0 && (
@@ -578,6 +604,10 @@ export default function ReportDetailPage() {
   const totalPass = totalRecords.filter(r => r.evaluation_result === '合格').length;
   const totalFail = totalRecords.filter(r => r.evaluation_result === '不合格').length;
   const totalRecipePC = totalRecipes.reduce((s, r) => s + (r.problem_count || 0), 0);
+  const displayReport = buildDisplayReportContent({
+    title: report.title,
+    content: report.content as ReportContentWithReview | null,
+  });
 
   return (
     <PageShell size="wide" className="space-y-4">
@@ -587,9 +617,12 @@ export default function ReportDetailPage() {
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="flex-1 min-w-0">
-          <h1 className="text-xl font-semibold leading-tight break-words lg:text-2xl">{report.product_model || report.title} {isMerged && <Badge variant="secondary" className="text-[10px] ml-1 align-middle">合并 {allReports.length} 份报告</Badge>}</h1>
+          <h1 className="text-xl font-semibold leading-tight break-words lg:text-2xl">{report.product_model || displayReport.title} {isMerged && <Badge variant="secondary" className="text-[10px] ml-1 align-middle">合并 {allReports.length} 份报告</Badge>}</h1>
           <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground flex-wrap">
             <Badge variant="secondary" className="text-[10px]">{report.status}</Badge>
+            <Badge variant="outline" className="text-[10px]">
+              {displayReport.review_status === 'published' ? '已发布' : displayReport.review_status === 'reviewed' ? '已评审' : '待评审'}
+            </Badge>
             {projectType && <span>{projectType}</span>}
             {taskPhase && <span>{taskPhase}</span>}
           </div>
@@ -604,6 +637,8 @@ export default function ReportDetailPage() {
         </div>
       </div>
 
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
+        <div className="min-w-0 space-y-4">
       {/* Summary Stats */}
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 lg:gap-3">
         {[
@@ -622,6 +657,31 @@ export default function ReportDetailPage() {
         ))}
       </div>
 
+      <div className="rounded-lg border bg-card p-3 shadow-sm lg:flex lg:items-center lg:justify-between lg:gap-4">
+        <div className="min-w-0">
+          <p className="text-xs font-medium text-muted-foreground">评审导航</p>
+          <p className="mt-1 text-sm font-medium">按阶段阅读报告，随时打开图/视频证据核对结论</p>
+        </div>
+        <div className="mt-3 flex gap-2 overflow-x-auto lg:mt-0 lg:justify-end">
+          {allReports.map((rpt, idx) => {
+            const rptTask = rpt.content?.task as Record<string, unknown> | undefined;
+            const rptPhase = rptTask?.project_phase as string | undefined;
+            return (
+              <a
+                key={rpt.id}
+                href={`#report-section-${idx}`}
+                className="shrink-0 rounded-md border bg-background px-3 py-2 text-xs font-medium transition-colors hover:bg-muted"
+              >
+                {isMerged ? rptPhase || `报告 ${idx + 1}` : '报告正文'}
+              </a>
+            );
+          })}
+          <Button variant="outline" size="sm" className="shrink-0" onClick={handleExportPDF}>
+            导出PDF
+          </Button>
+        </div>
+      </div>
+
       {/* Report sections */}
       {allReports.map((rpt, idx) => {
         const rptTask = rpt.content?.task as Record<string, unknown> | undefined;
@@ -629,7 +689,7 @@ export default function ReportDetailPage() {
         const rptDate = rptTask?.test_date as string | undefined;
         const rptType = rptTask?.project_type as string | undefined;
         return (
-          <Card key={rpt.id} className="overflow-hidden">
+          <Card key={rpt.id} id={`report-section-${idx}`} className="scroll-mt-4 overflow-hidden">
             <CardHeader className="border-b bg-muted/20 pb-3">
               <div className="flex items-center justify-between gap-2">
                 <CardTitle className="text-sm font-medium min-w-0 break-all">
@@ -664,6 +724,23 @@ export default function ReportDetailPage() {
           </Card>
         );
       })}
+        </div>
+
+        <ReportReviewEditor
+          report={{
+            id: report.id,
+            title: report.title,
+            content: report.content as ReportContentWithReview | null,
+          }}
+          onSaved={(updated) => {
+            setReport((prev) => prev ? {
+              ...prev,
+              title: updated.title,
+              content: updated.content as unknown as ReportContent,
+            } : prev);
+          }}
+        />
+      </div>
 
       {/* Issue Status Quick Edit Dialog */}
       <Dialog open={statusDialogOpen} onOpenChange={(v) => { if (!v) { setStatusDialogOpen(false); setEditingIssue(null); } else setStatusDialogOpen(v); }}>

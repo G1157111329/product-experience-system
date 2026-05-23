@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useImagePreview } from '@/components/image-preview';
 import { MediaGallery } from '@/components/app/media-gallery';
+import { buildDisplayReportContent, type AiSummaryLike, type ReportContentWithReview, type ReportReviewOverrides } from '@/lib/report-review-overrides';
 
 interface Material {
   id: string; material_type: string; file_name: string; file_url: string; file_size: number;
@@ -51,6 +52,7 @@ interface ReportContent {
   recipes: Recipe[];
   materials: Material[];
   generatedAt: string;
+  review_overrides?: ReportReviewOverrides;
 }
 
 interface AiTaskSummary {
@@ -122,7 +124,7 @@ function getBoundMaterials(materials: Material[] | undefined, ids: string[] | un
   return materials.filter((material) => idSet.has(material.id));
 }
 
-function SharedAiSummary({ summary }: { summary?: AiTaskSummary | null }) {
+function SharedAiSummary({ summary }: { summary?: AiSummaryLike | null }) {
   if (!summary || (!summary.summary && !summary.tag && !summary.historical_position)) return null;
   return (
     <Card>
@@ -242,6 +244,10 @@ export default function ShareReportPage() {
   const totalPass = totalRecords.filter(r => r.evaluation_result === '合格').length;
   const totalFail = totalRecords.filter(r => r.evaluation_result === '不合格').length;
   const totalRecipePC = totalRecipes.reduce((s, r) => s + (r.problem_count || 0), 0);
+  const displayReport = buildDisplayReportContent({
+    title: report.title,
+    content: report.content as unknown as ReportContentWithReview,
+  });
 
   return (
     <div className="min-h-screen bg-background overflow-x-hidden">
@@ -249,7 +255,7 @@ export default function ShareReportPage() {
       <div className="sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b px-3 sm:px-4 py-3">
         <div className="max-w-4xl mx-auto flex items-center gap-3">
           <div className="min-w-0 flex-1">
-            <h1 className="text-base sm:text-lg font-semibold truncate">{report.product_model || report.title}</h1>
+            <h1 className="text-base sm:text-lg font-semibold truncate">{report.product_model || displayReport.title}</h1>
             <div className="flex items-center gap-1.5 mt-0.5 text-xs text-muted-foreground flex-wrap">
               <Badge variant="secondary" className="text-[10px] shrink-0">{report.status}</Badge>
               {projectType && <span className="shrink-0">{projectType}</span>}
@@ -294,6 +300,10 @@ export default function ShareReportPage() {
           const rptTask = content.task as Record<string, unknown> | undefined;
           const rptPhase = rptTask?.project_phase as string | undefined;
           const rptDate = rptTask?.test_date as string | undefined;
+          const displayContent = buildDisplayReportContent({
+            title: rpt.title,
+            content: content as unknown as ReportContentWithReview,
+          });
 
           return (
             <div key={rpt.id} className="space-y-4">
@@ -339,7 +349,15 @@ export default function ShareReportPage() {
                 </Card>
               )}
 
-              <SharedAiSummary summary={content.ai_summary} />
+              <SharedAiSummary summary={displayContent.ai_summary} />
+              {displayContent.review_note && (
+                <Card className="border-amber-200 bg-amber-50/70 dark:bg-amber-950/20">
+                  <CardContent className="p-3">
+                    <p className="mb-1 text-xs font-medium text-amber-900 dark:text-amber-200">评审备注</p>
+                    <p className="whitespace-pre-wrap break-all text-xs text-amber-900 dark:text-amber-200">{displayContent.review_note}</p>
+                  </CardContent>
+                </Card>
+              )}
 
               {/* Issues */}
               {liveIssues.length > 0 && (
