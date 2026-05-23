@@ -151,17 +151,17 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange 
   return (
     <section className="rounded-lg border bg-card p-3 shadow-sm">
       <PreviewComponent />
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="min-w-0">
+      <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
+        <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-sm font-semibold">素材证据</h2>
             <Badge variant="secondary">{materials.length} 个素材</Badge>
             {unlinkedCount > 0 && <Badge variant="outline">{unlinkedCount} 个未关联</Badge>}
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">先整理手机拍摄的图片/视频，再绑定到五感记录、功能步骤或效果评价。</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">先整理手机拍摄的图片/视频，再绑定到五感记录、功能步骤或效果评价。</p>
         </div>
 
-        <div className="grid grid-cols-4 gap-2 sm:flex">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 2xl:flex">
           <Button variant="outline" size="sm" onClick={() => setCaptureMode('image')} disabled={uploading}>
             <Camera className="mr-1.5 h-4 w-4" />拍照
           </Button>

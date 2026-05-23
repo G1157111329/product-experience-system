@@ -190,7 +190,7 @@ export default function TaskDetailPage() {
   const id = params.id as string;
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'info' | 'materials' | 'senses' | 'functions'>('info');
+  const [activeTab, setActiveTab] = useState<'agent' | 'info' | 'materials' | 'senses' | 'functions'>('agent');
   const [evidenceBindingTarget, setEvidenceBindingTarget] = useState<EvidenceBindingTarget | null>(null);
   const [agentAssistOpen, setAgentAssistOpen] = useState(false);
   const [generateConfirmOpen, setGenerateConfirmOpen] = useState(false);
@@ -248,7 +248,7 @@ export default function TaskDetailPage() {
   useEffect(() => { fetchReportRecipes(); }, [fetchReportRecipes]);
   useEffect(() => {
     const tab = searchParams.get('tab');
-    if (tab === 'info' || tab === 'materials' || tab === 'senses' || tab === 'functions') {
+    if (tab === 'agent' || tab === 'info' || tab === 'materials' || tab === 'senses' || tab === 'functions') {
       setActiveTab(tab);
     }
   }, [searchParams]);
@@ -424,7 +424,6 @@ export default function TaskDetailPage() {
           <p className="text-xs sm:text-sm text-muted-foreground mt-1 break-all">{task.product_model} | {task.product_category}{task.product ? ` - ${task.product}` : ''}{task.project_type ? ` | ${task.project_type}` : ''}{task.project_phase ? ` | ${task.project_phase}` : ''}</p>
         </div>
         <div className="grid grid-cols-2 gap-2 shrink-0 w-full sm:flex sm:w-auto sm:justify-end">
-          <AgentPresetPanel taskId={id} userId={user?.id} onAccepted={handleAgentAccepted} />
           {isAdmin && (
             <Button variant="outline" size="sm" className="min-w-0 sm:flex-none" onClick={handleOpenTransfer}>
               <ArrowRightLeft className="h-4 w-4 mr-1.5" /> 转移
@@ -440,7 +439,7 @@ export default function TaskDetailPage() {
         onTabChange={setActiveTab}
         onAgentOpenChange={setAgentAssistOpen}
       >
-      {activeTab !== 'info' && (
+      {(activeTab === 'senses' || activeTab === 'functions') && (
         <MaterialEvidenceRail
           taskId={id}
           bindingTarget={evidenceBindingTarget}
@@ -449,6 +448,9 @@ export default function TaskDetailPage() {
       )}
 
       {/* Tab Content */}
+      {activeTab === 'agent' && (
+        <AgentPresetPanel taskId={id} userId={user?.id} onAccepted={handleAgentAccepted} />
+      )}
       {activeTab === 'info' && (
         <div className="space-y-4">
           <BasicInfoTab task={task} onRefresh={fetchTask} />

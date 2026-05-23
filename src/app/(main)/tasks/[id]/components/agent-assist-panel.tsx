@@ -57,7 +57,7 @@ export function AgentAssistPanel({ taskId, onClose }: AgentAssistPanelProps) {
   };
 
   return (
-    <aside className="rounded-lg border bg-card shadow-sm lg:sticky lg:top-4 lg:w-[320px]">
+    <aside className="rounded-lg border bg-card shadow-sm lg:sticky lg:top-4">
       <div className="flex items-start justify-between gap-3 border-b p-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">

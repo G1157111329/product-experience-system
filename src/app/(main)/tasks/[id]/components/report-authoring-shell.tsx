@@ -1,12 +1,12 @@
 'use client';
 
 import type { ComponentType, ReactNode } from 'react';
-import { Eye, FileText, Sparkles, Wrench } from 'lucide-react';
+import { Eye, FileText, Sparkles, WandSparkles, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { AgentAssistPanel } from './agent-assist-panel';
 
-type TaskTabKey = 'info' | 'materials' | 'senses' | 'functions';
+type TaskTabKey = 'agent' | 'info' | 'materials' | 'senses' | 'functions';
 
 type ReportAuthoringShellProps = {
   taskId: string;
@@ -18,6 +18,7 @@ type ReportAuthoringShellProps = {
 };
 
 const navItems: Array<{ key: TaskTabKey; label: string; icon: ComponentType<{ className?: string }> | null }> = [
+  { key: 'agent', label: 'AI体验方案', icon: WandSparkles },
   { key: 'senses', label: '五感体验', icon: Eye },
   { key: 'functions', label: '功能效果', icon: Wrench },
   { key: 'info', label: 'AI总结/报告', icon: FileText },
@@ -32,7 +33,14 @@ export function ReportAuthoringShell({
   children,
 }: ReportAuthoringShellProps) {
   return (
-    <div className={cn('grid gap-4 lg:items-start', agentOpen ? 'lg:grid-cols-[220px_minmax(0,1fr)_320px]' : 'lg:grid-cols-[220px_minmax(0,1fr)]')}>
+    <div
+      className={cn(
+        'grid gap-4 lg:items-start',
+        agentOpen
+          ? 'lg:grid-cols-[220px_minmax(0,1fr)] 2xl:grid-cols-[220px_minmax(0,1fr)_300px]'
+          : 'lg:grid-cols-[220px_minmax(0,1fr)]'
+      )}
+    >
       <aside className="rounded-lg border bg-card p-3 shadow-sm lg:sticky lg:top-4">
         <div className="mb-3 flex items-center justify-between gap-2">
           <div>
@@ -71,10 +79,12 @@ export function ReportAuthoringShell({
       <div className="min-w-0 space-y-4">{children}</div>
 
       {agentOpen && (
-        <AgentAssistPanel
-          taskId={taskId}
-          onClose={() => onAgentOpenChange(false)}
-        />
+        <div className="min-w-0 lg:col-start-2 2xl:col-start-3 2xl:row-start-1">
+          <AgentAssistPanel
+            taskId={taskId}
+            onClose={() => onAgentOpenChange(false)}
+          />
+        </div>
       )}
     </div>
   );
