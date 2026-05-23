@@ -15,6 +15,15 @@ function formatSkillTemplateError(err: unknown, fallback: string) {
   return message || fallback;
 }
 
+function normalizeTemplateRow(row: Record<string, unknown>) {
+  return {
+    id: readField(row, 'id', 'id', ''),
+    skill_key: readField(row, 'skill_key', 'skillKey', ''),
+    is_enabled: readField(row, 'is_enabled', 'isEnabled', true),
+    active_version_id: readField<string | null>(row, 'active_version_id', 'activeVersionId', null),
+  };
+}
+
 async function listSkillTemplates(client: ReturnType<typeof getSupabaseClient>) {
   const { data, error } = await client
     .from('agent_skill_templates')
@@ -107,12 +116,34 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (!body.template_id) return NextResponse.json({ code: 1, message: '缺少 Skill ID' }, { status: 400 });
+  let templateId = body.template_id as string | undefined;
+  let skillKey = body.skill_key as AgentSkillKey | undefined;
+
+  if (!templateId && skillKey) {
+    try {
+      await ensureDefaultSkillTemplates(client, body.admin_user_id);
+      const { data: template, error } = await client
+        .from('agent_skill_templates')
+        .select('*')
+        .eq('skill_key', skillKey)
+        .maybeSingle();
+      if (error || !template) {
+        return NextResponse.json({ code: 1, message: error?.message || 'Prompt 模板创建失败' }, { status: 500 });
+      }
+      const normalized = normalizeTemplateRow(template as Record<string, unknown>);
+      templateId = normalized.id;
+      skillKey = normalized.skill_key as AgentSkillKey;
+    } catch (err) {
+      return NextResponse.json({ code: 1, message: formatSkillTemplateError(err, 'Prompt 模板创建失败') }, { status: 500 });
+    }
+  }
+
+  if (!templateId) return NextResponse.json({ code: 1, message: '缺少 Skill ID' }, { status: 400 });
 
   const { data: versions } = await client
     .from('agent_skill_versions')
     .select('version')
-    .eq('template_id', body.template_id)
+    .eq('template_id', templateId)
     .order('version', { ascending: false })
     .limit(1);
 
@@ -120,7 +151,7 @@ export async function POST(request: NextRequest) {
   const { data, error } = await client
     .from('agent_skill_versions')
     .insert({
-      template_id: body.template_id,
+      template_id: templateId,
       version: nextVersion,
       system_prompt: body.system_prompt || '',
       user_prompt_template: body.user_prompt_template || '',
@@ -133,16 +164,24 @@ export async function POST(request: NextRequest) {
 
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
 
-  const { data: template } = await client
+  await client
     .from('agent_skill_templates')
-    .select('skill_key')
-    .eq('id', body.template_id)
-    .maybeSingle();
+    .update({ active_version_id: data.id, updated_at: new Date().toISOString() })
+    .eq('id', templateId);
 
-  if (template?.skill_key) {
+  if (!skillKey) {
+    const { data: template } = await client
+      .from('agent_skill_templates')
+      .select('*')
+      .eq('id', templateId)
+      .maybeSingle();
+    if (template) skillKey = normalizeTemplateRow(template as Record<string, unknown>).skill_key as AgentSkillKey;
+  }
+
+  if (skillKey) {
     await logAgentAudit(client, {
-      skillKey: template.skill_key as AgentSkillKey,
-      templateId: body.template_id,
+      skillKey,
+      templateId,
       versionId: data.id,
       action: 'create_version',
       actorUserId: body.admin_user_id,
@@ -151,7 +190,7 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  return NextResponse.json({ code: 0, message: 'Skill 版本已创建', data });
+  return NextResponse.json({ code: 0, message: 'Skill 版本已创建', data: { ...data, template_id: templateId } });
 }
 
 export async function PUT(request: NextRequest) {

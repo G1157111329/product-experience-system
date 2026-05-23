@@ -188,7 +188,7 @@ function AiSummaryBlock({ summary }: { summary?: AiSummaryLike | null }) {
     <div className="rounded-lg border bg-background p-3 space-y-3">
       <div className="flex items-center gap-2 min-w-0">
         <Sparkles className="h-4 w-4 text-primary shrink-0" />
-        <span className="text-xs font-medium text-primary shrink-0">AI总结</span>
+        <span className="text-xs font-medium text-primary shrink-0">总结</span>
         {summary.tag && <Badge className="text-[10px] shrink-0">{summary.tag}</Badge>}
         {summary.satisfaction_score !== undefined && (
           <Badge variant="outline" className="text-[10px] ml-auto shrink-0">满意度 {summary.satisfaction_score}/10</Badge>
@@ -271,7 +271,7 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
 
       <ReportPaperSection index="02" title="结论摘要" subtitle="先看结论，再下钻到对应证据。">
         <AiSummaryBlock summary={display.ai_summary} />
-        {!display.ai_summary && <p className="text-xs text-muted-foreground">暂无 AI 总结。</p>}
+        {!display.ai_summary && <p className="text-xs text-muted-foreground">暂无总结。</p>}
       </ReportPaperSection>
       {display.review_note && (
         <div className="rounded-lg border bg-background p-3 text-xs leading-relaxed">

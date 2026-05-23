@@ -130,7 +130,7 @@ function SharedAiSummary({ summary }: { summary?: AiSummaryLike | null }) {
     <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center gap-2 min-w-0">
-          <h3 className="font-semibold text-sm text-primary shrink-0">AI总结</h3>
+          <h3 className="font-semibold text-sm text-primary shrink-0">总结</h3>
           {summary.tag && <Badge className="text-[10px] shrink-0">{summary.tag}</Badge>}
           {summary.satisfaction_score !== undefined && <Badge variant="outline" className="text-[10px] ml-auto shrink-0">满意度 {summary.satisfaction_score}/10</Badge>}
         </div>

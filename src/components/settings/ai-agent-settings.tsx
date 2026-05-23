@@ -14,6 +14,7 @@ import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/lib/auth-context';
+import { getDefaultSkillDefinitions } from '@/lib/agent-skills';
 
 interface ModelConfig {
   id?: string;
@@ -42,6 +43,7 @@ interface SkillTemplate {
     user_prompt_template: string;
     output_schema: Record<string, unknown>;
   } | null;
+  is_builtin_draft?: boolean;
 }
 
 const emptyModel: ModelConfig = {
@@ -59,8 +61,25 @@ const skillModuleLabels: Record<string, string> = {
   senses_standard_preset: 'AI体验方案 · 五感体验',
   recipe_scene_preset: 'AI体验方案 · 功能效果',
   effect_evaluation: '功能效果 · 效果评价',
-  report_summary: 'AI总结/报告',
+  report_summary: '总结/报告',
 };
+
+const builtinSkillTemplates: SkillTemplate[] = getDefaultSkillDefinitions().map((skill) => ({
+  id: `builtin:${skill.skillKey}`,
+  skill_key: skill.skillKey,
+  name: skill.name,
+  description: skill.description,
+  is_enabled: true,
+  active_version_id: null,
+  is_builtin_draft: true,
+  active_version: {
+    id: '',
+    version: 1,
+    system_prompt: skill.systemPrompt,
+    user_prompt_template: skill.userPromptTemplate,
+    output_schema: skill.outputSchema,
+  },
+}));
 
 export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenChange: (value: boolean) => void }) {
   const { user } = useAuth();
@@ -71,6 +90,7 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
   const [saving, setSaving] = useState(false);
   const [initializingSkills, setInitializingSkills] = useState(false);
   const [skillsError, setSkillsError] = useState<string | null>(null);
+  const displaySkills = skills.length > 0 ? skills : builtinSkillTemplates;
 
   const fetchData = useCallback(async () => {
     setSkillsError(null);
@@ -206,7 +226,7 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        template_id: editingSkill.id,
+        ...(editingSkill.is_builtin_draft ? { skill_key: editingSkill.skill_key } : { template_id: editingSkill.id }),
         system_prompt: version.system_prompt,
         user_prompt_template: version.user_prompt_template,
         output_schema: version.output_schema || {},
@@ -216,11 +236,6 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
     });
     const data = await res.json();
     if (data.code === 0) {
-      await fetch('/api/ai/skill-templates', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ template_id: editingSkill.id, active_version_id: data.data.id, admin_user_id: user.id }),
-      });
       toast.success('Skill新版本已启用');
       setEditingSkill(null);
       fetchData();
@@ -352,16 +367,17 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
                 <p className="text-xs text-muted-foreground">Skills 以 Prompt 形式存在，编辑会创建新版本，历史版本不会被覆盖。</p>
               </div>
               <div className="rounded-md border bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
-                选择一个模板后，下方会出现 System Prompt 和 User Prompt Template 两个录入框。保存后会创建并启用新版本。
+                选择模板即可编辑 System Prompt 和 User Prompt Template。若数据库里还没有模板，会先显示内置草稿，保存后自动创建正式版本。
               </div>
               <div className="space-y-2">
-                {skills.map((skill) => (
+                {displaySkills.map((skill) => (
                   <div key={skill.id} className="rounded-md border p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-medium text-sm">{skill.name}</span>
                           <Badge variant="outline" className="text-[10px]">v{skill.active_version?.version || '-'}</Badge>
+                          {skill.is_builtin_draft && <Badge variant="secondary" className="text-[10px]">内置草稿</Badge>}
                           <Badge variant={skill.is_enabled ? 'default' : 'secondary'} className="text-[10px]">{skill.is_enabled ? '启用' : '停用'}</Badge>
                         </div>
                         <p className="mt-1 text-xs text-muted-foreground">{skill.description}</p>
@@ -369,7 +385,7 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
                           作用模块：{skillModuleLabels[skill.skill_key] || skill.skill_key}
                         </p>
                       </div>
-                      <Switch checked={skill.is_enabled} onCheckedChange={(checked) => toggleSkill(skill, checked)} />
+                      <Switch checked={skill.is_enabled} disabled={skill.is_builtin_draft} onCheckedChange={(checked) => toggleSkill(skill, checked)} />
                     </div>
                     <div className="mt-3 flex justify-end">
                       <Button variant={editingSkill?.id === skill.id ? 'default' : 'outline'} size="sm" className="gap-1" onClick={() => openPromptEditor(skill)}>
@@ -379,21 +395,15 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
                   </div>
                 ))}
                 {skills.length === 0 && (
-                  <div className="space-y-3 rounded-md border border-dashed p-4 text-center">
-                    <div>
-                      <div className="text-sm font-medium">暂无 Prompt 模板</div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        可以先初始化系统内置模板，然后直接在这里编辑 System Prompt 和 User Prompt Template。
-                      </p>
+                  <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <span>当前显示的是内置默认模板，可直接打开录入框编辑；保存时会创建正式 Prompt 版本。</span>
+                      <Button variant="outline" size="sm" className="gap-2" onClick={initializeSkillTemplates} disabled={initializingSkills || !user?.id}>
+                        <RefreshCw className={initializingSkills ? 'h-3.5 w-3.5 animate-spin' : 'h-3.5 w-3.5'} />
+                        同步模板
+                      </Button>
                     </div>
-                    <Button variant="outline" className="gap-2" onClick={initializeSkillTemplates} disabled={initializingSkills || !user?.id}>
-                      <RefreshCw className={initializingSkills ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
-                      初始化 Prompt 模板
-                    </Button>
-                    {skillsError && <p className="text-xs text-destructive">{skillsError}</p>}
-                    <p className="text-[11px] text-muted-foreground">
-                      若初始化失败，请确认已执行 docs/superpowers/sql/2026-05-23-ai-agent-skills.sql。
-                    </p>
+                    {skillsError && <p className="mt-2 text-xs text-destructive">{skillsError}</p>}
                   </div>
                 )}
               </div>
