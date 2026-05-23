@@ -151,14 +151,24 @@ async function loadRecipesForTask(taskId: string): Promise<Recipe[]> {
     deduped.map(async (recipe) => {
       const stepsWithMats = await Promise.all(
         (recipe.recipe_steps || []).map(async (step) => {
-          const matRes = await fetch(`/api/materials?recipe_step_id=${step.id}`);
-          const matData = await matRes.json();
-          return { ...step, materials: matData.data || [] };
+          try {
+            const matRes = await fetch(`/api/materials?recipe_step_id=${step.id}`);
+            const matData = await matRes.json();
+            return { ...step, materials: matData.code === 0 ? matData.data || [] : [] };
+          } catch {
+            return { ...step, materials: [] };
+          }
         })
       );
 
-      const effectMatRes = await fetch(`/api/materials?recipe_id=${recipe.id}`);
-      const effectMatData = await effectMatRes.json();
+      let effectMaterials: Material[] = [];
+      try {
+        const effectMatRes = await fetch(`/api/materials?recipe_id=${recipe.id}`);
+        const effectMatData = await effectMatRes.json();
+        effectMaterials = effectMatData.code === 0 ? effectMatData.data || [] : [];
+      } catch {
+        effectMaterials = [];
+      }
       let parsedProblemPoints: ProblemPoint[] = [];
       if (recipe.effect_problem_point) {
         try {
@@ -174,7 +184,7 @@ async function loadRecipesForTask(taskId: string): Promise<Recipe[]> {
       return {
         ...recipe,
         recipe_steps: stepsWithMats,
-        effect_materials: effectMatData.data || [],
+        effect_materials: effectMaterials,
         effect_problem_points: parsedProblemPoints,
       };
     })
@@ -246,6 +256,9 @@ export default function TaskDetailPage() {
   useEffect(() => { fetchTask().finally(() => setLoading(false)); }, [fetchTask]);
   useEffect(() => { fetchAiSummary(); }, [fetchAiSummary]);
   useEffect(() => { fetchReportRecipes(); }, [fetchReportRecipes]);
+  useEffect(() => {
+    if (activeTab === 'functions') fetchReportRecipes();
+  }, [activeTab, fetchReportRecipes]);
   useEffect(() => {
     const tab = searchParams.get('tab');
     if (tab === 'agent' || tab === 'info' || tab === 'materials' || tab === 'senses' || tab === 'functions') {
@@ -466,7 +479,7 @@ export default function TaskDetailPage() {
       )}
       {activeTab === 'materials' && <MaterialsTab taskId={id} />}
         {activeTab === 'senses' && <SensesTab taskId={id} records={task.records || []} taskProductCategory={task.product_category} taskProduct={task.product} onRefresh={fetchTask} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onBindingTargetChange={setEvidenceBindingTarget} />}
-        {activeTab === 'functions' && <FunctionsTab taskId={id} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onRecipesChange={setReportRecipes} onBindingTargetChange={setEvidenceBindingTarget} />}
+        {activeTab === 'functions' && <FunctionsTab taskId={id} initialRecipes={reportRecipes} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onRecipesChange={setReportRecipes} onBindingTargetChange={setEvidenceBindingTarget} />}
       </ReportAuthoringShell>
 
       {/* Transfer Dialog */}
@@ -2236,9 +2249,21 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
 
 
 /* ─── Tab: 功能效果 ─── */
-function FunctionsTab({ taskId, onStatusUpdate, onRecipesChange, onBindingTargetChange }: { taskId: string; onStatusUpdate: () => void; onRecipesChange?: (recipes: Recipe[]) => void; onBindingTargetChange?: (target: EvidenceBindingTarget | null) => void }) {
-  const [recipes, setRecipes] = useState<Recipe[]>([]);
-  const [loading, setLoading] = useState(true);
+function FunctionsTab({
+  taskId,
+  initialRecipes,
+  onStatusUpdate,
+  onRecipesChange,
+  onBindingTargetChange,
+}: {
+  taskId: string;
+  initialRecipes?: Recipe[];
+  onStatusUpdate: () => void;
+  onRecipesChange?: (recipes: Recipe[]) => void;
+  onBindingTargetChange?: (target: EvidenceBindingTarget | null) => void;
+}) {
+  const [recipes, setRecipes] = useState<Recipe[]>(initialRecipes || []);
+  const [loading, setLoading] = useState((initialRecipes || []).length === 0);
   const [savingRecipe, setSavingRecipe] = useState(false);
   const [savingStep, setSavingStep] = useState(false);
   const [savingEditStep, setSavingEditStep] = useState(false);
@@ -2290,11 +2315,24 @@ function FunctionsTab({ taskId, onStatusUpdate, onRecipesChange, onBindingTarget
   const [stepRefResults, setStepRefResults] = useState<RecipeLibRef[]>([]);
   const [stepRefLoading, setStepRefLoading] = useState(false);
 
+  useEffect(() => {
+    if (initialRecipes && initialRecipes.length > 0) {
+      setRecipes(initialRecipes);
+      setLoading(false);
+    }
+  }, [initialRecipes]);
+
   const fetchRecipes = useCallback(async () => {
-    const enriched = await loadRecipesForTask(taskId);
-    setRecipes(enriched);
-    onRecipesChange?.(enriched);
-    setLoading(false);
+    setLoading(true);
+    try {
+      const enriched = await loadRecipesForTask(taskId);
+      setRecipes(enriched);
+      onRecipesChange?.(enriched);
+    } catch {
+      toast.error('功能/食谱列表加载失败');
+    } finally {
+      setLoading(false);
+    }
   }, [taskId, onRecipesChange]);
 
   useEffect(() => { fetchRecipes(); }, [fetchRecipes]);
@@ -2699,11 +2737,13 @@ function FunctionsTab({ taskId, onStatusUpdate, onRecipesChange, onBindingTarget
 
       <FunctionsInputWorkspace
         recipes={recipes}
+        loading={loading}
         onCreateRecipe={() => setAddDialogOpen(true)}
         onEditRecipe={handleEditRecipe}
         onAddStep={(recipe) => { setSelectedRecipe(recipe); setAddStepDialogOpen(true); }}
         onEditStep={(step) => handleEditStep(step)}
         onBindingTargetChange={(target) => onBindingTargetChange?.(target)}
+        onRefresh={fetchRecipes}
         renderEffectEditor={(recipe) => (
           <div className="rounded-lg border bg-card p-3 shadow-sm space-y-3">
             <div className="flex items-center gap-2">

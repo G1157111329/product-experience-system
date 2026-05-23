@@ -9,21 +9,25 @@ import type { EvidenceBindingTarget, Recipe, RecipeStep } from '../types';
 
 type FunctionsInputWorkspaceProps = {
   recipes: Recipe[];
+  loading?: boolean;
   onCreateRecipe: () => void;
   onEditRecipe: (recipe: Recipe) => void;
   onAddStep: (recipe: Recipe) => void;
   onEditStep: (step: RecipeStep, recipe: Recipe) => void;
   onBindingTargetChange: (target: EvidenceBindingTarget | null) => void;
+  onRefresh?: () => void;
   renderEffectEditor?: (recipe: Recipe) => ReactNode;
 };
 
 export function FunctionsInputWorkspace({
   recipes,
+  loading = false,
   onCreateRecipe,
   onEditRecipe,
   onAddStep,
   onEditStep,
   onBindingTargetChange,
+  onRefresh,
   renderEffectEditor,
 }: FunctionsInputWorkspaceProps) {
   const [selectedRecipeId, setSelectedRecipeId] = useState('');
@@ -65,7 +69,15 @@ export function FunctionsInputWorkspace({
         </div>
 
         <div className="mt-3 space-y-2">
-          {recipes.map((recipe) => (
+          {loading && recipes.length === 0 ? (
+            [1, 2, 3].map((item) => (
+              <div key={item} className="h-20 animate-pulse rounded-md bg-muted" />
+            ))
+          ) : recipes.length === 0 ? (
+            <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
+              暂无功能/食谱
+            </div>
+          ) : recipes.map((recipe) => (
             <button
               key={recipe.id}
               type="button"
@@ -165,8 +177,15 @@ export function FunctionsInputWorkspace({
             {renderEffectEditor?.(selectedRecipe)}
           </>
         ) : (
-          <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">
-            <ClipboardList className="mr-2 h-4 w-4" />选择或新增一个功能
+          <div className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-lg border border-dashed text-sm text-muted-foreground">
+            <div className="flex items-center">
+              <ClipboardList className="mr-2 h-4 w-4" />{loading ? '正在加载功能/食谱...' : '选择或新增一个功能'}
+            </div>
+            {onRefresh && (
+              <Button variant="outline" size="sm" onClick={onRefresh} disabled={loading}>
+                刷新列表
+              </Button>
+            )}
           </div>
         )}
       </div>
