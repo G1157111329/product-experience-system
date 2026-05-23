@@ -240,7 +240,7 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
     <div className="space-y-5">
       {/* Task Info */}
       {task && (
-        <ReportPaperSection index="01" title="任务信息" subtitle="报告正文以任务数据为准，必要时可回到任务详情修正原始记录。">
+        <ReportPaperSection index="01" title="任务信息">
         <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2 lg:grid-cols-3">
           {Object.entries(task)
             .filter(([k]) => !['id', 'selected_standards', 'created_by'].includes(k))
@@ -256,20 +256,7 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
         </ReportPaperSection>
       )}
 
-      <div className="flex flex-wrap gap-2 rounded-xl border bg-background p-3 shadow-sm">
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium">事实内容回源编辑</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">检查记录、素材、食谱步骤和效果评价以任务源数据为准。</p>
-        </div>
-        <Button variant="outline" size="sm" onClick={() => window.location.href = `/tasks/${report.task_id}?tab=senses`}>
-          编辑五感记录
-        </Button>
-        <Button variant="outline" size="sm" onClick={() => window.location.href = `/tasks/${report.task_id}?tab=functions`}>
-          编辑功能效果
-        </Button>
-      </div>
-
-      <ReportPaperSection index="02" title="结论摘要" subtitle="先看结论，再下钻到对应证据。">
+      <ReportPaperSection index="02" title="结论摘要">
         <AiSummaryBlock summary={display.ai_summary} />
         {!display.ai_summary && <p className="text-xs text-muted-foreground">暂无总结。</p>}
       </ReportPaperSection>
@@ -282,7 +269,7 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
 
       {/* Issues with live status */}
       {liveIssues.length > 0 && (
-        <ReportPaperSection index="03" title={`问题清单 (${liveIssues.length})`} subtitle="问题状态可直接点选更新，便于报告评审后回写整改进展。">
+        <ReportPaperSection index="03" title={`问题清单 (${liveIssues.length})`}>
           <div className="space-y-2">
           {liveIssues.map((issue) => (
             <div key={issue.id} className="rounded-lg border bg-background p-2.5 space-y-1">
@@ -313,7 +300,7 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
 
       {/* Check Records */}
       {records.length > 0 && (
-        <ReportPaperSection index="04" title={`五感检查记录 (${records.length})`} subtitle="每条记录下方保留对应图片/视频证据，避免结论和素材脱节。">
+        <ReportPaperSection index="04" title={`五感检查记录 (${records.length})`}>
           <div className="space-y-3">
           {records.map((record) => {
             const recordMats = record.materials || [];
@@ -350,7 +337,7 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
 
       {/* Recipes */}
       {recipes.length > 0 && (
-        <ReportPaperSection index="05" title={`功能/食谱效果 (${recipes.length})`} subtitle="步骤问题、效果结论与素材证据保持在同一上下文中。">
+        <ReportPaperSection index="05" title={`功能/食谱效果 (${recipes.length})`}>
           <div className="space-y-3">
           {recipes.map((recipe) => (
             <div key={recipe.id} className="rounded-lg border bg-background p-3 space-y-2">
