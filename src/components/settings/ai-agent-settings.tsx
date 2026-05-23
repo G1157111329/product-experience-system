@@ -273,7 +273,7 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] w-[min(1120px,calc(100vw-2rem))] max-w-none">
+      <DialogContent className="w-[calc(100vw-1rem)] max-w-none sm:!w-[min(1180px,calc(100vw-3rem))] sm:!max-w-[1180px] xl:!w-[1180px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-5 w-5" /> AI Agent 设置
@@ -282,8 +282,8 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
         </DialogHeader>
 
         <ScrollArea className="max-h-[72vh] pr-3">
-          <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
-            <section className="min-w-0 space-y-3">
+          <div className="flex min-w-0 flex-col gap-5 xl:flex-row">
+            <section className="min-w-0 space-y-3 xl:w-[360px] xl:shrink-0">
               <div>
                 <h3 className="text-sm font-semibold">模型接入</h3>
                 <p className="text-xs text-muted-foreground">当前启用模型将作为 Agent 默认模型</p>
@@ -361,7 +361,7 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
               )}
             </section>
 
-            <section className="space-y-3">
+            <section className="min-w-0 flex-1 space-y-3">
               <div>
                 <h3 className="text-sm font-semibold">Prompt 模板</h3>
                 <p className="text-xs text-muted-foreground">Skills 以 Prompt 形式存在，编辑会创建新版本，历史版本不会被覆盖。</p>
