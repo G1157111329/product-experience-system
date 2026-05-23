@@ -120,6 +120,37 @@ const LEVEL_COLORS: Record<string, string> = {
   '三类': 'bg-slate-100 text-slate-600',
 };
 
+function parseProblemPoints(value: string | null | undefined): ProblemPoint[] {
+  if (!value) return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((item): ProblemPoint | null => {
+          if (typeof item === 'string') return { text: item };
+          if (!item || typeof item !== 'object') return null;
+          const record = item as Record<string, unknown>;
+          const text = typeof record.text === 'string' ? record.text.trim() : '';
+          const materialIds = Array.isArray(record.material_ids)
+            ? record.material_ids.filter((id): id is string => typeof id === 'string')
+            : [];
+          return text ? { text, material_ids: materialIds } : null;
+        })
+        .filter((item): item is ProblemPoint => Boolean(item));
+    }
+    if (typeof parsed === 'string' && parsed.trim()) return [{ text: parsed.trim() }];
+  } catch {
+    // Legacy reports stored a plain text problem point.
+  }
+  return value.trim() ? [{ text: value.trim() }] : [];
+}
+
+function getBoundMaterials(materials: Material[] | undefined, ids: string[] | undefined): Material[] {
+  if (!materials?.length || !ids?.length) return [];
+  const idSet = new Set(ids);
+  return materials.filter((material) => idSet.has(material.id));
+}
+
 function AiSummaryBlock({ summary }: { summary?: AiTaskSummary | null }) {
   if (!summary || (!summary.summary && !summary.tag && !summary.historical_position)) return null;
   return (
@@ -310,10 +341,38 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
                   {!recipe.effect_ai_result && recipe.effect_description && (
                     <p className="text-[11px] text-muted-foreground whitespace-pre-wrap break-all ml-5">{recipe.effect_description}</p>
                   )}
-                  {recipe.effect_problem_point && (
-                    <p className="text-[10px] text-amber-600 break-all ml-5">问题: {recipe.effect_problem_point}</p>
-                  )}
-                  <MediaGallery materials={recipe.effect_materials || []} responsive columns={{ mobile: 2, sm: 3, lg: 4 }} className="ml-5" onPreview={onPreview} />
+                  {(() => {
+                    const effectPoints = parseProblemPoints(recipe.effect_problem_point);
+                    const effectMaterials = recipe.effect_materials || [];
+                    const hasBoundMaterials = effectPoints.some((point) => point.material_ids?.length);
+                    return (
+                      <>
+                        {effectPoints.length > 0 && (
+                          <div className="ml-5 space-y-2">
+                            {effectPoints.map((point, pointIndex) => {
+                              const pointMaterials = getBoundMaterials(effectMaterials, point.material_ids);
+                              return (
+                                <div key={`${point.text}-${pointIndex}`} className="space-y-1.5">
+                                  <p className="text-[11px] text-amber-600 break-all">
+                                    {effectPoints.length > 1 ? `问题${pointIndex + 1}: ` : '问题: '}{point.text}
+                                  </p>
+                                  <MediaGallery materials={pointMaterials} responsive columns={{ mobile: 2, sm: 2, lg: 3 }} gap="gap-3" onPreview={onPreview} />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        <MediaGallery
+                          materials={hasBoundMaterials ? [] : effectMaterials}
+                          responsive
+                          columns={{ mobile: 2, sm: 2, lg: 3 }}
+                          gap="gap-3"
+                          className="ml-5"
+                          onPreview={onPreview}
+                        />
+                      </>
+                    );
+                  })()}
                 </div>
               )}
             </div>

@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { MediaThumbnail } from './image-preview';
 import { MediaCaptureDialog } from './media-capture-dialog';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 interface Material {
@@ -34,6 +35,7 @@ interface MaterialPickerProps {
   initialMaterials?: Material[];
   onSelectionChange?: (ids: string[], materials: Material[]) => void;
   onPreview?: (url: string) => void;
+  selectedPreviewSize?: 'sm' | 'md';
 }
 
 type FilterType = 'all' | 'image' | 'video';
@@ -50,6 +52,7 @@ export function MaterialPicker({
   initialMaterials,
   onSelectionChange,
   onPreview,
+  selectedPreviewSize = 'sm',
 }: MaterialPickerProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const [materials, setMaterials] = useState<Material[]>([]);
@@ -266,14 +269,16 @@ export function MaterialPicker({
   const renderSelectedThumbnails = () => {
     if (selected.length === 0) return null;
 
+    const wrapperClass = selectedPreviewSize === 'md' ? 'w-20 h-20' : 'w-12 h-12';
+
     return (
-      <div className="flex gap-1.5 flex-wrap">
+      <div className={cn('flex flex-wrap', selectedPreviewSize === 'md' ? 'gap-2.5' : 'gap-1.5')}>
         {selected.map((id) => {
           const material = selectedMaterialMap[id];
           if (!material) return null;
 
           return (
-            <div key={id} className="relative w-12 h-12 rounded-md overflow-hidden border border-border group cursor-pointer"
+            <div key={id} className={cn('relative rounded-md overflow-hidden border border-border group cursor-pointer', wrapperClass)}
               onClick={(e) => {
                 e.stopPropagation();
                 if (onPreview) {
@@ -282,7 +287,7 @@ export function MaterialPicker({
                   setPreviewUrl(material.file_url);
                 }
               }}>
-              <MediaThumbnail url={material.file_url} type={material.material_type as 'image' | 'video'} size="sm" />
+              <MediaThumbnail url={material.file_url} type={material.material_type as 'image' | 'video'} size={selectedPreviewSize} />
               <button
                 type="button"
                 className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center text-[8px] opacity-70 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"

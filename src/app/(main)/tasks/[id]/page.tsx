@@ -2683,6 +2683,7 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                         onSelectionChange={(ids) => {
                           setEffectMaterialIds(prev => ({ ...prev, [recipe.id]: ids }));
                         }}
+                        selectedPreviewSize="md"
                       />
                     </div>
                     {/* AI result display */}
@@ -2756,6 +2757,7 @@ function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpda
                               <MaterialPicker
                                 taskId={taskId}
                                 selectedIds={pp.material_ids || []}
+                                selectedPreviewSize="md"
                                 onSelectionChange={(ids) => {
                                   const existing = effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? [];
                                   setEffectProblemPoints(prev => ({
