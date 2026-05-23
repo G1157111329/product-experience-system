@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, type ReactNode } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Download, Share2, Copy, X, Loader2, Star, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -153,10 +153,39 @@ function getBoundMaterials(materials: Material[] | undefined, ids: string[] | un
   return materials.filter((material) => idSet.has(material.id));
 }
 
+function ReportPaperSection({
+  index,
+  title,
+  subtitle,
+  children,
+  className,
+}: {
+  index: string;
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={cn('rounded-xl border bg-background p-4 shadow-sm sm:p-5', className)}>
+      <div className="mb-4 flex items-start gap-3 border-b pb-3">
+        <span className="rounded-md border bg-muted/30 px-2 py-1 text-[11px] font-semibold tabular-nums text-muted-foreground">
+          {index}
+        </span>
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold leading-tight text-foreground">{title}</h2>
+          {subtitle && <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{subtitle}</p>}
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
 function AiSummaryBlock({ summary }: { summary?: AiSummaryLike | null }) {
   if (!summary || (!summary.summary && !summary.tag && !summary.historical_position)) return null;
   return (
-    <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-3">
+    <div className="rounded-lg border bg-background p-3 space-y-3">
       <div className="flex items-center gap-2 min-w-0">
         <Sparkles className="h-4 w-4 text-primary shrink-0" />
         <span className="text-xs font-medium text-primary shrink-0">AI总结</span>
@@ -168,13 +197,13 @@ function AiSummaryBlock({ summary }: { summary?: AiSummaryLike | null }) {
       {summary.summary && <p className="text-xs leading-relaxed whitespace-pre-wrap break-all">{summary.summary}</p>}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         {(summary.strengths || []).length > 0 && (
-          <div className="rounded-md bg-background/60 p-2">
+          <div className="rounded-md border bg-muted/20 p-2">
             <p className="text-[10px] font-medium text-emerald-700 mb-1">主要优势</p>
             <div className="space-y-0.5">{summary.strengths!.map((item, idx) => <p key={idx} className="text-[11px] text-muted-foreground break-all">{item}</p>)}</div>
           </div>
         )}
         {(summary.risks || []).length > 0 && (
-          <div className="rounded-md bg-background/60 p-2">
+          <div className="rounded-md border bg-muted/20 p-2">
             <p className="text-[10px] font-medium text-amber-700 mb-1">主要风险</p>
             <div className="space-y-0.5">{summary.risks!.map((item, idx) => <p key={idx} className="text-[11px] text-muted-foreground break-all">{item}</p>)}</div>
           </div>
@@ -208,24 +237,26 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
   });
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {/* Task Info */}
       {task && (
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
+        <ReportPaperSection index="01" title="任务信息" subtitle="报告正文以任务数据为准，必要时可回到任务详情修正原始记录。">
+        <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2 lg:grid-cols-3">
           {Object.entries(task)
             .filter(([k]) => !['id', 'selected_standards', 'created_by'].includes(k))
             .map(([key, value]) => (
-              <div key={key} className="min-w-0">
-                <span className="text-muted-foreground">{taskFieldLabels[key] || key}: </span>
-                <span className="break-all">
+              <div key={key} className="min-w-0 rounded-md border bg-muted/20 p-2.5">
+                <div className="mb-1 text-[10px] text-muted-foreground">{taskFieldLabels[key] || key}</div>
+                <div className="break-all font-medium leading-relaxed">
                   {(key === 'created_at' || key === 'updated_at') ? formatBeijingTime(value as string) : String(value || '-')}
-                </span>
+                </div>
               </div>
             ))}
         </div>
+        </ReportPaperSection>
       )}
 
-      <div className="flex flex-wrap gap-2 rounded-lg border bg-muted/20 p-3">
+      <div className="flex flex-wrap gap-2 rounded-xl border bg-background p-3 shadow-sm">
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium">事实内容回源编辑</p>
           <p className="mt-0.5 text-[11px] text-muted-foreground">检查记录、素材、食谱步骤和效果评价以任务源数据为准。</p>
@@ -238,9 +269,12 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
         </Button>
       </div>
 
-      <AiSummaryBlock summary={display.ai_summary} />
+      <ReportPaperSection index="02" title="结论摘要" subtitle="先看结论，再下钻到对应证据。">
+        <AiSummaryBlock summary={display.ai_summary} />
+        {!display.ai_summary && <p className="text-xs text-muted-foreground">暂无 AI 总结。</p>}
+      </ReportPaperSection>
       {display.review_note && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-3 text-xs leading-relaxed text-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+        <div className="rounded-lg border bg-background p-3 text-xs leading-relaxed">
           <p className="mb-1 font-medium">评审备注</p>
           <p className="whitespace-pre-wrap break-all">{display.review_note}</p>
         </div>
@@ -248,10 +282,10 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
 
       {/* Issues with live status */}
       {liveIssues.length > 0 && (
-        <div className="space-y-1.5">
-          <p className="text-xs font-medium text-muted-foreground">问题清单 ({liveIssues.length})</p>
+        <ReportPaperSection index="03" title={`问题清单 (${liveIssues.length})`} subtitle="问题状态可直接点选更新，便于报告评审后回写整改进展。">
+          <div className="space-y-2">
           {liveIssues.map((issue) => (
-            <div key={issue.id} className="p-2 rounded bg-muted/30 space-y-1">
+            <div key={issue.id} className="rounded-lg border bg-background p-2.5 space-y-1">
               <div className="flex items-center gap-2">
                 <Badge className={cn('text-[10px] shrink-0', LEVEL_COLORS[issue.level || '二类'] || LEVEL_COLORS['二类'])}>
                   {issue.level || '二类'}
@@ -259,7 +293,7 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
                 {issue.source_type === 'recipe_problem' && (
                   <Badge variant="outline" className="text-[10px] shrink-0">食谱/功能</Badge>
                 )}
-                <span className="text-xs flex-1 truncate">{issue.title}</span>
+                <span className="text-xs flex-1 break-all">{issue.title}</span>
                 <button
                   onClick={() => onStatusClick(issue)}
                   className={cn('text-[10px] px-1.5 py-0.5 rounded cursor-pointer font-medium transition-colors hover:opacity-80 shrink-0',
@@ -273,17 +307,18 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
               )}
             </div>
           ))}
-        </div>
+          </div>
+        </ReportPaperSection>
       )}
 
       {/* Check Records */}
       {records.length > 0 && (
-        <div className="space-y-1.5">
-          <p className="text-xs font-medium text-muted-foreground">检查记录 ({records.length})</p>
+        <ReportPaperSection index="04" title={`五感检查记录 (${records.length})`} subtitle="每条记录下方保留对应图片/视频证据，避免结论和素材脱节。">
+          <div className="space-y-3">
           {records.map((record) => {
             const recordMats = record.materials || [];
             return (
-              <div key={record.id} className="p-2.5 sm:p-3 rounded-lg bg-muted/30 space-y-2">
+              <div key={record.id} className="p-3 rounded-lg border bg-background space-y-2">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className={cn(
                     'text-[10px] font-medium px-1.5 py-0.5 rounded',
@@ -309,22 +344,23 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
               </div>
             );
           })}
-        </div>
+          </div>
+        </ReportPaperSection>
       )}
 
       {/* Recipes */}
       {recipes.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-xs font-medium text-muted-foreground">食谱/功能 ({recipes.length})</p>
+        <ReportPaperSection index="05" title={`功能/食谱效果 (${recipes.length})`} subtitle="步骤问题、效果结论与素材证据保持在同一上下文中。">
+          <div className="space-y-3">
           {recipes.map((recipe) => (
-            <div key={recipe.id} className="border rounded-lg p-3 space-y-2">
+            <div key={recipe.id} className="rounded-lg border bg-background p-3 space-y-2">
               <div className="flex items-center gap-2">
                 <Badge variant="secondary" className="text-[10px] shrink-0">{recipe.recipe_type}</Badge>
                 <span className="text-xs font-medium flex-1 min-w-0 truncate">{recipe.name}</span>
                 <span className="text-[10px] text-muted-foreground">{recipe.problem_count || 0} 问题</span>
               </div>
               {recipe.recipe_steps?.map((step) => (
-                <div key={step.id} className="p-2 rounded bg-muted/30 space-y-1">
+                <div key={step.id} className="p-2.5 rounded-lg border bg-muted/10 space-y-1.5">
                   <div className="flex items-center gap-1.5">
                     <span className="w-4 h-4 rounded-full bg-primary/10 text-primary text-[9px] flex items-center justify-center font-medium shrink-0">{step.step_number}</span>
                     <span className="text-xs break-all">{step.operation}</span>
@@ -350,7 +386,7 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
               ))}
               {/* Effect Evaluation */}
               {(recipe.effect_description || recipe.effect_problem_point || recipe.effect_score || recipe.effect_ai_result || (recipe.effect_materials && recipe.effect_materials.length > 0)) && (
-                <div className="mt-2 p-2.5 rounded-lg border border-primary/20 bg-primary/5 space-y-1.5">
+                <div className="mt-2 p-2.5 rounded-lg border bg-background space-y-1.5">
                   <div className="flex items-center gap-2">
                     <Star className="h-3.5 w-3.5 text-primary" />
                     <span className="text-[11px] font-medium text-primary">效果/出品效果评价</span>
@@ -402,7 +438,8 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
               )}
             </div>
           ))}
-        </div>
+          </div>
+        </ReportPaperSection>
       )}
 
     </div>
@@ -609,9 +646,9 @@ export default function ReportDetailPage() {
   });
 
   return (
-    <PageShell size="wide" className="space-y-4">
+    <PageShell size="wide" className="space-y-5">
       <PreviewComponent />
-      <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 shadow-sm lg:flex-row lg:items-start lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
+      <div className="mx-auto flex max-w-6xl flex-col gap-3 rounded-xl border bg-background p-4 shadow-sm lg:flex-row lg:items-start">
         <Button variant="ghost" size="icon" className="h-10 w-10 shrink-0" onClick={() => router.back()}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -634,7 +671,7 @@ export default function ReportDetailPage() {
       </div>
 
       {/* Summary Stats */}
-      <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 lg:gap-3">
+      <div className="mx-auto grid max-w-6xl grid-cols-3 gap-2 sm:grid-cols-5 lg:gap-3">
         {[
           { label: '检查项总数', value: totalRecords.length, color: '' },
           { label: '合格', value: totalPass, color: 'text-emerald-600' },
@@ -642,7 +679,7 @@ export default function ReportDetailPage() {
           { label: '问题整改', value: allLiveIssues.length, color: 'text-amber-600' },
           { label: '食谱/功能问题', value: totalRecipePC, color: 'text-orange-600' },
         ].map((stat) => (
-          <Card key={stat.label} className="lg:py-4">
+          <Card key={stat.label} className="border bg-background shadow-sm lg:py-4">
             <CardContent className="p-3 text-center sm:p-4">
               <p className={cn('text-2xl font-bold tabular-nums lg:text-3xl', stat.color)}>{stat.value}</p>
               <p className="text-xs text-muted-foreground mt-1">{stat.label}</p>
@@ -651,7 +688,7 @@ export default function ReportDetailPage() {
         ))}
       </div>
 
-      <div className="rounded-lg border bg-card p-3 shadow-sm lg:flex lg:items-center lg:justify-between lg:gap-4">
+      <div className="mx-auto max-w-6xl rounded-xl border bg-background p-3 shadow-sm lg:flex lg:items-center lg:justify-between lg:gap-4">
         <div className="min-w-0">
           <p className="text-xs font-medium text-muted-foreground">报告导航</p>
           <p className="mt-1 text-sm font-medium">按阶段阅读报告，随时打开图/视频证据查看细节</p>
@@ -683,8 +720,8 @@ export default function ReportDetailPage() {
         const rptDate = rptTask?.test_date as string | undefined;
         const rptType = rptTask?.project_type as string | undefined;
         return (
-          <Card key={rpt.id} id={`report-section-${idx}`} className="scroll-mt-4 overflow-hidden">
-            <CardHeader className="border-b bg-muted/20 pb-3">
+          <Card key={rpt.id} id={`report-section-${idx}`} className="mx-auto max-w-6xl scroll-mt-4 overflow-hidden border bg-background shadow-sm">
+            <CardHeader className="border-b bg-background pb-3">
               <div className="flex items-center justify-between gap-2">
                 <CardTitle className="text-sm font-medium min-w-0 break-all">
                   {isMerged ? (

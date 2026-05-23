@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useState, type CSSProperties } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { buildDisplayReportContent, type AiSummaryLike, type ReportContentWithReview, type ReportReviewOverrides } from '@/lib/report-review-overrides';
@@ -121,12 +121,76 @@ async function imageUrlToPrintableDataUrl(url: string, mode: PrintMode): Promise
   }
 }
 
+function parseProblemPoints(value?: string | null): ProblemPoint[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((item) => {
+          if (typeof item === 'string') return { text: item };
+          if (item && typeof item === 'object' && typeof (item as Record<string, unknown>).text === 'string') {
+            const rawIds = (item as Record<string, unknown>).material_ids;
+            return {
+              text: (item as Record<string, string>).text,
+              material_ids: Array.isArray(rawIds) ? rawIds.filter((id): id is string => typeof id === 'string') : undefined,
+            };
+          }
+          return null;
+        })
+        .filter((item): item is ProblemPoint => Boolean(item));
+    }
+    if (typeof parsed === 'string' && parsed.trim()) return [{ text: parsed.trim() }];
+  } catch {
+    // Legacy reports stored a plain text problem point.
+  }
+  return value.trim() ? [{ text: value.trim() }] : [];
+}
+
+function getBoundMaterials(materials: Material[] | undefined, ids: string[] | undefined): Material[] {
+  if (!materials?.length || !ids?.length) return [];
+  const idSet = new Set(ids);
+  return materials.filter((material) => idSet.has(material.id));
+}
+
+function PrintMediaStrip({ materials, indent = 0 }: { materials?: Material[]; indent?: number }) {
+  if (!materials?.length) return null;
+  const images = materials.filter(m => m.material_type === 'image');
+  const videos = materials.filter(m => m.material_type === 'video');
+  if (images.length === 0 && videos.length === 0) return null;
+
+  const mediaBoxStyle: CSSProperties = {
+    width: '72px',
+    height: '72px',
+    borderRadius: '6px',
+    objectFit: 'cover',
+    border: '1px solid #d1d5db',
+    background: '#f3f4f6',
+  };
+
+  return (
+    <div style={{ display: 'flex', gap: '8px', marginTop: '8px', marginLeft: indent, flexWrap: 'wrap' }}>
+      {images.map(mat => (
+        <img key={mat.id} src={mat.file_url} alt={mat.file_name} style={mediaBoxStyle} crossOrigin="anonymous" />
+      ))}
+      {videos.map(mat => (
+        <div key={mat.id} style={{ ...mediaBoxStyle, overflow: 'hidden', position: 'relative' }}>
+          <video src={mat.file_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(17,24,39,0.28)' }}>
+            <span style={{ color: 'white', fontSize: '16px' }}>&#9654;</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function PrintAiSummary({ summary }: { summary?: AiSummaryLike | null }) {
   if (!summary || (!summary.summary && !summary.tag && !summary.historical_position)) return null;
   return (
     <>
       <h3 style={{ fontSize: '15px', margin: '16px 0 8px', color: '#0d9488', borderBottom: '1px solid #0d9488', paddingBottom: '4px' }}>AI总结</h3>
-      <div style={{ padding: '10px', background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: '6px', margin: '8px 0' }}>
+      <div style={{ padding: '12px', background: '#fff', border: '1px solid #d1d5db', borderRadius: '8px', margin: '8px 0' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
           {summary.tag && <span style={{ fontSize: '11px', fontWeight: 600, color: '#0f766e', background: '#ccfbf1', padding: '2px 8px', borderRadius: '4px' }}>{summary.tag}</span>}
           {summary.satisfaction_score !== undefined && <span style={{ fontSize: '11px', color: '#0f766e' }}>满意度 {summary.satisfaction_score}/10</span>}
@@ -238,8 +302,6 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
       <h3 style={{ fontSize: '15px', margin: '16px 0 8px', color: '#0d9488', borderBottom: '1px solid #0d9488', paddingBottom: '4px' }}>检查记录 ({records.length})</h3>
       {records.length > 0 ? records.map((record) => {
         const recordMats = record.materials || [];
-        const recordImages = recordMats.filter(m => m.material_type === 'image');
-        const recordVideos = recordMats.filter(m => m.material_type === 'video');
         return (
           <div key={record.id} style={{ padding: '10px', margin: '4px 0', background: '#f9fafb', borderRadius: '6px', border: '1px solid #e5e7eb' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
@@ -259,16 +321,7 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
               </div>
             )}
             {record.problem_description && <div style={{ color: '#666', fontSize: '11px', marginTop: '3px' }}>{record.problem_description}</div>}
-            {(recordImages.length > 0 || recordVideos.length > 0) && (
-              <div style={{ display: 'flex', gap: '4px', marginTop: '6px', flexWrap: 'wrap' }}>
-                {recordImages.map(mat => (
-                  <img key={mat.id} src={mat.file_url} alt={mat.file_name} style={{ width: '50px', height: '50px', borderRadius: '3px', objectFit: 'cover', border: '1px solid #e5e7eb' }} crossOrigin="anonymous" />
-                ))}
-                {recordVideos.map(mat => (
-                  <div key={mat.id} style={{ width: '50px', height: '50px', borderRadius: '3px', overflow: 'hidden', border: '1px solid #e5e7eb', position: 'relative', background: '#e5e7eb' }}><video src={mat.file_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" /><div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)' }}><span style={{ color: 'white', fontSize: '16px' }}>&#9654;</span></div></div>
-                ))}
-              </div>
-            )}
+            <PrintMediaStrip materials={recordMats} />
           </div>
         );
       }) : <div style={{ textAlign: 'center', color: '#666', padding: '12px', fontSize: '12px' }}>暂无记录</div>}
@@ -289,12 +342,10 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
               </div>
               {recipe.recipe_steps?.map(step => {
                 const stepMats = step.materials || [];
-                const stepImages = stepMats.filter(m => m.material_type === 'image');
-                const stepVideos = stepMats.filter(m => m.material_type === 'video');
                 return (
                   <div key={step.id} style={{ padding: '6px', margin: '3px 0', background: '#f9fafb', borderRadius: '3px' }}>
                     <div>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '18px', height: '18px', borderRadius: '50%', background: '#ccfbf1', color: '#0d9488', fontSize: '10px', fontWeight: 600, marginRight: '6px' }}>{step.step_number}</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '18px', height: '18px', borderRadius: '50%', background: '#f3f4f6', color: '#374151', fontSize: '10px', fontWeight: 600, marginRight: '6px' }}>{step.step_number}</span>
                       <span style={{ fontSize: '12px' }}>{step.operation}</span>
                     </div>
                     {(() => {
@@ -313,27 +364,13 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
                         </div>
                       );
                     })()}
-                    {(stepImages.length > 0 || stepVideos.length > 0) && (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px', marginLeft: '24px' }}>
-                        {stepImages.map(mat => (
-                          <img key={mat.id} src={mat.file_url} alt={mat.file_name} style={{ width: '50px', height: '50px', borderRadius: '3px', objectFit: 'cover', border: '1px solid #e5e7eb' }} crossOrigin="anonymous" />
-                        ))}
-                        {stepVideos.map(mat => (
-                          <div key={mat.id} style={{ width: '50px', height: '50px', borderRadius: '3px', overflow: 'hidden', border: '1px solid #e5e7eb', position: 'relative', background: '#e5e7eb' }}>
-                            <video src={mat.file_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
-                            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)' }}>
-                              <span style={{ color: 'white', fontSize: '16px' }}>&#9654;</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    <PrintMediaStrip materials={stepMats} indent={24} />
                   </div>
                 );
               })}
               {/* Effect Evaluation */}
               {(recipe.effect_description || recipe.effect_problem_point || recipe.effect_score || recipe.effect_ai_result || (recipe.effect_materials && recipe.effect_materials.length > 0)) && (
-                <div style={{ marginTop: '8px', padding: '8px', borderRadius: '4px', border: '1px solid #99f6e4', background: '#f0fdfa' }}>
+                <div style={{ marginTop: '8px', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', background: '#fff' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
                     <span style={{ fontSize: '11px', fontWeight: 600, color: '#0d9488' }}>效果/出品效果评价</span>
                     {recipe.effect_score && (
@@ -360,7 +397,19 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
                       <div key={i} style={{ fontSize: '11px', color: '#d97706', marginLeft: '20px' }}>问题{i > 0 ? i + 1 : ''}: {pp}</div>
                     ));
                   })()}
-                  {recipe.effect_materials && recipe.effect_materials.length > 0 && (
+                  {(() => {
+                    const effectPoints = parseProblemPoints(recipe.effect_problem_point);
+                    const effectMaterials = recipe.effect_materials || [];
+                    const hasBoundMaterials = effectPoints.some((point) => point.material_ids?.length);
+                    if (!hasBoundMaterials) return null;
+                    return effectPoints.map((point, i) => (
+                      <div key={`${point.text}-${i}`} style={{ marginLeft: '20px', marginTop: '6px' }}>
+                        <div style={{ fontSize: '10px', color: '#6b7280' }}>对应素材 {effectPoints.length > 1 ? i + 1 : ''}</div>
+                        <PrintMediaStrip materials={getBoundMaterials(effectMaterials, point.material_ids)} />
+                      </div>
+                    ));
+                  })()}
+                  {recipe.effect_materials && recipe.effect_materials.length > 0 && !parseProblemPoints(recipe.effect_problem_point).some((point) => point.material_ids?.length) && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px', marginLeft: '20px' }}>
                       {recipe.effect_materials.filter(m => m.material_type === 'image').map(mat => (
                         <img key={mat.id} src={mat.file_url} alt={mat.file_name} style={{ width: '50px', height: '50px', borderRadius: '3px', objectFit: 'cover', border: '1px solid #e5e7eb' }} crossOrigin="anonymous" />
@@ -560,7 +609,7 @@ function ReportPrintContent() {
       )}
     <div className={`print-container ${printMode === 'text' ? 'print-text-mode' : ''}`} style={{ padding: '40px', maxWidth: '1000px', margin: '0 auto', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif', color: '#1a1a1a', lineHeight: 1.6, fontSize: '14px' }}>
       {/* Title */}
-      <h1 style={{ fontSize: '24px', marginBottom: '8px', color: '#0d9488' }}>
+      <h1 style={{ fontSize: '24px', marginBottom: '8px', color: '#111827', letterSpacing: '0' }}>
         {report.product_model || displayReport.title}
         {isMerged && <span style={{ fontSize: '14px', color: '#666', fontWeight: 400, marginLeft: '8px' }}>(合并 {allReports.length} 份报告)</span>}
       </h1>
@@ -636,6 +685,33 @@ function ReportPrintContent() {
           img { page-break-inside: avoid; max-width: 100%; }
         }
         .print-text-mode img, .print-text-mode video { display: none !important; }
+        .print-container {
+          background: #fff !important;
+        }
+        .print-container h1,
+        .print-container h2,
+        .print-container h3 {
+          color: #111827 !important;
+          border-color: #d1d5db !important;
+          letter-spacing: 0 !important;
+        }
+        .print-container [style*="#f0fdfa"],
+        .print-container [style*="#ccfbf1"] {
+          background: #fff !important;
+          border-color: #d1d5db !important;
+          color: #111827 !important;
+        }
+        .print-container img,
+        .print-container video {
+          width: 72px !important;
+          height: 72px !important;
+          object-fit: cover !important;
+        }
+        .print-container [style*="width: 50px"] {
+          width: 72px !important;
+          height: 72px !important;
+          border-radius: 6px !important;
+        }
         @page { size: A4; margin: 20mm; }
       `}</style>
     </div>
