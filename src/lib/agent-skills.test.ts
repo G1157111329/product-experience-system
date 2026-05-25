@@ -13,9 +13,10 @@ assert.deepEqual(AGENT_SKILL_KEYS, [
   'recipe_scene_preset',
   'effect_evaluation',
   'report_summary',
+  'report_product_compare',
 ]);
 
-assert.equal(defaults.length, 4);
+assert.equal(defaults.length, 5);
 assert.equal(defaults.every((item) => item.systemPrompt.includes('JSON')), true);
 assert.equal(defaults.every((item) => item.outputSchema && typeof item.outputSchema === 'object'), true);
 

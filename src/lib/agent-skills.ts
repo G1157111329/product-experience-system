@@ -3,6 +3,7 @@ export const AGENT_SKILL_KEYS = [
   'recipe_scene_preset',
   'effect_evaluation',
   'report_summary',
+  'report_product_compare',
 ] as const;
 
 export type AgentSkillKey = typeof AGENT_SKILL_KEYS[number];
@@ -80,6 +81,53 @@ export function getDefaultSkillDefinitions(): DefaultSkillDefinition[] {
         risks: ['string'],
         historical_position: 'string',
         suggestions: ['string'],
+      },
+    },
+    {
+      skillKey: 'report_product_compare',
+      name: '产品体验对比',
+      description: '基于两份体验报告对比两款产品的满意度、优劣势、关键差异和优化建议。',
+      systemPrompt: `你是产品体验对比分析专家。用户选择两份体验报告，是为了比较两款产品的体验表现差异，而不是评价报告写得好不好。请把A/B报告视为两款产品的体验证据来源，输出产品优劣势对比。
+
+要求：
+1. 以产品体验满意度为核心，分别给A/B产品0-10分。
+2. 输出VS总结形式，指出哪款产品体验表现更优或是否接近。
+3. 对比维度包括五感体验、功能效果、问题数量与严重度、用户使用流程、产品短板和整改风险。
+4. 优势、差异、风险必须描述产品体验本身，避免使用"报告更完整/信息更完整/报告质量"等报告评价口径。
+5. 如果某份报告数据较少，只能说明"该产品当前证据不足"，不要把报告不完整当成产品优势或劣势。
+6. 仅输出JSON，不要添加解释文字。`,
+      userPromptTemplate: `请基于以下两份报告证据，生成产品体验对比结果。
+
+报告A：
+{{report_a}}
+
+报告B：
+{{report_b}}
+
+JSON格式：
+{
+  "winner_report_id": "体验表现更优的产品对应报告id，接近则为null",
+  "satisfaction_a": 0-10数字,
+  "satisfaction_b": 0-10数字,
+  "headline": "一句话产品体验VS结论",
+  "summary": "2-4句话说明两款产品的体验表现差异",
+  "report_a_advantages": ["A产品体验优势1", "A产品体验优势2"],
+  "report_b_advantages": ["B产品体验优势1", "B产品体验优势2"],
+  "key_differences": ["产品体验关键差异1", "产品体验关键差异2"],
+  "risks": ["共同或主要体验风险1", "风险2"],
+  "recommendation": "面向产品优化、验证或选型的下一步建议"
+}`,
+      outputSchema: {
+        winner_report_id: 'string | null',
+        satisfaction_a: 8,
+        satisfaction_b: 7,
+        headline: 'string',
+        summary: 'string',
+        report_a_advantages: ['string'],
+        report_b_advantages: ['string'],
+        key_differences: ['string'],
+        risks: ['string'],
+        recommendation: 'string',
       },
     },
   ];

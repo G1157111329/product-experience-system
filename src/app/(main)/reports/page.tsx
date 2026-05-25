@@ -78,6 +78,20 @@ function getReportReviewStats(report: Report) {
   };
 }
 
+function getScorePercent(score: number | undefined) {
+  if (score === undefined || !Number.isFinite(score)) return 0;
+  return Math.min(100, Math.max(0, score * 10));
+}
+
+function getStatusLabel(status: string) {
+  return status === '草稿' ? '已完成' : status;
+}
+
+function getCompareProductLabel(report: Report) {
+  const parts = [report.product_category, report.product, report.product_model].filter(Boolean);
+  return parts.length > 0 ? parts.join(' · ') : report.title;
+}
+
 export default function ReportsPage() {
   const { user, isAdmin } = useAuth();
   const router = useRouter();
@@ -182,10 +196,12 @@ export default function ReportsPage() {
   const visibleReports = categoryFilter === 'all'
     ? reports
     : reports.filter(r => r.product_category === categoryFilter);
-  const selectedCompareReports = visibleReports.filter(r => compareIds.includes(r.id));
+  const selectedCompareReports = compareIds
+    .map(id => visibleReports.find(r => r.id === id))
+    .filter((report): report is Report => Boolean(report));
   const handleOpenCompare = async () => {
     if (compareIds.length !== 2) {
-      toast.error('请选择两份报告进行对比');
+      toast.error('请选择两份产品体验报告进行对比');
       return;
     }
     setCompareOpen(true);
@@ -196,13 +212,13 @@ export default function ReportsPage() {
       const res = await fetch('/api/reports/compare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ report_ids: compareIds }),
+        body: JSON.stringify({ report_ids: compareIds, user_id: user?.id || null }),
       });
       const data = await res.json();
       if (data.code === 0) {
         setCompareResult(data.data.result);
       } else {
-        setCompareError(data.message || '报告对比失败');
+        setCompareError(data.message || '产品体验对比失败');
       }
     } catch {
       setCompareError('网络错误，请重试');
@@ -236,7 +252,7 @@ export default function ReportsPage() {
     setCompareIds(prev => {
       if (prev.includes(id)) return prev.filter(x => x !== id);
       if (prev.length >= 2) {
-        toast.error('报告对比一次只能选择两份报告');
+        toast.error('产品体验对比一次只能选择两份报告');
         return prev;
       }
       return [...prev, id];
@@ -262,7 +278,7 @@ export default function ReportsPage() {
           </Button>
           {compareIds.length === 2 && (
             <Button size="sm" className="hidden gap-1.5 text-xs sm:inline-flex" onClick={handleOpenCompare}>
-              <BarChart3 className="h-3.5 w-3.5" /> 报告对比 ({compareIds.length})
+              <BarChart3 className="h-3.5 w-3.5" /> 产品体验对比 ({compareIds.length})
             </Button>
           )}
         </>
@@ -425,16 +441,16 @@ export default function ReportsPage() {
         <ActionDock mobileOnly={false} className="sm:left-auto sm:right-6 sm:bottom-6 sm:w-[28rem]">
           <div className="flex items-center gap-2">
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium">已选择 {compareIds.length}/2 份报告</p>
+              <p className="text-xs font-medium">已选择 {compareIds.length}/2 份体验报告</p>
               <p className="text-[11px] text-muted-foreground truncate">
-                {selectedCompareReports.map((r) => r.title).join(' · ') || '请选择两份报告进行AI对比'}
+                {selectedCompareReports.map(getCompareProductLabel).join(' · ') || '请选择两份报告进行产品体验对比'}
               </p>
             </div>
             <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => setCompareIds([])} aria-label="清空已选报告">
               <X className="h-4 w-4" />
             </Button>
             <Button size="sm" className="shrink-0 gap-1.5" disabled={compareIds.length !== 2} onClick={handleOpenCompare}>
-              <BarChart3 className="h-3.5 w-3.5" /> 对比
+              <BarChart3 className="h-3.5 w-3.5" /> 体验对比
             </Button>
           </div>
         </ActionDock>
@@ -453,56 +469,80 @@ export default function ReportsPage() {
 
       {/* Compare dialog */}
       <Dialog open={compareOpen} onOpenChange={setCompareOpen}>
-        <DialogContent className="max-w-4xl max-h-[88vh]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <BarChart3 className="h-4 w-4 text-primary" /> 报告对比
+        <DialogContent className="max-h-[88vh] max-w-[min(920px,calc(100vw-24px))] gap-0 overflow-hidden p-0">
+          <DialogHeader className="border-b px-4 py-4 sm:px-6">
+            <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
+              <BarChart3 className="h-4 w-4 text-primary" /> 产品体验对比
             </DialogTitle>
-            <DialogDescription>基于两份报告内容生成满意度 VS 总结</DialogDescription>
+            <DialogDescription className="text-sm">基于两份报告对比两款产品的体验表现、优劣势与关键差异</DialogDescription>
           </DialogHeader>
-          <ScrollArea className="max-h-[70vh]">
-            <div className="space-y-4 pr-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <ScrollArea className="max-h-[calc(88vh-80px)]">
+            <div className="space-y-4 p-4 sm:p-6">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4">
               {selectedCompareReports.map((r, idx) => {
-                const content = (r.content || {}) as Record<string, unknown>;
-                const records = (content.records || []) as unknown[];
-                const recipes = (content.recipes || []) as Array<Record<string, unknown>>;
-                const failed = records.filter((item) => (item as Record<string, unknown>).evaluation_result === '不合格').length;
-                const recipeProblems = recipes.reduce((sum, recipe) => sum + Number(recipe.problem_count || 0), 0);
+                const stats = getReportReviewStats(r);
                 const score = idx === 0 ? compareResult?.satisfaction_a : compareResult?.satisfaction_b;
                 const isWinner = compareResult?.winner_report_id === r.id;
+                const productLabel = getCompareProductLabel(r);
                 return (
-                <Card key={r.id}>
-                  <CardHeader className="pb-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <CardTitle className="text-sm min-w-0 truncate">{idx === 0 ? 'A' : 'B'} · {r.title}</CardTitle>
-                      {isWinner && <Badge className="text-[10px] shrink-0">更优</Badge>}
-                    </div>
-                    <div className="flex gap-1 flex-wrap">
-                      {r.product_category && <Badge variant="outline" className="text-[10px]">{r.product_category}</Badge>}
-                      {r.product && <Badge variant="outline" className="text-[10px]">{r.product}</Badge>}
-                      <Badge variant="outline" className="text-[10px]">{r.status === '草稿' ? '已完成' : r.status}</Badge>
+                <Card key={r.id} className={cn('overflow-hidden', isWinner && 'border-primary/40 bg-primary/[0.03]')}>
+                  <CardHeader className="space-y-3 p-4 pb-3">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border bg-background text-sm font-semibold text-foreground">
+                        {idx === 0 ? 'A' : 'B'}
+                      </div>
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <div className="flex min-w-0 items-start justify-between gap-2">
+                          <CardTitle className="min-w-0 text-base leading-snug [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden">
+                            {productLabel}
+                          </CardTitle>
+                          {isWinner && <Badge className="shrink-0 text-[10px]">体验更优</Badge>}
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {r.product_category && <Badge variant="outline" className="max-w-[96px] truncate text-[10px]">{r.product_category}</Badge>}
+                          {r.product && <Badge variant="outline" className="max-w-[96px] truncate text-[10px]">{r.product}</Badge>}
+                          <Badge variant="outline" className="text-[10px]">{getStatusLabel(r.status)}</Badge>
+                        </div>
+                      </div>
                     </div>
                   </CardHeader>
-                  <CardContent className="text-xs text-muted-foreground space-y-1">
-                    <div>产品型号: {r.product_model || '-'}</div>
-                    <div>版本: V{r.version}</div>
-                    <div>生成时间: {formatBeijingTime(r.created_at)}</div>
-                    <Separator className="my-1" />
-                    <div>检查项: {records.length} / 不合格: {failed}</div>
-                    <div>功能效果问题: {recipeProblems}</div>
+                  <CardContent className="space-y-3 p-4 pt-0 text-xs text-muted-foreground">
+                    <dl className="grid grid-cols-[72px_minmax(0,1fr)] gap-x-2 gap-y-1.5">
+                      <dt>产品型号</dt><dd className="min-w-0 break-words text-foreground">{r.product_model || '-'}</dd>
+                      <dt>版本</dt><dd className="text-foreground">V{r.version}</dd>
+                      <dt>生成时间</dt><dd className="min-w-0 break-words text-foreground">{formatBeijingTime(r.created_at)}</dd>
+                    </dl>
+                    <Separator />
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="rounded-md bg-muted/45 px-2 py-2">
+                        <p className="text-[10px]">检查项</p>
+                        <p className="mt-0.5 text-sm font-semibold text-foreground">{stats.records}</p>
+                      </div>
+                      <div className="rounded-md bg-muted/45 px-2 py-2">
+                        <p className="text-[10px]">不合格</p>
+                        <p className="mt-0.5 text-sm font-semibold text-foreground">{stats.failedRecords}</p>
+                      </div>
+                      <div className="rounded-md bg-muted/45 px-2 py-2">
+                        <p className="text-[10px]">功能问题</p>
+                        <p className="mt-0.5 text-sm font-semibold text-foreground">{stats.recipeProblems}</p>
+                      </div>
+                    </div>
                     {score !== undefined && (
                       <div className="pt-2">
                         <div className="flex items-center justify-between mb-1">
                           <span>AI满意度</span>
-                          <span className="font-semibold text-foreground">{score}/10</span>
+                          <span className="text-base font-semibold text-foreground">{score}/10</span>
                         </div>
-                        <div className="h-2 rounded-full bg-muted overflow-hidden">
-                          <div className="h-full bg-primary" style={{ width: `${Math.min(100, Math.max(0, score * 10))}%` }} />
+                        <div className="h-2.5 rounded-full bg-muted overflow-hidden">
+                          <div className="h-full rounded-full bg-primary" style={{ width: `${getScorePercent(score)}%` }} />
                         </div>
                       </div>
                     )}
                   </CardContent>
+                  <div className="border-t bg-muted/20 px-4 py-2 text-[11px] text-muted-foreground">
+                    <span className="mr-1">报告来源</span>
+                    <span className="break-words text-foreground">{r.title}</span>
+                  </div>
                 </Card>
                 );
               })}
@@ -520,40 +560,40 @@ export default function ReportsPage() {
               )}
               {compareResult && (
                 <div className="space-y-3">
-                  <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Sparkles className="h-4 w-4 text-primary" />
-                      <span className="font-medium text-sm">{compareResult.headline || 'VS总结'}</span>
+                  <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
+                    <div className="mb-2 flex items-start gap-2">
+                      <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                      <span className="text-sm font-medium leading-6 text-foreground">{compareResult.headline || '产品体验差异总结'}</span>
                     </div>
-                    <p className="text-sm text-muted-foreground whitespace-pre-wrap break-all">{compareResult.summary}</p>
+                    <p className="whitespace-pre-wrap break-words text-sm leading-6 text-muted-foreground">{compareResult.summary}</p>
                     {compareResult.recommendation && (
-                      <p className="text-xs text-primary break-all">建议：{compareResult.recommendation}</p>
+                      <p className="mt-3 rounded-md bg-background/70 px-3 py-2 text-xs leading-5 text-primary break-words">建议：{compareResult.recommendation}</p>
                     )}
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <Card>
-                      <CardHeader className="pb-2"><CardTitle className="text-sm">A报告优势</CardTitle></CardHeader>
-                      <CardContent className="space-y-1">
-                        {compareResult.report_a_advantages.length > 0 ? compareResult.report_a_advantages.map((item, idx) => <p key={idx} className="text-xs text-muted-foreground break-all">{idx + 1}. {item}</p>) : <p className="text-xs text-muted-foreground">暂无明显优势</p>}
+                      <CardHeader className="p-4 pb-2"><CardTitle className="text-sm">A产品优势</CardTitle></CardHeader>
+                      <CardContent className="space-y-2 p-4 pt-0">
+                        {compareResult.report_a_advantages.length > 0 ? compareResult.report_a_advantages.map((item, idx) => <p key={idx} className="text-xs leading-5 text-muted-foreground break-words">{idx + 1}. {item}</p>) : <p className="text-xs text-muted-foreground">暂无明显优势</p>}
                       </CardContent>
                     </Card>
                     <Card>
-                      <CardHeader className="pb-2"><CardTitle className="text-sm">B报告优势</CardTitle></CardHeader>
-                      <CardContent className="space-y-1">
-                        {compareResult.report_b_advantages.length > 0 ? compareResult.report_b_advantages.map((item, idx) => <p key={idx} className="text-xs text-muted-foreground break-all">{idx + 1}. {item}</p>) : <p className="text-xs text-muted-foreground">暂无明显优势</p>}
+                      <CardHeader className="p-4 pb-2"><CardTitle className="text-sm">B产品优势</CardTitle></CardHeader>
+                      <CardContent className="space-y-2 p-4 pt-0">
+                        {compareResult.report_b_advantages.length > 0 ? compareResult.report_b_advantages.map((item, idx) => <p key={idx} className="text-xs leading-5 text-muted-foreground break-words">{idx + 1}. {item}</p>) : <p className="text-xs text-muted-foreground">暂无明显优势</p>}
                       </CardContent>
                     </Card>
                   </div>
                   <Card>
-                    <CardHeader className="pb-2"><CardTitle className="text-sm">关键差异与风险</CardTitle></CardHeader>
-                    <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1">
+                    <CardHeader className="p-4 pb-2"><CardTitle className="text-sm">关键差异与风险</CardTitle></CardHeader>
+                    <CardContent className="grid grid-cols-1 gap-4 p-4 pt-0 sm:grid-cols-2">
+                      <div className="space-y-2">
                         <p className="text-[10px] font-medium text-muted-foreground">关键差异</p>
-                        {compareResult.key_differences.map((item, idx) => <p key={idx} className="text-xs text-muted-foreground break-all">{idx + 1}. {item}</p>)}
+                        {compareResult.key_differences.map((item, idx) => <p key={idx} className="text-xs leading-5 text-muted-foreground break-words">{idx + 1}. {item}</p>)}
                       </div>
-                      <div className="space-y-1">
+                      <div className="space-y-2">
                         <p className="text-[10px] font-medium text-muted-foreground">主要风险</p>
-                        {compareResult.risks.map((item, idx) => <p key={idx} className="text-xs text-muted-foreground break-all">{idx + 1}. {item}</p>)}
+                        {compareResult.risks.map((item, idx) => <p key={idx} className="text-xs leading-5 text-muted-foreground break-words">{idx + 1}. {item}</p>)}
                       </div>
                     </CardContent>
                   </Card>

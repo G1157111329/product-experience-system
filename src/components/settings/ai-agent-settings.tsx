@@ -62,6 +62,7 @@ const skillModuleLabels: Record<string, string> = {
   recipe_scene_preset: 'AI体验方案 · 功能效果',
   effect_evaluation: '功能效果 · 效果评价',
   report_summary: '总结/报告',
+  report_product_compare: '报告中心 · 产品体验对比',
 };
 
 const builtinSkillTemplates: SkillTemplate[] = getDefaultSkillDefinitions().map((skill) => ({
