@@ -6,6 +6,7 @@
 
 ## 目录
 
+- [PRD 2.0 版本管理](#prd-20-版本管理)
 - [1. 系统架构概览](#1-系统架构概览)
 - [2. 所需环境与工具](#2-所需环境与工具)
 - [3. 外部服务准备](#3-外部服务准备)
@@ -27,6 +28,39 @@
 - [10. 数据库表结构参考](#10-数据库表结构参考)
 - [11. API 接口清单](#11-api-接口清单)
 - [12. 常见问题排查](#12-常见问题排查)
+
+---
+
+## PRD 2.0 版本管理
+
+| 版本 | 日期 | 负责人 | 状态 | 说明 |
+|------|------|--------|------|------|
+| PRD 2.0 | 2026-05-25 | 产品体验平台 | 已实现并推送 `ai-agent-skills` 分支 | 将报告中心的“报告对比”升级为“产品体验对比”，并纳入 AI Agent / Prompt 模板版本管理体系 |
+
+### PRD 2.0 产品目标
+
+PRD 2.0 的核心目标是让报告中心不再停留在“比较两份报告文本”，而是服务真实产品决策场景：产品、体验工程师或管理者选择两份体验报告后，系统需要输出两款产品在体验表现上的满意度、优劣势、关键差异、风险和下一步产品建议。
+
+### PRD 2.0 更新范围
+
+| 更新项 | 需求说明 | 实现口径 |
+|--------|----------|----------|
+| 产品体验对比 | 报告中心对比入口改为面向两款产品的体验表现对比 | A/B 卡片优先展示产品/品类/型号，报告名称降级为“报告来源” |
+| AI 对比结论 | AI 输出必须围绕产品体验本身，而不是评价报告质量 | Prompt 明确禁止“报告更完整/报告质量更好”等评审口径 |
+| 对比指标 | 输出满意度、体验优势、关键差异、主要风险、产品建议 | `/api/reports/compare` 返回结构保持稳定，前端分区展示 |
+| Prompt 配置入口 | 产品体验对比 Prompt 必须与五感体验 AI、食谱/功能 AI、效果评价 AI 一致纳入设置入口 | 平台设置 → AI Agent / Prompt 模板新增“产品体验对比”模板 |
+| Prompt 版本管理 | 管理员修改 Prompt 时创建新版本，不覆盖历史版本 | `agent_skill_templates` + `agent_skill_versions` 管理启用版本 |
+| 审计记录 | 产品体验对比 AI 运行需要保留请求/响应摘要 | 运行时写入 `agent_skill_audit_logs` |
+| 默认兜底 | 未初始化或未配置模板时仍可使用内置默认 Prompt | 系统启动对比时自动 ensure 默认模板 |
+
+### PRD 2.0 验收标准
+
+1. 报告中心选择两份报告后，入口、弹窗标题、浮动操作条均表达为“产品体验对比”。
+2. A/B 对比卡片第一层展示产品对象，报告标题只作为来源信息。
+3. AI 总结不得把“信息完整度”“报告质量”作为产品胜负依据。
+4. 平台设置中的 AI Agent / Prompt 模板可看到“产品体验对比”入口，交互与五感体验、功能效果、效果评价模板一致。
+5. 管理员保存产品体验对比 Prompt 后，新版本立即作为 `/api/reports/compare` 的启用 Prompt。
+6. 未保存自定义 Prompt 时，系统使用内置 PRD 2.0 默认 Prompt 兜底。
 
 ---
 
@@ -171,12 +205,14 @@
 
 ### 3.3 大语言模型 (LLM)
 
-标准批量导入功能使用 LLM 将 PDF/Excel 文档中的非结构化文本解析为标准检查项。该功能通过 `coze-coding-dev-sdk` 的 `LLMClient` 调用豆包系列模型。
+标准批量导入、报告总结、效果评价、问题点识别、产品体验对比等 AI 功能使用 LLM 将体验事实、素材描述和结构化记录转化为可执行的产品结论。系统支持内置模型，也支持管理员在平台设置中配置 OpenAI 兼容接口。
 
 - **导入标准时使用**: `doubao-seed-2-0-pro-260215` (高精度)
-- **其他场景预留**: `doubao-seed-2-0-lite-260215` (轻量级)
+- **效果评价视觉分析**: 可配置视觉模型，用于食谱/功能效果评价
+- **体验报告总结/产品体验对比**: 默认使用平台启用的 AI Agent 模型配置，Prompt 可版本化管理
+- **其他轻量场景**: `doubao-seed-2-0-lite-260215` 或管理员启用的自定义模型
 
-> **注意**: LLM 功能为可选依赖。如不使用"标准批量导入"功能，可以不配置 LLM。`coze-coding-dev-sdk` 的 LLMClient 会自动从运行环境获取认证信息，独立部署时需配置对应的认证环境变量或替换为 OpenAI 兼容接口。
+> **注意**: LLM 功能为可选依赖。如不使用 AI 能力，可以不配置 LLM。AI Agent / Prompt 模板位于“平台设置”，管理员可为五感体验、功能效果、效果评价、报告总结、产品体验对比分别维护 Prompt 版本。
 
 ---
 
@@ -519,7 +555,81 @@ CREATE INDEX IF NOT EXISTS report_shares_report_id_idx ON report_shares(report_i
 CREATE INDEX IF NOT EXISTS report_shares_token_idx ON report_shares(share_token);
 
 -- ============================================================
--- 18. 食谱库表
+-- 18. AI模型配置表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS ai_model_configs (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(100) NOT NULL,
+  provider VARCHAR(20) NOT NULL DEFAULT 'builtin', -- builtin / custom
+  model VARCHAR(100) NOT NULL,
+  temperature INTEGER NOT NULL DEFAULT 5,
+  max_tokens INTEGER NOT NULL DEFAULT 2400,
+  supports_vision BOOLEAN NOT NULL DEFAULT false,
+  custom_api_url TEXT,
+  custom_api_key_encrypted TEXT,
+  is_active BOOLEAN NOT NULL DEFAULT false,
+  created_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ai_model_configs_active_idx ON ai_model_configs(is_active);
+
+-- ============================================================
+-- 19. AI Agent Prompt模板表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS agent_skill_templates (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  skill_key VARCHAR(50) NOT NULL UNIQUE,
+  name VARCHAR(100) NOT NULL,
+  description TEXT,
+  is_enabled BOOLEAN NOT NULL DEFAULT true,
+  active_version_id VARCHAR(36),
+  model_config_id VARCHAR(36) REFERENCES ai_model_configs(id) ON DELETE SET NULL,
+  created_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS agent_skill_templates_key_idx ON agent_skill_templates(skill_key);
+
+-- ============================================================
+-- 20. AI Agent Prompt版本表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS agent_skill_versions (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  template_id VARCHAR(36) NOT NULL REFERENCES agent_skill_templates(id) ON DELETE CASCADE,
+  version INTEGER NOT NULL,
+  system_prompt TEXT NOT NULL,
+  user_prompt_template TEXT NOT NULL,
+  output_schema JSONB NOT NULL DEFAULT '{}',
+  notes TEXT,
+  created_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(template_id, version)
+);
+CREATE INDEX IF NOT EXISTS agent_skill_versions_template_id_idx ON agent_skill_versions(template_id);
+
+-- ============================================================
+-- 21. AI Agent审计日志表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS agent_skill_audit_logs (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  skill_key VARCHAR(50) NOT NULL,
+  template_id VARCHAR(36) REFERENCES agent_skill_templates(id) ON DELETE SET NULL,
+  version_id VARCHAR(36) REFERENCES agent_skill_versions(id) ON DELETE SET NULL,
+  action VARCHAR(50) NOT NULL,
+  actor_user_id VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  task_id VARCHAR(36) REFERENCES experience_tasks(id) ON DELETE SET NULL,
+  request_snapshot JSONB DEFAULT '{}',
+  response_snapshot JSONB DEFAULT '{}',
+  status VARCHAR(20) NOT NULL DEFAULT 'success',
+  error_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS agent_skill_audit_logs_skill_key_idx ON agent_skill_audit_logs(skill_key);
+CREATE INDEX IF NOT EXISTS agent_skill_audit_logs_task_id_idx ON agent_skill_audit_logs(task_id);
+
+-- ============================================================
+-- 22. 食谱库表
 -- ============================================================
 CREATE TABLE IF NOT EXISTS recipe_library (
   id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -533,7 +643,7 @@ CREATE TABLE IF NOT EXISTS recipe_library (
 );
 
 -- ============================================================
--- 19. 食谱库步骤表
+-- 23. 食谱库步骤表
 -- ============================================================
 CREATE TABLE IF NOT EXISTS recipe_library_steps (
   id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -901,10 +1011,22 @@ docker compose down
 | 体验计划 | `/tasks` | 创建体验任务，品类-产品级联选择，项目类型/阶段选择 |
 | 任务详情 | `/tasks/[id]` | 基本信息/素材仓库/五感体验/功能效果 四Tab，步骤/食谱拖拽排序，AI效果评价 |
 | 问题管理 | `/issues` | 从报告自动汇总，等级分一类/二类/三类，状态流转 |
-| 报告中心 | `/reports` | 报告生成/查看/打印，食谱含食材/参数+AI评分，同型号内容级合并，报告对比，报告分享 |
+| 报告中心 | `/reports` | 报告生成/查看/打印，食谱含食材/参数+AI评分，同型号内容级合并，产品体验对比，报告分享 |
 | 报告分享 | `/reports/share/[token]` | 无需登录，只读查看，支持导出PDF、图片放大、视频播放 |
 | 数据分析 | `/analysis` | 多维筛选，核心指标，图表分布，管理账号可导出CSV |
-| 品类设置 | 个人信息→设置 | 管理账号专属：品类/产品增删管理，通用标准选项管理，AI模型配置 |
+| 平台设置 | 个人信息→平台设置 | 管理账号专属：品类/产品、通用标准选项、AI模型配置、AI Agent / Prompt模板版本管理 |
+
+### AI Agent / Prompt 模板
+
+| Skill Key | 模块入口 | 用途 |
+|-----------|----------|------|
+| `senses_standard_preset` | AI体验方案 · 五感体验 | 根据任务目的推荐重点五感检查项 |
+| `recipe_scene_preset` | AI体验方案 · 功能效果 | 根据品类、产品和体验目的推荐食谱/功能/场景 |
+| `effect_evaluation` | 功能效果 · 效果评价 | 基于效果描述和素材生成综合评分与总结 |
+| `report_summary` | 总结/报告 | 根据任务事实和历史报告生成报告总评 |
+| `report_product_compare` | 报告中心 · 产品体验对比 | 基于两份体验报告对比两款产品的体验表现差异 |
+
+Prompt 模板采用“模板 + 版本”管理方式。管理员在平台设置中保存 Prompt 时会创建新版本并立即启用，历史版本保留在 `agent_skill_versions` 中；AI 运行记录写入 `agent_skill_audit_logs`，用于追踪模型调用口径和结果摘要。
 
 ### 权限体系
 
@@ -939,6 +1061,10 @@ docker compose down
 | `report_templates` | 报告模板 | template_type |
 | `reports` | 报告 | task_id, product_model, content(JSONB) |
 | `report_shares` | 报告分享 | report_id, share_token(unique), expires_at, created_by |
+| `ai_model_configs` | AI模型配置 | provider, model, temperature, supports_vision, is_active |
+| `agent_skill_templates` | AI Agent Prompt模板 | skill_key(unique), name, is_enabled, active_version_id |
+| `agent_skill_versions` | AI Agent Prompt版本 | template_id, version, system_prompt, user_prompt_template, output_schema |
+| `agent_skill_audit_logs` | AI Agent运行审计 | skill_key, action, request_snapshot, response_snapshot, status |
 | `recipes` | 食谱/功能 | task_id, recipe_type(食谱/功能), effect_score, effect_ai_result(JSONB), sort_order |
 | `recipe_steps` | 食谱步骤 | recipe_id, operation, problem_points(JSONB) |
 | `recipe_library` | 食谱库 | name(unique), product_category, product |
@@ -984,6 +1110,7 @@ docker compose down
 | GET/PUT/DELETE | `/api/issues/[id]` | 问题详情/更新/删除 |
 | GET/POST | `/api/reports` | 报告列表/生成 |
 | GET/PUT/DELETE | `/api/reports/[id]` | 报告详情/更新/删除 |
+| POST | `/api/reports/compare` | 产品体验对比：基于两份报告输出两款产品满意度、优劣势、差异、风险和建议 |
 | POST | `/api/reports/export-pdf` | PDF导出辅助 |
 | POST | `/api/reports/share` | 创建分享链接（7天/30天/永久） |
 | GET | `/api/reports/share?token=xxx` | 验证分享令牌并获取报告（公开接口） |
@@ -1001,6 +1128,12 @@ docker compose down
 | GET/POST | `/api/recipe-library-steps` | 食谱库步骤列表/创建 |
 | PUT/DELETE | `/api/recipe-library-steps/[id]` | 食谱库步骤更新/删除 |
 | GET/POST | `/api/categories` | 品类/产品配置 (GET/POST/DELETE) |
+| GET/POST/PUT | `/api/ai/model-configs` | AI模型配置读取、保存、启用 |
+| GET/POST/PUT | `/api/ai/skill-templates` | AI Agent Prompt模板读取、初始化、创建版本、启停 |
+| GET | `/api/ai/skill-templates/[id]/versions` | 查看指定 Prompt 模板的历史版本 |
+| POST | `/api/tasks/[id]/agent-presets` | 五感体验/功能效果 AI 预设推荐 |
+| PUT | `/api/tasks/[id]/agent-presets` | AI 预设建议采纳/拒绝审计 |
+| POST | `/api/tasks/[id]/ai-summary` | 体验任务 AI 总结 |
 | GET | `/api/dashboard` | 工作台统计 |
 | GET/POST | `/api/analysis` | 数据分析/导出CSV |
 | GET/PUT | `/api/settings` | 平台设置读取/更新（管理员） |
@@ -1083,10 +1216,11 @@ VALUES ('新产品', '品类ID', 1);
 2. 检查 Supabase 连接是否正常
 3. 查看 `/app/work/logs/bypass/app.log` 日志
 
-### Q: 报告对比显示 "model not found"
+### Q: 产品体验对比显示 "model not found"
 
 1. 确认 AI 模型名包含日期后缀（如 `doubao-seed-2-0-lite-260215`，而非 `doubao-seed-2-0-lite`）
-2. 管理员可在个人设置中检查 AI 模型配置
+2. 管理员可在平台设置 → AI Agent / Prompt 模板中检查启用模型配置
+3. 如果仅产品体验对比异常，检查 `report_product_compare` 模板是否启用，且 System Prompt / User Prompt Template 不为空
 
 ### Q: 侧边栏与内容区域长度不一致
 
