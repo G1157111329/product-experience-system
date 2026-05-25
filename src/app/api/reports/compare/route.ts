@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { extractJsonObject, invokeConfiguredAI } from '@/lib/server/ai';
+import { ensureDefaultSkillTemplates, getActiveSkillVersion, logAgentAudit } from '@/lib/server/agent-skills';
+import { getDefaultSkillDefinitions, renderPromptTemplate } from '@/lib/agent-skills';
 
 interface CompareResult {
   winner_report_id: string | null;
@@ -28,14 +30,19 @@ const emptyResult = (): CompareResult => ({
   recommendation: '',
 });
 
+const COMPARE_SKILL_KEY = 'report_product_compare';
+
 export async function POST(request: NextRequest) {
   const client = getSupabaseClient();
   try {
     const body = await request.json();
     const reportIds = Array.isArray(body.report_ids) ? body.report_ids.slice(0, 2) : [];
+    const actorUserId = body.user_id || null;
     if (reportIds.length !== 2) {
       return NextResponse.json({ code: 1, message: '请选择两份报告进行对比' }, { status: 400 });
     }
+
+    await ensureDefaultSkillTemplates(client, actorUserId);
 
     const { data: reports, error } = await client
       .from('reports')
@@ -53,27 +60,14 @@ export async function POST(request: NextRequest) {
     const { data: issuesA } = await client.from('issues').select('*').eq('source_report_id', reportA.id);
     const { data: issuesB } = await client.from('issues').select('*').eq('source_report_id', reportB.id);
 
-    const systemPrompt = `你是产品体验评审专家。请对两份不同体验报告做AI汇总对比，核心指标是产品满意度。
-
-要求：
-1. 以产品满意度为核心，分别给A/B报告0-10分。
-2. 输出VS总结形式，指出谁更优或是否接近。
-3. 对比维度包括任务信息、AI总结、问题点、五感体验、功能效果、整改风险。
-4. 仅输出JSON，不要添加解释文字。
-
-JSON格式：
-{
-  "winner_report_id": "胜出报告id，接近则为null",
-  "satisfaction_a": 0-10数字,
-  "satisfaction_b": 0-10数字,
-  "headline": "一句话VS结论",
-  "summary": "2-4句话总体对比",
-  "report_a_advantages": ["A优势1", "A优势2"],
-  "report_b_advantages": ["B优势1", "B优势2"],
-  "key_differences": ["关键差异1", "关键差异2"],
-  "risks": ["共同或主要风险1", "风险2"],
-  "recommendation": "下一步建议"
-}`;
+    const compactA = compactReport(reportA, issuesA || []);
+    const compactB = compactReport(reportB, issuesB || []);
+    const promptConfig = await getComparePromptConfig(client);
+    const systemPrompt = promptConfig.systemPrompt;
+    const userPrompt = renderPromptTemplate(promptConfig.userPromptTemplate, {
+      report_a: compactA,
+      report_b: compactB,
+    });
 
     const rawContent = await invokeConfiguredAI({
       request,
@@ -82,13 +76,7 @@ JSON格式：
       defaultTemperature: 0.35,
       messages: [
         { role: 'system', content: systemPrompt },
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: `报告A：\n${compactReport(reportA, issuesA || [])}` },
-            { type: 'text', text: `报告B：\n${compactReport(reportB, issuesB || [])}` },
-          ],
-        },
+        { role: 'user', content: userPrompt },
       ],
     });
 
@@ -106,9 +94,25 @@ JSON格式：
       recommendation: String(parsed.recommendation || ''),
     };
 
+    if (promptConfig.templateId || promptConfig.versionId) {
+      await logAgentAudit(client, {
+        skillKey: COMPARE_SKILL_KEY,
+        templateId: promptConfig.templateId,
+        versionId: promptConfig.versionId,
+        action: 'run',
+        actorUserId,
+        requestSnapshot: { report_ids: reportIds },
+        responseSnapshot: {
+          winner_report_id: result.winner_report_id,
+          satisfaction_a: result.satisfaction_a,
+          satisfaction_b: result.satisfaction_b,
+        },
+      });
+    }
+
     return NextResponse.json({
       code: 0,
-      message: '报告对比完成',
+      message: '产品体验对比完成',
       data: {
         result,
         reports: {
@@ -118,9 +122,21 @@ JSON格式：
       },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : '报告对比失败';
+    const message = err instanceof Error ? err.message : '产品体验对比失败';
     return NextResponse.json({ code: 1, message }, { status: 500 });
   }
+}
+
+async function getComparePromptConfig(client: ReturnType<typeof getSupabaseClient>) {
+  const fallback = getDefaultSkillDefinitions().find((skill) => skill.skillKey === COMPARE_SKILL_KEY);
+  const active = await getActiveSkillVersion(client, COMPARE_SKILL_KEY);
+
+  return {
+    systemPrompt: String(active?.version.system_prompt || fallback?.systemPrompt || ''),
+    userPromptTemplate: String(active?.version.user_prompt_template || fallback?.userPromptTemplate || ''),
+    templateId: active?.template.id ? String(active.template.id) : null,
+    versionId: active?.version.id ? String(active.version.id) : null,
+  };
 }
 
 function compactReport(report: Record<string, unknown>, issues: Array<Record<string, unknown>>) {
