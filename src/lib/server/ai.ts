@@ -44,7 +44,7 @@ interface ResolveOptions {
 export async function resolveAIConfig(
   client: SupabaseLike,
   {
-    defaultModel = 'kimi-k2-5-260127',
+    defaultModel = 'doubao-seed-2-0-pro-260215',
     defaultTemperature = 0.5,
     maxTokens = 2400,
   }: ResolveOptions = {},
@@ -87,7 +87,7 @@ export async function invokeConfiguredAI({
   request,
   client,
   messages,
-  defaultModel = 'kimi-k2-5-260127',
+  defaultModel = 'doubao-seed-2-0-pro-260215',
   defaultTemperature = 0.5,
   maxTokens = 2400,
   forceBuiltInModel,

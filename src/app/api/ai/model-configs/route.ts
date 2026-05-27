@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
   const payload = {
     name: body.name || 'AI模型配置',
     provider: body.provider || 'builtin',
-    model: body.model || 'kimi-k2-5-260127',
+    model: body.model || 'doubao-seed-2-0-pro-260215',
     temperature: normalizeTemperatureScale(body.temperature),
     max_tokens: Number(body.max_tokens || body.maxTokens || 2400),
     supports_vision: Boolean(body.supports_vision ?? body.supportsVision),

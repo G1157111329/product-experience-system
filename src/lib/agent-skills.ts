@@ -43,8 +43,29 @@ export function getDefaultSkillDefinitions(): DefaultSkillDefinition[] {
       skillKey: 'senses_standard_preset',
       name: '五感体验标准预设',
       description: '根据体验目的推荐重点检查标准。',
-      systemPrompt: '你是产品体验标准专家。请根据任务目的筛选重点检查项，必须输出 JSON。',
-      userPromptTemplate: '请根据任务信息推荐重点五感检查项：{{task_snapshot}}',
+      systemPrompt: `你是产品体验标准专家。根据品类、产品名称和体验目的，从五感维度推荐重点检查项。
+
+要求：
+1. 每个推荐必须包含检查项ID（如数据库中有的话）、标准分类、推荐理由和重点关注。
+2. 推荐理由应结合产品特性和五感体验维度。
+3. 重点关注应说明此检查项对产品体验的关键影响。
+4. 仅输出JSON，不要添加解释文字。`,
+      userPromptTemplate: `请根据以下任务信息推荐重点五感检查项。
+
+任务信息：
+{{task_snapshot}}
+
+JSON格式：
+{
+  "standards": [
+    {
+      "standard_item_id": "检查项ID（如有）",
+      "standard_category": "标准分类：通用标准/品类标准/感官评价标准",
+      "reason": "推荐理由",
+      "focus": "重点关注"
+    }
+  ]
+}`,
       outputSchema: {
         standards: [{ standard_item_id: 'string', standard_category: 'string', reason: 'string', focus: 'string' }],
       },
@@ -53,8 +74,33 @@ export function getDefaultSkillDefinitions(): DefaultSkillDefinition[] {
       skillKey: 'recipe_scene_preset',
       name: '食谱/功能/场景筛选',
       description: '根据体验目的推荐食谱、功能或使用场景。',
-      systemPrompt: '你是产品体验场景规划专家。请根据品类、产品和体验目的推荐功能场景，必须输出 JSON。',
-      userPromptTemplate: '请根据任务信息、食谱库和热点摘要推荐功能场景：{{task_snapshot}}',
+      systemPrompt: `你是产品体验场景规划专家。根据品类、产品名称、型号和体验目的，推荐可执行的功能/食谱场景草案。
+
+要求：
+1. 每个推荐必须包含具体的功能/食谱名称、类型（食谱/功能）、食材/参数、推荐理由和操作步骤。
+2. 步骤应描述用户实际操作流程，每步一个操作动作。
+3. 推荐理由应结合产品特性和用户体验场景。
+4. 仅输出JSON，不要添加解释文字。`,
+      userPromptTemplate: `请根据以下任务信息推荐功能/食谱场景草案。
+
+任务信息：
+{{task_snapshot}}
+
+JSON格式：
+{
+  "recipes": [
+    {
+      "name": "功能/食谱名称",
+      "recipe_type": "食谱或功能",
+      "ingredients": "食材/参数",
+      "reason": "推荐理由",
+      "steps": [
+        {"operation": "具体操作步骤1"},
+        {"operation": "具体操作步骤2"}
+      ]
+    }
+  ]
+}`,
       outputSchema: {
         recipes: [{ name: 'string', recipe_type: 'string', ingredients: 'string', reason: 'string', steps: [{ operation: 'string' }] }],
       },
@@ -63,16 +109,50 @@ export function getDefaultSkillDefinitions(): DefaultSkillDefinition[] {
       skillKey: 'effect_evaluation',
       name: '效果评价',
       description: '根据效果描述和素材生成综合评分与总结。',
-      systemPrompt: '你是资深美食评委和小家电产品体验专家。请基于内部四维方法论输出综合评分和总结，必须输出 JSON。',
-      userPromptTemplate: '请评价该食谱/功能效果：{{recipe_snapshot}}',
+      systemPrompt: `你是资深美食评委和小家电产品体验专家。请基于四维评价体系（质感/透彻/纯净/恒定）对食谱/功能效果进行综合评价。
+
+要求：
+1. 综合评分范围0-10分，取一位小数。
+2. 总结评语应描述实际效果表现，2-4句话。
+3. 内部四维评价仅作为方法论参考，对外只输出综合评分和总结。
+4. 仅输出JSON，不要添加解释文字。`,
+      userPromptTemplate: `请评价该食谱/功能效果：
+
+{{recipe_snapshot}}
+
+JSON格式：
+{
+  "score": 8.5,
+  "summary": "2-4句话的综合评价"
+}`,
       outputSchema: { score: 8.5, summary: 'string' },
     },
     {
       skillKey: 'report_summary',
       name: '报告总体总结',
       description: '根据任务事实和历史报告生成报告总评。',
-      systemPrompt: '你是资深产品体验负责人。请基于事实证据生成体验报告总评，必须输出 JSON。',
-      userPromptTemplate: '请总结该体验任务：{{report_snapshot}}',
+      systemPrompt: `你是资深产品体验负责人。请基于检查记录、问题清单和功能效果等事实证据，生成体验报告总评。
+
+要求：
+1. 评分范围0-10分，取整数。
+2. 总结需基于事实证据，2-4句话概括整体体验。
+3. 优势、风险、建议各2-5条，必须描述产品体验本身。
+4. 历史定位说明当前产品与同类或前代的体验差异。
+5. 仅输出JSON，不要添加解释文字。`,
+      userPromptTemplate: `请总结该体验任务：
+
+{{report_snapshot}}
+
+JSON格式：
+{
+  "tag": "一句话标签（如：体验良好/需重点整改）",
+  "satisfaction_score": 8,
+  "summary": "2-4句话整体体验总结",
+  "strengths": ["体验优势1", "体验优势2"],
+  "risks": ["体验风险1", "体验风险2"],
+  "historical_position": "与同类或前代产品的体验对比",
+  "suggestions": ["优化建议1", "优化建议2"]
+}`,
       outputSchema: {
         tag: 'string',
         satisfaction_score: 8,
@@ -153,7 +233,7 @@ export function normalizePresetSuggestions(input: unknown): NormalizedPresetSugg
           focus: String(row.focus || ''),
         };
       })
-      .filter((item) => item.standardItemId),
+      .filter((item) => item.standardItemId || item.reason || item.focus),
     recipes: recipesRaw
       .map((item) => {
         const row = item && typeof item === 'object' ? item as Record<string, unknown> : {};

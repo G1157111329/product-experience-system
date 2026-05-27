@@ -13,7 +13,7 @@
 - **Styling**: Tailwind CSS 4
 - **Database**: Supabase (PostgreSQL)
 - **File Storage**: S3 兼容对象存储 (coze-coding-dev-sdk)
-- **AI/LLM**: doubao-seed-2-0-pro-260215 (标准导入解析), doubao-seed-1-6-vision-250815 (食谱效果评价, 可配置), doubao-seed-2-0-lite-260215 (其他场景)
+- **AI/LLM**: doubao-seed-2-0-pro-260215 (默认/Agent任务/标准导入解析), doubao-seed-2-0-lite-260215 (轻量场景)
 - **PDF/Excel解析**: coze-coding-dev-sdk FetchClient + xlsx
 - **Theme**: Teal 主色 / Business 字体 / Cool 阴影
 
@@ -315,6 +315,9 @@ coze start
 71. **报告问题点清单分行呈现**: 报告详情页、打印页、分享页的问题清单优化为多行结构化呈现——第一行：等级+标题+状态；第二行：标准/分类（如有）；第三行：问题来源；第四行：整改方案（含责任人、计划完成日期）；第五行：验证结果（如有）
 72. **素材预览放大**: MaterialPicker中已选素材缩略图支持点击放大查看（图片）或播放（视频），使用Dialog全屏预览
 73. **问题点保存同步效果评价**: 问题点板块的"保存"按钮调用handleSaveEffect，同时保存效果描述和问题点数据
+74. **AI模型切换**: 默认AI模型从已停运的doubao-seed-1-6-vision-250815/kimi-k2-5-260127统一切换为doubao-seed-2-0-pro-260215（旗舰模型，面向Agent复杂推理场景）；platform_settings.ai_config同步更新
+75. **Agent预设错误上报**: Agent预设API(agent-presets)不再静默吞掉AI调用失败错误；无结果且有错误时返回code:1和500状态码，部分失败时在warnings字段返回错误详情，前端toast显示失败原因
+76. **标准建议过滤放宽**: normalizePresetSuggestions对standards的过滤条件从"必须有standardItemId"放宽为"有standardItemId或reason或focus"，使AI生成的新建议（无DB ID）也能展示
 
 ## 代码风格
 
@@ -376,6 +379,7 @@ coze start
 | 食谱库/注册等RLS策略缺失 | 启用了RLS但没有策略，INSERT/UPDATE被拒绝 | 为 recipe_library, recipe_library_steps, platform_users, platform_settings, report_shares 添加公开读写策略 |
 | gen_random_uuid运行时错误 | schema.ts 中作为JS函数调用，改为 sql`gen_random_uuid()` 模板语法 | 所有 gen_random_uuid() 改为 sql`gen_random_uuid()`，导致所有API返回500 |
 | AI模型名无效 | doubao-seed-2-0-lite 缺少日期后缀 | 正确模型名为 doubao-seed-2-0-lite-260215，invokeConfiguredAI 新增 forceBuiltInModel 参数 |
+| AI探索返回空内容 | platform_settings.ai_config中model为已停运的doubao-seed-1-6-vision-250815，且错误被catch静默吞掉 | 更新ai_config.model为doubao-seed-2-0-pro-260215；agent-presets API无结果时返回错误信息而非空数据 |
 | 步骤保存后无法编辑 | handleEditStep 使用 as unknown 类型转换导致素材数据丢失 | 直接使用 step.materials 访问，编辑对话框传入 initialMaterials |
 | 侧边栏与内容长度不一致 | 主布局使用 min-h-screen 导致内容无限拉长 | 改为 h-screen overflow-hidden + overflow-y-auto 实现固定视口滚动 |
 | 编辑任务空日期报错 | PUT /api/tasks/[id] 未处理空字符串日期 | test_date: body.test_date \|\| null 转换空字符串为 null |

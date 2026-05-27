@@ -64,13 +64,14 @@ export function AgentPresetPanel({
         return;
       }
       const nextResult = data.data as AgentPresetResponse;
+      const warnings = (data.data as Record<string, unknown>)?.warnings as string[] | undefined;
       if (mode === 'senses') {
         setStandardSuggestions(nextResult.suggestions.standards || []);
-        toast.success('AI五感体验建议已生成');
+        toast.success(warnings?.length ? `已生成，但有部分失败: ${warnings.join('; ')}` : 'AI五感体验建议已生成');
       } else {
         setRecipeSuggestions(nextResult.suggestions.recipes || []);
         setExpandedRecipes([]);
-        toast.success('食谱功能探索已生成');
+        toast.success(warnings?.length ? `已生成，但有部分失败: ${warnings.join('; ')}` : '食谱功能探索已生成');
       }
     } finally {
       setRunningMode(null);
@@ -79,7 +80,7 @@ export function AgentPresetPanel({
 
   const applyPreset = async (mode: Exclude<AcceptingMode, null>) => {
     const standards = mode === 'senses'
-      ? standardSuggestions.map((item) => ({ standard_item_id: item.standardItemId }))
+      ? standardSuggestions.filter((item) => item.standardItemId).map((item) => ({ standard_item_id: item.standardItemId }))
       : [];
     const recipes = mode === 'recipes'
       ? recipeSuggestions.map((item) => ({
@@ -112,8 +113,8 @@ export function AgentPresetPanel({
     }
   };
 
-  const removeStandard = (id: string) => {
-    setStandardSuggestions((current) => current.filter((item) => item.standardItemId !== id));
+  const removeStandard = (key: string) => {
+    setStandardSuggestions((current) => current.filter((item) => (item.standardItemId || item.focus) !== key));
   };
 
   const removeRecipe = (name: string) => {
@@ -162,18 +163,18 @@ export function AgentPresetPanel({
           ) : (
             <div className="space-y-2">
               {standardSuggestions.map((item) => (
-                <div key={item.standardItemId} className="rounded-md border bg-background p-3">
+                <div key={item.standardItemId || item.focus} className="rounded-md border bg-background p-3">
                   <div className="flex items-start gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="break-all text-sm font-medium">{item.focus || item.standardItemId}</span>
+                        <span className="break-all text-sm font-medium">{item.focus || item.reason || item.standardItemId}</span>
                         {item.standardCategory && <Badge variant="outline" className="text-[10px]">{item.standardCategory}</Badge>}
                       </div>
                       <p className="mt-1 break-all text-xs leading-relaxed text-muted-foreground">
                         {item.reason || 'AI推荐重点检查'}
                       </p>
                     </div>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => removeStandard(item.standardItemId)}>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => removeStandard(item.standardItemId || item.focus)}>
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>

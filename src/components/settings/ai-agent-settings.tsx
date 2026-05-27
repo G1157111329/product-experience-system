@@ -49,7 +49,7 @@ interface SkillTemplate {
 const emptyModel: ModelConfig = {
   name: '默认AI模型',
   provider: 'builtin',
-  model: 'kimi-k2-5-260127',
+  model: 'doubao-seed-2-0-pro-260215',
   temperature: 0.5,
   max_tokens: 2400,
   supports_vision: true,

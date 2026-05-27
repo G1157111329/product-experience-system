@@ -24,7 +24,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const { data: standardItems } = await client
     .from('standard_items')
-    .select('id, standard_id, sensory_dimension, test_phase, experience_flow, touch_point, check_dimension, sub_check_dimension, check_item, check_requirement, check_standard, experience_standard, check_tool, problem_level')
+    .select('id, standard_id, sensory_dimension, test_phase, experience_flow, touch_point, check_dimension, sub_check_dimension, check_item, check_requirement, check_standard, experience_standard, check_tool, problem_level, standards(id, category)')
     .limit(120);
 
   const { data: recipeLibrary } = await client
@@ -36,10 +36,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const taskSnapshot = buildTaskSnapshot(task, intent, standardItems || [], recipeLibrary || [], body.hotspot_summary || '');
   const merged: NormalizedPresetSuggestions = { standards: [], recipes: [] };
   const auditIds: string[] = [];
+  const errors: string[] = [];
 
   for (const skillKey of skillKeys) {
     const active = await getActiveSkillVersion(client, skillKey);
-    if (!active) continue;
+    if (!active) {
+      errors.push(`${skillKey}: 未找到启用的技能模板`);
+      continue;
+    }
 
     try {
       const userPrompt = renderPromptTemplate(String(active.version.user_prompt_template || ''), {
@@ -76,6 +80,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         },
       });
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Agent运行失败';
+      errors.push(`${skillKey}: ${errMsg}`);
       await logAgentAudit(client, {
         skillKey,
         templateId: String(active.template.id),
@@ -85,18 +91,28 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         taskId: id,
         requestSnapshot: { task_id: id, skill_key: skillKey },
         status: 'failed',
-        errorMessage: err instanceof Error ? err.message : 'Agent运行失败',
+        errorMessage: errMsg,
       });
     }
   }
 
+  const hasResults = merged.standards.length > 0 || merged.recipes.length > 0;
+  if (!hasResults && errors.length > 0) {
+    return NextResponse.json({
+      code: 1,
+      message: `AI生成失败: ${errors.join('; ')}`,
+      data: { intent, suggestions: dedupeSuggestions(merged), errors },
+    }, { status: 500 });
+  }
+
   return NextResponse.json({
     code: 0,
-    message: 'AI体验方案已生成',
+    message: errors.length > 0 ? `部分AI生成失败: ${errors.join('; ')}` : 'AI体验方案已生成',
     data: {
       intent,
       suggestions: dedupeSuggestions(merged),
       audit_ids: auditIds,
+      warnings: errors.length > 0 ? errors : undefined,
     },
   });
 }
@@ -181,15 +197,19 @@ function buildTaskSnapshot(
   recipeLibrary: Array<Record<string, unknown>>,
   hotspotSummary: string,
 ) {
-  const standards = standardItems.slice(0, 80).map((item) => [
-    `ID:${item.id}`,
-    `类型:${item.standard_category || '-'}`,
-    `维度:${item.sensory_dimension || item.check_dimension || '-'}`,
-    `阶段:${item.test_phase || '-'}`,
-    `流程:${item.experience_flow || '-'}`,
-    `检查项:${item.check_item || '-'}`,
-    `要求:${item.check_requirement || item.check_standard || item.experience_standard || '-'}`,
-  ].join('；')).join('\n');
+  const standards = standardItems.slice(0, 80).map((item) => {
+    const stdRef = item.standards as Record<string, unknown> | null;
+    const category = stdRef?.category || item.standard_category || '-';
+    return [
+      `ID:${item.id}`,
+      `类型:${category}`,
+      `维度:${item.sensory_dimension || item.check_dimension || '-'}`,
+      `阶段:${item.test_phase || '-'}`,
+      `流程:${item.experience_flow || '-'}`,
+      `检查项:${item.check_item || '-'}`,
+      `要求:${item.check_requirement || item.check_standard || item.experience_standard || '-'}`,
+    ].join('；');
+  }).join('\n');
 
   const recipes = recipeLibrary.slice(0, 50).map((recipe) => [
     `名称:${recipe.name || '-'}`,

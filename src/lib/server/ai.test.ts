@@ -54,20 +54,20 @@ async function main() {
   const legacy = await resolveAIConfig(makeClient({
     legacy: {
       provider: 'builtin',
-      model: 'kimi-k2-5-260127',
+      model: 'doubao-seed-2-0-pro-260215',
       temperature: 0.4,
     },
   }));
 
   assert.equal(legacy.provider, 'builtin');
-  assert.equal(legacy.model, 'kimi-k2-5-260127');
+  assert.equal(legacy.model, 'doubao-seed-2-0-pro-260215');
   assert.equal(legacy.temperature, 0.4);
   assert.equal(legacy.maxTokens, 2400);
 
   const fallback = await resolveAIConfig(makeClient({}));
 
   assert.equal(fallback.provider, 'builtin');
-  assert.equal(fallback.model, 'kimi-k2-5-260127');
+  assert.equal(fallback.model, 'doubao-seed-2-0-pro-260215');
   assert.equal(fallback.temperature, 0.5);
 }
 
