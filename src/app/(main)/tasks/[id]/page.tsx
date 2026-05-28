@@ -2615,6 +2615,7 @@ function FunctionsTab({
   };
 
   const handleDeleteStep = async (step: RecipeStep) => {
+    if (!confirm('确定删除此步骤？')) return;
     const res = await fetch(`/api/recipe-steps/${step.id}`, { method: 'DELETE' });
     const data = await res.json();
     if (data.code === 0) {
@@ -2624,7 +2625,8 @@ function FunctionsTab({
   };
 
   const handleDeleteRecipe = async (recipe: Recipe) => {
-    // Delete all steps first
+    if (!confirm(`确定删除"${recipe.name}"？该操作不可恢复。`)) return;
+    // Delete all steps first (only disassociate materials)
     for (const step of (recipe.recipe_steps || [])) {
       await fetch(`/api/recipe-steps/${step.id}`, { method: 'DELETE' });
     }
@@ -2740,8 +2742,29 @@ function FunctionsTab({
         loading={loading}
         onCreateRecipe={() => setAddDialogOpen(true)}
         onEditRecipe={handleEditRecipe}
+        onDeleteRecipe={handleDeleteRecipe}
+        onReorderRecipes={async (newRecipes) => {
+          setRecipes(newRecipes);
+          await fetch('/api/recipes', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ recipes: newRecipes.map((r, i) => ({ id: r.id, sort_order: i })) }),
+          });
+        }}
         onAddStep={(recipe) => { setSelectedRecipe(recipe); setAddStepDialogOpen(true); }}
         onEditStep={(step) => handleEditStep(step)}
+        onDeleteStep={(step) => handleDeleteStep(step)}
+        onReorderSteps={async (recipe, newSteps) => {
+          const updatedRecipes = recipes.map(r => {
+            if (r.id !== recipe.id) return r;
+            return { ...r, recipe_steps: newSteps };
+          });
+          setRecipes(updatedRecipes);
+          const reorderData = newSteps.map((s, i) => ({ id: s.id, step_number: i + 1 }));
+          await fetch('/api/recipe-steps', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ steps: reorderData }),
+          });
+        }}
         onBindingTargetChange={(target) => onBindingTargetChange?.(target)}
         onRefresh={fetchRecipes}
         renderEffectEditor={(recipe) => (
