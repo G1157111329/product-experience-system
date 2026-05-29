@@ -38,11 +38,11 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const client = getSupabaseClient();
 
   try {
-    // Disassociate materials (set issue_id to null) instead of deleting them
+    // Disassociate materials (set re_evaluation_id to null) instead of deleting them
     await client
       .from('materials')
-      .update({ issue_id: null })
-      .eq('issue_id', id);
+      .update({ re_evaluation_id: null })
+      .eq('re_evaluation_id', id);
 
     const { error } = await client
       .from('issue_re_evaluations')

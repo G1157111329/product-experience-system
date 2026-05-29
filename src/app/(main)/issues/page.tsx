@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Sparkles, Plus, Loader2 } from 'lucide-react';
+import { Sparkles, Plus, Loader2, Pencil } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import { PageShell } from '@/components/app';
@@ -84,6 +84,11 @@ export default function IssuesPage() {
   const [newReEvalMaterials, setNewReEvalMaterials] = useState<Material[]>([]);
   const [savingReEval, setSavingReEval] = useState(false);
   const [aiEvaluating, setAiEvaluating] = useState<string | null>(null);
+  const [editingReEvalId, setEditingReEvalId] = useState<string | null>(null);
+  const [editingReEvalDesc, setEditingReEvalDesc] = useState('');
+  const [editingReEvalAiScore, setEditingReEvalAiScore] = useState('');
+  const [editingReEvalAiSummary, setEditingReEvalAiSummary] = useState('');
+  const [savingReEvalEdit, setSavingReEvalEdit] = useState(false);
 
   // Fetch current user's task IDs (for non-admin filtering)
   useEffect(() => {
@@ -376,6 +381,41 @@ export default function IssuesPage() {
     }
   };
 
+  const handleStartEditReEval = (reEval: ReEvaluation) => {
+    setEditingReEvalId(reEval.id);
+    setEditingReEvalDesc(reEval.description || '');
+    setEditingReEvalAiScore(reEval.ai_result ? String(reEval.ai_result.score) : '');
+    setEditingReEvalAiSummary(reEval.ai_result?.summary || '');
+  };
+
+  const handleSaveReEvalEdit = async (reEvalId: string) => {
+    setSavingReEvalEdit(true);
+    try {
+      const body: Record<string, unknown> = { description: editingReEvalDesc };
+      const score = parseFloat(editingReEvalAiScore);
+      if (!isNaN(score) || editingReEvalAiSummary) {
+        body.ai_result = { score: isNaN(score) ? 0 : score, summary: editingReEvalAiSummary };
+      }
+      const res = await fetch(`/api/issue-re-evaluations/${reEvalId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (data.code !== 0) {
+        toast.error(data.message || '保存失败');
+        return;
+      }
+      toast.success('保存成功');
+      setEditingReEvalId(null);
+      if (selectedIssue) fetchReEvaluations(selectedIssue.id);
+    } catch {
+      toast.error('保存失败');
+    } finally {
+      setSavingReEvalEdit(false);
+    }
+  };
+
   const totalIssues = issues.length;
   const pendingCount = issues.filter(i => i.status === '待整改').length;
   const inProgressCount = issues.filter(i => i.status === '整改中').length;
@@ -603,65 +643,119 @@ export default function IssuesPage() {
                       <div className="text-xs font-medium text-muted-foreground">复评估记录 ({reEvaluations.length})</div>
                       {reEvaluations.map((reEval, idx) => {
                         const roundLabel = idx === 0 ? '最新复测' : `第${reEvaluations.length - idx}次复测`;
+                        const isEditing = editingReEvalId === reEval.id;
                         return (
                           <div key={reEval.id} className="border rounded-lg p-3 space-y-2">
                             <div className="flex items-center justify-between">
                               <span className="text-xs font-medium text-muted-foreground">{roundLabel}</span>
-                              <span className="text-[10px] text-muted-foreground">
-                                {new Date(reEval.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
-                              </span>
+                              <div className="flex items-center gap-1">
+                                <span className="text-[10px] text-muted-foreground">
+                                  {new Date(reEval.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
+                                </span>
+                                {!isEditing && (
+                                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => handleStartEditReEval(reEval)}>
+                                    <Pencil className="h-3 w-3" />
+                                  </Button>
+                                )}
+                              </div>
                             </div>
-                            {reEval.description && (
-                              <div className="text-sm bg-muted/30 p-2 rounded break-all">{reEval.description}</div>
-                            )}
-                            {/* Materials */}
-                            {reEval.materials && reEval.materials.length > 0 && (
-                              <div className="flex gap-2 flex-wrap">
-                                {reEval.materials.map((mat) => (
-                                  <div key={mat.id} className="shrink-0">
-                                    {mat.material_type === 'image' ? (
-                                      <img src={mat.file_url} alt={mat.file_name} className="h-16 w-16 object-cover rounded border" />
-                                    ) : (
-                                      <div className="h-16 w-16 rounded border bg-muted/30 flex items-center justify-center">
-                                        <span className="text-[10px] text-muted-foreground">视频</span>
+                            {isEditing ? (
+                              <>
+                                <Textarea
+                                  value={editingReEvalDesc}
+                                  onChange={(e) => setEditingReEvalDesc(e.target.value)}
+                                  rows={2}
+                                  placeholder="输入复测效果描述..."
+                                  className="text-sm"
+                                />
+                                {reEval.ai_result && (
+                                  <div className="space-y-1.5">
+                                    <div className="flex items-center gap-2">
+                                      <Input
+                                        type="number"
+                                        step="0.1"
+                                        min="0"
+                                        max="10"
+                                        value={editingReEvalAiScore}
+                                        onChange={(e) => setEditingReEvalAiScore(e.target.value)}
+                                        className="h-7 w-20 text-sm font-bold"
+                                      />
+                                      <span className="text-xs text-muted-foreground">分</span>
+                                    </div>
+                                    <Textarea
+                                      value={editingReEvalAiSummary}
+                                      onChange={(e) => setEditingReEvalAiSummary(e.target.value)}
+                                      rows={3}
+                                      placeholder="AI总结内容..."
+                                      className="text-xs"
+                                    />
+                                  </div>
+                                )}
+                                <div className="flex gap-2">
+                                  <Button size="sm" onClick={() => handleSaveReEvalEdit(reEval.id)} disabled={savingReEvalEdit}>
+                                    {savingReEvalEdit ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+                                    保存
+                                  </Button>
+                                  <Button size="sm" variant="ghost" onClick={() => setEditingReEvalId(null)}>
+                                    取消
+                                  </Button>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                {reEval.description && (
+                                  <div className="text-sm bg-muted/30 p-2 rounded break-all">{reEval.description}</div>
+                                )}
+                                {/* Materials */}
+                                {reEval.materials && reEval.materials.length > 0 && (
+                                  <div className="flex gap-2 flex-wrap">
+                                    {reEval.materials.map((mat) => (
+                                      <div key={mat.id} className="shrink-0">
+                                        {mat.material_type === 'image' ? (
+                                          <img src={mat.file_url} alt={mat.file_name} className="h-16 w-16 object-cover rounded border" />
+                                        ) : (
+                                          <div className="h-16 w-16 rounded border bg-muted/30 flex items-center justify-center">
+                                            <span className="text-[10px] text-muted-foreground">视频</span>
+                                          </div>
+                                        )}
                                       </div>
+                                    ))}
+                                  </div>
+                                )}
+                                {/* AI Result */}
+                                {reEval.ai_result && (
+                                  <div className="bg-muted/20 rounded-lg p-2 space-y-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-sm font-bold text-primary">{reEval.ai_result.score}分</span>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 text-xs"
+                                        disabled={aiEvaluating === reEval.id}
+                                        onClick={() => handleAiEvaluate(reEval.id)}
+                                      >
+                                        {aiEvaluating === reEval.id ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Sparkles className="h-3 w-3 mr-1" />}
+                                        重新AI评价
+                                      </Button>
+                                    </div>
+                                    {reEval.ai_result.summary && (
+                                      <p className="text-xs text-muted-foreground break-all">{reEval.ai_result.summary}</p>
                                     )}
                                   </div>
-                                ))}
-                              </div>
-                            )}
-                            {/* AI Result */}
-                            {reEval.ai_result && (
-                              <div className="bg-muted/20 rounded-lg p-2 space-y-1">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-sm font-bold text-primary">{reEval.ai_result.score}分</span>
+                                )}
+                                {!reEval.ai_result && (
                                   <Button
-                                    variant="ghost"
+                                    variant="outline"
                                     size="sm"
-                                    className="h-6 text-xs"
+                                    className="h-7 text-xs"
                                     disabled={aiEvaluating === reEval.id}
                                     onClick={() => handleAiEvaluate(reEval.id)}
                                   >
                                     {aiEvaluating === reEval.id ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Sparkles className="h-3 w-3 mr-1" />}
-                                    重新AI评价
+                                    AI总结
                                   </Button>
-                                </div>
-                                {reEval.ai_result.summary && (
-                                  <p className="text-xs text-muted-foreground break-all">{reEval.ai_result.summary}</p>
                                 )}
-                              </div>
-                            )}
-                            {!reEval.ai_result && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-7 text-xs"
-                                disabled={aiEvaluating === reEval.id}
-                                onClick={() => handleAiEvaluate(reEval.id)}
-                              >
-                                {aiEvaluating === reEval.id ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Sparkles className="h-3 w-3 mr-1" />}
-                                AI总结
-                              </Button>
+                              </>
                             )}
                           </div>
                         );
