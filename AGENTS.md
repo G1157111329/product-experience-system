@@ -322,9 +322,10 @@ coze start
 74. **AI模型切换**: 默认AI模型从已停运的doubao-seed-1-6-vision-250815/kimi-k2-5-260127统一切换为doubao-seed-2-0-pro-260215（旗舰模型，面向Agent复杂推理场景）；platform_settings.ai_config同步更新
 75. **Agent预设错误上报**: Agent预设API(agent-presets)不再静默吞掉AI调用失败错误；无结果且有错误时返回code:1和500状态码，部分失败时在warnings字段返回错误详情，前端toast显示失败原因
 76. **标准建议过滤放宽**: normalizePresetSuggestions对standards的过滤条件从"必须有standardItemId"放宽为"有standardItemId或reason或focus"，使AI生成的新建议（无DB ID）也能展示
-77. **AI模型统一切换**: 默认AI模型从已停运的doubao-seed-1-6-vision-250815/kimi-k2-5-260127统一切换为doubao-seed-2-0-pro-260215（旗舰模型，面向Agent复杂推理场景）；platform_settings.ai_config同步更新
+77.
 78. **功能效果食谱管理增强**: 功能效果中食谱列表支持删除（带确认弹窗）和拖拽排序（GripVertical手柄）；食谱步骤支持删除和拖拽排序
 79. **问题点复评估闭环**: 功能效果来源(recipe_problem)的问题点支持多次复评估；新增issue_re_evaluations表存储复测记录（description+ai_result+materials）；素材通过materials.re_evaluation_id关联复评估记录；五感体验来源(record_fail)的问题点弹窗保持原样（整改方案/责任人/计划完成日期），功能效果来源显示复评估表单（描述评价+选择素材+AI总结）；复测结果按时间倒序排列（最新顶置），报告详情页/打印页/分享页问题清单下方附录复测结果（含素材图片）
+80. **复评估AI总结可编辑**: 复评估记录中AI评分和AI总结文本支持点击编辑按钮进入编辑模式，修改后保存；描述评价也支持编辑
 
 ## 代码风格
 
@@ -391,3 +392,5 @@ coze start
 | 侧边栏与内容长度不一致 | 主布局使用 min-h-screen 导致内容无限拉长 | 改为 h-screen overflow-hidden + overflow-y-auto 实现固定视口滚动 |
 | 编辑任务空日期报错 | PUT /api/tasks/[id] 未处理空字符串日期 | test_date: body.test_date \|\| null 转换空字符串为 null |
 | 删除五感体验/食谱/步骤导致素材被删除 | DB外键 onDelete("cascade") 级联删除素材 + API显式删除素材 | DB外键改为 onDelete("set null")，API改为 update({record_id/recipe_step_id/recipe_library_step_id: null}) 解除关联 |
+| 食谱AI探索返回空内容 | platform_settings.ai_config中model为已停运的doubao-seed-1-6-vision-250815，且错误被catch静默吞掉 | 更新ai_config.model为doubao-seed-2-0-pro-260215；agent-presets API无结果时返回错误信息而非空数据 |
+| 复评估素材无法关联 | 素材通过issue_id关联，无法区分同一问题下不同次复评估的素材 | materials表新增re_evaluation_id字段，素材通过复评估ID精确关联；DELETE时解除re_evaluation_id而非issue_id |
