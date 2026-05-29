@@ -13,7 +13,7 @@ import { Sparkles, Plus, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import { PageShell } from '@/components/app';
-import { MaterialPicker } from '@/components/material-picker';
+import { MaterialPicker, type Material } from '@/components/material-picker';
 import { toast } from 'sonner';
 
 interface Issue {
@@ -81,7 +81,7 @@ export default function IssuesPage() {
   const [reEvaluations, setReEvaluations] = useState<ReEvaluation[]>([]);
   const [newReEvalDescription, setNewReEvalDescription] = useState('');
   const [newReEvalMaterialIds, setNewReEvalMaterialIds] = useState<string[]>([]);
-  const [newReEvalMaterials, setNewReEvalMaterials] = useState<Array<{ id: string; material_type: string; file_url: string; file_name: string; file_size: number; record_id: string | null; recipe_step_id: string | null; recipe_id: string | null; issue_id: string | null }>>([]);
+  const [newReEvalMaterials, setNewReEvalMaterials] = useState<Material[]>([]);
   const [savingReEval, setSavingReEval] = useState(false);
   const [aiEvaluating, setAiEvaluating] = useState<string | null>(null);
 
@@ -323,12 +323,12 @@ export default function IssuesPage() {
 
       const reEvalId = data.data.id;
 
-      // Associate selected materials with the re-evaluation
+      // Associate selected materials with the re-evaluation via re_evaluation_id
       for (const matId of newReEvalMaterialIds) {
         await fetch('/api/materials', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: matId, issue_id: reEvalId }),
+          body: JSON.stringify({ id: matId, re_evaluation_id: reEvalId }),
         });
       }
 
@@ -338,7 +338,7 @@ export default function IssuesPage() {
           await fetch('/api/materials', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: mat.id, issue_id: reEvalId }),
+            body: JSON.stringify({ id: mat.id, re_evaluation_id: reEvalId }),
           });
         }
       }

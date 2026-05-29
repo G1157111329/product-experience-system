@@ -88,21 +88,21 @@ export async function GET(request: NextRequest) {
     const issueIds = liveIssues.map((i: { id: string }) => i.id);
     const { data: reEvals } = await client.from('issue_re_evaluations').select('*').in('issue_id', issueIds).order('created_at', { ascending: false });
     if (reEvals) {
-      // Fetch materials for re-evaluations
+      // Fetch materials for re-evaluations (by re_evaluation_id)
       const reEvalIds = reEvals.map((re: { id: string }) => re.id);
-      const { data: reEvalMats } = await client.from('materials').select('*').in('issue_id', issueIds);
-      const matsByIssueId: Record<string, unknown[]> = {};
+      const { data: reEvalMats } = await client.from('materials').select('*').in('re_evaluation_id', reEvalIds);
+      const matsByReEvalId: Record<string, unknown[]> = {};
       if (reEvalMats) {
         for (const m of reEvalMats) {
-          const iid = m.issue_id as string;
-          if (!matsByIssueId[iid]) matsByIssueId[iid] = [];
-          matsByIssueId[iid].push(m);
+          const rid = m.re_evaluation_id as string;
+          if (!matsByReEvalId[rid]) matsByReEvalId[rid] = [];
+          matsByReEvalId[rid].push(m);
         }
       }
       for (const re of reEvals) {
         const iid = re.issue_id as string;
         if (!reEvaluationsMap[iid]) reEvaluationsMap[iid] = [];
-        reEvaluationsMap[iid].push({ ...re, materials: matsByIssueId[iid] || [] });
+        reEvaluationsMap[iid].push({ ...re, materials: matsByReEvalId[re.id as string] || [] });
       }
     }
   }
@@ -148,20 +148,21 @@ export async function GET(request: NextRequest) {
       const allSiblingIssueIds = siblingIssues.map((i: { id: string }) => i.id);
       if (allSiblingIssueIds.length > 0) {
         const { data: siblingReEvals } = await client.from('issue_re_evaluations').select('*').in('issue_id', allSiblingIssueIds).order('created_at', { ascending: false });
-        const { data: siblingReEvalMats } = await client.from('materials').select('*').in('issue_id', allSiblingIssueIds);
-        const sMatsByIssueId: Record<string, unknown[]> = {};
+        const sReEvalIds = (siblingReEvals || []).map((re: { id: string }) => re.id);
+        const { data: siblingReEvalMats } = sReEvalIds.length > 0 ? await client.from('materials').select('*').in('re_evaluation_id', sReEvalIds) : { data: [] };
+        const sMatsByReEvalId: Record<string, unknown[]> = {};
         if (siblingReEvalMats) {
           for (const m of siblingReEvalMats) {
-            const iid = m.issue_id as string;
-            if (!sMatsByIssueId[iid]) sMatsByIssueId[iid] = [];
-            sMatsByIssueId[iid].push(m);
+            const rid = m.re_evaluation_id as string;
+            if (!sMatsByReEvalId[rid]) sMatsByReEvalId[rid] = [];
+            sMatsByReEvalId[rid].push(m);
           }
         }
         if (siblingReEvals) {
           for (const re of siblingReEvals) {
             const iid = re.issue_id as string;
             if (!siblingReEvaluationsMap[iid]) siblingReEvaluationsMap[iid] = [];
-            siblingReEvaluationsMap[iid].push({ ...re, materials: sMatsByIssueId[iid] || [] });
+            siblingReEvaluationsMap[iid].push({ ...re, materials: sMatsByReEvalId[re.id as string] || [] });
           }
         }
       }

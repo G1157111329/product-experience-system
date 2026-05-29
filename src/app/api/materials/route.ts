@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   const client = getSupabaseClient();
   const body = await request.json();
-  const { id, file_name, record_id, recipe_step_id, recipe_id, issue_id } = body;
+  const { id, file_name, record_id, recipe_step_id, recipe_id, issue_id, re_evaluation_id } = body;
 
   if (!id) {
     return NextResponse.json({ code: 1, message: '缺少必要参数' }, { status: 400 });
@@ -42,6 +42,7 @@ export async function PUT(request: NextRequest) {
   if (recipe_step_id !== undefined) updateData.recipe_step_id = recipe_step_id;
   if (recipe_id !== undefined) updateData.recipe_id = recipe_id;
   if (issue_id !== undefined) updateData.issue_id = issue_id;
+  if (re_evaluation_id !== undefined) updateData.re_evaluation_id = re_evaluation_id;
 
   if (Object.keys(updateData).length === 0) {
     return NextResponse.json({ code: 1, message: '没有需要更新的字段' }, { status: 400 });

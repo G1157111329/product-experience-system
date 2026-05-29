@@ -411,12 +411,14 @@ export const materials = pgTable("materials", {
 	recipeLibraryStepId: varchar("recipe_library_step_id", { length: 36 }),
 	recipeId: varchar("recipe_id", { length: 36 }),
 	issueId: varchar("issue_id", { length: 36 }),
+	reEvaluationId: varchar("re_evaluation_id", { length: 36 }),
 }, (table) => [
 	index("materials_recipe_step_id_idx").using("btree", table.recipeStepId.asc().nullsLast().op("text_ops")),
 	index("materials_record_id_idx").using("btree", table.recordId.asc().nullsLast().op("text_ops")),
 	index("materials_task_id_idx").using("btree", table.taskId.asc().nullsLast().op("text_ops")),
 	index("materials_type_idx").using("btree", table.materialType.asc().nullsLast().op("text_ops")),
 	index("materials_issue_id_idx").using("btree", table.issueId.asc().nullsLast().op("text_ops")),
+		index("materials_re_evaluation_id_idx").using("btree", table.reEvaluationId.asc().nullsLast().op("text_ops")),
 	foreignKey({
 			columns: [table.recordId],
 			foreignColumns: [checkRecords.id],
@@ -431,6 +433,11 @@ export const materials = pgTable("materials", {
 			columns: [table.issueId],
 			foreignColumns: [issues.id],
 			name: "materials_issue_id_issues_id_fk"
+		}).onDelete("set null"),
+		foreignKey({
+			columns: [table.reEvaluationId],
+			foreignColumns: [issueReEvaluations.id],
+			name: "materials_re_evaluation_id_issue_re_evaluations_id_fk"
 		}).onDelete("set null"),
 	pgPolicy("materials_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
 	pgPolicy("materials_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),

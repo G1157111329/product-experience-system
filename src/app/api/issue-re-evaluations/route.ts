@@ -28,23 +28,23 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ code: 1, message: '查询失败: ' + error.message }, { status: 500 });
   }
 
-  // Also fetch related materials (by issue_id, since materials are linked to the issue)
-  const targetIssueIds = issueId ? [issueId] : issueIds!.split(',');
+  // Also fetch related materials (by re_evaluation_id)
+  const reEvalIds = (data || []).map((r: Record<string, unknown>) => r.id as string);
   let materialsMap: Record<string, unknown[]> = {};
-  if (targetIssueIds.length > 0) {
+  if (reEvalIds.length > 0) {
     const { data: materials } = await client
       .from('materials')
       .select('*')
-      .in('issue_id', targetIssueIds);
-    for (const m of (materials || []) as Array<{ issue_id: string }>) {
-      if (!materialsMap[m.issue_id]) materialsMap[m.issue_id] = [];
-      materialsMap[m.issue_id].push(m);
+      .in('re_evaluation_id', reEvalIds);
+    for (const m of (materials || []) as Array<{ re_evaluation_id: string }>) {
+      if (!materialsMap[m.re_evaluation_id]) materialsMap[m.re_evaluation_id] = [];
+      materialsMap[m.re_evaluation_id].push(m);
     }
   }
 
   const result = (data || []).map((r: Record<string, unknown>) => ({
     ...r,
-    materials: materialsMap[r.issue_id as string] || [],
+    materials: materialsMap[r.id as string] || [],
   }));
 
   return NextResponse.json({ code: 0, data: result });
