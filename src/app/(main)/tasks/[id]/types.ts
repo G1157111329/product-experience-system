@@ -1,3 +1,6 @@
+import type { Material as MaterialType } from '@/components/material-picker';
+export type Material = MaterialType;
+
 export interface CategoryWithProducts {
   id: string;
   name: string;
@@ -75,17 +78,6 @@ export interface Issue {
   status: string;
 }
 
-export interface Material {
-  id: string;
-  material_type: string;
-  file_name: string;
-  file_url: string;
-  file_size: number;
-  record_id: string | null;
-  recipe_step_id: string | null;
-  recipe_id: string | null;
-}
-
 export type MaterialEvidenceFilter = 'all' | 'unlinked' | 'linked' | 'image' | 'video' | 'senses' | 'functions' | 'effect';
 
 export type EvidenceBindingTarget =
@@ -106,7 +98,7 @@ export interface Recipe {
   effect_score?: string | null;
   effect_problem_point?: string | null;
   effect_problem_points?: ProblemPoint[];
-  effect_ai_result?: { score: number; summary: string } | null;
+  sort_order?: number;  effect_ai_result?: { score: number; summary: string } | null;
   effect_materials?: Material[];
 }
 

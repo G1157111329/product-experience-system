@@ -12,7 +12,7 @@ import { MediaCaptureDialog } from './media-capture-dialog';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
-interface Material {
+export interface Material {
   id: string;
   material_type: string;
   file_name: string;
@@ -21,6 +21,7 @@ interface Material {
   record_id: string | null;
   recipe_step_id: string | null;
   recipe_id: string | null;
+  issue_id: string | null;
 }
 
 interface MaterialPickerProps {
@@ -31,6 +32,7 @@ interface MaterialPickerProps {
   recordId?: string;
   recipeStepId?: string;
   recipeId?: string;
+  issueId?: string;
   selectedIds?: string[];
   initialMaterials?: Material[];
   onSelectionChange?: (ids: string[], materials: Material[]) => void;
@@ -48,6 +50,7 @@ export function MaterialPicker({
   recordId,
   recipeStepId,
   recipeId,
+  issueId,
   selectedIds,
   initialMaterials,
   onSelectionChange,
@@ -108,7 +111,8 @@ export function MaterialPicker({
           if (recordId && material.record_id === recordId) return true;
           if (recipeStepId && material.recipe_step_id === recipeStepId) return true;
           if (recipeId && material.recipe_id === recipeId) return true;
-          return !material.record_id && !material.recipe_step_id && !material.recipe_id;
+          if (issueId && material.issue_id === issueId) return true;
+          return !material.record_id && !material.recipe_step_id && !material.recipe_id && !material.issue_id;
         });
       }
 
@@ -125,7 +129,7 @@ export function MaterialPicker({
     } finally {
       setLoading(false);
     }
-  }, [taskId, recordId, recipeStepId, recipeId, onSelect, onSelectionChange, selected, selectedIds]);
+  }, [taskId, recordId, recipeStepId, recipeId, issueId, onSelect, onSelectionChange, selected, selectedIds]);
 
   const handleOpen = (nextOpen: boolean) => {
     setIsOpen(nextOpen);
@@ -185,6 +189,7 @@ export function MaterialPicker({
         if (recordId) formData.append('record_id', recordId);
         if (recipeStepId) formData.append('recipe_step_id', recipeStepId);
         if (recipeId) formData.append('recipe_id', recipeId);
+        if (issueId) formData.append('issue_id', issueId);
 
         const res = await fetch('/api/materials/upload', { method: 'POST', body: formData });
         const data = await res.json();

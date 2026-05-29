@@ -293,6 +293,35 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
                   <span style={{ color: '#6b7280', fontSize: '10px' }}>{String(issue.verification_note)}</span>
                 </div>
               )}
+              {/* Re-evaluations for recipe_problem issues */}
+              {Array.isArray(issue._reEvaluations) && (issue._reEvaluations as Array<Record<string, unknown>>).length > 0 && (
+                <div style={{ marginTop: '6px', borderTop: '1px dashed #d1d5db', paddingTop: '4px' }}>
+                  {(issue._reEvaluations as Array<Record<string, unknown>>).map((re, reIdx) => {
+                    const reMats = re.materials as Array<Record<string, string>> | undefined;
+                    const aiResult = re.ai_result as { score: number; summary: string } | null | undefined;
+                    return (
+                    <div key={String(re.id)} style={{ background: '#f0fdf4', borderRadius: '3px', padding: '4px 6px', margin: '3px 0', fontSize: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ background: '#dcfce7', padding: '0 4px', borderRadius: '2px', fontWeight: 500 }}>第{reIdx + 1}次复测</span>
+                        {aiResult && (
+                          <span style={{ border: '1px solid #d1d5db', padding: '0 4px', borderRadius: '2px' }}>AI评分: {aiResult.score}</span>
+                        )}
+                        <span style={{ color: '#9ca3af', marginLeft: 'auto' }}>{re.created_at ? new Date(String(re.created_at)).toLocaleDateString('zh-CN') : ''}</span>
+                      </div>
+                      {String(re.description || '') && <div style={{ marginTop: '2px' }}>{String(re.description || '')}</div>}
+                      {aiResult && aiResult.summary && <div style={{ color: '#6b7280', marginTop: '2px' }}>AI总结: {String(aiResult.summary)}</div>}
+                      {reMats && reMats.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
+                          {reMats.filter(m => m.material_type === 'image').map((m, mi) => (
+                            <img key={mi} src={String(m.file_url)} alt={String(m.file_name)} style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '3px', border: '1px solid #e5e7eb' }} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           ))}
         </>
@@ -491,6 +520,25 @@ function ReportPrintContent() {
         const raw = issuesData.data;
         const allIssues: IssueItem[] = Array.isArray(raw) ? raw : (raw?.list || []);
         const reportIssues = allIssues.filter((i: IssueItem) => i.source_report_id === rpt.id);
+        // Fetch re-evaluations for recipe_problem issues
+        const recipeIssues = reportIssues.filter((i: IssueItem) => i.source_type === 'recipe_problem');
+        if (recipeIssues.length > 0) {
+          try {
+            const issueIds = recipeIssues.map(i => i.id).join(',');
+            const reRes = await fetch(`/api/issue-re-evaluations?issue_ids=${issueIds}`);
+            const reData = await reRes.json();
+            if (reData.code === 0 && reData.data) {
+              const reEvalMap: Record<string, unknown[]> = {};
+              for (const re of reData.data) {
+                if (!reEvalMap[re.issue_id]) reEvalMap[re.issue_id] = [];
+                reEvalMap[re.issue_id].push(re);
+              }
+              for (const issue of recipeIssues) {
+                (issue as Record<string, unknown>)._reEvaluations = reEvalMap[issue.id] || [];
+              }
+            }
+          } catch { /* ignore */ }
+        }
         setLiveIssuesMap({ [rpt.id]: reportIssues });
       }
     }).finally(() => setLoading(false));
@@ -499,13 +547,32 @@ function ReportPrintContent() {
   // Fetch live issues for sibling reports
   useEffect(() => {
     if (siblingReports.length === 0) return;
-    fetch('/api/issues?limit=500').then(r => r.json()).then(data => {
+    fetch('/api/issues?limit=500').then(r => r.json()).then(async data => {
       const raw = data.data;
       const allIssues: IssueItem[] = Array.isArray(raw) ? raw : (raw?.list || []);
       const map: Record<string, IssueItem[]> = {};
       siblingReports.forEach(rpt => {
         map[rpt.id] = allIssues.filter((i: IssueItem) => i.source_report_id === rpt.id);
       });
+      // Fetch re-evaluations for recipe_problem issues
+      const allRecipeIssues = Object.values(map).flat().filter((i: IssueItem) => i.source_type === 'recipe_problem');
+      if (allRecipeIssues.length > 0) {
+        try {
+          const issueIds = allRecipeIssues.map(i => i.id).join(',');
+          const reRes = await fetch(`/api/issue-re-evaluations?issue_ids=${issueIds}`);
+          const reData = await reRes.json();
+          if (reData.code === 0 && reData.data) {
+            const reEvalMap: Record<string, unknown[]> = {};
+            for (const re of reData.data) {
+              if (!reEvalMap[re.issue_id]) reEvalMap[re.issue_id] = [];
+              reEvalMap[re.issue_id].push(re);
+            }
+            for (const issue of allRecipeIssues) {
+              (issue as Record<string, unknown>)._reEvaluations = reEvalMap[issue.id] || [];
+            }
+          }
+        } catch { /* ignore */ }
+      }
       setLiveIssuesMap(prev => ({ ...prev, ...map }));
     });
   }, [siblingReports]);

@@ -8,6 +8,7 @@ import { ArrowLeft, ArrowRightLeft, FileText, Eye, Wrench, Package, Plus, Camera
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import type { Material, CheckRecord, Issue, Recipe, RecipeStep, ProblemPoint } from './types';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
@@ -60,48 +61,6 @@ interface AiTaskSummary {
   historical_position: string;
   suggestions: string[];
   updated_at?: string;
-}
-
-interface CheckRecord {
-  id: string; sensory_dimension: string | null; check_dimension: string | null;
-  sub_check_dimension: string | null; check_standard: string | null;
-  check_item: string; check_requirement: string | null; evaluation_result: string;
-  problem_description: string | null; measurement_value: string | null;
-  standard_category: string | null; test_phase: string | null;
-  experience_flow: string | null; touch_point: string | null;
-  experience_standard: string | null; check_tool: string | null;
-  problem_level: string | null; task_id: string;
-  materials?: Material[];
-}
-
-interface Issue {
-  id: string; title: string; severity: string; status: string;
-}
-
-interface Material {
-  id: string; material_type: string; file_name: string; file_url: string; file_size: number;
-  record_id: string | null; recipe_step_id: string | null; recipe_id: string | null;
-}
-
-interface Recipe {
-  id: string; name: string; ingredients: string | null; recipe_type: string;
-  problem_count: number; recipe_steps: RecipeStep[];
-  sort_order?: number;
-  effect_description?: string | null; effect_score?: string | null; effect_problem_point?: string | null;
-  effect_problem_points?: ProblemPoint[];
-  effect_ai_result?: { score: number; summary: string } | null;
-  effect_materials?: Material[];
-}
-
-interface ProblemPoint {
-  text: string;
-  material_ids?: string[];
-}
-
-interface RecipeStep {
-  id: string; step_number: number; operation: string; problem_point: string | null;
-  problem_points?: ProblemPoint[];
-  materials?: Material[];
 }
 
 const sensoryColors: Record<string, string> = {

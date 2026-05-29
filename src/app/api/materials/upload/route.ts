@@ -23,13 +23,14 @@ export async function POST(request: NextRequest) {
     const recipe_step_id = formData.get('recipe_step_id') as string | null;
     const recipe_library_step_id = formData.get('recipe_library_step_id') as string | null;
     const recipe_id = formData.get('recipe_id') as string | null;
+    const issue_id = formData.get('issue_id') as string | null;
 
     if (!file) {
       return NextResponse.json({ code: 1, message: '缺少文件' }, { status: 400 });
     }
 
-    if (!task_id && !recipe_library_step_id) {
-      return NextResponse.json({ code: 1, message: '缺少必要参数(需提供task_id或recipe_library_step_id)' }, { status: 400 });
+    if (!task_id && !recipe_library_step_id && !issue_id) {
+      return NextResponse.json({ code: 1, message: '缺少必要参数(需提供task_id、recipe_library_step_id或issue_id)' }, { status: 400 });
     }
 
     // 文件大小校验 (100MB)
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest) {
     }
 
     const timestamp = Date.now();
-    const folderId = recipe_library_step_id || task_id || 'unknown';
+    const folderId = recipe_library_step_id || issue_id || task_id || 'unknown';
     const fileName = `experience-media/${folderId}/${materialType}/${timestamp}_${file.name}`;
 
     // 上传到对象存储 (with retry for large files)
@@ -107,6 +108,7 @@ export async function POST(request: NextRequest) {
       recipe_step_id: recipe_step_id || null,
       recipe_library_step_id: recipe_library_step_id || null,
       recipe_id: recipe_id || null,
+      issue_id: issue_id || null,
       material_type: materialType,
       file_name: file.name,
       file_path: fileKey,

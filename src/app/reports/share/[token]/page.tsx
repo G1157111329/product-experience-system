@@ -41,7 +41,13 @@ interface CheckRecord {
 
 interface IssueItem {
   id: string; title: string; description: string | null; level: string | null;
-  status: string; [key: string]: unknown;
+  status: string; source_type?: string; [key: string]: unknown;
+}
+
+interface ReEvaluation {
+  id: string; issue_id: string; description: string | null;
+  ai_result: { score: number; summary: string } | null;
+  created_at: string; materials?: Material[];
 }
 
 interface ReportContent {
@@ -169,6 +175,7 @@ export default function ShareReportPage() {
   const [report, setReport] = useState<ReportData | null>(null);
   const [siblingReports, setSiblingReports] = useState<ReportData[]>([]);
   const [liveIssuesMap, setLiveIssuesMap] = useState<Record<string, IssueItem[]>>({});
+  const [reEvaluationsMap, setReEvaluationsMap] = useState<Record<string, ReEvaluation[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expired, setExpired] = useState(false);
@@ -188,6 +195,15 @@ export default function ShareReportPage() {
             Object.assign(issuesMap, data.data.siblingIssuesMap);
           }
           setLiveIssuesMap(issuesMap);
+          // Populate re-evaluations map
+          const reEvalMap: Record<string, ReEvaluation[]> = {};
+          if (data.data.reEvaluationsMap) {
+            Object.assign(reEvalMap, data.data.reEvaluationsMap);
+          }
+          if (data.data.siblingReEvaluationsMap) {
+            Object.assign(reEvalMap, data.data.siblingReEvaluationsMap);
+          }
+          setReEvaluationsMap(reEvalMap);
         } else if (data.code === 1 && data.message?.includes('过期')) {
           setExpired(true);
         } else {
@@ -366,22 +382,60 @@ export default function ShareReportPage() {
                     <h3 className="font-semibold text-sm text-primary">问题清单 ({liveIssues.length})</h3>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-1">
-                      {liveIssues.map((issue, idx) => (
-                        <div key={idx} className="flex items-center gap-1.5 sm:gap-2 py-1.5 px-2 rounded bg-muted/30 text-sm min-w-0">
-                          <span className={cn('text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0',
-                            issue.level === '一类' ? 'bg-red-100 text-red-700' :
-                            issue.level === '二类' ? 'bg-amber-100 text-amber-700' :
-                            'bg-blue-100 text-blue-700'
-                          )}>{issue.level || '二类'}</span>
-                          <span className="flex-1 min-w-0 break-all text-xs sm:text-sm">{issue.title}</span>
-                          <span className={cn('text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0')}
-                            style={{
-                              background: STATUS_BG[issue.status] || '#fef3c7',
-                              color: STATUS_FG[issue.status] || '#92400e',
-                            }}>{issue.status}</span>
-                        </div>
-                      ))}
+                    <div className="space-y-2">
+                      {liveIssues.map((issue, idx) => {
+                        const reEvals = reEvaluationsMap[issue.id] || [];
+                        return (
+                          <div key={idx} className="p-2 rounded bg-muted/30 space-y-1.5 min-w-0">
+                            <div className="flex items-center gap-1.5 sm:gap-2 text-sm min-w-0">
+                              <span className={cn('text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0',
+                                issue.level === '一类' ? 'bg-red-100 text-red-700' :
+                                issue.level === '二类' ? 'bg-amber-100 text-amber-700' :
+                                'bg-blue-100 text-blue-700'
+                              )}>{issue.level || '二类'}</span>
+                              <span className="flex-1 min-w-0 break-all text-xs sm:text-sm">{issue.title}</span>
+                              <span className={cn('text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0')}
+                                style={{
+                                  background: STATUS_BG[issue.status] || '#fef3c7',
+                                  color: STATUS_FG[issue.status] || '#92400e',
+                                }}>{issue.status}</span>
+                            </div>
+                            {issue.source_type && (
+                              <div className="text-[10px] text-muted-foreground">
+                                来源: {issue.source_type === 'record_fail' ? '五感体验' : '功能效果'}
+                              </div>
+                            )}
+                            {/* Re-evaluation results for recipe_problem type */}
+                            {reEvals.length > 0 && (
+                              <div className="mt-1.5 space-y-2 border-t border-border/50 pt-1.5">
+                                {reEvals.map((reEval, reIdx) => {
+                                  const label = reIdx === 0 ? '最新复测' : `第${reEvals.length - reIdx}次复测`;
+                                  return (
+                                    <div key={reEval.id} className="bg-background/50 rounded p-2 space-y-1">
+                                      <div className="flex items-center gap-1.5">
+                                        <Badge variant="outline" className="text-[9px] shrink-0">{label}</Badge>
+                                        {reEval.ai_result?.score != null && (
+                                          <span className="text-[10px] font-medium text-primary">{reEval.ai_result.score}分</span>
+                                        )}
+                                        <span className="text-[9px] text-muted-foreground">{new Date(reEval.created_at).toLocaleDateString('zh-CN')}</span>
+                                      </div>
+                                      {reEval.description && (
+                                        <div className="text-[11px] text-muted-foreground whitespace-pre-wrap break-all">{reEval.description}</div>
+                                      )}
+                                      {reEval.ai_result?.summary && (
+                                        <div className="text-[11px] text-primary/80 whitespace-pre-wrap break-all">AI评语: {reEval.ai_result.summary}</div>
+                                      )}
+                                      {reEval.materials && reEval.materials.length > 0 && (
+                                        <MediaGallery materials={reEval.materials} responsive columns={{ mobile: 2, sm: 3, lg: 4 }} onPreview={openPreview} />
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </CardContent>
                 </Card>

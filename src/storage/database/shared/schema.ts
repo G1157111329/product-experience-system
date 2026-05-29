@@ -228,6 +228,27 @@ export const issues = pgTable("issues", {
 	pgPolicy("issues_允许公开删除", { as: "permissive", for: "delete", to: ["public"] }),
 ]);
 
+export const issueReEvaluations = pgTable("issue_re_evaluations", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	issueId: varchar("issue_id", { length: 36 }).notNull(),
+	description: text(),
+	aiResult: jsonb("ai_result"),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	createdBy: varchar("created_by", { length: 36 }),
+}, (table) => [
+	index("issue_re_evaluations_issue_id_idx").using("btree", table.issueId.asc().nullsLast().op("text_ops")),
+	index("issue_re_evaluations_created_at_idx").using("btree", table.createdAt.asc().nullsLast().op("timestamptz_ops")),
+	foreignKey({
+			columns: [table.issueId],
+			foreignColumns: [issues.id],
+			name: "issue_re_evaluations_issue_id_issues_id_fk"
+		}).onDelete("cascade"),
+	pgPolicy("issue_re_evaluations_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
+	pgPolicy("issue_re_evaluations_允许公开写入", { as: "permissive", for: "insert", to: ["public"], withCheck: sql`true` }),
+	pgPolicy("issue_re_evaluations_允许公开更新", { as: "permissive", for: "update", to: ["public"], using: sql`true`, withCheck: sql`true` }),
+	pgPolicy("issue_re_evaluations_允许公开删除", { as: "permissive", for: "delete", to: ["public"], using: sql`true` }),
+]);
+
 export const experienceTasks = pgTable("experience_tasks", {
 	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
 	taskName: varchar("task_name", { length: 200 }).notNull(),
@@ -389,11 +410,13 @@ export const materials = pgTable("materials", {
 	recipeStepId: varchar("recipe_step_id", { length: 36 }),
 	recipeLibraryStepId: varchar("recipe_library_step_id", { length: 36 }),
 	recipeId: varchar("recipe_id", { length: 36 }),
+	issueId: varchar("issue_id", { length: 36 }),
 }, (table) => [
 	index("materials_recipe_step_id_idx").using("btree", table.recipeStepId.asc().nullsLast().op("text_ops")),
 	index("materials_record_id_idx").using("btree", table.recordId.asc().nullsLast().op("text_ops")),
 	index("materials_task_id_idx").using("btree", table.taskId.asc().nullsLast().op("text_ops")),
 	index("materials_type_idx").using("btree", table.materialType.asc().nullsLast().op("text_ops")),
+	index("materials_issue_id_idx").using("btree", table.issueId.asc().nullsLast().op("text_ops")),
 	foreignKey({
 			columns: [table.recordId],
 			foreignColumns: [checkRecords.id],
@@ -403,6 +426,11 @@ export const materials = pgTable("materials", {
 			columns: [table.taskId],
 			foreignColumns: [experienceTasks.id],
 			name: "materials_task_id_experience_tasks_id_fk"
+		}).onDelete("set null"),
+	foreignKey({
+			columns: [table.issueId],
+			foreignColumns: [issues.id],
+			name: "materials_issue_id_issues_id_fk"
 		}).onDelete("set null"),
 	pgPolicy("materials_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
 	pgPolicy("materials_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),

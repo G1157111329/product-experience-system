@@ -82,6 +82,31 @@ export async function GET(request: NextRequest) {
   const { data: rawIssues } = await client.from('issues').select('*').eq('source_report_id', report.id);
   const liveIssues = rawIssues || [];
 
+  // Fetch re-evaluations for the issues
+  const reEvaluationsMap: Record<string, unknown[]> = {};
+  if (liveIssues.length > 0) {
+    const issueIds = liveIssues.map((i: { id: string }) => i.id);
+    const { data: reEvals } = await client.from('issue_re_evaluations').select('*').in('issue_id', issueIds).order('created_at', { ascending: false });
+    if (reEvals) {
+      // Fetch materials for re-evaluations
+      const reEvalIds = reEvals.map((re: { id: string }) => re.id);
+      const { data: reEvalMats } = await client.from('materials').select('*').in('issue_id', issueIds);
+      const matsByIssueId: Record<string, unknown[]> = {};
+      if (reEvalMats) {
+        for (const m of reEvalMats) {
+          const iid = m.issue_id as string;
+          if (!matsByIssueId[iid]) matsByIssueId[iid] = [];
+          matsByIssueId[iid].push(m);
+        }
+      }
+      for (const re of reEvals) {
+        const iid = re.issue_id as string;
+        if (!reEvaluationsMap[iid]) reEvaluationsMap[iid] = [];
+        reEvaluationsMap[iid].push({ ...re, materials: matsByIssueId[iid] || [] });
+      }
+    }
+  }
+
   // Fetch sibling reports for content merge (same logic as report detail page)
   let siblingReports: Record<string, unknown>[] = [];
   if (report.product_model) {
@@ -109,6 +134,7 @@ export async function GET(request: NextRequest) {
 
   // Fetch issues for sibling reports
   const siblingIssuesMap: Record<string, unknown[]> = {};
+  const siblingReEvaluationsMap: Record<string, unknown[]> = {};
   if (siblingReports.length > 0) {
     const siblingIds = siblingReports.map((r: Record<string, unknown>) => r.id as string);
     const { data: siblingIssues } = await client.from('issues').select('*').in('source_report_id', siblingIds);
@@ -117,6 +143,27 @@ export async function GET(request: NextRequest) {
         const rid = issue.source_report_id as string;
         if (!siblingIssuesMap[rid]) siblingIssuesMap[rid] = [];
         siblingIssuesMap[rid].push(issue);
+      }
+      // Fetch re-evaluations for sibling issues
+      const allSiblingIssueIds = siblingIssues.map((i: { id: string }) => i.id);
+      if (allSiblingIssueIds.length > 0) {
+        const { data: siblingReEvals } = await client.from('issue_re_evaluations').select('*').in('issue_id', allSiblingIssueIds).order('created_at', { ascending: false });
+        const { data: siblingReEvalMats } = await client.from('materials').select('*').in('issue_id', allSiblingIssueIds);
+        const sMatsByIssueId: Record<string, unknown[]> = {};
+        if (siblingReEvalMats) {
+          for (const m of siblingReEvalMats) {
+            const iid = m.issue_id as string;
+            if (!sMatsByIssueId[iid]) sMatsByIssueId[iid] = [];
+            sMatsByIssueId[iid].push(m);
+          }
+        }
+        if (siblingReEvals) {
+          for (const re of siblingReEvals) {
+            const iid = re.issue_id as string;
+            if (!siblingReEvaluationsMap[iid]) siblingReEvaluationsMap[iid] = [];
+            siblingReEvaluationsMap[iid].push({ ...re, materials: sMatsByIssueId[iid] || [] });
+          }
+        }
       }
     }
   }
@@ -127,8 +174,10 @@ export async function GET(request: NextRequest) {
     data: {
       report,
       liveIssues,
+      reEvaluationsMap,
       siblingReports,
       siblingIssuesMap,
+      siblingReEvaluationsMap,
       shareInfo: {
         expires_at: share.expires_at,
         created_at: share.created_at,

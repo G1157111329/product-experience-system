@@ -94,6 +94,7 @@
 | `report_templates` | 报告模板 |
 | `reports` | 报告（含 product_model 用于同型号合并） |
 | `report_shares` | 报告分享（share_token, expires_at, created_by，支持7天/30天/永久有效期） |
+| `issue_re_evaluations` | 问题复评估（功能效果问题多次复测，含描述+AI结果JSONB） |
 | `recipe_library` | 食谱库（名称全局唯一约束，按品类-产品分类的全局食谱标准） |
 | `recipe_library_steps` | 食谱库步骤 |
 | `recipes` | 食谱/功能（含 effect_description 效果评价描述, effect_score AI评分, effect_problem_point 效果问题点, effect_ai_result AI四维评价完整结果JSONB） |
@@ -170,6 +171,9 @@
 | PUT/DELETE | `/api/recipe-library-steps/[id]` | 食谱库步骤更新/删除（含素材关联清理） |
 | GET/PUT | `/api/settings` | 平台设置读取/更新（管理员，key-value JSONB；ai_config含AI模型配置） |
 | POST | `/api/tasks/[id]/transfer` | 转移体验计划到其他用户（管理员，含全部资料） |
+| GET/POST | `/api/issue-re-evaluations` | 问题复评估列表/创建（支持issue_id和issue_ids参数）；GET返回含素材 |
+| PUT/DELETE | `/api/issue-re-evaluations/[id]` | 复评估更新/删除 |
+| POST | `/api/issue-re-evaluations/[id]/ai-evaluate` | AI效果评价（基于描述+图片，同食谱四维评价体系） |
 
 ## 构建与运行
 
@@ -318,6 +322,9 @@ coze start
 74. **AI模型切换**: 默认AI模型从已停运的doubao-seed-1-6-vision-250815/kimi-k2-5-260127统一切换为doubao-seed-2-0-pro-260215（旗舰模型，面向Agent复杂推理场景）；platform_settings.ai_config同步更新
 75. **Agent预设错误上报**: Agent预设API(agent-presets)不再静默吞掉AI调用失败错误；无结果且有错误时返回code:1和500状态码，部分失败时在warnings字段返回错误详情，前端toast显示失败原因
 76. **标准建议过滤放宽**: normalizePresetSuggestions对standards的过滤条件从"必须有standardItemId"放宽为"有standardItemId或reason或focus"，使AI生成的新建议（无DB ID）也能展示
+77. **AI模型统一切换**: 默认AI模型从已停运的doubao-seed-1-6-vision-250815/kimi-k2-5-260127统一切换为doubao-seed-2-0-pro-260215（旗舰模型，面向Agent复杂推理场景）；platform_settings.ai_config同步更新
+78. **功能效果食谱管理增强**: 功能效果中食谱列表支持删除（带确认弹窗）和拖拽排序（GripVertical手柄）；食谱步骤支持删除和拖拽排序
+79. **问题点复评估闭环**: 功能效果来源(recipe_problem)的问题点支持多次复评估；新增issue_re_evaluations表存储复测记录（description+ai_result+materials）；五感体验来源(record_fail)的问题点弹窗保持原样（整改方案/责任人/计划完成日期），功能效果来源显示复评估表单（描述评价+选择素材+AI总结）；复测结果按时间倒序排列（最新顶置），报告详情页/打印页/分享页问题清单下方附录复测结果
 
 ## 代码风格
 

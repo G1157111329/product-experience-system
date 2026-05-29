@@ -18,6 +18,12 @@ import { buildDisplayReportContent, type AiSummaryLike, type ReportContentWithRe
 
 interface Material {
   id: string; material_type: string; file_name: string; file_url: string; file_size: number;
+  issue_id?: string | null;
+}
+
+interface ReEvaluation {
+  id: string; issue_id: string; description: string | null; ai_result: { score: number; summary: string } | null;
+  created_at: string; created_by: string | null;
 }
 
 interface ProblemPoint {
@@ -271,7 +277,9 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
       {liveIssues.length > 0 && (
         <ReportPaperSection index="03" title={`问题清单 (${liveIssues.length})`}>
           <div className="space-y-2">
-          {liveIssues.map((issue) => (
+          {liveIssues.map((issue) => {
+            const reEvals = (issue._reEvaluations || []) as ReEvaluation[];
+            return (
             <div key={issue.id} className="rounded-lg border bg-background p-2.5 space-y-1">
               <div className="flex items-center gap-2">
                 <Badge className={cn('text-[10px] shrink-0', LEVEL_COLORS[issue.level || '二类'] || LEVEL_COLORS['二类'])}>
@@ -292,8 +300,39 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
               {issue.description && (
                 <p className="text-[10px] text-muted-foreground pl-1 break-all">{issue.description}</p>
               )}
+              {/* Re-evaluations for recipe_problem issues */}
+              {reEvals.length > 0 && (
+                <div className="mt-1.5 space-y-1.5 border-t pt-1.5">
+                  {reEvals.map((re, idx) => {
+                    const reMats = (re as unknown as Record<string, unknown>).materials as Material[] | undefined;
+                    return (
+                    <div key={re.id} className="rounded bg-muted/30 p-2 space-y-1">
+                      <div className="flex items-center gap-1.5">
+                        <Badge variant="secondary" className="text-[10px]">第{idx + 1}次复测</Badge>
+                        {re.ai_result && (
+                          <Badge variant="outline" className="text-[10px]">AI评分: {re.ai_result.score}</Badge>
+                        )}
+                        <span className="text-[10px] text-muted-foreground ml-auto">
+                          {new Date(re.created_at).toLocaleDateString('zh-CN')}
+                        </span>
+                      </div>
+                      {re.description && (
+                        <p className="text-[10px] break-all whitespace-pre-wrap">{re.description}</p>
+                      )}
+                      {re.ai_result && re.ai_result.summary && (
+                        <p className="text-[10px] text-muted-foreground break-all">AI总结: {re.ai_result.summary}</p>
+                      )}
+                      {reMats && reMats.length > 0 && (
+                        <MediaGallery materials={reMats} responsive columns={{ mobile: 2, sm: 3 }} onPreview={onPreview} />
+                      )}
+                    </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          ))}
+            );
+          })}
           </div>
         </ReportPaperSection>
       )}
@@ -507,6 +546,26 @@ export default function ReportDetailPage() {
     const raw = data.data;
     const allIssues: IssueItem[] = Array.isArray(raw) ? raw : (raw?.list || []);
     const reportIssues = allIssues.filter((i: IssueItem) => i.source_report_id === reportId);
+    // Fetch re-evaluations for recipe_problem issues
+    const recipeIssues = reportIssues.filter((i: IssueItem) => i.source_type === 'recipe_problem');
+    if (recipeIssues.length > 0) {
+      try {
+        const issueIds = recipeIssues.map(i => i.id).join(',');
+        const reRes = await fetch(`/api/issue-re-evaluations?issue_ids=${issueIds}`);
+        const reData = await reRes.json();
+        if (reData.code === 0 && reData.data) {
+          const reEvalMap: Record<string, ReEvaluation[]> = {};
+          for (const re of reData.data) {
+            if (!reEvalMap[re.issue_id]) reEvalMap[re.issue_id] = [];
+            reEvalMap[re.issue_id].push(re);
+          }
+          // Attach re-evaluations (with embedded materials) to issues
+          for (const issue of recipeIssues) {
+            (issue as Record<string, unknown>)._reEvaluations = reEvalMap[issue.id] || [];
+          }
+        }
+      } catch { /* ignore re-evaluation fetch errors */ }
+    }
     setLiveIssuesMap(prev => ({ ...prev, [reportId]: reportIssues }));
   };
 
