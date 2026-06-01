@@ -5,6 +5,7 @@
 import { useState, useCallback } from 'react';
 import { X, ZoomIn, ZoomOut, Play } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { usePresignedUrl } from '@/lib/use-presigned-url';
 
 interface ImagePreviewProps {
   url: string | null;
@@ -79,6 +80,7 @@ export function MediaThumbnail({ url, type, onClick, size = 'md', responsive }: 
   const responsiveClass = 'w-full aspect-square min-w-0';
   const sizeClass = responsive ? responsiveClass : sizeMap[size];
   const isVideo = type === 'video';
+  const presignedSrc = usePresignedUrl(url);
 
   return (
     <div
@@ -87,13 +89,13 @@ export function MediaThumbnail({ url, type, onClick, size = 'md', responsive }: 
     >
       {isVideo ? (
         <>
-          <video src={url} className="w-full h-full object-cover" muted preload="metadata" />
+          <video src={presignedSrc || undefined} className="w-full h-full object-cover" muted preload="metadata" />
           <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/40 transition-colors">
             <Play className="h-5 w-5 text-white fill-white" />
           </div>
         </>
       ) : (
-        <img src={url} alt="" className="w-full h-full object-cover" loading="lazy" />
+        <img src={presignedSrc || undefined} alt="" className="w-full h-full object-cover" loading="lazy" />
       )}
     </div>
   );

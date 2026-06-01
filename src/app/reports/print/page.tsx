@@ -2,17 +2,19 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { Suspense, useEffect, useState, type CSSProperties } from 'react';
+import { Suspense, useEffect, useState, useCallback, type CSSProperties } from 'react';
+import { usePresignedUrls } from '@/lib/use-presigned-url';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { buildDisplayReportContent, type AiSummaryLike, type ReportContentWithReview, type ReportReviewOverrides } from '@/lib/report-review-overrides';
 import { mapWithConcurrency, normalizePrintMode, uniqueUrls, type PrintMode } from '@/lib/print-assets';
 
 interface Material {
-  id: string; material_type: string; file_name: string; file_url: string; file_size: number;
+  id: string; material_type: string; file_name: string; file_url: string; file_size: number; file_path?: string;
 }
 
 interface ProblemPoint { text: string; material_ids?: string[]; }
+interface ReEvaluation { id: string; description: string | null; ai_result: Record<string, unknown> | null; created_at: string; materials?: Material[]; }
 interface RecipeStep {
   id: string; step_number: number; operation: string; problem_point: string | null;
   problem_points?: ProblemPoint[];
@@ -118,6 +120,22 @@ async function imageUrlToPrintableDataUrl(url: string, mode: PrintMode): Promise
     }
   } catch {
     return url;
+  }
+}
+
+async function batchPresignUrls(paths: string[]): Promise<Record<string, string>> {
+  if (!paths.length) return {};
+  try {
+    const res = await fetch('/api/materials/presign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_paths: paths }),
+    });
+    if (!res.ok) return {};
+    const data = await res.json();
+    return data.code === 0 ? data.data : {};
+  } catch {
+    return {};
   }
 }
 
@@ -577,6 +595,60 @@ function ReportPrintContent() {
     });
   }, [siblingReports]);
 
+  // Presign all file_url values before rendering/converting
+  const presignReportUrls = async (rpt: ReportData): Promise<ReportData> => {
+    const filePaths: string[] = [];
+    const collectPaths = (obj: unknown) => {
+      if (!obj || typeof obj !== 'object') return;
+      const record = obj as Record<string, unknown>;
+      for (const [key, val] of Object.entries(record)) {
+        if ((key === 'file_url' || key === 'file_path') && typeof val === 'string' && val && !val.startsWith('http')) {
+          filePaths.push(val);
+        } else if (Array.isArray(val)) {
+          val.forEach(item => collectPaths(item));
+        } else if (typeof val === 'object' && val !== null) {
+          collectPaths(val);
+        }
+      }
+    };
+    collectPaths(rpt);
+    if (filePaths.length === 0) return rpt;
+    try {
+      const res = await fetch('/api/materials/presign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_paths: [...new Set(filePaths)] }),
+      });
+      const data = await res.json();
+      if (data.code === 0 && data.data) {
+        const urlMap = data.data as Record<string, string>;
+        const replacePaths = (obj: unknown): unknown => {
+          if (!obj || typeof obj !== 'object') return obj;
+          if (Array.isArray(obj)) return obj.map(item => replacePaths(item));
+          const record = obj as Record<string, unknown>;
+          const result: Record<string, unknown> = {};
+          for (const [key, val] of Object.entries(record)) {
+            if ((key === 'file_url' || key === 'file_path') && typeof val === 'string' && urlMap[val]) {
+              result[key] = urlMap[val];
+            } else if (typeof val === 'object' && val !== null) {
+              result[key] = replacePaths(val);
+            } else {
+              result[key] = val;
+            }
+          }
+          return result;
+        };
+        return replacePaths(rpt) as ReportData;
+      }
+    } catch { /* ignore */ }
+    return rpt;
+  };
+
+  useEffect(() => {
+    if (!report) return;
+    presignReportUrls(report).then(rpt => setReport(rpt));
+  }, [report?.id]);
+
   // Convert images for printing. Fast mode dedupes and compresses; high mode keeps originals.
   useEffect(() => {
     if (!report) return;
@@ -590,30 +662,44 @@ function ReportPrintContent() {
 
     const convertImages = async () => {
       const allReports = [report, ...siblingReports];
-      const allImageUrls: string[] = [];
+      const allFilePaths: string[] = [];
       allReports.forEach(rpt => {
         if (!rpt.content) return;
         rpt.content.records?.forEach(r => {
           (r as CheckRecord).materials?.forEach(m => {
-            if (m.material_type === 'image') allImageUrls.push(m.file_url);
+            if (m.material_type === 'image') allFilePaths.push(m.file_path || m.file_url);
           });
         });
         rpt.content.recipes?.forEach(recipe => {
           recipe.recipe_steps?.forEach(step => {
             step.materials?.forEach(m => {
-              if (m.material_type === 'image') allImageUrls.push(m.file_url);
+              if (m.material_type === 'image') allFilePaths.push(m.file_path || m.file_url);
             });
           });
           recipe.effect_materials?.forEach(m => {
-            if (m.material_type === 'image') allImageUrls.push(m.file_url);
+            if (m.material_type === 'image') allFilePaths.push(m.file_path || m.file_url);
           });
         });
         rpt.content.materials?.forEach(m => {
-          if (m.material_type === 'image') allImageUrls.push(m.file_url);
+          if (m.material_type === 'image') allFilePaths.push(m.file_path || m.file_url);
         });
       });
 
-      const imageUrls = uniqueUrls(allImageUrls);
+      // Also include re-evaluation materials
+      Object.values(liveIssuesMap).flat().forEach(issue => {
+        const reEvals = (issue as Record<string, unknown>)._reEvaluations as ReEvaluation[] | undefined;
+        reEvals?.forEach(reEval => {
+          reEval.materials?.forEach(m => {
+            if (m.material_type === 'image') allFilePaths.push(m.file_path || m.file_url);
+          });
+        });
+      });
+
+      // Presign all file paths to get valid URLs
+      const filePaths = uniqueUrls(allFilePaths);
+      const presignedMap = await batchPresignUrls(filePaths);
+      
+      const imageUrls = filePaths.map(fp => presignedMap[fp] || fp);
       setImageProgress({ total: imageUrls.length, done: 0 });
 
       await mapWithConcurrency(imageUrls, printMode === 'high' ? 3 : 5, async (url) => {

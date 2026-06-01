@@ -1,5 +1,6 @@
 'use client';
 
+import { PresignedImage } from '@/components/presigned-media';
 import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -40,6 +41,7 @@ interface ReEvaluation {
     id: string;
     material_type: string;
     file_url: string;
+    file_path: string | null;
     file_name: string;
   }>;
 }
@@ -712,7 +714,7 @@ export default function IssuesPage() {
                                     {reEval.materials.map((mat) => (
                                       <div key={mat.id} className="shrink-0">
                                         {mat.material_type === 'image' ? (
-                                          <img src={mat.file_url} alt={mat.file_name} className="h-16 w-16 object-cover rounded border" />
+                                          <PresignedImage filePath={mat.file_path || mat.file_url} alt={mat.file_name} className="h-16 w-16 object-cover rounded border" />
                                         ) : (
                                           <div className="h-16 w-16 rounded border bg-muted/30 flex items-center justify-center">
                                             <span className="text-[10px] text-muted-foreground">视频</span>

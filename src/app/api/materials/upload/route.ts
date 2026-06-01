@@ -91,15 +91,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ code: 1, message: '文件上传失败' }, { status: 500 });
     }
 
-    // 生成访问URL
-    let fileUrl: string;
-    try {
-      fileUrl = await storage.generatePresignedUrl({ key: fileKey, expireTime: 86400 * 30 });
-    } catch (urlErr) {
-      console.error('[upload] Generate presigned URL failed:', urlErr);
-      // Fallback: construct URL manually
-      fileUrl = `${process.env.COZE_BUCKET_ENDPOINT_URL}/${process.env.COZE_BUCKET_NAME}/${fileKey}`;
-    }
+    // 不再存储签名URL（会过期导致裂图），仅存储file_path
+    // 前端通过 /api/materials/presign 按需获取临时签名URL
 
     // 保存素材记录到数据库
     const client = getSupabaseClient();
@@ -115,7 +108,7 @@ export async function POST(request: NextRequest) {
       file_name: file.name,
       file_path: fileKey,
       file_size: file.size,
-      file_url: fileUrl,
+      file_url: fileKey,
     }).select().single();
 
     if (error) {
@@ -123,7 +116,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ code: 0, message: '上传成功', data: { ...data, file_url: fileUrl } });
+    return NextResponse.json({ code: 0, message: '上传成功', data: { ...data, file_url: fileKey } });
   } catch (err) {
     console.error('[upload] Unexpected error:', err);
     const message = err instanceof Error ? err.message : '上传失败';

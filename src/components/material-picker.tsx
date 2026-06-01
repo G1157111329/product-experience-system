@@ -17,6 +17,7 @@ export interface Material {
   material_type: string;
   file_name: string;
   file_url: string;
+  file_path?: string;
   file_size: number;
   record_id: string | null;
   recipe_step_id: string | null;
@@ -296,7 +297,7 @@ export function MaterialPicker({
                   setPreviewUrl(material.file_url);
                 }
               }}>
-              <MediaThumbnail url={material.file_url} type={material.material_type as 'image' | 'video'} size={selectedPreviewSize} />
+              <MediaThumbnail url={material.file_path || material.file_url} type={material.material_type as 'image' | 'video'} size={selectedPreviewSize} />
               <button
                 type="button"
                 className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center text-[8px] opacity-70 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"

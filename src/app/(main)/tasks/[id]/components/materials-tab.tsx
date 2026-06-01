@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import { useImagePreview } from '@/components/image-preview';
 import { MediaCaptureDialog } from '@/components/media-capture-dialog';
+import { usePresignedUrls } from '@/lib/use-presigned-url';
 import type { Material } from '../types';
 
 export function MaterialsTab({ taskId }: { taskId: string }) {
@@ -22,6 +23,7 @@ export function MaterialsTab({ taskId }: { taskId: string }) {
   const galleryImageInputRef = useRef<HTMLInputElement>(null);
   const galleryVideoInputRef = useRef<HTMLInputElement>(null);
   const { open, PreviewComponent } = useImagePreview();
+  const presignedUrls = usePresignedUrls(materials);
 
   const fetchMaterials = useCallback(async () => {
     const res = await fetch(`/api/materials?task_id=${taskId}`);
@@ -129,8 +131,8 @@ export function MaterialsTab({ taskId }: { taskId: string }) {
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
                 {images.map((mat) => (
                   <div key={mat.id} className="group relative rounded-lg overflow-hidden bg-muted border border-border">
-                    <div className="aspect-square cursor-pointer" onClick={() => open(mat.file_url)}>
-                      <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
+                    <div className="aspect-square cursor-pointer" onClick={() => open(presignedUrls.get(mat.id) || mat.file_url)}>
+                      <img src={presignedUrls.get(mat.id) || mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
                     </div>
                     <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">
                       {editingId === mat.id ? (

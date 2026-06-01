@@ -3,6 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { PresignedImage, PresignedVideo } from '@/components/presigned-media';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, ArrowRightLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Film, Image as ImageIcon, Pencil, Trash2, Check, X, Play, GripVertical, Sparkles, Save, Star, AlertTriangle, Crop } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -23,6 +24,7 @@ import { MaterialPicker } from '@/components/material-picker';
 import { MediaCaptureDialog } from '@/components/media-capture-dialog';
 import { ImageEditorDialog } from '@/components/image-editor-dialog';
 import { PageShell } from '@/components/app';
+import { usePresignedUrls } from '@/lib/use-presigned-url';
 import { MediaGallery } from '@/components/app/media-gallery';
 import { buildReportReadiness } from '@/lib/report-readiness';
 import { AgentPresetPanel } from './components/agent-preset-panel';
@@ -959,8 +961,8 @@ function MaterialsTab({ taskId }: { taskId: string }) {
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
                 {images.map((mat) => (
                   <div key={mat.id} className="group relative rounded-lg overflow-hidden bg-muted border border-border">
-                    <div className="aspect-square cursor-pointer" onClick={() => open(mat.file_url)}>
-                      <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" loading="lazy" />
+                    <div className="aspect-square cursor-pointer" onClick={() => open(mat.file_path || mat.file_url)}>
+                      <PresignedImage filePath={mat.file_path || mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
                     </div>
                     <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">
                       {editingId === mat.id ? (
@@ -1004,8 +1006,8 @@ function MaterialsTab({ taskId }: { taskId: string }) {
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {videos.map((mat) => (
                   <div key={mat.id} className="group relative rounded-lg overflow-hidden bg-muted border border-border">
-                    <div className="aspect-video cursor-pointer" onClick={() => open(mat.file_url)}>
-                      <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
+                    <div className="aspect-video cursor-pointer" onClick={() => open(mat.file_path || mat.file_url)}>
+                      <PresignedVideo filePath={mat.file_path || mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
                       <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/40 transition-colors">
                         <Play className="h-6 w-6 text-white fill-white" />
                       </div>
@@ -2966,12 +2968,12 @@ function FunctionsTab({
                           <div className="flex gap-1.5 ml-7 flex-wrap">
                             {stepMats.map((mat) => (
                               <div key={mat.id} className="w-12 h-12 rounded-md overflow-hidden border border-border cursor-pointer"
-                                onClick={(e) => { e.stopPropagation(); open(mat.file_url); }}>
+                                onClick={(e) => { e.stopPropagation(); open(mat.file_path || mat.file_url); }}>
                                 {mat.material_type === 'image' ? (
-                                  <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
+                                  <PresignedImage filePath={mat.file_path || mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
                                 ) : (
                                   <div className="w-full h-full flex items-center justify-center bg-muted relative">
-                                    <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
+                                    <PresignedVideo filePath={mat.file_path || mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
                                     <div className="absolute inset-0 flex items-center justify-center bg-black/30">
                                       <Play className="h-3 w-3 text-white fill-white" />
                                     </div>
