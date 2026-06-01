@@ -2,13 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { S3Storage } from 'coze-coding-dev-sdk';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 
-const storage = new S3Storage({
-  endpointUrl: process.env.COZE_BUCKET_ENDPOINT_URL,
-  accessKey: '',
-  secretKey: '',
-  bucketName: process.env.COZE_BUCKET_NAME,
-  region: 'cn-beijing',
-});
+// SDK 自动读取 COZE_BUCKET_ENDPOINT_URL 和 COZE_BUCKET_NAME 环境变量
+const storage = new S3Storage();
 
 // Allow up to 100MB file uploads with extended timeout
 export const maxDuration = 120; // seconds - extended for large video uploads

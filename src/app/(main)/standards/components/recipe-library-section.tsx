@@ -11,6 +11,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { usePresignedUrls } from '@/lib/use-presigned-url';
 import { toast } from 'sonner';
 import { FilterBar, StatusBadge, EmptyState, SkeletonList } from '@/components/app';
 import type { CategoryWithProducts, RecipeLibItem, RecipeLibStep } from '../types';
@@ -45,7 +46,11 @@ export function RecipeLibrarySection({ categories, isAdmin }: RecipeLibrarySecti
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   // Step materials map
-  const [stepMaterials, setStepMaterials] = useState<Record<string, Array<{ id: string; file_url: string; material_type: string; file_name: string }>>>({});
+  const [stepMaterials, setStepMaterials] = useState<Record<string, Array<{ id: string; file_url: string; file_path?: string; material_type: string; file_name: string }>>>({});
+
+  // Flatten all step materials for presigned URL resolution
+  const flatStepMaterials = Object.values(stepMaterials).flat();
+  const presignedUrls = usePresignedUrls(flatStepMaterials);
 
   const fetchRecipes = useCallback(async () => {
     setLoading(true);
@@ -328,12 +333,14 @@ export function RecipeLibrarySection({ categories, isAdmin }: RecipeLibrarySecti
                                 {/* Step images */}
                                 {step.id && stepMaterials[step.id] && stepMaterials[step.id].length > 0 && (
                                   <div className="flex gap-2 flex-wrap pl-8">
-                                    {stepMaterials[step.id].map(mat => (
+                                    {stepMaterials[step.id].map(mat => {
+                                      const resolvedUrl = presignedUrls.get(mat.id) || mat.file_url;
+                                      return (
                                       <div key={mat.id} className="relative group w-16 h-16 rounded border overflow-hidden">
                                         {mat.material_type === 'video' ? (
-                                          <video src={mat.file_url} className="w-full h-full object-cover" preload="metadata" />
+                                          <video src={resolvedUrl} className="w-full h-full object-cover" preload="metadata" />
                                         ) : (
-                                          <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
+                                          <img src={resolvedUrl} alt={mat.file_name} className="w-full h-full object-cover" />
                                         )}
                                         {isAdmin && (
                                           <button className="absolute top-0 right-0 bg-black/50 text-white rounded-bl p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -342,7 +349,7 @@ export function RecipeLibrarySection({ categories, isAdmin }: RecipeLibrarySecti
                                           </button>
                                         )}
                                       </div>
-                                    ))}
+                                    );})}
                                   </div>
                                 )}
                                 {/* Upload image button */}

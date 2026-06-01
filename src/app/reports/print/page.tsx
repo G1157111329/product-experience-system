@@ -129,7 +129,7 @@ async function batchPresignUrls(paths: string[]): Promise<Record<string, string>
     const res = await fetch('/api/materials/presign', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_paths: paths }),
+      body: JSON.stringify({ paths }),
     });
     if (!res.ok) return {};
     const data = await res.json();
@@ -698,7 +698,14 @@ function ReportPrintContent() {
       // Presign all file paths to get valid URLs
       const filePaths = uniqueUrls(allFilePaths);
       const presignedMap = await batchPresignUrls(filePaths);
-      
+
+      // Step 1: Update DOM img/video src from S3 key to presigned URL
+      for (const [fp, presignedUrl] of Object.entries(presignedMap)) {
+        document.querySelectorAll(`img[src="${fp}"]`).forEach(img => { (img as HTMLImageElement).src = presignedUrl; });
+        document.querySelectorAll(`video[src="${fp}"]`).forEach(vid => { (vid as HTMLVideoElement).src = presignedUrl; });
+      }
+
+      // Step 2: Convert presigned URLs to base64 for print
       const imageUrls = filePaths.map(fp => presignedMap[fp] || fp);
       setImageProgress({ total: imageUrls.length, done: 0 });
 

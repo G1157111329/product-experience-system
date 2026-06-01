@@ -11,6 +11,7 @@ import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { MediaCaptureDialog } from '@/components/media-capture-dialog';
 import { useImagePreview } from '@/components/image-preview';
 import { cn } from '@/lib/utils';
+import { usePresignedUrls } from '@/lib/use-presigned-url';
 import type { EvidenceBindingTarget, Material, MaterialEvidenceFilter } from '../types';
 
 type MaterialEvidenceRailProps = {
@@ -56,6 +57,7 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const { open, PreviewComponent } = useImagePreview();
+  const presignedUrls = usePresignedUrls(materials);
 
   const fetchMaterials = useCallback(async () => {
     setLoading(true);
@@ -207,22 +209,23 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange 
           ) : (
             filteredMaterials.map((material) => {
               const selected = selectedIds.includes(material.id);
+              const resolvedUrl = presignedUrls.get(material.id) || material.file_url;
               return (
                 <button
                   key={material.id}
                   type="button"
                   onClick={() => toggleSelected(material.id)}
-                  onDoubleClick={() => open(material.file_url)}
+                  onDoubleClick={() => open(resolvedUrl)}
                   className={cn(
                     'group relative h-24 w-32 shrink-0 overflow-hidden rounded-lg border text-left transition',
                     selected ? 'border-primary ring-2 ring-primary/30' : 'border-border hover:border-primary/60'
                   )}
                 >
                   {material.material_type === 'image' ? (
-                    <img src={material.file_url} alt={material.file_name} loading="lazy" className="h-full w-full object-cover" />
+                    <img src={resolvedUrl} alt={material.file_name} loading="lazy" className="h-full w-full object-cover" />
                   ) : (
                     <>
-                      <video src={material.file_url} className="h-full w-full object-cover" muted preload="metadata" />
+                      <video src={resolvedUrl} className="h-full w-full object-cover" muted preload="metadata" />
                       <div className="absolute inset-0 flex items-center justify-center bg-black/20">
                         <Play className="h-5 w-5 fill-white text-white" />
                       </div>

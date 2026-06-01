@@ -291,10 +291,11 @@ export function MaterialPicker({
             <div key={id} className={cn('relative rounded-md overflow-hidden border border-border group cursor-pointer', wrapperClass)}
               onClick={(e) => {
                 e.stopPropagation();
+                const previewSrc = material.file_path || material.file_url;
                 if (onPreview) {
-                  onPreview(material.file_url);
+                  onPreview(previewSrc);
                 } else {
-                  setPreviewUrl(material.file_url);
+                  setPreviewUrl(previewSrc);
                 }
               }}>
               <MediaThumbnail url={material.file_path || material.file_url} type={material.material_type as 'image' | 'video'} size={selectedPreviewSize} />
@@ -427,7 +428,7 @@ export function MaterialPicker({
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
             {filteredMaterials.map((material) => (
               <div key={material.id} className="relative cursor-pointer" onClick={() => handleSelect(material)}>
-                <MediaThumbnail url={material.file_url} type={material.material_type as 'image' | 'video'} responsive />
+                <MediaThumbnail url={material.file_path || material.file_url} type={material.material_type as 'image' | 'video'} responsive />
                 <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate rounded-b-lg">
                   {material.material_type === 'video'
                     ? <Film className="h-2.5 w-2.5 inline mr-0.5" />

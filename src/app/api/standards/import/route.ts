@@ -3,13 +3,8 @@ import { S3Storage, FetchClient, LLMClient, Config, HeaderUtils } from 'coze-cod
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import * as xlsx from 'xlsx';
 
-const storage = new S3Storage({
-  endpointUrl: process.env.COZE_BUCKET_ENDPOINT_URL,
-  accessKey: '',
-  secretKey: '',
-  bucketName: process.env.COZE_BUCKET_NAME,
-  region: 'cn-beijing',
-});
+// SDK 自动读取 COZE_BUCKET_ENDPOINT_URL 和 COZE_BUCKET_NAME 环境变量
+const storage = new S3Storage();
 
 // Unified extracted item that covers all standard categories
 interface ExtractedItem {

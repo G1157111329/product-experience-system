@@ -14,6 +14,8 @@ interface ImagePreviewProps {
 
 export function ImagePreview({ url, onClose }: ImagePreviewProps) {
   const [zoomed, setZoomed] = useState(false);
+  const presignedUrl = usePresignedUrl(url);
+  const displayUrl = presignedUrl || url || undefined;
 
   if (!url) return null;
 
@@ -28,7 +30,7 @@ export function ImagePreview({ url, onClose }: ImagePreviewProps) {
         <div className="relative w-full h-full flex items-center justify-center">
           {isVideo ? (
             <video
-              src={url}
+              src={displayUrl}
               controls
               autoPlay
               className="max-w-full max-h-[90vh] object-contain"
@@ -40,7 +42,7 @@ export function ImagePreview({ url, onClose }: ImagePreviewProps) {
               onClick={() => setZoomed(!zoomed)}
             >
               <img
-                src={url}
+                src={displayUrl}
                 alt="预览"
                 className={`transition-all duration-200 ease-out max-h-[90vh] ${
                   zoomed ? 'max-w-none w-auto h-auto scale-100 cursor-zoom-out' : 'max-w-full object-contain cursor-zoom-in'

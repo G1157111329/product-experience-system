@@ -22,14 +22,17 @@ async function requestPresignedUrls(filePaths: string[]): Promise<Map<string, st
     const res = await fetch('/api/materials/presign', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_paths: filePaths }),
+      body: JSON.stringify({ paths: filePaths }),
     });
     const json = await res.json();
     if (json.code === 0 && json.data) {
-      for (const item of json.data) {
-        result.set(item.file_path, item.url);
-        // 写入全局缓存
-        globalCache.set(item.file_path, { url: item.url, expireAt: Date.now() + CACHE_TTL });
+      // 后端返回 { "path1": "url1", "path2": "url2" } 对象格式
+      for (const [path, url] of Object.entries(json.data)) {
+        if (typeof url === 'string') {
+          result.set(path, url);
+          // 写入全局缓存
+          globalCache.set(path, { url, expireAt: Date.now() + CACHE_TTL });
+        }
       }
     }
   } catch {

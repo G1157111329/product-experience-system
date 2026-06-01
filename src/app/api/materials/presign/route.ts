@@ -14,13 +14,8 @@ export async function POST(request: NextRequest) {
     // 限制单次最多50个
     const limitedPaths = paths.slice(0, 50);
 
-    const storage = new S3Storage({
-      endpointUrl: process.env.COZE_BUCKET_ENDPOINT_URL!,
-      accessKey: process.env.OSS_ACCESS_KEY_ID!,
-      secretKey: process.env.OSS_ACCESS_KEY_SECRET!,
-      bucketName: process.env.COZE_BUCKET_NAME!,
-      region: process.env.OSS_REGION || 'cn-beijing',
-    });
+    // 使用与 upload 一致的初始化方式（SDK 自动读取 COZE_BUCKET_* 环境变量）
+    const storage = new S3Storage();
 
     // 并行生成签名URL（有效期7天）
     const results = await Promise.allSettled(
@@ -31,7 +26,8 @@ export async function POST(request: NextRequest) {
             expireTime: 86400 * 7, // 7天有效期
           });
           return { path, url };
-        } catch {
+        } catch (err) {
+          console.error('[presign] Failed for path:', path, err);
           return { path, url: null };
         }
       })

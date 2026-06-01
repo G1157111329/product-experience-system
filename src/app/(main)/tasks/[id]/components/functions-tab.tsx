@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Wrench, Plus, Pencil, Trash2, Play, GripVertical, Sparkles, Save, Star, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
+import { usePresignedUrls } from '@/lib/use-presigned-url';
 import { toast } from 'sonner';
 import { useImagePreview } from '@/components/image-preview';
 import { MaterialPicker } from '@/components/material-picker';
@@ -47,6 +48,20 @@ export function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onSta
   const [dragRecipeIdx, setDragRecipeIdx] = useState<number | null>(null);
   const [dragRecipeOverIdx, setDragRecipeOverIdx] = useState<number | null>(null);
   const { open, PreviewComponent } = useImagePreview();
+
+  // Collect all materials from all recipes for presigned URL resolution
+  const allMaterials = useMemo(() => {
+    const result: { id: string; file_url: string | null; file_path?: string | null }[] = [];
+    for (const recipe of recipes) {
+      for (const step of recipe.recipe_steps || []) {
+        for (const mat of step.materials || []) {
+          result.push({ id: mat.id, file_url: mat.file_url, file_path: mat.file_path });
+        }
+      }
+    }
+    return result;
+  }, [recipes]);
+  const presignedUrls = usePresignedUrls(allMaterials);
 
   // ── Effect evaluation states ──
   const [effectDesc, setEffectDesc] = useState<Record<string, string>>({});
@@ -582,12 +597,12 @@ export function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onSta
                         <div className="flex gap-1.5 ml-7 flex-wrap">
                           {step.materials.map((mat) => (
                             <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border cursor-pointer"
-                              onClick={(e) => { e.stopPropagation(); open(mat.file_url); }}>
+                              onClick={(e) => { e.stopPropagation(); open(presignedUrls.get(mat.id) || mat.file_url); }}>
                               {mat.material_type === 'image' ? (
-                                <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
+                                <img src={presignedUrls.get(mat.id) || mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
                               ) : (
                                 <div className="w-full h-full flex items-center justify-center bg-muted relative">
-                                  <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
+                                  <video src={presignedUrls.get(mat.id) || mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
                                   <div className="absolute inset-0 flex items-center justify-center bg-black/30">
                                     <Play className="h-4 w-4 text-white fill-white" />
                                   </div>
@@ -922,12 +937,12 @@ export function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onSta
                 <div className="flex gap-1.5 flex-wrap">
                   {editingStep.materials.map((mat) => (
                     <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border cursor-pointer"
-                      onClick={() => open(mat.file_url)}>
+                      onClick={() => open(presignedUrls.get(mat.id) || mat.file_url)}>
                       {mat.material_type === 'image' ? (
-                        <img src={mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
+                        <img src={presignedUrls.get(mat.id) || mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center bg-muted relative">
-                          <video src={mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
+                          <video src={presignedUrls.get(mat.id) || mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
                           <div className="absolute inset-0 flex items-center justify-center bg-black/30">
                             <Play className="h-4 w-4 text-white fill-white" />
                           </div>
