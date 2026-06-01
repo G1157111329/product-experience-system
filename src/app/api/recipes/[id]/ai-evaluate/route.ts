@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { LLMClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 import { getImageUrlsForAI } from '@/lib/server/ai';
+import { getActiveSkillVersion } from '@/lib/server/agent-skills';
+import { getDefaultSkillDefinitions, renderPromptTemplate } from '@/lib/agent-skills';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -31,26 +33,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ code: 1, message: '请先填写效果评价描述或上传附件素材' }, { status: 400 });
     }
 
-    // Fetch AI config from platform_settings
-    const { data: aiConfigData } = await client
-      .from('platform_settings')
-      .select('value')
-      .eq('key', 'ai_config')
-      .maybeSingle();
+    // Read custom prompt from skill template, fallback to built-in default
+    const activeSkill = await getActiveSkillVersion(client, 'effect_evaluation');
+    const defaultSkill = getDefaultSkillDefinitions().find(s => s.skillKey === 'effect_evaluation');
 
-    const aiConfig = (aiConfigData?.value || {}) as {
-      provider?: string;
-      model?: string;
-      temperature?: number;
-      custom_api_url?: string;
-      custom_api_key?: string;
-    };
-
-    const model = aiConfig.model || 'doubao-seed-2-0-pro-260215';
-    const temperature = aiConfig.temperature ?? 0.7;
-
-    // Build the evaluation prompt with 4-dimension framework as internal methodology
-    const systemPrompt = `你是一位资深美食评委和小家电产品体验专家。你需要根据提供的食物效果描述和照片，从以下四个维度进行专业评估，但最终只输出一份综合评价。
+    const defaultSystemPrompt = `你是一位资深美食评委和小家电产品体验专家。你需要根据提供的食物效果描述和照片，从以下四个维度进行专业评估，但最终只输出一份综合评价。
 
 【评价维度（内部参考框架）】
 
@@ -89,17 +76,46 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   "summary": "综合评价，2-4句话概括食物/功能的整体出品效果，指出亮点和可改进之处"
 }`;
 
+    const systemPrompt = activeSkill
+      ? String(activeSkill.version.system_prompt || defaultSkill?.systemPrompt || defaultSystemPrompt)
+      : (defaultSkill?.systemPrompt || defaultSystemPrompt);
+
+    // Build user prompt from template
+    const userPromptTemplate = activeSkill
+      ? String(activeSkill.version.user_prompt_template || defaultSkill?.userPromptTemplate || '')
+      : (defaultSkill?.userPromptTemplate || '');
+
+    // Build recipe snapshot for template rendering
+    let recipeSnapshot = `食谱/功能名称：${recipe.name}\n`;
+    if (recipe.ingredients) recipeSnapshot += `食材/参数：${recipe.ingredients}\n`;
+    if (recipe.effect_description) recipeSnapshot += `效果评价描述：${recipe.effect_description}\n`;
+    if (recipe.effect_problem_point) recipeSnapshot += `已知问题点：${recipe.effect_problem_point}\n`;
+
+    const userPromptText = userPromptTemplate
+      ? renderPromptTemplate(userPromptTemplate, { recipe_snapshot: recipeSnapshot })
+      : `${recipeSnapshot}\n请从质感、透彻、纯净、恒定四个维度综合考量，给出整体评分和评价。`;
+
+    // Fetch AI config from platform_settings
+    const { data: aiConfigData } = await client
+      .from('platform_settings')
+      .select('value')
+      .eq('key', 'ai_config')
+      .maybeSingle();
+
+    const aiConfig = (aiConfigData?.value || {}) as {
+      provider?: string;
+      model?: string;
+      temperature?: number;
+      custom_api_url?: string;
+      custom_api_key?: string;
+    };
+
+    const model = aiConfig.model || 'doubao-seed-2-0-pro-260215';
+    const temperature = aiConfig.temperature ?? 0.7;
+
     // Build content parts
     const contentParts: Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string; detail?: 'high' | 'low' } }> = [];
-
-    // Add description text
-    let descriptionText = `食谱/功能名称：${recipe.name}\n`;
-    if (recipe.ingredients) descriptionText += `食材/参数：${recipe.ingredients}\n`;
-    if (recipe.effect_description) descriptionText += `效果评价描述：${recipe.effect_description}\n`;
-    if (recipe.effect_problem_point) descriptionText += `已知问题点：${recipe.effect_problem_point}\n`;
-    descriptionText += '\n请从质感、透彻、纯净、恒定四个维度综合考量，给出整体评分和评价。';
-
-    contentParts.push({ type: 'text', text: descriptionText });
+    contentParts.push({ type: 'text', text: userPromptText });
 
     // Add image materials (presign S3 keys to http URLs for AI vision model)
     const imageUrls = await getImageUrlsForAI(materials);

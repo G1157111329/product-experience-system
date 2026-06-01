@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { LLMClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
+import { getActiveSkillVersion } from '@/lib/server/agent-skills';
+import { getDefaultSkillDefinitions, renderPromptTemplate } from '@/lib/agent-skills';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -58,7 +60,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       } catch { /* ignore parse error */ }
     }
 
-    const systemPrompt = `你是一位专业产品评价官，擅长从用户体验角度识别产品问题。
+    // Read custom prompt from skill template, fallback to built-in default
+    const activeSkill = await getActiveSkillVersion(client, 'problem_detection');
+    const defaultSkill = getDefaultSkillDefinitions().find(s => s.skillKey === 'problem_detection');
+
+    const defaultSystemPrompt = `你是一位专业产品评价官，擅长从用户体验角度识别产品问题。
 
 你的任务分两层：
 
@@ -85,6 +91,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 - 不要过度解读，仅基于明确的负面表述和合理的期待差距
 - 如果未发现任何问题点，输出空数组 []
 - 只输出JSON数组，不要添加任何其他文字或解释`;
+
+    const systemPrompt = activeSkill
+      ? String(activeSkill.version.system_prompt || defaultSkill?.systemPrompt || defaultSystemPrompt)
+      : (defaultSkill?.systemPrompt || defaultSystemPrompt);
+
+    // Build user prompt from template
+    const userPromptTemplate = activeSkill
+      ? String(activeSkill.version.user_prompt_template || defaultSkill?.userPromptTemplate || '')
+      : (defaultSkill?.userPromptTemplate || '');
+
+    const userPromptText = userPromptTemplate
+      ? renderPromptTemplate(userPromptTemplate, { recipe_snapshot: contextText })
+      : contextText;
 
     // Fetch AI config
     const { data: aiConfigData } = await client
@@ -119,7 +138,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           model,
           messages: [
             { role: 'system', content: systemPrompt },
-            { role: 'user', content: contextText },
+            { role: 'user', content: userPromptText },
           ],
           temperature,
           max_tokens: 2000,
@@ -140,7 +159,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
       const messages = [
         { role: 'system' as const, content: systemPrompt },
-        { role: 'user' as const, content: contextText },
+        { role: 'user' as const, content: userPromptText },
       ];
 
       const response = await llmClient.invoke(messages, { model, temperature });

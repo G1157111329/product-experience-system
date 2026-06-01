@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { extractJsonObject, getImageUrlsForAI, invokeConfiguredAI } from '@/lib/server/ai';
+import { getActiveSkillVersion } from '@/lib/server/agent-skills';
+import { getDefaultSkillDefinitions, renderPromptTemplate } from '@/lib/agent-skills';
 
 interface AiTaskSummary {
   tag: string;
@@ -110,12 +112,25 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       ? historyReports.map((r, index) => compactReportSnapshot(r, index + 1)).join('\n\n')
       : '暂无相同品类-相同产品的历史报告。';
 
+    // Read custom prompt from skill template, fallback to built-in default
+    const activeSkill = await getActiveSkillVersion(client, 'report_summary');
+    const defaultSkill = getDefaultSkillDefinitions().find(s => s.skillKey === 'report_summary');
+    const systemPrompt = activeSkill
+      ? String(activeSkill.version.system_prompt || defaultSkill?.systemPrompt || '')
+      : (defaultSkill?.systemPrompt || '');
+
+    // Build user prompt from template
+    const userPromptTemplate = activeSkill
+      ? String(activeSkill.version.user_prompt_template || defaultSkill?.userPromptTemplate || '')
+      : (defaultSkill?.userPromptTemplate || '');
+    const reportSnapshot = `当前任务内容：\n${currentText}\n\n历史同品类-同产品报告：\n${historyText}`;
+    const userPromptText = userPromptTemplate
+      ? renderPromptTemplate(userPromptTemplate, { report_snapshot: reportSnapshot })
+      : reportSnapshot;
+
     const videoUrls: string[] = [];
     const contentParts: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string; detail: 'high' } }> = [
-      {
-        type: 'text',
-        text: `当前任务内容：\n${currentText}\n\n历史同品类-同产品报告：\n${historyText}`,
-      },
+      { type: 'text', text: userPromptText },
     ];
 
     // Collect all materials for presigning
@@ -160,25 +175,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (videoUrls.length > 0) {
       contentParts.push({ type: 'text', text: `视频素材链接（请结合文件名、关联记录和可访问链接判断）：\n${videoUrls.slice(0, 20).join('\n')}` });
     }
-
-    const systemPrompt = `你是资深产品体验负责人。请综合当前任务的“五感体验”和“功能效果”内容、图片/视频素材，以及历史相同品类-相同产品的报告表现，判断当前产品体验水平。
-
-要求：
-1. 产品满意度是核心指标，0-10分。
-2. 给出一个简短tag，概括体验水平，例如“表现稳定”“风险偏高”“有亮点需整改”。
-3. 总结必须落在体验证据上，指出主要优势、主要风险、相对历史的位置和下一步建议。
-4. 仅输出JSON，不要添加解释文字。
-
-JSON格式：
-{
-  "tag": "不超过8个字",
-  "satisfaction_score": 0-10数字,
-  "summary": "2-4句话总评",
-  "strengths": ["优势1", "优势2"],
-  "risks": ["风险1", "风险2"],
-  "historical_position": "相对历史同品类同产品的表现判断",
-  "suggestions": ["建议1", "建议2"]
-}`;
 
     const rawContent = await invokeConfiguredAI({
       request,

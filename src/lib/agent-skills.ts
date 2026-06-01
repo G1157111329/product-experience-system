@@ -2,6 +2,7 @@ export const AGENT_SKILL_KEYS = [
   'senses_standard_preset',
   'recipe_scene_preset',
   'effect_evaluation',
+  'problem_detection',
   'report_summary',
   'report_product_compare',
 ] as const;
@@ -126,6 +127,36 @@ JSON格式：
   "summary": "2-4句话的综合评价"
 }`,
       outputSchema: { score: 8.5, summary: 'string' },
+    },
+    {
+      skillKey: 'problem_detection',
+      name: '问题点识别',
+      description: '从步骤描述和效果评价中识别负面情绪语言和期待差距，生成问题点列表。',
+      systemPrompt: `你是一位专业产品评价官，擅长从用户体验角度识别产品问题。
+
+你的任务分两层：
+
+**第一层：负面情绪语言总结**
+从步骤描述和效果评价中，识别用户表达中的负面情绪语言（如"不均匀"、"困难"、"无法"、"失败"等），如实总结这些负面表述。AI效果评价结果中评分较低的维度需重点关注。
+
+**第二层：期待vs实际体验差距分析**
+"问题"本质是期待结果和实际体验之间的差距。请你基于该食谱/功能在互联网中用户普遍表达的期待状态，对比步骤描述和效果评价中反映的实际体验，识别出期待与实际之间的差距。
+
+要求：
+1. 第一层问题排前面，第二层问题排后面
+2. 问题描述简洁明确，一句话一个
+3. 不要过度解读，仅基于明确的负面表述和合理的期待差距
+4. 只输出JSON数组，不要添加其他文字`,
+      userPromptTemplate: `请识别以下食谱/功能的问题点：
+
+{{recipe_snapshot}}
+
+JSON数组格式：
+[
+  {"text": "问题描述1"},
+  {"text": "问题描述2"}
+]`,
+      outputSchema: { items: [{ text: 'string' }] },
     },
     {
       skillKey: 'report_summary',

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { LLMClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 import { getImageUrlsForAI } from '@/lib/server/ai';
+import { getActiveSkillVersion } from '@/lib/server/agent-skills';
+import { getDefaultSkillDefinitions, renderPromptTemplate } from '@/lib/agent-skills';
 
 // POST /api/issue-re-evaluations/[id]/ai-evaluate — AI evaluate a re-evaluation
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -31,7 +33,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const { data: materials } = await client
       .from('materials')
       .select('*')
-      .eq('issue_id', id);
+      .eq('re_evaluation_id', id);
 
     const mats = materials || [];
 
@@ -39,26 +41,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ code: 1, message: '请先填写复评估描述或上传附件素材' }, { status: 400 });
     }
 
-    // Fetch AI config
-    const { data: aiConfigData } = await client
-      .from('platform_settings')
-      .select('value')
-      .eq('key', 'ai_config')
-      .maybeSingle();
+    // Read custom prompt from skill template, fallback to built-in default
+    const activeSkill = await getActiveSkillVersion(client, 'effect_evaluation');
+    const defaultSkill = getDefaultSkillDefinitions().find(s => s.skillKey === 'effect_evaluation');
 
-    const aiConfig = (aiConfigData?.value || {}) as {
-      provider?: string;
-      model?: string;
-      temperature?: number;
-      custom_api_url?: string;
-      custom_api_key?: string;
-    };
-
-    const model = aiConfig.model || 'doubao-seed-2-0-pro-260215';
-    const temperature = aiConfig.temperature ?? 0.7;
-
-    // Build evaluation prompt
-    const systemPrompt = `你是一位资深产品体验专家和美食评委。你需要根据提供的功能效果复测描述和照片，从以下四个维度进行专业评估，但最终只输出一份综合评价。
+    const defaultSystemPrompt = `你是一位资深产品体验专家和美食评委。你需要根据提供的功能效果复测描述和照片，从以下四个维度进行专业评估，但最终只输出一份综合评价。
 
 【评价维度（内部参考框架）】
 
@@ -82,19 +69,49 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   "summary": "综合评价，2-4句话概括复测的效果整体表现，指出改善情况和仍存在的问题"
 }`;
 
+    const systemPrompt = activeSkill
+      ? String(activeSkill.version.system_prompt || defaultSkill?.systemPrompt || defaultSystemPrompt)
+      : (defaultSkill?.systemPrompt || defaultSystemPrompt);
+
+    // Build user prompt from template
+    const userPromptTemplate = activeSkill
+      ? String(activeSkill.version.user_prompt_template || defaultSkill?.userPromptTemplate || '')
+      : (defaultSkill?.userPromptTemplate || '');
+
+    // Build context for template rendering
+    let reEvalSnapshot = '';
+    if (issue) {
+      reEvalSnapshot += `原始问题：${issue.title}\n`;
+      if (issue.level) reEvalSnapshot += `问题等级：${issue.level}\n`;
+      if (issue.category) reEvalSnapshot += `分类：${issue.category}\n`;
+    }
+    reEvalSnapshot += `复测描述：${reEval.description || '（无描述）'}\n`;
+
+    const userPromptText = userPromptTemplate
+      ? renderPromptTemplate(userPromptTemplate, { recipe_snapshot: reEvalSnapshot })
+      : `${reEvalSnapshot}\n请从质感、透彻、纯净、恒定四个维度综合考量复测效果，给出整体评分和评价。`;
+
+    // Fetch AI config
+    const { data: aiConfigData } = await client
+      .from('platform_settings')
+      .select('value')
+      .eq('key', 'ai_config')
+      .maybeSingle();
+
+    const aiConfig = (aiConfigData?.value || {}) as {
+      provider?: string;
+      model?: string;
+      temperature?: number;
+      custom_api_url?: string;
+      custom_api_key?: string;
+    };
+
+    const model = aiConfig.model || 'doubao-seed-2-0-pro-260215';
+    const temperature = aiConfig.temperature ?? 0.7;
+
     // Build content parts
     const contentParts: Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string; detail?: 'high' | 'low' } }> = [];
-
-    let descriptionText = '【复评估场景】\n';
-    if (issue) {
-      descriptionText += `原始问题：${issue.title}\n`;
-      if (issue.level) descriptionText += `问题等级：${issue.level}\n`;
-      if (issue.category) descriptionText += `分类：${issue.category}\n`;
-    }
-    descriptionText += `\n【复测描述】\n${reEval.description || '（无描述）'}\n`;
-    descriptionText += '\n请从质感、透彻、纯净、恒定四个维度综合考量复测效果，给出整体评分和评价。';
-
-    contentParts.push({ type: 'text', text: descriptionText });
+    contentParts.push({ type: 'text', text: userPromptText });
 
     // Add image materials (presign S3 keys to http URLs for AI vision model)
     const imageUrls = await getImageUrlsForAI(mats);
