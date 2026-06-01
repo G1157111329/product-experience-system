@@ -17,7 +17,7 @@ import { MediaGallery } from '@/components/app/media-gallery';
 import { buildDisplayReportContent, type AiSummaryLike, type ReportContentWithReview, type ReportReviewOverrides } from '@/lib/report-review-overrides';
 
 interface Material {
-  id: string; material_type: string; file_name: string; file_url: string; file_size: number;
+  id: string; material_type: string; file_name: string; file_url: string; file_path?: string; file_size: number;
   issue_id?: string | null;
 }
 
