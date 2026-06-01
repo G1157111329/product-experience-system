@@ -213,6 +213,21 @@ JSON格式：
   ];
 }
 
+/**
+ * 根据 skill_key 获取默认的 user_prompt_template
+ * 用户仅输入 system prompt，user prompt template 由系统自动生成
+ */
+export function getDefaultUserPromptTemplate(skillKey: string): string {
+  const defaults = getDefaultSkillDefinitions();
+  const found = defaults.find(d => d.skillKey === skillKey);
+  return found?.userPromptTemplate || `请根据以下信息执行任务。
+
+任务信息：
+{{task_snapshot}}
+
+仅输出JSON格式结果。`;
+}
+
 export function renderPromptTemplate(template: string, values: Record<string, unknown>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => String(values[key] ?? ''));
 }

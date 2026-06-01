@@ -14,7 +14,7 @@ import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/lib/auth-context';
-import { getDefaultSkillDefinitions } from '@/lib/agent-skills';
+import { getDefaultSkillDefinitions, getDefaultUserPromptTemplate } from '@/lib/agent-skills';
 
 interface ModelConfig {
   id?: string;
@@ -223,13 +223,15 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
   const createSkillVersion = async () => {
     if (!user?.id || !editingSkill?.active_version) return;
     const version = editingSkill.active_version;
+    // 自动生成 user_prompt_template：优先使用用户自定义，否则从默认模板获取
+    const userPromptTemplate = version.user_prompt_template || getDefaultUserPromptTemplate(editingSkill.skill_key);
     const res = await fetch('/api/ai/skill-templates', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...(editingSkill.is_builtin_draft ? { skill_key: editingSkill.skill_key } : { template_id: editingSkill.id }),
         system_prompt: version.system_prompt,
-        user_prompt_template: version.user_prompt_template,
+        user_prompt_template: userPromptTemplate,
         output_schema: version.output_schema || {},
         notes: '管理员调整模板',
         admin_user_id: user.id,
@@ -249,25 +251,18 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
     <div className="space-y-3 rounded-lg border bg-background p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <div className="text-sm font-medium">Prompt 录入框</div>
-          <div className="truncate text-xs text-muted-foreground">{editingSkill.name} · 新版本</div>
+          <div className="text-sm font-medium">System Prompt</div>
+          <div className="truncate text-xs text-muted-foreground">{editingSkill.name} · 编辑后保存即生效</div>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => setEditingSkill(null)}>取消</Button>
           <Button size="sm" onClick={createSkillVersion}>保存并启用</Button>
         </div>
       </div>
-      <div className="grid gap-3 xl:grid-cols-2">
-        <div className="space-y-2">
-          <Label className="text-xs">System Prompt</Label>
-          <Textarea className="min-h-40 resize-y" value={editingSkill.active_version.system_prompt}
-            onChange={(event) => setEditingSkill({ ...editingSkill, active_version: { ...editingSkill.active_version!, system_prompt: event.target.value } })} />
-        </div>
-        <div className="space-y-2">
-          <Label className="text-xs">User Prompt Template</Label>
-          <Textarea className="min-h-40 resize-y" value={editingSkill.active_version.user_prompt_template}
-            onChange={(event) => setEditingSkill({ ...editingSkill, active_version: { ...editingSkill.active_version!, user_prompt_template: event.target.value } })} />
-        </div>
+      <div className="space-y-2">
+        <Label className="text-xs">System Prompt <span className="text-muted-foreground">（编辑后系统自动适配 User Prompt）</span></Label>
+        <Textarea className="min-h-60 resize-y" value={editingSkill.active_version.system_prompt}
+          onChange={(event) => setEditingSkill({ ...editingSkill, active_version: { ...editingSkill.active_version!, system_prompt: event.target.value } })} />
       </div>
     </div>
   ) : null;
