@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { LLMClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
+import { getImageUrlsForAI } from '@/lib/server/ai';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -100,14 +101,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     contentParts.push({ type: 'text', text: descriptionText });
 
-    // Add image materials
-    for (const mat of materials) {
-      if (mat.material_type === 'image' && mat.file_url) {
-        contentParts.push({
-          type: 'image_url',
-          image_url: { url: mat.file_url, detail: 'high' },
-        });
-      }
+    // Add image materials (presign S3 keys to http URLs for AI vision model)
+    const imageUrls = await getImageUrlsForAI(materials);
+    for (const url of imageUrls) {
+      contentParts.push({
+        type: 'image_url',
+        image_url: { url, detail: 'high' },
+      });
     }
 
     const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);

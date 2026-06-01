@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { Config, HeaderUtils, LLMClient } from 'coze-coding-dev-sdk';
+import { Config, HeaderUtils, LLMClient, S3Storage } from 'coze-coding-dev-sdk';
 
 type SupabaseLike = {
   from: (table: string) => {
@@ -146,4 +146,67 @@ function normalizePositiveInt(value: unknown, fallback: number): number {
   const num = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(num) || num <= 0) return fallback;
   return Math.floor(num);
+}
+
+/**
+ * 为素材列表生成预签名 URL（服务端用）
+ * AI 视觉模型要求 image_url 必须是 http/https URL，
+ * 但 file_url 现在存的是 S3 Key，需要先签名
+ */
+export async function presignMaterialUrls(
+  materials: Array<{ file_url?: string | null; file_path?: string | null; material_type: string }>,
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+
+  // Collect file paths that need presigning (not already http URLs)
+  const toPresign: string[] = [];
+  for (const mat of materials) {
+    const path = mat.file_path || mat.file_url;
+    if (path && !path.startsWith('http')) {
+      toPresign.push(path);
+    }
+  }
+
+  if (toPresign.length === 0) return result;
+
+  try {
+    const storage = new S3Storage();
+    const presignedResults = await Promise.allSettled(
+      toPresign.map(async (path) => {
+        const url = await storage.generatePresignedUrl({ key: path, expireTime: 86400 });
+        return { path, url };
+      }),
+    );
+
+    for (const r of presignedResults) {
+      if (r.status === 'fulfilled' && r.value.url) {
+        result.set(r.value.path, r.value.url);
+      }
+    }
+  } catch (err) {
+    console.error('[presignMaterialUrls] Error:', err);
+  }
+
+  return result;
+}
+
+/**
+ * 从素材列表中提取图片的预签名 URL，供 AI 视觉模型使用
+ * @returns 图片 URL 数组（均为 http/https 格式）
+ */
+export async function getImageUrlsForAI(
+  materials: Array<{ file_url?: string | null; file_path?: string | null; material_type: string }>,
+): Promise<string[]> {
+  const imageMaterials = materials.filter(m => m.material_type === 'image');
+  if (imageMaterials.length === 0) return [];
+
+  const presignedMap = await presignMaterialUrls(imageMaterials);
+
+  return imageMaterials.map(mat => {
+    const path = mat.file_path || mat.file_url;
+    if (path && !path.startsWith('http')) {
+      return presignedMap.get(path) || path;
+    }
+    return path || '';
+  }).filter(Boolean);
 }

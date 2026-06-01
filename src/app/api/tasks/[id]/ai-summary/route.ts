@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { extractJsonObject, invokeConfiguredAI } from '@/lib/server/ai';
+import { extractJsonObject, getImageUrlsForAI, invokeConfiguredAI } from '@/lib/server/ai';
 
 interface AiTaskSummary {
   tag: string;
@@ -118,20 +118,45 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       },
     ];
 
-    const addMedia = (materials: Array<Record<string, unknown>> | undefined) => {
-      for (const mat of materials || []) {
-        if (mat.material_type === 'image' && mat.file_url) {
-          contentParts.push({ type: 'image_url', image_url: { url: String(mat.file_url), detail: 'high' } });
-        } else if (mat.material_type === 'video' && mat.file_url) {
-          videoUrls.push(`${mat.file_name || '视频素材'}: ${mat.file_url}`);
+    // Collect all materials for presigning
+    const allMaterials: Array<Record<string, unknown>> = [];
+    records.forEach((record) => {
+      const mats = record.materials as Array<Record<string, unknown>> | undefined;
+      if (mats) allMaterials.push(...mats);
+    });
+    recipes.forEach((recipe) => {
+      const steps = recipe.recipe_steps as Array<Record<string, unknown>> | undefined;
+      steps?.forEach((step) => {
+        const mats = step.materials as Array<Record<string, unknown>> | undefined;
+        if (mats) allMaterials.push(...mats);
+      });
+      const effectMats = recipe.effect_materials as Array<Record<string, unknown>> | undefined;
+      if (effectMats) allMaterials.push(...effectMats);
+    });
+
+    // Presign image URLs for AI vision model
+    const imageUrls = await getImageUrlsForAI(
+      allMaterials.map(m => ({
+        file_url: m.file_url as string | null | undefined,
+        file_path: m.file_path as string | null | undefined,
+        material_type: String(m.material_type || ''),
+      })),
+    );
+
+    // Add presigned image URLs to content
+    for (const url of imageUrls) {
+      contentParts.push({ type: 'image_url', image_url: { url, detail: 'high' } });
+    }
+
+    // Collect video URLs (presign if needed)
+    for (const mat of allMaterials) {
+      if (mat.material_type === 'video') {
+        const filePath = String(mat.file_path || mat.file_url || '');
+        if (filePath) {
+          videoUrls.push(`${mat.file_name || '视频素材'}: ${filePath.startsWith('http') ? filePath : '[视频文件]'}`);
         }
       }
-    };
-    records.forEach((record) => addMedia(record.materials as Array<Record<string, unknown>> | undefined));
-    recipes.forEach((recipe) => {
-      (recipe.recipe_steps as Array<Record<string, unknown>> | undefined)?.forEach((step) => addMedia(step.materials as Array<Record<string, unknown>> | undefined));
-      addMedia(recipe.effect_materials as Array<Record<string, unknown>> | undefined);
-    });
+    }
     if (videoUrls.length > 0) {
       contentParts.push({ type: 'text', text: `视频素材链接（请结合文件名、关联记录和可访问链接判断）：\n${videoUrls.slice(0, 20).join('\n')}` });
     }
