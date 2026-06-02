@@ -34,6 +34,9 @@ export const reports = pgTable("reports", {
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 	productModel: varchar("product_model", { length: 50 }),
 }, (table) => [
+	index("reports_created_at_idx").using("btree", table.createdAt.asc().nullsLast().op("timestamptz_ops")),
+	index("reports_product_model_idx").using("btree", table.productModel.asc().nullsLast().op("text_ops")),
+	index("reports_product_model_created_at_idx").using("btree", table.productModel.asc().nullsLast().op("text_ops"), table.createdAt.asc().nullsLast().op("timestamptz_ops")),
 	index("reports_task_id_idx").using("btree", table.taskId.asc().nullsLast().op("text_ops")),
 	foreignKey({
 			columns: [table.taskId],

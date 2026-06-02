@@ -322,6 +322,9 @@ CREATE TABLE IF NOT EXISTS reports (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS reports_task_id_idx ON reports(task_id);
+CREATE INDEX IF NOT EXISTS reports_created_at_idx ON reports(created_at);
+CREATE INDEX IF NOT EXISTS reports_product_model_idx ON reports(product_model);
+CREATE INDEX IF NOT EXISTS reports_product_model_created_at_idx ON reports(product_model, created_at);
 
 -- ============================================================
 -- 16. 报告分享表

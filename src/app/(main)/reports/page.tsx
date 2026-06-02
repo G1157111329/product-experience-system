@@ -20,6 +20,13 @@ interface Report {
   id: string; title: string; product_model: string | null;
   task_id: string; content: Record<string, unknown> | null;
   status: string; version: number; created_at: string;
+  summary_stats?: {
+    records: number;
+    failedRecords: number;
+    recipes: number;
+    recipeProblems: number;
+    media: number;
+  };
   project_type?: string | null;
   project_phase?: string | null;
   task_name?: string;
@@ -56,6 +63,8 @@ function formatBeijingTime(isoStr: string | null | undefined): string {
 }
 
 function getReportReviewStats(report: Report) {
+  if (report.summary_stats) return report.summary_stats;
+
   const content = (report.content || {}) as Record<string, unknown>;
   const records = Array.isArray(content.records) ? content.records as Array<Record<string, unknown>> : [];
   const recipes = Array.isArray(content.recipes) ? content.recipes as Array<Record<string, unknown>> : [];

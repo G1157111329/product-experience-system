@@ -80,6 +80,23 @@ const taskFieldLabels: Record<string, string> = {
   assigned_to: '负责人', created_at: '创建时间', updated_at: '更新时间',
 };
 
+const hiddenTaskFields = new Set(['id', 'selected_standards', 'created_by']);
+const beijingTimeFields = new Set(['created_at', 'updated_at']);
+
+function formatBeijingTime(dateStr: string | null | undefined): string {
+  if (!dateStr) return '-';
+  try {
+    const d = new Date(dateStr);
+    if (Number.isNaN(d.getTime())) return String(dateStr);
+    const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+    const beijing = new Date(utc + 8 * 60 * 60000);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${beijing.getFullYear()}-${pad(beijing.getMonth() + 1)}-${pad(beijing.getDate())} ${pad(beijing.getHours())}:${pad(beijing.getMinutes())}:${pad(beijing.getSeconds())}`;
+  } catch {
+    return String(dateStr);
+  }
+}
+
 async function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -241,13 +258,18 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
           <h3 style={{ fontSize: '15px', margin: '16px 0 8px', color: '#0d9488', borderBottom: '1px solid #0d9488', paddingBottom: '4px' }}>任务信息</h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', margin: '8px 0' }}>
             {Object.entries(task)
-              .filter(([k]) => !['id', 'selected_standards'].includes(k))
-              .map(([key, value]) => (
-                <div key={key} style={{ fontSize: '12px', padding: '6px', background: '#f9fafb', borderRadius: '4px' }}>
-                  <div style={{ color: '#666', fontSize: '10px', marginBottom: '2px' }}>{taskFieldLabels[key] || key}</div>
-                  <div style={{ wordBreak: 'break-all' }}>{String(value || '-')}</div>
-                </div>
-              ))}
+              .filter(([k]) => !hiddenTaskFields.has(k))
+              .map(([key, value]) => {
+                const displayValue = beijingTimeFields.has(key)
+                  ? formatBeijingTime(value as string | null | undefined)
+                  : String(value || '-');
+                return (
+                  <div key={key} style={{ fontSize: '12px', padding: '6px', background: '#f9fafb', borderRadius: '4px' }}>
+                    <div style={{ color: '#666', fontSize: '10px', marginBottom: '2px' }}>{taskFieldLabels[key] || key}</div>
+                    <div style={{ wordBreak: 'break-all' }}>{displayValue}</div>
+                  </div>
+                );
+              })}
           </div>
         </>
       )}
@@ -775,7 +797,7 @@ function ReportPrintContent() {
       </h1>
       <div style={{ color: '#666', fontSize: '12px', marginBottom: '20px' }}>
         {projectType && <span>项目类型: {projectType} | </span>}
-        版本 V{report.version} | 状态: {report.status} | 生成时间: {report.content.generatedAt ? new Date(report.content.generatedAt).toLocaleString('zh-CN') : '-'}
+        版本 V{report.version} | 状态: {report.status} | 生成时间: {formatBeijingTime(report.content.generatedAt)}
       </div>
 
       {/* Overall Stats */}

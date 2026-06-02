@@ -10,12 +10,52 @@ import {
 } from '@/storage/database/shared/schema';
 import { preserveReviewOverrides, type ReportContentWithReview } from '@/lib/report-review-overrides';
 
+function parsePositiveInt(value: string | null, fallback: number, max: number) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return fallback;
+  return Math.min(Math.floor(num), max);
+}
+
+function countEffectProblemPoints(value: unknown) {
+  const text = String(value || '').trim();
+  if (!text) return 0;
+  try {
+    const parsed = JSON.parse(text);
+    if (!Array.isArray(parsed)) return 1;
+    return parsed.filter((item: unknown) => {
+      if (!item || typeof item !== 'object') return false;
+      const point = String((item as Record<string, unknown>).text || '').trim();
+      return Boolean(point);
+    }).length;
+  } catch {
+    return 1;
+  }
+}
+
+function isFailedEvaluationValue(value: unknown) {
+  return String(value || '').includes('\u4e0d\u5408\u683c');
+}
+
+function groupRowsByField(rows: Array<Record<string, unknown>>, field: string) {
+  const grouped = new Map<string, Array<Record<string, unknown>>>();
+  for (const row of rows) {
+    const key = String(row[field] || '');
+    if (!key) continue;
+    const bucket = grouped.get(key) || [];
+    bucket.push(row);
+    grouped.set(key, bucket);
+  }
+  return grouped;
+}
+
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
   const { searchParams } = new URL(request.url);
   const task_id = searchParams.get('task_id');
   const created_by = searchParams.get('created_by'); // filter by user's tasks
   const keyword = searchParams.get('keyword')?.trim();
+  const limit = parsePositiveInt(searchParams.get('limit'), 50, 200);
+  const offset = Math.max(0, Number(searchParams.get('offset') || '0') || 0);
 
   // Step 1: If created_by filter, get user's task IDs first
   let userTaskIds: string[] = [];
@@ -24,30 +64,69 @@ export async function GET(request: NextRequest) {
     userTaskIds = (userTasks || []).map((t: { id: string }) => t.id);
   }
 
-  let query = client.from('reports').select('*');
+  let query = client
+    .from('reports')
+    .select('id, task_id, template_id, title, status, version, product_model, created_at, updated_at');
   if (task_id) query = query.eq('task_id', task_id);
+  if (created_by && userTaskIds.length > 0) query = query.in('task_id', userTaskIds);
+  if (created_by && userTaskIds.length === 0) {
+    return NextResponse.json({ code: 0, message: 'success', data: [], meta: { limit, offset, total: 0 } });
+  }
+  const dbPaginated = !keyword;
+  if (dbPaginated) query = query.range(offset, offset + limit - 1);
 
   const { data, error } = await query.order('created_at', { ascending: false });
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
 
   let reports = data || [];
 
-  // If created_by filter, filter reports by user's task IDs
-  if (created_by && userTaskIds.length > 0) {
-    reports = reports.filter((r: { task_id: string }) => userTaskIds.includes(r.task_id));
-  } else if (created_by) {
-    reports = []; // user has no tasks
-  }
-
   // Enrich with task info for grouping
-  const taskIds = [...new Set(reports.map((r: { task_id: string }) => r.task_id))];
-  const { data: tasks } = await client.from('experience_tasks').select('id, task_name, product_category, product, project_type, project_phase, created_by').in('id', taskIds);
+  const taskIds = [...new Set<string>(reports.map((r: Record<string, unknown>) => String(r.task_id || '')).filter(Boolean))];
+  const { data: tasks } = taskIds.length > 0
+    ? await client.from('experience_tasks').select('id, task_name, product_category, product, project_type, project_phase, created_by').in('id', taskIds)
+    : { data: [] };
   const taskMap: Record<string, Record<string, unknown>> = Object.fromEntries((tasks || []).map((t: Record<string, unknown>) => [t.id as string, t]));
+
+  const { data: records } = taskIds.length > 0
+    ? await client.from('check_records').select('id, task_id, evaluation_result').in('task_id', taskIds)
+    : { data: [] };
+  const { data: recipes } = taskIds.length > 0
+    ? await client.from('recipes').select('id, task_id, problem_count, effect_problem_point').in('task_id', taskIds)
+    : { data: [] };
+  const { data: materials } = taskIds.length > 0
+    ? await client.from('materials').select('id, task_id').in('task_id', taskIds)
+    : { data: [] };
+
+  const statsByTask = new Map<string, { records: number; failedRecords: number; recipes: number; recipeProblems: number; media: number }>();
+  for (const id of taskIds) {
+    statsByTask.set(id, { records: 0, failedRecords: 0, recipes: 0, recipeProblems: 0, media: 0 });
+  }
+  for (const record of records || []) {
+    const taskId = String((record as Record<string, unknown>).task_id || '');
+    const stats = statsByTask.get(taskId);
+    if (!stats) continue;
+    stats.records += 1;
+    if (isFailedEvaluationValue((record as Record<string, unknown>).evaluation_result)) stats.failedRecords += 1;
+  }
+  for (const recipe of recipes || []) {
+    const row = recipe as Record<string, unknown>;
+    const stats = statsByTask.get(String(row.task_id || ''));
+    if (!stats) continue;
+    stats.recipes += 1;
+    stats.recipeProblems += Number(row.problem_count || 0) + countEffectProblemPoints(row.effect_problem_point);
+  }
+  for (const material of materials || []) {
+    const taskId = String((material as Record<string, unknown>).task_id || '');
+    const stats = statsByTask.get(taskId);
+    if (stats) stats.media += 1;
+  }
 
   const enriched = reports.map((r: Record<string, unknown>) => {
     const taskInfo = taskMap[r.task_id as string] || {};
     return {
       ...r,
+      content: null,
+      summary_stats: statsByTask.get(String(r.task_id || '')) || { records: 0, failedRecords: 0, recipes: 0, recipeProblems: 0, media: 0 },
       task_name: taskInfo.task_name || '',
       product_category: taskInfo.product_category || null,
       product: taskInfo.product || null,
@@ -66,14 +145,18 @@ export async function GET(request: NextRequest) {
           r.product_category,
           r.product,
           r.project_type,
-          ((r.content as Record<string, unknown> | null)?.task as Record<string, unknown> | undefined)?.product_category,
-          ((r.content as Record<string, unknown> | null)?.task as Record<string, unknown> | undefined)?.product,
         ].filter(Boolean).join(' ').toLowerCase();
         return haystack.includes(keyword.toLowerCase());
       })
     : enriched;
 
-  return NextResponse.json({ code: 0, message: 'success', data: filtered });
+  const paged = dbPaginated ? filtered : filtered.slice(offset, offset + limit);
+  return NextResponse.json({
+    code: 0,
+    message: 'success',
+    data: paged,
+    meta: { limit, offset, total: dbPaginated ? undefined : filtered.length, has_more: dbPaginated ? reports.length === limit : offset + limit < filtered.length },
+  });
 }
 
 export async function POST(request: NextRequest) {
@@ -97,30 +180,36 @@ export async function POST(request: NextRequest) {
     .eq('key', `ai_sum_${body.task_id}`)
     .maybeSingle();
 
-  // Enrich records with their associated materials
-  const recordsWithMaterials = await Promise.all(
-    (rawRecords || []).map(async (record: Record<string, unknown>) => {
-      const { data: recordMaterials } = await client.from('materials').select('*').eq('record_id', record.id);
-      return { ...record, materials: recordMaterials || [] };
-    })
-  );
+  const allMaterials = (materials || []) as Array<Record<string, unknown>>;
+  const materialsByRecordId = groupRowsByField(allMaterials, 'record_id');
+  const materialsByRecipeStepId = groupRowsByField(allMaterials, 'recipe_step_id');
+  const materialsByRecipeId = groupRowsByField(allMaterials, 'recipe_id');
+
+  const recordsWithMaterials = ((rawRecords || []) as Array<Record<string, unknown>>).map((record) => ({
+    ...record,
+    materials: materialsByRecordId.get(String(record.id || '')) || [],
+  }));
 
   // 查询食谱/功能及其步骤
   const { data: recipes } = await client.from('recipes').select('*').eq('task_id', body.task_id);
-  const recipesWithSteps = await Promise.all(
-    (recipes || []).map(async (recipe: Record<string, unknown>) => {
-      const { data: steps } = await client.from('recipe_steps').select('*').eq('recipe_id', recipe.id).order('step_number', { ascending: true });
-      const stepsWithMaterials = await Promise.all(
-        (steps || []).map(async (step: Record<string, unknown>) => {
-          const { data: stepMaterials } = await client.from('materials').select('*').eq('recipe_step_id', step.id);
-          return { ...step, materials: stepMaterials || [] };
-        })
-      );
-      // Fetch effect materials (linked via recipe_id)
-      const { data: effectMaterials } = await client.from('materials').select('*').eq('recipe_id', recipe.id);
-      return { ...recipe, recipe_steps: stepsWithMaterials, effect_materials: effectMaterials || [] };
-    })
-  );
+  const recipeRows = (recipes || []) as Array<Record<string, unknown>>;
+  const recipeIds = recipeRows.map((recipe) => String(recipe.id || '')).filter(Boolean);
+  const { data: allSteps } = recipeIds.length > 0
+    ? await client.from('recipe_steps').select('*').in('recipe_id', recipeIds).order('step_number', { ascending: true })
+    : { data: [] };
+  const stepsByRecipeId = groupRowsByField((allSteps || []) as Array<Record<string, unknown>>, 'recipe_id');
+  const recipesWithSteps = recipeRows.map((recipe) => {
+    const steps = stepsByRecipeId.get(String(recipe.id || '')) || [];
+    const stepsWithMaterials = steps.map((step) => ({
+      ...step,
+      materials: materialsByRecipeStepId.get(String(step.id || '')) || [],
+    }));
+    return {
+      ...recipe,
+      recipe_steps: stepsWithMaterials,
+      effect_materials: materialsByRecipeId.get(String(recipe.id || '')) || [],
+    };
+  });
 
   const recipesWithCount = (recipesWithSteps || []).map((recipe: Record<string, unknown>) => {
     const steps = (recipe.recipe_steps || []) as Array<Record<string, unknown>>;
