@@ -10,7 +10,14 @@ export async function GET() {
     .order('created_at', { ascending: false });
 
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
-  return NextResponse.json({ code: 0, message: 'success', data: data || [] });
+  const sanitized = (data || []).map((item: Record<string, unknown>) => {
+    const { custom_api_key_encrypted: customApiKeyEncrypted, customApiKeyEncrypted: camelCustomApiKeyEncrypted, ...rest } = item;
+    return {
+      ...rest,
+      has_custom_api_key: Boolean(customApiKeyEncrypted || camelCustomApiKeyEncrypted),
+    };
+  });
+  return NextResponse.json({ code: 0, message: 'success', data: sanitized });
 }
 
 export async function POST(request: NextRequest) {
@@ -24,18 +31,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ code: 1, message }, { status: 403 });
   }
 
-  const payload = {
+  const customApiKey = body.custom_api_key || body.customApiKey || body.custom_api_key_encrypted;
+  const payload: Record<string, unknown> = {
     name: body.name || 'AI模型配置',
-    provider: body.provider || 'builtin',
-    model: body.model || 'doubao-seed-2-0-pro-260215',
+    provider: body.provider || 'custom',
+    model: body.model || 'Bear-Model-VL',
     temperature: normalizeTemperatureScale(body.temperature),
     max_tokens: Number(body.max_tokens || body.maxTokens || 2400),
     supports_vision: Boolean(body.supports_vision ?? body.supportsVision),
     custom_api_url: body.custom_api_url || body.customApiUrl || null,
-    custom_api_key_encrypted: body.custom_api_key || body.customApiKey || body.custom_api_key_encrypted || null,
     created_by: body.admin_user_id || null,
     updated_at: new Date().toISOString(),
   };
+  if (!body.id || customApiKey) {
+    payload.custom_api_key_encrypted = customApiKey || null;
+  }
 
   const query = body.id
     ? client.from('ai_model_configs').update(payload).eq('id', body.id).select().single()

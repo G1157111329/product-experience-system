@@ -85,7 +85,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [user]);
 
   useEffect(() => {
     fetchData();

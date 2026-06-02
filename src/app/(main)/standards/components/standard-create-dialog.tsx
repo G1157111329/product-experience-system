@@ -15,13 +15,26 @@ import { toast } from 'sonner';
 import type { CategoryWithProducts } from '../types';
 import { categoryConfig } from '../types';
 
+async function readApiJson<T = { code: number; message?: string }>(response: Response): Promise<T> {
+  const text = await response.text();
+  if (!text.trim()) {
+    throw new Error(response.ok ? '接口未返回数据' : `接口请求失败(${response.status})`);
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(response.ok ? '接口返回格式异常' : `接口请求失败(${response.status})`);
+  }
+}
+
 type StandardCreateDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   categories: CategoryWithProducts[];
+  onAdded?: () => void;
 };
 
-export function StandardCreateDialog({ open, onOpenChange, categories }: StandardCreateDialogProps) {
+export function StandardCreateDialog({ open, onOpenChange, categories, onAdded }: StandardCreateDialogProps) {
   const [createCategory, setCreateCategory] = useState('通用标准');
   const [createProductCategory, setCreateProductCategory] = useState('');
   const [createProduct, setCreateProduct] = useState('');
@@ -36,11 +49,12 @@ export function StandardCreateDialog({ open, onOpenChange, categories }: Standar
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    const data = await res.json();
+    const data = await readApiJson<{ code: number; message?: string; data: { id: string } }>(res);
     if (data.code === 0) {
       onOpenChange(false);
       setCreateProductCategory('');
       setCreateProduct('');
+      onAdded?.();
       window.location.href = `/standards/${data.data.id}`;
     }
   };
@@ -129,7 +143,7 @@ export function StandardImportDialog({ open, onOpenChange, categories, onImporte
       if (importForm.product) formData.append('product', importForm.product);
       if (importForm.description) formData.append('description', importForm.description);
       const res = await fetch('/api/standards/import', { method: 'POST', body: formData });
-      const data = await res.json();
+      const data = await readApiJson(res);
       if (data.code === 0) {
         toast.success(data.message || '导入成功');
         onOpenChange(false);
@@ -139,7 +153,9 @@ export function StandardImportDialog({ open, onOpenChange, categories, onImporte
       } else {
         toast.error(data.message || '导入失败');
       }
-    } catch { toast.error('导入失败'); } finally { setImporting(false); }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '导入失败');
+    } finally { setImporting(false); }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {

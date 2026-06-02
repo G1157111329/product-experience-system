@@ -1,5 +1,4 @@
-import { NextRequest } from 'next/server';
-import { Config, HeaderUtils, LLMClient, S3Storage } from 'coze-coding-dev-sdk';
+import { generatePresignedUrl } from './storage';
 
 type SupabaseLike = {
   from: (table: string) => {
@@ -11,19 +10,20 @@ type SupabaseLike = {
   };
 };
 
-type MessageContent =
+export type MessageContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string; detail?: 'high' | 'low' } };
+
+export type MessageContent =
   | string
-  | Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string; detail?: 'high' | 'low' } }>;
+  | MessageContentPart[];
 
 interface InvokeOptions {
-  request: NextRequest;
   client: SupabaseLike;
   messages: Array<{ role: 'system' | 'user'; content: MessageContent }>;
   defaultModel?: string;
   defaultTemperature?: number;
   maxTokens?: number;
-  /** 强制使用的内置SDK模型名，忽略用户ai_config中的model设置（仅对内置SDK调用生效） */
-  forceBuiltInModel?: string;
 }
 
 export interface ResolvedAIConfig {
@@ -41,10 +41,22 @@ interface ResolveOptions {
   maxTokens?: number;
 }
 
+// Default AI config — local deployment endpoint
+const DEFAULT_API_URL = 'http://ds.bears.com.cn:8000/v1/chat/completions';
+const DEFAULT_API_KEY = 'local';
+const DEFAULT_MODEL = 'Bear-Model-VL';
+
+export function normalizeChatCompletionsUrl(apiUrl: string): string {
+  const trimmed = apiUrl.trim().replace(/\/+$/, '');
+  if (!trimmed) return DEFAULT_API_URL;
+  if (trimmed.endsWith('/chat/completions')) return trimmed;
+  return `${trimmed}/chat/completions`;
+}
+
 export async function resolveAIConfig(
   client: SupabaseLike,
   {
-    defaultModel = 'doubao-seed-2-0-pro-260215',
+    defaultModel = DEFAULT_MODEL,
     defaultTemperature = 0.5,
     maxTokens = 2400,
   }: ResolveOptions = {},
@@ -57,12 +69,12 @@ export async function resolveAIConfig(
 
   if (activeModel) {
     return {
-      provider: String(activeModel.provider || 'builtin'),
+      provider: String(activeModel.provider || 'custom'),
       model: String(activeModel.model || defaultModel),
       temperature: normalizeTemperature(activeModel.temperature, defaultTemperature),
       maxTokens: normalizePositiveInt(activeModel.max_tokens ?? activeModel.maxTokens, maxTokens),
-      customApiUrl: String(activeModel.custom_api_url || activeModel.customApiUrl || ''),
-      customApiKey: String(activeModel.custom_api_key_encrypted || activeModel.customApiKeyEncrypted || ''),
+      customApiUrl: normalizeChatCompletionsUrl(String(activeModel.custom_api_url || activeModel.customApiUrl || DEFAULT_API_URL)),
+      customApiKey: String(activeModel.custom_api_key_encrypted || activeModel.customApiKeyEncrypted || DEFAULT_API_KEY),
     };
   }
 
@@ -74,34 +86,37 @@ export async function resolveAIConfig(
 
   const legacyValue = (aiConfigData?.value || {}) as Record<string, unknown>;
   return {
-    provider: String(legacyValue.provider || 'builtin'),
+    provider: String(legacyValue.provider || 'custom'),
     model: String(legacyValue.model || defaultModel),
     temperature: normalizeTemperature(legacyValue.temperature, defaultTemperature),
     maxTokens,
-    customApiUrl: String(legacyValue.custom_api_url || ''),
-    customApiKey: String(legacyValue.custom_api_key || ''),
+    customApiUrl: normalizeChatCompletionsUrl(String(legacyValue.custom_api_url || DEFAULT_API_URL)),
+    customApiKey: String(legacyValue.custom_api_key || DEFAULT_API_KEY),
   };
 }
 
 export async function invokeConfiguredAI({
-  request,
   client,
   messages,
-  defaultModel = 'doubao-seed-2-0-pro-260215',
+  defaultModel = DEFAULT_MODEL,
   defaultTemperature = 0.5,
   maxTokens = 2400,
-  forceBuiltInModel,
 }: InvokeOptions): Promise<string> {
   const aiConfig = await resolveAIConfig(client, { defaultModel, defaultTemperature, maxTokens });
-  const model = aiConfig.provider === 'builtin' && forceBuiltInModel ? forceBuiltInModel : aiConfig.model;
+  const model = aiConfig.model;
   const temperature = aiConfig.temperature;
 
-  if (aiConfig.provider === 'custom' && aiConfig.customApiUrl && aiConfig.customApiKey) {
-    const response = await fetch(aiConfig.customApiUrl, {
+  const apiUrl = normalizeChatCompletionsUrl(aiConfig.customApiUrl || DEFAULT_API_URL);
+  const apiKey = aiConfig.customApiKey || DEFAULT_API_KEY;
+
+  let response: Response;
+  try {
+    response = await fetch(apiUrl, {
       method: 'POST',
+      signal: AbortSignal.timeout(60000),
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${aiConfig.customApiKey}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model,
@@ -110,19 +125,17 @@ export async function invokeConfiguredAI({
         max_tokens: aiConfig.maxTokens,
       }),
     });
-
-    if (!response.ok) {
-      throw new Error(`AI服务调用失败(${response.status})`);
-    }
-
-    const result = await response.json();
-    return result.choices?.[0]?.message?.content || '';
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'network error';
+    throw new Error(`AI服务连接失败: ${message}`);
   }
 
-  const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);
-  const llmClient = new LLMClient(new Config(), customHeaders);
-  const response = await llmClient.invoke(messages, { model, temperature });
-  return response.content || '';
+  if (!response.ok) {
+    throw new Error(`AI服务调用失败(${response.status})`);
+  }
+
+  const result = await response.json();
+  return result.choices?.[0]?.message?.content || '';
 }
 
 export function extractJsonObject<T extends object>(content: string, fallback: T): T {
@@ -149,16 +162,13 @@ function normalizePositiveInt(value: unknown, fallback: number): number {
 }
 
 /**
- * 为素材列表生成预签名 URL（服务端用）
- * AI 视觉模型要求 image_url 必须是 http/https URL，
- * 但 file_url 现在存的是 S3 Key，需要先签名
+ * Presign S3 keys to HTTP URLs for AI vision models.
  */
 export async function presignMaterialUrls(
   materials: Array<{ file_url?: string | null; file_path?: string | null; material_type: string }>,
 ): Promise<Map<string, string>> {
   const result = new Map<string, string>();
 
-  // Collect file paths that need presigning (not already http URLs)
   const toPresign: string[] = [];
   for (const mat of materials) {
     const path = mat.file_path || mat.file_url;
@@ -170,10 +180,9 @@ export async function presignMaterialUrls(
   if (toPresign.length === 0) return result;
 
   try {
-    const storage = new S3Storage();
     const presignedResults = await Promise.allSettled(
       toPresign.map(async (path) => {
-        const url = await storage.generatePresignedUrl({ key: path, expireTime: 86400 });
+        const url = await generatePresignedUrl({ key: path, expireTime: 86400 });
         return { path, url };
       }),
     );
@@ -191,8 +200,7 @@ export async function presignMaterialUrls(
 }
 
 /**
- * 从素材列表中提取图片的预签名 URL，供 AI 视觉模型使用
- * @returns 图片 URL 数组（均为 http/https 格式）
+ * Extract presigned image URLs for AI vision models.
  */
 export async function getImageUrlsForAI(
   materials: Array<{ file_url?: string | null; file_path?: string | null; material_type: string }>,

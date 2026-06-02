@@ -26,6 +26,7 @@ coverage/
 
 # Logs
 logs/
+.codex-logs/
 *.log
 npm-debug.log*
 yarn-debug.log*

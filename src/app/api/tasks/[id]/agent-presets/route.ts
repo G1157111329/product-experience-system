@@ -22,10 +22,30 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const { data: task, error: taskError } = await client.from('experience_tasks').select('*').eq('id', id).single();
   if (taskError || !task) return NextResponse.json({ code: 1, message: '任务不存在' }, { status: 404 });
 
-  const { data: standardItems } = await client
+  const { data: allStandards } = await client
+    .from('standards')
+    .select('id, category, product_category, product');
+
+  const eligibleStandardIds = new Set(
+    (allStandards || [])
+      .filter((standard: Record<string, unknown>) => isStandardEligibleForTask(standard, task))
+      .map((standard: Record<string, unknown>) => String(standard.id))
+  );
+  const standardById = new Map(
+    (allStandards || []).map((standard: Record<string, unknown>) => [String(standard.id), standard])
+  );
+
+  const { data: rawStandardItems } = eligibleStandardIds.size > 0
+    ? await client
     .from('standard_items')
-    .select('id, standard_id, sensory_dimension, test_phase, experience_flow, touch_point, check_dimension, sub_check_dimension, check_item, check_requirement, check_standard, experience_standard, check_tool, problem_level, standards(id, category)')
-    .limit(120);
+        .select('id, standard_id, sensory_dimension, test_phase, experience_flow, touch_point, check_dimension, sub_check_dimension, check_item, check_requirement, check_standard, experience_standard, check_tool, problem_level')
+        .in('standard_id', Array.from(eligibleStandardIds))
+        .limit(120)
+    : { data: [] };
+  const standardItems = (rawStandardItems || []).map((item: Record<string, unknown>) => ({
+    ...item,
+    standards: standardById.get(String(item.standard_id)) || null,
+  }));
 
   const { data: recipeLibrary } = await client
     .from('recipe_library')
@@ -33,7 +53,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     .limit(80);
 
   const intent = buildIntent(task);
-  const taskSnapshot = buildTaskSnapshot(task, intent, standardItems || [], recipeLibrary || [], body.hotspot_summary || '');
   const merged: NormalizedPresetSuggestions = { standards: [], recipes: [] };
   const auditIds: string[] = [];
   const errors: string[] = [];
@@ -46,12 +65,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     try {
+      const taskSnapshot = buildTaskSnapshot(task, intent, standardItems || [], recipeLibrary || [], body.hotspot_summary || '', {
+        includeStandards: skillKey === 'senses_standard_preset',
+        includeRecipes: skillKey === 'recipe_scene_preset',
+      });
       const userPrompt = renderPromptTemplate(String(active.version.user_prompt_template || ''), {
         task_snapshot: taskSnapshot,
         hotspot_summary: body.hotspot_summary || '',
       });
       const rawContent = await invokeConfiguredAI({
-        request,
         client,
         defaultTemperature: 0.3,
         maxTokens: 2400,
@@ -190,14 +212,31 @@ function extractKeywords(text: string, candidates: string[]) {
   return candidates.filter((keyword) => text.includes(keyword));
 }
 
+function isStandardEligibleForTask(standard: Record<string, unknown>, task: Record<string, unknown>) {
+  const category = String(standard.category || '');
+  if (category !== '品类标准') return true;
+
+  const standardCategory = String(standard.product_category || '');
+  const standardProduct = String(standard.product || '');
+  const taskCategory = String(task.product_category || '');
+  const taskProduct = String(task.product || '');
+
+  if (standardCategory && standardCategory !== taskCategory) return false;
+  if (standardProduct && standardProduct !== taskProduct) return false;
+  return Boolean(standardCategory || standardProduct);
+}
+
 function buildTaskSnapshot(
   task: Record<string, unknown>,
   intent: Record<string, unknown>,
   standardItems: Array<Record<string, unknown>>,
   recipeLibrary: Array<Record<string, unknown>>,
   hotspotSummary: string,
+  options: { includeStandards?: boolean; includeRecipes?: boolean } = {},
 ) {
-  const standards = standardItems.slice(0, 80).map((item) => {
+  const includeStandards = options.includeStandards !== false;
+  const includeRecipes = options.includeRecipes !== false;
+  const standards = includeStandards ? standardItems.slice(0, 80).map((item) => {
     const stdRef = item.standards as Record<string, unknown> | null;
     const category = stdRef?.category || item.standard_category || '-';
     return [
@@ -209,9 +248,10 @@ function buildTaskSnapshot(
       `检查项:${item.check_item || '-'}`,
       `要求:${item.check_requirement || item.check_standard || item.experience_standard || '-'}`,
     ].join('；');
-  }).join('\n');
+  }).join('\n') : '';
 
-  const recipes = recipeLibrary.slice(0, 50).map((recipe) => [
+  const recipesSource = includeRecipes ? recipeLibrary : [];
+  const recipes = recipesSource.slice(0, 50).map((recipe) => [
     `名称:${recipe.name || '-'}`,
     `类型:${recipe.recipe_type || '食谱'}`,
     `参数:${recipe.ingredients || '-'}`,
@@ -238,8 +278,9 @@ function dedupeSuggestions(input: NormalizedPresetSuggestions): NormalizedPreset
   const recipeSeen = new Set<string>();
   return {
     standards: input.standards.filter((item) => {
-      if (standardSeen.has(item.standardItemId)) return false;
-      standardSeen.add(item.standardItemId);
+      const key = item.standardItemId || `${item.focus}::${item.reason}`;
+      if (standardSeen.has(key)) return false;
+      standardSeen.add(key);
       return true;
     }),
     recipes: input.recipes.filter((item) => {
@@ -252,20 +293,23 @@ function dedupeSuggestions(input: NormalizedPresetSuggestions): NormalizedPreset
 
 async function acceptStandardSuggestions(client: ReturnType<typeof getSupabaseClient>, taskId: string, standards: Array<Record<string, unknown>>) {
   const ids = standards.map((item) => String(item.standard_item_id || item.standardItemId || '')).filter(Boolean);
-  if (ids.length === 0) return [];
+  const generatedSuggestions = standards.filter((item) => !String(item.standard_item_id || item.standardItemId || '').trim());
 
-  const { data: items } = await client.from('standard_items').select('*').in('id', ids);
-  if (!items || items.length === 0) return [];
-  const standardIds = [...new Set(items.map((item: Record<string, unknown>) => String(item.standard_id || '')).filter(Boolean))];
+  const { data: existingRecords } = await client.from('check_records').select('id').eq('task_id', taskId);
+  let nextSort = existingRecords?.length || 0;
+  const created: Record<string, unknown>[] = [];
+
+  const { data: items } = ids.length > 0
+    ? await client.from('standard_items').select('*').in('id', ids)
+    : { data: [] };
+  const itemRows = items || [];
+  const standardIds = [...new Set(itemRows.map((item: Record<string, unknown>) => String(item.standard_id || '')).filter(Boolean))];
   const { data: standardRows } = standardIds.length > 0
     ? await client.from('standards').select('id, category').in('id', standardIds)
     : { data: [] };
   const categoryByStandardId = new Map((standardRows || []).map((standard: Record<string, unknown>) => [standard.id, standard.category]));
 
-  const { data: existingRecords } = await client.from('check_records').select('id').eq('task_id', taskId);
-  const baseSort = existingRecords?.length || 0;
-
-  const inserts = items.map((item: Record<string, unknown>, index: number) => ({
+  const inserts = itemRows.map((item: Record<string, unknown>, index: number) => ({
     task_id: taskId,
     standard_item_id: item.id,
     standard_category: categoryByStandardId.get(item.standard_id) || null,
@@ -283,11 +327,40 @@ async function acceptStandardSuggestions(client: ReturnType<typeof getSupabaseCl
     problem_level: item.problem_level || null,
     evaluation_result: '待定',
     problem_description: null,
-    sort_order: baseSort + index,
+    sort_order: nextSort + index,
   }));
 
-  const { data } = await client.from('check_records').insert(inserts).select();
-  return data || [];
+  if (inserts.length > 0) {
+    const { data } = await client.from('check_records').insert(inserts).select();
+    created.push(...(data || []));
+    nextSort += inserts.length;
+  }
+
+  const generatedInserts = generatedSuggestions
+    .map<Record<string, unknown> | null>((item, index) => {
+      const focus = String(item.focus || '').trim();
+      const reason = String(item.reason || '').trim();
+      const title = focus || reason;
+      if (!title) return null;
+      return {
+        task_id: taskId,
+        standard_item_id: null,
+        standard_category: String(item.standard_category || item.standardCategory || 'AI预设'),
+        check_item: title.substring(0, 200),
+        check_requirement: reason || null,
+        evaluation_result: '待定',
+        problem_description: null,
+        sort_order: nextSort + index,
+      };
+    })
+    .filter((item): item is Record<string, unknown> => item !== null);
+
+  if (generatedInserts.length > 0) {
+    const { data } = await client.from('check_records').insert(generatedInserts).select();
+    created.push(...(data || []));
+  }
+
+  return created;
 }
 
 async function acceptRecipeSuggestions(client: ReturnType<typeof getSupabaseClient>, taskId: string, recipes: Array<Record<string, unknown>>) {

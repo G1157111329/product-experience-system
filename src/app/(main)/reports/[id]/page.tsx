@@ -493,6 +493,35 @@ export default function ReportDetailPage() {
   const [shareLinks, setShareLinks] = useState<Array<{ id: string; share_token: string; expires_at: string | null; is_expired: boolean; created_at: string }>>([]);
   const { open, PreviewComponent } = useImagePreview();
 
+  const fetchLiveIssues = useCallback(async (reportId: string) => {
+    const res = await fetch(`/api/issues?limit=500`);
+    const data = await res.json();
+    const raw = data.data;
+    const allIssues: IssueItem[] = Array.isArray(raw) ? raw : (raw?.list || []);
+    const reportIssues = allIssues.filter((i: IssueItem) => i.source_report_id === reportId);
+    // Fetch re-evaluations for recipe_problem issues
+    const recipeIssues = reportIssues.filter((i: IssueItem) => i.source_type === 'recipe_problem');
+    if (recipeIssues.length > 0) {
+      try {
+        const issueIds = recipeIssues.map(i => i.id).join(',');
+        const reRes = await fetch(`/api/issue-re-evaluations?issue_ids=${issueIds}`);
+        const reData = await reRes.json();
+        if (reData.code === 0 && reData.data) {
+          const reEvalMap: Record<string, ReEvaluation[]> = {};
+          for (const re of reData.data) {
+            if (!reEvalMap[re.issue_id]) reEvalMap[re.issue_id] = [];
+            reEvalMap[re.issue_id].push(re);
+          }
+          // Attach re-evaluations (with embedded materials) to issues
+          for (const issue of recipeIssues) {
+            (issue as Record<string, unknown>)._reEvaluations = reEvalMap[issue.id] || [];
+          }
+        }
+      } catch { /* ignore re-evaluation fetch errors */ }
+    }
+    setLiveIssuesMap(prev => ({ ...prev, [reportId]: reportIssues }));
+  }, []);
+
   const fetchReport = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
@@ -538,36 +567,7 @@ export default function ReportDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [id]);
-
-  const fetchLiveIssues = async (reportId: string) => {
-    const res = await fetch(`/api/issues?limit=500`);
-    const data = await res.json();
-    const raw = data.data;
-    const allIssues: IssueItem[] = Array.isArray(raw) ? raw : (raw?.list || []);
-    const reportIssues = allIssues.filter((i: IssueItem) => i.source_report_id === reportId);
-    // Fetch re-evaluations for recipe_problem issues
-    const recipeIssues = reportIssues.filter((i: IssueItem) => i.source_type === 'recipe_problem');
-    if (recipeIssues.length > 0) {
-      try {
-        const issueIds = recipeIssues.map(i => i.id).join(',');
-        const reRes = await fetch(`/api/issue-re-evaluations?issue_ids=${issueIds}`);
-        const reData = await reRes.json();
-        if (reData.code === 0 && reData.data) {
-          const reEvalMap: Record<string, ReEvaluation[]> = {};
-          for (const re of reData.data) {
-            if (!reEvalMap[re.issue_id]) reEvalMap[re.issue_id] = [];
-            reEvalMap[re.issue_id].push(re);
-          }
-          // Attach re-evaluations (with embedded materials) to issues
-          for (const issue of recipeIssues) {
-            (issue as Record<string, unknown>)._reEvaluations = reEvalMap[issue.id] || [];
-          }
-        }
-      } catch { /* ignore re-evaluation fetch errors */ }
-    }
-    setLiveIssuesMap(prev => ({ ...prev, [reportId]: reportIssues }));
-  };
+  }, [fetchLiveIssues, id]);
 
   useEffect(() => { fetchReport().finally(() => setLoading(false)); }, [fetchReport]);
 

@@ -11,10 +11,10 @@
 - **Language**: TypeScript 5
 - **UI 组件**: shadcn/ui (基于 Radix UI)
 - **Styling**: Tailwind CSS 4
-- **Database**: Supabase (PostgreSQL)
-- **File Storage**: S3 兼容对象存储 (coze-coding-dev-sdk)
-- **AI/LLM**: doubao-seed-2-0-pro-260215 (默认/Agent任务/标准导入解析), doubao-seed-2-0-lite-260215 (轻量场景)
-- **PDF/Excel解析**: coze-coding-dev-sdk FetchClient + xlsx
+- **Database**: Supabase (PostgreSQL) / 自建 PostgreSQL (Drizzle ORM)
+- **File Storage**: S3 兼容对象存储 (MinIO / AWS S3 / 火山引擎 TOS)
+- **AI/LLM**: Bear-Model-VL (OpenAI 兼容 API, 默认地址 http://ds.bears.com.cn:8000/v1) + 自定义模型支持
+- **PDF解析**: pdf-parse (本地解析) + xlsx (Excel解析)
 - **Theme**: Teal 主色 / Business 字体 / Cool 阴影
 
 ## 目录结构
@@ -69,7 +69,8 @@
 │   │   └── media-capture-dialog.tsx # 拍照/录像对话框（移动端原生相机，桌面端浏览器摄像头）
 │   │   └── ui/                  # Shadcn UI 组件库
 │   ├── storage/database/
-│   │   ├── supabase-client.ts   # Supabase 客户端
+│   │   ├── supabase-client.ts   # Supabase 客户端（双模式：云/本地）
+│   │   ├── pg-db.ts             # PostgreSQL 直连（Drizzle ORM）
 │   │   └── shared/schema.ts     # Drizzle ORM Schema
 │   └── lib/
 │       ├── utils.ts
@@ -178,7 +179,7 @@
 ## 构建与运行
 
 ### 环境要求
-- **Node.js**: 24+ (通过 .coze 配置 `requires = ["nodejs-24"]`)
+- **Node.js**: 24+（本地/Docker 环境需安装 Node.js 24）
 - **包管理器**: pnpm (禁止 npm / yarn)
 - **端口**: 5000 (开发与生产统一，`DEPLOY_RUN_PORT` 环境变量)
 
@@ -186,17 +187,16 @@
 
 | 变量名 | 说明 | 示例值 |
 |--------|------|--------|
-| `COZE_WORKSPACE_PATH` | 项目工作目录 | `/workspace/projects/` |
-| `COZE_PROJECT_DOMAIN_DEFAULT` | 对外访问域名 | `https://abc123.dev.coze.site` |
+| `DATABASE_URL` | PostgreSQL 连接字符串（本地模式） | `postgresql://xp_admin:password@127.0.0.1:5432/xp_experience` |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase 项目 URL（云模式） | `https://xxx.supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase 匿名密钥（云模式） | `eyJ...` |
+| `S3_ENDPOINT` | S3 兼容存储端点 | `http://127.0.0.1:9000` |
+| `S3_REGION` | S3 区域 | `us-east-1` |
+| `S3_BUCKET` | 存储桶名称 | `xp-experience-media` |
+| `S3_ACCESS_KEY` | 存储访问密钥 | `minioadmin` |
+| `S3_SECRET_KEY` | 存储密钥 | `minioadmin` |
 | `DEPLOY_RUN_PORT` | 服务监听端口 | `5000` |
-| `COZE_PROJECT_ENV` | 环境标识 | `DEV` / `PROD` |
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase 项目 URL | `https://xxx.supabase.co` |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase 匿名密钥 | `eyJ...` |
-| `OSS_ACCESS_KEY_ID` | 对象存储 AccessKey | — |
-| `OSS_ACCESS_KEY_SECRET` | 对象存储 SecretKey | — |
-| `OSS_BUCKET` | 对象存储 Bucket | — |
-| `OSS_REGION` | 对象存储 Region | — |
-| `OSS_ENDPOINT` | 对象存储 Endpoint | — |
+| `NODE_ENV` | 运行环境 | `development` / `production` |
 
 ### 开发命令
 
@@ -220,20 +220,22 @@ pnpm build
 pnpm start
 ```
 
-### Coze CLI 命令
+### 本地部署命令
+
+> 项目使用本地/Docker 部署，以下命令用于安装、开发、构建和启动：
 
 ```bash
-# 初始化项目（仅首次）
-coze init /workspace/projects --template nextjs
+# 安装依赖
+pnpm install
 
-# 启动开发环境
-coze dev
+# 开发模式（端口 5000）
+pnpm dev
 
 # 构建生产版本
-coze build
+pnpm build
 
 # 启动生产环境
-coze start
+pnpm start
 ```
 
 ### 初始账号
@@ -254,7 +256,7 @@ coze start
 6. **PDF导出**: 通过打印页面(`/reports/print?id=xxx`)实现，浏览器原生打印为PDF，含照片/视频预览图
 7. **数据库**: Supabase PostgreSQL，Drizzle ORM，RLS 公开读写
 8. **AI 预留**: materials 表预留 ai_analysis_status 和 ai_result 字段
-9. **标准批量导入**: 支持 PDF（fetch-url提取+LLM结构化解析）和 Excel（xlsx直接解析），使用 doubao-seed-2-0-pro 模型，按标准分类使用不同LLM prompt
+9. **标准批量导入**: 支持 PDF（pdf-parse 本地提取文本 + AI 结构化解析）和 Excel（xlsx 直接解析），使用 Bear-Model-VL 模型，按标准分类使用不同 prompt
 10. **标准分类维度重构**: 四类标准（通用/品类/感官评价/食谱功能）有不同输入字段结构，创建和编辑时按分类展示不同表单
 11. **五感体验-新增问题点重构**: 移除"从标准库引用"栏目，改为选择"标准类型"后按类型展示不同筛选/输入字段；通用标准选择产品使用阶段→体验流程→感官维度后自动带出触点和检验范围及具体要求
 12. **权限控制**: 管理账号(admin)可编辑标准、导入、删除；使用账号(user)只读，侧边栏底部切换角色
@@ -294,7 +296,7 @@ coze start
 46. **报告时间格式化**: 报告中心 created_at/updated_at 以北京时间（UTC+8）格式显示，隐藏 created_by 字段
 47. **页面内边距统一**: 工作台/报告中心/问题管理等主页面统一使用 p-4 lg:p-6 内边距，与体验计划/标准管理/数据分析页面一致
 48. **食谱效果评价**: 每个食谱/功能新增"效果/出品效果评价"板块（与步骤同等级），包含效果描述输入框+附件素材框+AI总结评分；AI通过视觉评估食物状态和功能效果，按美食评委评分制（满分10分）输出分数
-49. **AI模型配置**: 管理员可在个人设置中配置AI模型和API信息，支持内置模型（doubao-seed-vision系列等）和自定义API（OpenAI兼容格式）；配置存储在platform_settings(ai_config)，包含provider/model/temperature/custom_api_url/custom_api_key
+49. **AI模型配置**: 管理员可在个人设置中配置AI模型和API信息，支持自定义 OpenAI 兼容 API；默认使用 Bear-Model-VL（http://ds.bears.com.cn:8000/v1）；配置存储在 ai_model_configs 表或 platform_settings(ai_config)
 50. **食谱效果素材关联**: materials表新增recipe_id字段，可关联食谱效果评价的附件素材；MaterialPicker组件支持recipe_id参数
 51. **AI效果评价API**: POST /api/recipes/[id]/ai-evaluate 端点，接收食谱描述+图片素材，调用AI模型按四维评价体系（质感/透彻/纯净/恒定）生成评价，每维度0-10分+评语，综合评分自动保存到recipes.effect_score，完整结果保存到recipes.effect_ai_result(JSONB)
 52. **效果评价问题点**: 效果/出品效果评价板块新增问题点输入框（effect_problem_point字段），与步骤的问题点格式一致；报告生成时效果问题点也会自动创建问题记录
@@ -319,7 +321,7 @@ coze start
 71. **报告问题点清单分行呈现**: 报告详情页、打印页、分享页的问题清单优化为多行结构化呈现——第一行：等级+标题+状态；第二行：标准/分类（如有）；第三行：问题来源；第四行：整改方案（含责任人、计划完成日期）；第五行：验证结果（如有）
 72. **素材预览放大**: MaterialPicker中已选素材缩略图支持点击放大查看（图片）或播放（视频），使用Dialog全屏预览
 73. **问题点保存同步效果评价**: 问题点板块的"保存"按钮调用handleSaveEffect，同时保存效果描述和问题点数据
-74. **AI模型切换**: 默认AI模型从已停运的doubao-seed-1-6-vision-250815/kimi-k2-5-260127统一切换为doubao-seed-2-0-pro-260215（旗舰模型，面向Agent复杂推理场景）；platform_settings.ai_config同步更新
+74. **AI模型切换**: 已迁移至 OpenAI 兼容 API；默认模型 Bear-Model-VL（http://ds.bears.com.cn:8000/v1），支持在 ai_model_configs 表配置自定义 provider/model/api_url/api_key；移除 forceBuiltInModel 参数，统一走 fetch 调用
 75. **Agent预设错误上报**: Agent预设API(agent-presets)不再静默吞掉AI调用失败错误；无结果且有错误时返回code:1和500状态码，部分失败时在warnings字段返回错误详情，前端toast显示失败原因
 76. **标准建议过滤放宽**: normalizePresetSuggestions对standards的过滤条件从"必须有standardItemId"放宽为"有standardItemId或reason或focus"，使AI生成的新建议（无DB ID）也能展示
 77.
@@ -386,11 +388,11 @@ coze start
 | 产品型号所有项目类型都必填 | 表单验证未区分项目类型 | 仅"自研"和"改型/降本/优化"时必填，其他类型可选 |
 | 食谱库/注册等RLS策略缺失 | 启用了RLS但没有策略，INSERT/UPDATE被拒绝 | 为 recipe_library, recipe_library_steps, platform_users, platform_settings, report_shares 添加公开读写策略 |
 | gen_random_uuid运行时错误 | schema.ts 中作为JS函数调用，改为 sql`gen_random_uuid()` 模板语法 | 所有 gen_random_uuid() 改为 sql`gen_random_uuid()`，导致所有API返回500 |
-| AI模型名无效 | doubao-seed-2-0-lite 缺少日期后缀 | 正确模型名为 doubao-seed-2-0-lite-260215，invokeConfiguredAI 新增 forceBuiltInModel 参数 |
-| AI探索返回空内容 | platform_settings.ai_config中model为已停运的doubao-seed-1-6-vision-250815，且错误被catch静默吞掉 | 更新ai_config.model为doubao-seed-2-0-pro-260215；agent-presets API无结果时返回错误信息而非空数据 |
+| AI模型名无效 | 旧模型名 doubao-seed-2-0-lite 缺少日期后缀 | 已迁移至 OpenAI 兼容 API，使用 Bear-Model-VL 或在设置中配置自定义模型 |
+| AI探索返回空内容 | platform_settings.ai_config 中模型配置过时 | 已迁移至 ai_model_configs 表，默认使用 Bear-Model-VL；agent-presets API 无结果时返回错误信息而非空数据 |
 | 步骤保存后无法编辑 | handleEditStep 使用 as unknown 类型转换导致素材数据丢失 | 直接使用 step.materials 访问，编辑对话框传入 initialMaterials |
 | 侧边栏与内容长度不一致 | 主布局使用 min-h-screen 导致内容无限拉长 | 改为 h-screen overflow-hidden + overflow-y-auto 实现固定视口滚动 |
 | 编辑任务空日期报错 | PUT /api/tasks/[id] 未处理空字符串日期 | test_date: body.test_date \|\| null 转换空字符串为 null |
 | 删除五感体验/食谱/步骤导致素材被删除 | DB外键 onDelete("cascade") 级联删除素材 + API显式删除素材 | DB外键改为 onDelete("set null")，API改为 update({record_id/recipe_step_id/recipe_library_step_id: null}) 解除关联 |
-| 食谱AI探索返回空内容 | platform_settings.ai_config中model为已停运的doubao-seed-1-6-vision-250815，且错误被catch静默吞掉 | 更新ai_config.model为doubao-seed-2-0-pro-260215；agent-presets API无结果时返回错误信息而非空数据 |
+| 食谱AI探索返回空内容 | platform_settings.ai_config 中模型配置过时 | 同上，已迁移至统一 API 调用方式 |
 | 复评估素材无法关联 | 素材通过issue_id关联，无法区分同一问题下不同次复评估的素材 | materials表新增re_evaluation_id字段，素材通过复评估ID精确关联；DELETE时解除re_evaluation_id而非issue_id |

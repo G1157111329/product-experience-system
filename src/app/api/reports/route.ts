@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { eq } from 'drizzle-orm';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { getDb } from '@/storage/database/pg-db';
+import {
+  issues as issuesTable,
+  recipeLibrary,
+  recipeLibrarySteps,
+  reports as reportsTable,
+} from '@/storage/database/shared/schema';
 import { preserveReviewOverrides, type ReportContentWithReview } from '@/lib/report-review-overrides';
 
 export async function GET(request: NextRequest) {
@@ -171,140 +179,126 @@ export async function POST(request: NextRequest) {
     { preserve: body.preserve_review_overrides !== false },
   );
 
-  // Delete any older reports for the same task FIRST (before creating new one)
-  await client.from('reports').delete().eq('task_id', body.task_id);
-  // Also delete issues linked to the old reports for this task
-  await client.from('issues').delete().eq('task_id', body.task_id);
+  const db = getDb();
+  const savedReport = await db.transaction(async (tx) => {
+    await tx.delete(reportsTable).where(eq(reportsTable.taskId, body.task_id));
+    await tx.delete(issuesTable).where(eq(issuesTable.taskId, body.task_id));
 
-  // Small delay to ensure deletes are committed before inserts (prevent race conditions)
-  await new Promise(resolve => setTimeout(resolve, 200));
+    const [report] = await tx.insert(reportsTable).values({
+      taskId: body.task_id,
+      templateId: body.template_id || null,
+      title: body.title || `${task?.task_name || '体验'}报告`,
+      productModel: task?.product_model || null,
+      content: finalReportContent,
+      status: '已完成',
+    }).returning();
 
-  const { data, error } = await client.from('reports').insert({
-    task_id: body.task_id,
-    template_id: body.template_id || null,
-    title: body.title || `${task?.task_name || '体验'}报告`,
-    product_model: task?.product_model || null,
-    content: finalReportContent,
-    status: '已完成',
-  }).select().single();
+    if (!report) {
+      throw new Error('报告创建失败');
+    }
 
-  if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
+    const reportTitle = report.title || '报告';
+    const records = (recordsWithMaterials || []) as Record<string, unknown>[];
+    const recs = (recipesWithCount || []) as Record<string, unknown>[];
+    const createdKeys = new Set<string>();
+    const sourceText = (value: string) => value.substring(0, 50);
+    const issueRows: Array<typeof issuesTable.$inferInsert> = [];
 
-    // Create issues from report content (server-side, no race conditions)
-    // DB has UNIQUE(title, source_type, task_id) constraint to prevent duplicates
-    if (data) {
-      const reportId = data.id;
-      const reportTitle = data.title || '报告';
-      const records = (recordsWithMaterials || []) as Record<string, unknown>[];
-      const recs = (recipesWithCount || []) as Record<string, unknown>[];
+    for (const record of records) {
+      if (record.evaluation_result !== '不合格') continue;
 
-      // Track created issue keys to prevent duplicates within this creation session
-      const createdKeys = new Set<string>();
+      const issueTitle = String(record.check_item || '不合格检查项').substring(0, 200);
+      const issueKey = `record_fail::${issueTitle}`;
+      if (createdKeys.has(issueKey)) continue;
 
-      // Create issues from failed check records (one issue per unique problem, not per material)
-      for (const record of records) {
-        if (record.evaluation_result === '不合格') {
-          const issueTitle = (record.check_item as string) || '不合格检查项';
-          const issueKey = `record_fail::${issueTitle}`;
+      issueRows.push({
+        taskId: body.task_id,
+        title: issueTitle,
+        productModel: (task as Record<string, unknown>)?.product_model as string || null,
+        level: '二类',
+        source: sourceText(`${reportTitle} - 不合格检查项`),
+        sourceReportId: report.id,
+        sourceType: 'record_fail',
+        description: [record.check_requirement, record.check_standard, record.problem_description].filter(Boolean).join('\n'),
+        status: '待整改',
+      });
+      createdKeys.add(issueKey);
+    }
+
+    for (const recipe of recs) {
+      for (const step of ((recipe.recipe_steps || []) as Array<Record<string, unknown>>)) {
+        const problemPoints: Array<{ text: string }> = [];
+        const pp = step.problem_points;
+        if (Array.isArray(pp) && pp.length > 0) {
+          (pp as Array<{ text: string }>).forEach((p) => {
+            if (p.text && p.text.trim()) problemPoints.push({ text: p.text });
+          });
+        } else if (step.problem_point && String(step.problem_point).trim()) {
+          problemPoints.push({ text: String(step.problem_point) });
+        }
+
+        for (const ppItem of problemPoints) {
+          const issueTitle = ppItem.text.substring(0, 200);
+          const issueKey = `recipe_problem::${issueTitle}`;
           if (createdKeys.has(issueKey)) continue;
 
-          const { error: insertError } = await client.from('issues').insert({
-            task_id: body.task_id,
+          issueRows.push({
+            taskId: body.task_id,
             title: issueTitle,
-            product_model: (task as Record<string, unknown>)?.product_model || null,
+            productModel: (task as Record<string, unknown>)?.product_model as string || null,
             level: '二类',
-            source: `${reportTitle} - 不合格检查项`,
-            source_report_id: reportId,
-            source_type: 'record_fail',
-            description: [record.check_requirement, record.check_standard, record.problem_description].filter(Boolean).join('\n'),
+            source: sourceText(`${reportTitle} - 食谱功能问题(${(recipe as Record<string, unknown>).name || ''})`),
+            sourceReportId: report.id,
+            sourceType: 'recipe_problem',
+            description: `步骤${step.step_number}: ${step.operation || ''}`,
             status: '待整改',
           });
-          // If insert fails due to unique constraint, it's a duplicate - skip silently
-          if (!insertError) {
-            createdKeys.add(issueKey);
-          }
+          createdKeys.add(issueKey);
         }
       }
 
-      // Create issues from recipe problem points (one issue per unique problem point text, not per material)
-      for (const recipe of recs) {
-        for (const step of ((recipe.recipe_steps || []) as Array<Record<string, unknown>>)) {
-          const problemPoints: Array<{ text: string }> = [];
-          const pp = step.problem_points;
-          if (Array.isArray(pp) && pp.length > 0) {
-            (pp as Array<{ text: string }>).forEach((p) => {
-              if (p.text && p.text.trim()) problemPoints.push({ text: p.text });
-            });
-          } else if (step.problem_point && String(step.problem_point).trim()) {
-            problemPoints.push({ text: String(step.problem_point) });
-          }
-
-          for (const ppItem of problemPoints) {
-            const issueTitle = ppItem.text.substring(0, 200);
-            const issueKey = `recipe_problem::${issueTitle}`;
-            if (createdKeys.has(issueKey)) continue;
-
-            const stepDesc = `步骤${step.step_number}: ${step.operation || ''}`;
-            const { error: insertError } = await client.from('issues').insert({
-              task_id: body.task_id,
-              title: issueTitle,
-              product_model: (task as Record<string, unknown>)?.product_model || null,
-              level: '二类',
-              source: `${reportTitle} - 食谱功能问题(${(recipe as Record<string, unknown>).name || ''})`,
-              source_report_id: reportId,
-              source_type: 'recipe_problem',
-              description: stepDesc,
-              status: '待整改',
-            });
-            // If insert fails due to unique constraint, it's a duplicate - skip silently
-            if (!insertError) {
-              createdKeys.add(issueKey);
-            }
-          }
-        }
-
-        // Create issues from recipe effect problem points (supports structured format)
-        if (recipe.effect_problem_point && String(recipe.effect_problem_point).trim()) {
-          const effectPPStr = String(recipe.effect_problem_point).trim();
-          let effectPPs: string[] = [];
-          try {
-            const parsed = JSON.parse(effectPPStr);
-            if (Array.isArray(parsed)) {
-              effectPPs = parsed
-                .filter((p: unknown) => typeof p === 'object' && p !== null && typeof (p as Record<string, unknown>).text === 'string')
-                .map((p: { text: string }) => p.text.trim())
-                .filter((t: string) => t);
-            } else {
-              effectPPs = [effectPPStr];
-            }
-          } catch {
+      if (recipe.effect_problem_point && String(recipe.effect_problem_point).trim()) {
+        const effectPPStr = String(recipe.effect_problem_point).trim();
+        let effectPPs: string[] = [];
+        try {
+          const parsed = JSON.parse(effectPPStr);
+          if (Array.isArray(parsed)) {
+            effectPPs = parsed
+              .filter((p: unknown) => typeof p === 'object' && p !== null && typeof (p as Record<string, unknown>).text === 'string')
+              .map((p: { text: string }) => p.text.trim())
+              .filter((t: string) => t);
+          } else {
             effectPPs = [effectPPStr];
           }
+        } catch {
+          effectPPs = [effectPPStr];
+        }
 
-          for (const ppText of effectPPs) {
-            const issueTitle = ppText.substring(0, 200);
-            const issueKey = `recipe_problem::${issueTitle}`;
-            if (!createdKeys.has(issueKey)) {
-              const { error: insertError } = await client.from('issues').insert({
-                task_id: body.task_id,
-                title: issueTitle,
-                product_model: (task as Record<string, unknown>)?.product_model || null,
-                level: '二类',
-                source: `${reportTitle} - 食谱效果问题(${(recipe as Record<string, unknown>).name || ''})`,
-                source_report_id: reportId,
-                source_type: 'recipe_problem',
-                description: '效果/出品效果评价问题',
-                status: '待整改',
-              });
-              if (!insertError) {
-                createdKeys.add(issueKey);
-              }
-            }
-          }
+        for (const ppText of effectPPs) {
+          const issueTitle = ppText.substring(0, 200);
+          const issueKey = `recipe_problem::${issueTitle}`;
+          if (createdKeys.has(issueKey)) continue;
+
+          issueRows.push({
+            taskId: body.task_id,
+            title: issueTitle,
+            productModel: (task as Record<string, unknown>)?.product_model as string || null,
+            level: '二类',
+            source: sourceText(`${reportTitle} - 食谱效果问题(${(recipe as Record<string, unknown>).name || ''})`),
+            sourceReportId: report.id,
+            sourceType: 'recipe_problem',
+            description: '效果/出品效果评价问题',
+            status: '待整改',
+          });
+          createdKeys.add(issueKey);
         }
       }
+    }
 
-    // Save recipes to recipe_library (dedup by name only, regardless of category/product)
+    if (issueRows.length > 0) {
+      await tx.insert(issuesTable).values(issueRows).onConflictDoNothing();
+    }
+
     const taskInfo = task as Record<string, unknown>;
     const taskProductCategory = taskInfo?.product_category as string || null;
     const taskProduct = taskInfo?.product as string || null;
@@ -312,36 +306,39 @@ export async function POST(request: NextRequest) {
       const recipeName = (recipe as Record<string, unknown>).name as string;
       if (!recipeName) continue;
 
-      // Check if recipe with same name already exists (name-only dedup for auto-save from reports)
-      const { data: existingLib } = await client.from('recipe_library').select('id').eq('name', recipeName);
-
-      if (existingLib && existingLib.length > 0) continue; // Skip if already exists
-
-      // Insert into recipe_library
-      const { data: libItem } = await client.from('recipe_library').insert({
+      const [libItem] = await tx.insert(recipeLibrary).values({
         name: recipeName,
-        product_category: taskProductCategory,
+        productCategory: taskProductCategory,
         product: taskProduct,
         ingredients: (recipe as Record<string, unknown>).ingredients as string || null,
-        recipe_type: (recipe as Record<string, unknown>).recipe_type as string || '食谱',
-      }).select().single();
+        recipeType: (recipe as Record<string, unknown>).recipe_type as string || '食谱',
+      }).onConflictDoNothing({ target: recipeLibrary.name }).returning({ id: recipeLibrary.id });
 
-      // Copy steps to library
-      if (libItem) {
-        const steps = ((recipe as Record<string, unknown>).recipe_steps || []) as Array<Record<string, unknown>>;
-        for (let i = 0; i < steps.length; i++) {
-          const s = steps[i];
-          await client.from('recipe_library_steps').insert({
-            recipe_library_id: libItem.id,
-            step_number: i + 1,
-            operation: s.operation as string || '',
-            problem_point: s.problem_point as string || null,
-            problem_points: s.problem_points || [],
-          });
-        }
-      }
+      if (!libItem) continue;
+
+      const steps = ((recipe as Record<string, unknown>).recipe_steps || []) as Array<Record<string, unknown>>;
+      if (steps.length === 0) continue;
+
+      await tx.insert(recipeLibrarySteps).values(steps.map((s, index) => ({
+        recipeLibraryId: libItem.id,
+        stepNumber: index + 1,
+        operation: s.operation as string || '',
+        problemPoint: s.problem_point as string || null,
+        problemPoints: s.problem_points || [],
+      })));
     }
-  }
+
+    return report;
+  });
+
+  const data = {
+    ...savedReport,
+    task_id: savedReport.taskId,
+    template_id: savedReport.templateId,
+    product_model: savedReport.productModel,
+    created_at: savedReport.createdAt,
+    updated_at: savedReport.updatedAt,
+  };
 
   return NextResponse.json({ code: 0, message: '报告生成成功', data });
 }

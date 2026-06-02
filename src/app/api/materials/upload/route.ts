@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { S3Storage } from 'coze-coding-dev-sdk';
+import { uploadFile } from '@/lib/server/storage';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-
-// SDK 自动读取 COZE_BUCKET_ENDPOINT_URL 和 COZE_BUCKET_NAME 环境变量
-const storage = new S3Storage();
 
 // Allow up to 100MB file uploads with extended timeout
 export const maxDuration = 120; // seconds - extended for large video uploads
@@ -58,12 +55,12 @@ export async function POST(request: NextRequest) {
     const folderId = recipe_library_step_id || issue_id || task_id || 'unknown';
     const fileName = `experience-media/${folderId}/${materialType}/${timestamp}_${file.name}`;
 
-    // 上传到对象存储 (with retry for large files)
+    // Upload to S3-compatible storage (with retry for large files)
     let fileKey: string | undefined;
     const maxRetries = isLargeFile ? 2 : 0;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        fileKey = await storage.uploadFile({
+        fileKey = await uploadFile({
           fileContent: buffer,
           fileName,
           contentType: file.type,
@@ -85,9 +82,6 @@ export async function POST(request: NextRequest) {
     if (!fileKey) {
       return NextResponse.json({ code: 1, message: '文件上传失败' }, { status: 500 });
     }
-
-    // 不再存储签名URL（会过期导致裂图），仅存储file_path
-    // 前端通过 /api/materials/presign 按需获取临时签名URL
 
     // 保存素材记录到数据库
     const client = getSupabaseClient();

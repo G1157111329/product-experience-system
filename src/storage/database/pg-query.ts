@@ -66,11 +66,39 @@ const tableSchemaMap: Record<string, any> = {
   health_check: healthCheck,
 } as any;
 
+const tableRelationMap: Record<string, Record<string, RelationConfig>> = {
+  standards: {
+    standard_items: { schema: standardItems, parentKey: 'id', childKey: 'standard_id', defaultOrder: 'sort_order' },
+  },
+  recipe_library: {
+    recipe_library_steps: { schema: recipeLibrarySteps, parentKey: 'id', childKey: 'recipe_library_id', defaultOrder: 'step_number' },
+  },
+  check_records: {
+    materials: { schema: materials, parentKey: 'id', childKey: 'record_id', defaultOrder: 'created_at' },
+  },
+  recipes: {
+    recipe_steps: { schema: recipeSteps, parentKey: 'id', childKey: 'recipe_id', defaultOrder: 'step_number' },
+  },
+};
+
+type DbError = { message: string; code?: string };
+type QueryResult = { data: unknown; error: DbError | null; count?: number | null };
 type EqCondition = { field: string; value: unknown };
-type OrderCondition = { field: string; order?: 'asc' | 'desc' };
+type CompareCondition = { field: string; value: unknown };
+type OrderCondition = { field: string; order?: 'asc' | 'desc'; referencedTable?: string };
+type RelationConfig = {
+  schema: any;
+  parentKey: string;
+  childKey: string;
+  defaultOrder?: string;
+};
 
 function toCamelCase(value: string) {
   return value.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
+}
+
+function toSnakeCase(value: string) {
+  return value.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 }
 
 function resolveColumn(schema: any, field: string) {
@@ -83,17 +111,66 @@ function normalizeWriteData(schema: any, data: Record<string, unknown>) {
   );
 }
 
+function normalizeWriteRows(schema: any, data: Record<string, unknown> | Record<string, unknown>[]) {
+  return Array.isArray(data)
+    ? data.map((row) => normalizeWriteData(schema, row))
+    : normalizeWriteData(schema, data);
+}
+
+function normalizeReadRow(row: unknown): unknown {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
+
+  return Object.fromEntries(
+    Object.entries(row as Record<string, unknown>).map(([key, value]) => [
+      toSnakeCase(key),
+      value,
+    ])
+  );
+}
+
+function normalizeReadRows(rows: unknown[]) {
+  return rows.map(normalizeReadRow);
+}
+
+function parseNestedSelect(field: string) {
+  const match = field.match(/^([a-zA-Z0-9_]+)\((\*|count)\)$/);
+  if (!match) return null;
+  return { relationName: match[1], mode: match[2] as '*' | 'count' };
+}
+
+function normalizeDbError(error: unknown): DbError {
+  const err = error as { message?: string; code?: string; cause?: { code?: string; message?: string } };
+  return {
+    message: err?.message || err?.cause?.message || 'Database query failed',
+    code: err?.code || err?.cause?.code,
+  };
+}
+
+function decodeFilterValue(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 class QueryBuilder {
   private tableName: string;
   private schema: any;
-  private action: 'select' | 'insert' | 'update' | 'delete' = 'select';
+  private action: 'select' | 'insert' | 'update' | 'delete' | 'upsert' = 'select';
   private selectFields: string[] = ['*'];
   private eqConditions: EqCondition[] = [];
+  private neqConditions: EqCondition[] = [];
+  private gteConditions: CompareCondition[] = [];
+  private lteConditions: CompareCondition[] = [];
+  private ilikeConditions: CompareCondition[] = [];
+  private isConditions: EqCondition[] = [];
   private inConditions: { field: string; values: unknown[] }[] = [];
+  private orExpressions: string[] = [];
   private orderConditions: OrderCondition[] = [];
   private limitCount?: number;
   private offsetCount?: number;
-  private insertData?: Record<string, unknown>;
+  private insertData?: Record<string, unknown> | Record<string, unknown>[];
   private updateData?: Record<string, unknown>;
   private returningFields: string[] = ['*'];
 
@@ -103,13 +180,24 @@ class QueryBuilder {
   }
 
   select(fields?: string): QueryBuilder {
-    this.action = 'select';
-    if (fields) this.selectFields = fields.split(',').map((f) => f.trim());
+    if (this.action === 'select') {
+      this.action = 'select';
+      if (fields) this.selectFields = fields.split(',').map((f) => f.trim());
+      return this;
+    }
+
+    if (fields) this.returningFields = fields.split(',').map((f) => f.trim());
     return this;
   }
 
-  insert(data?: Record<string, unknown>): QueryBuilder {
+  insert(data?: Record<string, unknown> | Record<string, unknown>[]): QueryBuilder {
     this.action = 'insert';
+    if (data) this.insertData = data;
+    return this;
+  }
+
+  upsert(data?: Record<string, unknown> | Record<string, unknown>[]): QueryBuilder {
+    this.action = 'upsert';
     if (data) this.insertData = data;
     return this;
   }
@@ -130,16 +218,46 @@ class QueryBuilder {
     return this;
   }
 
+  neq(field: string, value: unknown): QueryBuilder {
+    this.neqConditions.push({ field, value });
+    return this;
+  }
+
+  gte(field: string, value: unknown): QueryBuilder {
+    this.gteConditions.push({ field, value });
+    return this;
+  }
+
+  lte(field: string, value: unknown): QueryBuilder {
+    this.lteConditions.push({ field, value });
+    return this;
+  }
+
+  ilike(field: string, value: unknown): QueryBuilder {
+    this.ilikeConditions.push({ field, value });
+    return this;
+  }
+
+  is(field: string, value: unknown): QueryBuilder {
+    this.isConditions.push({ field, value });
+    return this;
+  }
+
   in(field: string, values: unknown[]): QueryBuilder {
     this.inConditions.push({ field, values });
     return this;
   }
 
-  order(field: string, order?: 'asc' | 'desc' | { ascending?: boolean }): QueryBuilder {
+  or(expression: string): QueryBuilder {
+    this.orExpressions.push(expression);
+    return this;
+  }
+
+  order(field: string, order?: 'asc' | 'desc' | { ascending?: boolean; referencedTable?: string }): QueryBuilder {
     const direction = typeof order === 'object'
       ? order.ascending === false ? 'desc' : 'asc'
       : order || 'asc';
-    this.orderConditions.push({ field, order: direction });
+    this.orderConditions.push({ field, order: direction, referencedTable: typeof order === 'object' ? order.referencedTable : undefined });
     return this;
   }
 
@@ -153,72 +271,129 @@ class QueryBuilder {
     return this;
   }
 
-  maybeSingle(): Promise<{ data: unknown; error: null } | { data: null; error: { message: string } }> {
+  range(from: number, to: number): QueryBuilder {
+    this.offsetCount = Math.max(0, from);
+    this.limitCount = Math.max(0, to - from + 1);
+    return this;
+  }
+
+  maybeSingle(): Promise<QueryResult> {
     return this._execute().then((rows) => {
       if (rows.length === 0) return { data: null, error: null };
       return { data: rows[0], error: null };
-    }) as any;
+    }).catch((error) => ({ data: null, error: normalizeDbError(error) })) as any;
   }
 
-  single(): Promise<{ data: unknown; error: null } | { data: null; error: { message: string } }> {
+  single(): Promise<QueryResult> {
     return this._execute().then((rows) => {
       if (rows.length === 0) return { data: null, error: { message: 'No data found' } };
       if (rows.length > 1) return { data: null, error: { message: 'Multiple data found' } };
       return { data: rows[0], error: null };
-    }) as any;
+    }).catch((error) => ({ data: null, error: normalizeDbError(error) })) as any;
   }
 
   then<TResult1 = unknown, TResult2 = unknown>(
-    onfulfilled?: ((value: { data: unknown; error: null }) => TResult1 | PromiseLike<TResult1>) | null,
+    onfulfilled?: ((value: QueryResult) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
   ): Promise<TResult1 | TResult2> {
     return this._execute()
-      .then((rows) => ({ data: rows, error: null }))
+      .then((rows) => ({ data: rows, error: null, count: rows.length }))
+      .catch((error) => ({ data: null, error: normalizeDbError(error), count: null }))
       .then(onfulfilled as any, onrejected);
   }
 
   catch<TResult = unknown>(
     onrejected?: ((reason: unknown) => TResult | PromiseLike<TResult>) | null
-  ): Promise<{ data: unknown; error: null } | TResult> {
+  ): Promise<QueryResult | TResult> {
     return this._execute()
-      .then((rows) => ({ data: rows, error: null }))
+      .then((rows) => ({ data: rows, error: null, count: rows.length }))
       .catch(onrejected) as any;
   }
 
   async _execute(): Promise<unknown[]> {
     const db = getDb();
-    const { and, eq, inArray, asc, desc } = await import('drizzle-orm').then((m) => m);
+    const { and, or, eq, ne, gte, lte, ilike, inArray, isNull, asc, desc } = await import('drizzle-orm').then((m) => m);
 
     if (!this.schema) throw new Error(`Unknown table: ${this.tableName}`);
 
-    const allConditions = [
+    const allConditions: any[] = [
       ...this.eqConditions.map((c) => eq(resolveColumn(this.schema, c.field), c.value)),
+      ...this.neqConditions.map((c) => ne(resolveColumn(this.schema, c.field), c.value)),
+      ...this.gteConditions.map((c) => gte(resolveColumn(this.schema, c.field), c.value)),
+      ...this.lteConditions.map((c) => lte(resolveColumn(this.schema, c.field), c.value)),
+      ...this.ilikeConditions.map((c) => ilike(resolveColumn(this.schema, c.field), String(c.value))),
+      ...this.isConditions.map((c) =>
+        c.value === null ? isNull(resolveColumn(this.schema, c.field)) : eq(resolveColumn(this.schema, c.field), c.value)
+      ),
       ...this.inConditions.map((c) => inArray(resolveColumn(this.schema, c.field), c.values)),
+      ...this.orExpressions
+        .map((expression) => {
+          const clauses = expression
+            .split(',')
+            .map((part) => part.trim())
+            .filter(Boolean)
+            .map((part) => {
+              const [field, operator, ...valueParts] = part.split('.');
+              const value = valueParts.join('.');
+              const column = resolveColumn(this.schema, field);
+
+              if (!column) return null;
+              if (operator === 'eq') return eq(column, decodeFilterValue(value));
+              if (operator === 'ilike') return ilike(column, decodeFilterValue(value));
+              if (operator === 'is' && value === 'null') return isNull(column);
+              return null;
+            })
+            .filter(Boolean);
+
+          return clauses.length > 0 ? or(...(clauses as any[])) : null;
+        })
+        .filter(Boolean),
     ];
     const whereClause = allConditions.length > 0 ? and(...allConditions) : undefined;
 
     switch (this.action) {
       case 'select': {
-        const fields = this.selectFields[0] === '*'
+        const nestedSelects = this.selectFields.map(parseNestedSelect).filter(Boolean) as Array<{ relationName: string; mode: '*' | 'count' }>;
+        const scalarFields = this.selectFields.filter((field) => !parseNestedSelect(field));
+        const fields = scalarFields.includes('*') || scalarFields.length === 0
           ? this.schema
-          : this.selectFields.reduce((acc: any, f) => ({ ...acc, [toCamelCase(f)]: resolveColumn(this.schema, f) }), {});
+          : scalarFields.reduce((acc: any, f) => ({ ...acc, [toCamelCase(f)]: resolveColumn(this.schema, f) }), {});
 
         let query: any = db.select(fields as any).from(this.schema as any);
         if (whereClause) query = query.where(whereClause);
         if (this.orderConditions.length > 0) {
-          const orders = this.orderConditions.map((o) =>
-            o.order === 'desc' ? desc(resolveColumn(this.schema, o.field)) : asc(resolveColumn(this.schema, o.field))
-          );
-          query = query.orderBy(...orders);
+          const parentOrders = this.orderConditions
+            .filter((o) => !o.referencedTable)
+            .map((o) => {
+              const column = resolveColumn(this.schema, o.field);
+              return column ? (o.order === 'desc' ? desc(column) : asc(column)) : null;
+            })
+            .filter(Boolean);
+          if (parentOrders.length > 0) query = query.orderBy(...parentOrders);
         }
         if (this.limitCount !== undefined) query = query.limit(this.limitCount);
         if (this.offsetCount !== undefined) query = query.offset(this.offsetCount);
-        return query as any;
+        const rows = normalizeReadRows(await query as unknown[]);
+        return this.hydrateNestedRows(rows, nestedSelects, { inArray, asc, desc });
       }
       case 'insert': {
         if (!this.insertData) return [];
-        const result = await db.insert(this.schema as any).values(normalizeWriteData(this.schema, this.insertData) as any).returning();
-        return result as unknown[];
+        const result = await db.insert(this.schema as any).values(normalizeWriteRows(this.schema, this.insertData) as any).returning();
+        return normalizeReadRows(result as unknown[]);
+      }
+      case 'upsert': {
+        if (!this.insertData) return [];
+        const rows = normalizeWriteRows(this.schema, this.insertData);
+        const updateSet = Array.isArray(rows) ? rows[0] : rows;
+        const conflictTarget = this.schema.key || this.schema.id;
+        let query: any = db.insert(this.schema as any).values(rows as any);
+        if (conflictTarget) {
+          query = query.onConflictDoUpdate({ target: conflictTarget, set: updateSet as any });
+        } else {
+          query = query.onConflictDoNothing();
+        }
+        const result = await query.returning();
+        return normalizeReadRows(result as unknown[]);
       }
       case 'update': {
         if (!this.updateData || !whereClause) return [];
@@ -227,16 +402,76 @@ class QueryBuilder {
           .set(normalizeWriteData(this.schema, this.updateData) as any)
           .where(whereClause)
           .returning();
-        return result as unknown[];
+        return normalizeReadRows(result as unknown[]);
       }
       case 'delete': {
         if (!whereClause) return [];
         const result = await db.delete(this.schema as any).where(whereClause).returning();
-        return result as unknown[];
+        return normalizeReadRows(result as unknown[]);
       }
       default:
         return [];
     }
+  }
+
+  private async hydrateNestedRows(
+    rows: unknown[],
+    nestedSelects: Array<{ relationName: string; mode: '*' | 'count' }>,
+    helpers: { inArray: any; asc: any; desc: any },
+  ) {
+    if (rows.length === 0 || nestedSelects.length === 0) return rows;
+
+    const db = getDb();
+    const relations = tableRelationMap[this.tableName] || {};
+    const parentRows = rows as Array<Record<string, unknown>>;
+
+    for (const nested of nestedSelects) {
+      const relation = relations[nested.relationName];
+      if (!relation) continue;
+
+      const parentIds = parentRows
+        .map((row) => row[relation.parentKey])
+        .filter((value) => value !== undefined && value !== null);
+      if (parentIds.length === 0) {
+        for (const row of parentRows) row[nested.relationName] = [];
+        continue;
+      }
+
+      const childColumn = resolveColumn(relation.schema, relation.childKey);
+      let childQuery: any = db
+        .select()
+        .from(relation.schema as any)
+        .where(helpers.inArray(childColumn, parentIds));
+
+      const nestedOrder = this.orderConditions.find((order) =>
+        order.referencedTable === nested.relationName ||
+        order.referencedTable === nested.relationName.replace(/_/g, '') ||
+        order.referencedTable === toCamelCase(nested.relationName)
+      );
+      const orderField = nestedOrder?.field || relation.defaultOrder;
+      const orderColumn = orderField ? resolveColumn(relation.schema, orderField) : null;
+      if (orderColumn) {
+        childQuery = childQuery.orderBy(nestedOrder?.order === 'desc' ? helpers.desc(orderColumn) : helpers.asc(orderColumn));
+      }
+
+      const children = normalizeReadRows(await childQuery as unknown[]) as Array<Record<string, unknown>>;
+      const childrenByParent = new Map<unknown, Array<Record<string, unknown>>>();
+      for (const child of children) {
+        const key = child[relation.childKey];
+        const bucket = childrenByParent.get(key) || [];
+        bucket.push(child);
+        childrenByParent.set(key, bucket);
+      }
+
+      for (const row of parentRows) {
+        const relatedChildren = childrenByParent.get(row[relation.parentKey]) || [];
+        row[nested.relationName] = nested.mode === 'count'
+          ? [{ count: relatedChildren.length }]
+          : relatedChildren;
+      }
+    }
+
+    return parentRows;
   }
 }
 

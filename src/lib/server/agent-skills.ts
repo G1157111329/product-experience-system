@@ -35,7 +35,7 @@ export interface EnsureSkillTemplateResult {
 
 export async function assertAdmin(client: SupabaseClientLike, adminUserId: string | null | undefined): Promise<void> {
   if (!adminUserId) throw new Error('缺少管理员用户');
-  const isDev = process.env.COZE_PROJECT_ENV !== 'PROD' && process.env.NODE_ENV !== 'production';
+  const isDev = process.env.NODE_ENV !== 'production';
   if (isDev && adminUserId === 'local-dev-admin') return;
   const { data: admin } = await client
     .from('platform_users')

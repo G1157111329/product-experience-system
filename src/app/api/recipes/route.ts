@@ -1,59 +1,110 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { asc, eq, ilike } from 'drizzle-orm';
+import { getDb } from '@/storage/database/pg-db';
+import { recipeSteps, recipes } from '@/storage/database/shared/schema';
+
+function toApiStep(step: typeof recipeSteps.$inferSelect) {
+  return {
+    id: step.id,
+    recipe_id: step.recipeId,
+    step_number: step.stepNumber,
+    operation: step.operation,
+    problem_point: step.problemPoint,
+    sort_order: step.sortOrder,
+    created_at: step.createdAt,
+    updated_at: step.updatedAt,
+    problem_points: step.problemPoints,
+  };
+}
+
+function toApiRecipe(recipe: typeof recipes.$inferSelect, steps: Array<typeof recipeSteps.$inferSelect> = []) {
+  return {
+    id: recipe.id,
+    task_id: recipe.taskId,
+    name: recipe.name,
+    ingredients: recipe.ingredients,
+    recipe_type: recipe.recipeType,
+    problem_count: recipe.problemCount,
+    created_at: recipe.createdAt,
+    updated_at: recipe.updatedAt,
+    sort_order: recipe.sortOrder,
+    effect_description: recipe.effectDescription,
+    effect_score: recipe.effectScore,
+    effect_problem_point: recipe.effectProblemPoint,
+    effect_ai_result: recipe.effectAiResult,
+    recipe_steps: steps.map(toApiStep),
+  };
+}
+
+async function loadRecipesWithSteps(recipeRows: Array<typeof recipes.$inferSelect>) {
+  if (recipeRows.length === 0) return [];
+
+  const db = getDb();
+  const result = [];
+  for (const recipe of recipeRows) {
+    const steps = await db
+      .select()
+      .from(recipeSteps)
+      .where(eq(recipeSteps.recipeId, recipe.id))
+      .orderBy(asc(recipeSteps.stepNumber), asc(recipeSteps.sortOrder));
+    result.push(toApiRecipe(recipe, steps));
+  }
+  return result;
+}
 
 export async function GET(request: NextRequest) {
-  const client = getSupabaseClient();
+  const db = getDb();
   const { searchParams } = new URL(request.url);
-  const task_id = searchParams.get('task_id');
-  const keyword = searchParams.get('keyword');
+  const taskId = searchParams.get('task_id');
+  const keyword = searchParams.get('keyword')?.trim();
   const library = searchParams.get('library');
 
-  // Library search: search across all tasks (for recipe referencing)
   if (library) {
-    let query = client.from('recipes').select('*, recipe_steps(*)').order('sort_order', { ascending: true }).order('step_number', { referencedTable: 'recipe_steps', ascending: true });
-    if (keyword) query = query.ilike('name', `%${keyword}%`);
-    const { data, error } = await query.limit(50);
-    if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
+    const recipeRows = keyword
+      ? await db.select().from(recipes).where(ilike(recipes.name, `%${keyword}%`)).orderBy(asc(recipes.sortOrder))
+      : await db.select().from(recipes).orderBy(asc(recipes.sortOrder));
+    const data = await loadRecipesWithSteps(recipeRows.slice(0, 50));
     return NextResponse.json({ code: 0, message: 'success', data });
   }
 
-  if (!task_id) return NextResponse.json({ code: 1, message: '缺少 task_id' }, { status: 400 });
+  if (!taskId) return NextResponse.json({ code: 1, message: '缺少 task_id' }, { status: 400 });
 
-  const { data, error } = await client
-    .from('recipes')
-    .select('*, recipe_steps(*)')
-    .eq('task_id', task_id)
-    .order('sort_order', { ascending: true })
-    .order('step_number', { referencedTable: 'recipe_steps', ascending: true });
-
-  if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
+  const recipeRows = await db
+    .select()
+    .from(recipes)
+    .where(eq(recipes.taskId, taskId))
+    .orderBy(asc(recipes.sortOrder), asc(recipes.createdAt));
+  const data = await loadRecipesWithSteps(recipeRows);
   return NextResponse.json({ code: 0, message: 'success', data });
 }
 
 export async function POST(request: NextRequest) {
-  const client = getSupabaseClient();
+  const db = getDb();
   const body = await request.json();
 
-  const { data, error } = await client.from('recipes').insert({
-    task_id: body.task_id,
+  const [recipe] = await db.insert(recipes).values({
+    taskId: body.task_id,
     name: body.name,
     ingredients: body.ingredients || null,
-    recipe_type: body.recipe_type || '食谱',
-  }).select().single();
+    recipeType: body.recipe_type || '食谱',
+  }).returning();
 
-  if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
-  return NextResponse.json({ code: 0, message: '创建成功', data });
+  return NextResponse.json({ code: 0, message: '创建成功', data: toApiRecipe(recipe) });
 }
 
 export async function PUT(request: NextRequest) {
-  const client = getSupabaseClient();
+  const db = getDb();
   const body = await request.json();
 
-  // Batch update sort order: { recipes: [{ id, sort_order }] }
   if (body.recipes && Array.isArray(body.recipes)) {
-    for (const item of body.recipes) {
-      await client.from('recipes').update({ sort_order: item.sort_order }).eq('id', item.id);
-    }
+    await db.transaction(async (tx) => {
+      for (const item of body.recipes) {
+        await tx
+          .update(recipes)
+          .set({ sortOrder: item.sort_order })
+          .where(eq(recipes.id, item.id));
+      }
+    });
     return NextResponse.json({ code: 0, message: '排序已更新' });
   }
 

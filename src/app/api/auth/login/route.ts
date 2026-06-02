@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     try {
       await ensureAdminAccount();
     } catch (err) {
-      const isDev = process.env.COZE_PROJECT_ENV !== 'PROD' && process.env.NODE_ENV !== 'production';
+      const isDev = process.env.NODE_ENV !== 'production';
       const message = err instanceof Error ? err.message : '';
       const dbUnavailable = message.includes('ECONNREFUSED') || message.includes('Failed query');
       if (isDev && dbUnavailable && account === 'bear2026' && password === 'bear2026') {

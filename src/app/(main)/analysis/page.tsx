@@ -100,7 +100,7 @@ export default function AnalysisPage() {
     } finally {
       setLoading(false);
     }
-  }, [isAdmin, user?.id, fCategory, fProduct, fProjectType, fOrganizer, fIssueLevel, fDateFrom, fDateTo]);
+  }, [isAdmin, user, fCategory, fProduct, fProjectType, fOrganizer, fIssueLevel, fDateFrom, fDateTo]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 

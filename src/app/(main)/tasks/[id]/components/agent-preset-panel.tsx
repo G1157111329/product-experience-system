@@ -9,7 +9,7 @@ import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 
 interface StandardSuggestion {
-  standardItemId: string;
+  standardItemId?: string;
   standardCategory?: string;
   reason: string;
   focus: string;
@@ -41,7 +41,7 @@ export function AgentPresetPanel({
 }: {
   taskId: string;
   userId?: string;
-  onAccepted: () => void;
+  onAccepted: (mode: Exclude<AcceptingMode, null>) => void;
 }) {
   const [runningMode, setRunningMode] = useState<RunningMode>(null);
   const [acceptingMode, setAcceptingMode] = useState<AcceptingMode>(null);
@@ -80,7 +80,12 @@ export function AgentPresetPanel({
 
   const applyPreset = async (mode: Exclude<AcceptingMode, null>) => {
     const standards = mode === 'senses'
-      ? standardSuggestions.filter((item) => item.standardItemId).map((item) => ({ standard_item_id: item.standardItemId }))
+      ? standardSuggestions.map((item) => ({
+          standard_item_id: item.standardItemId || '',
+          standard_category: item.standardCategory || 'AI预设',
+          reason: item.reason,
+          focus: item.focus,
+        }))
       : [];
     const recipes = mode === 'recipes'
       ? recipeSuggestions.map((item) => ({
@@ -107,7 +112,7 @@ export function AgentPresetPanel({
       toast.success(mode === 'senses' ? '五感体验标准已预设' : '食谱/功能已预设');
       if (mode === 'senses') setStandardSuggestions([]);
       else setRecipeSuggestions([]);
-      onAccepted();
+      onAccepted(mode);
     } finally {
       setAcceptingMode(null);
     }

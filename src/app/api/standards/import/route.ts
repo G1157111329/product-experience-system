@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { S3Storage, FetchClient, LLMClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { getDb } from '@/storage/database/pg-db';
+import { standardItems, standards } from '@/storage/database/shared/schema';
+import { normalizeChatCompletionsUrl, resolveAIConfig } from '@/lib/server/ai';
 import * as xlsx from 'xlsx';
-
-// SDK 自动读取 COZE_BUCKET_ENDPOINT_URL 和 COZE_BUCKET_NAME 环境变量
-const storage = new S3Storage();
 
 // Unified extracted item that covers all standard categories
 interface ExtractedItem {
@@ -26,26 +25,15 @@ interface ExtractedItem {
   subjective_rating: string | null;
 }
 
-async function parsePdfWithLLM(pdfUrl: string, headers: Record<string, string>, category: string): Promise<ExtractedItem[]> {
-  const fetchConfig = new Config();
-  const fetchClient = new FetchClient(fetchConfig, headers);
-  const fetchResponse = await fetchClient.fetch(pdfUrl);
-
-  if (fetchResponse.status_code !== 0) {
-    throw new Error(`PDF解析失败: ${fetchResponse.status_message}`);
-  }
-
-  const textContent = fetchResponse.content
-    .filter(item => item.type === 'text')
-    .map(item => item.text)
-    .join('\n');
+async function parsePdfWithLLM(pdfBuffer: Buffer, category: string): Promise<ExtractedItem[]> {
+  // Extract text from PDF using pdf-parse
+  const pdfParse = (await import('pdf-parse')).default;
+  const pdfData = await pdfParse(pdfBuffer);
+  const textContent = pdfData.text;
 
   if (!textContent || textContent.length < 50) {
     throw new Error('PDF内容为空或过短，无法提取标准项');
   }
-
-  const llmConfig = new Config();
-  const llmClient = new LLMClient(llmConfig, headers);
 
   // Build category-specific system prompt
   let systemPrompt = `你是中国产品体验标准解析专家。你从标准文档文本中提取检查项，所有输出必须使用中文。
@@ -105,13 +93,40 @@ ${textChunk}`;
     { role: 'user' as const, content: userPrompt },
   ];
 
-  // Use pro model for better accuracy
-  const response = await llmClient.invoke(messages, {
-    model: 'doubao-seed-2-0-pro-260215',
-    temperature: 0.05,
-  });
+  const client = getSupabaseClient();
+  const aiConfig = await resolveAIConfig(client, { defaultModel: 'Bear-Model-VL', defaultTemperature: 0.05 });
 
-  const content = response.content.trim();
+  const apiUrl = normalizeChatCompletionsUrl(aiConfig.customApiUrl);
+  const apiKey = aiConfig.customApiKey;
+
+  let response: Response;
+  try {
+    response = await fetch(apiUrl, {
+      method: 'POST',
+      signal: AbortSignal.timeout(60000),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: aiConfig.model,
+        messages,
+        temperature: aiConfig.temperature,
+        max_tokens: aiConfig.maxTokens,
+      }),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'network error';
+    throw new Error(`AI服务连接失败，请检查模型服务地址 ${apiUrl}: ${message}`);
+  }
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`AI服务调用失败(${response.status}): ${errText.substring(0, 200)}`);
+  }
+
+  const result = await response.json();
+  const content = (result.choices?.[0]?.message?.content || '').trim();
 
   let jsonStr: string | null = null;
   const cleanedContent = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
@@ -224,6 +239,55 @@ function parseExcel(buffer: Buffer): ExtractedItem[] {
     .filter(item => item.check_item.length > 0);
 }
 
+async function createImportedStandard(input: {
+  standardName: string;
+  category: string;
+  productCategory: string | null;
+  product: string | null;
+  description: string | null;
+  items: ExtractedItem[];
+}) {
+  const db = getDb();
+
+  return db.transaction(async (tx) => {
+    const [standard] = await tx.insert(standards).values({
+      standardName: input.standardName,
+      category: input.category,
+      productCategory: input.productCategory,
+      product: input.product,
+      description: input.description,
+      version: 'V1.0',
+    }).returning({ id: standards.id });
+
+    if (!standard) {
+      throw new Error('Failed to create standard');
+    }
+
+    await tx.insert(standardItems).values(input.items.map((item, index) => ({
+      standardId: standard.id,
+      sortOrder: index + 1,
+      sensoryDimension: item.sensory_dimension,
+      testPhase: item.test_phase,
+      experienceFlow: item.experience_flow,
+      touchPoint: item.touch_point,
+      checkDimension: item.check_dimension,
+      subCheckDimension: item.sub_check_dimension,
+      checkItem: item.check_item,
+      checkRequirement: item.check_requirement,
+      experienceStandard: item.experience_standard,
+      checkStandard: item.check_standard,
+      measurementPosition: item.measurement_position,
+      checkTool: item.check_tool,
+      problemLevel: item.problem_level,
+      evaluationPrep: item.evaluation_prep,
+      subjectiveScore: item.subjective_score,
+      subjectiveRating: item.subjective_rating,
+    })));
+
+    return standard.id;
+  });
+}
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
@@ -231,28 +295,20 @@ export async function POST(request: NextRequest) {
     const standard_name = formData.get('standard_name') as string;
     const category = formData.get('category') as string;
     const product_category = formData.get('product_category') as string | null;
+    const product = formData.get('product') as string | null;
     const description = formData.get('description') as string | null;
 
     if (!file || !standard_name || !category) {
       return NextResponse.json({ code: 1, message: '缺少必要参数' }, { status: 400 });
     }
 
-    const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);
     let items: ExtractedItem[] = [];
 
     const fileName = file.name.toLowerCase();
 
     if (fileName.endsWith('.pdf')) {
       const buffer = Buffer.from(await file.arrayBuffer());
-      const s3FileName = `standards-import/${Date.now()}_${file.name}`;
-      const fileKey = await storage.uploadFile({
-        fileContent: buffer,
-        fileName: s3FileName,
-        contentType: file.type || 'application/pdf',
-      });
-      const pdfUrl = await storage.generatePresignedUrl({ key: fileKey, expireTime: 600 });
-
-      items = await parsePdfWithLLM(pdfUrl, customHeaders, category);
+      items = await parsePdfWithLLM(buffer, category);
     } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv')) {
       const buffer = Buffer.from(await file.arrayBuffer());
       items = parseExcel(buffer);
@@ -264,51 +320,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ code: 1, message: '未能从文件中提取到标准检查项，请检查文件内容或尝试Excel格式' }, { status: 400 });
     }
 
-    const client = getSupabaseClient();
-    const { data: standard, error: stdError } = await client.from('standards').insert({
-      standard_name,
+    const standardId = await createImportedStandard({
+      standardName: standard_name,
       category,
-      product_category: product_category || null,
+      productCategory: product_category || null,
+      product: product || null,
       description: description || null,
-      version: 'V1.0',
-    }).select().single();
-
-    if (stdError) {
-      return NextResponse.json({ code: 1, message: stdError.message }, { status: 500 });
-    }
-
-    const standardItems = items.map((item, index) => ({
-      standard_id: standard.id,
-      sort_order: index + 1,
-      sensory_dimension: item.sensory_dimension,
-      test_phase: item.test_phase,
-      experience_flow: item.experience_flow,
-      touch_point: item.touch_point,
-      check_dimension: item.check_dimension,
-      sub_check_dimension: item.sub_check_dimension,
-      check_item: item.check_item,
-      check_requirement: item.check_requirement,
-      experience_standard: item.experience_standard,
-      check_standard: item.check_standard,
-      measurement_position: item.measurement_position,
-      check_tool: item.check_tool,
-      problem_level: item.problem_level,
-      evaluation_prep: item.evaluation_prep,
-      subjective_score: item.subjective_score,
-      subjective_rating: item.subjective_rating,
-    }));
-
-    const { error: itemsError } = await client.from('standard_items').insert(standardItems);
-
-    if (itemsError) {
-      await client.from('standards').delete().eq('id', standard.id);
-      return NextResponse.json({ code: 1, message: itemsError.message }, { status: 500 });
-    }
+      items,
+    });
 
     return NextResponse.json({
       code: 0,
       message: `导入成功，共导入 ${items.length} 项检查项`,
-      data: { standard_id: standard.id, item_count: items.length },
+      data: { standard_id: standardId, item_count: items.length },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : '导入失败';

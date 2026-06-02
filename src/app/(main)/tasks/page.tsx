@@ -71,6 +71,19 @@ const emptyForm = {
   test_method: '',
 };
 
+async function readApiJson<T = unknown>(response: Response): Promise<T> {
+  const text = await response.text();
+  if (!text.trim()) {
+    throw new Error(response.ok ? '接口未返回数据' : `接口请求失败(${response.status})`);
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(response.ok ? '接口返回格式异常' : `接口请求失败(${response.status})`);
+  }
+}
+
 export default function TasksPage() {
   const router = useRouter();
   const { user, isAdmin } = useAuth();
@@ -99,18 +112,25 @@ export default function TasksPage() {
 
   const fetchTasks = useCallback(async () => {
     setLoading(true);
-    const params = new URLSearchParams();
-    if (keyword) params.set('keyword', keyword);
-    if (filterStatus && filterStatus !== 'all') params.set('status', filterStatus);
-    if (user?.id && !isAdmin) params.set('created_by', user.id);
-    const res = await fetch(`/api/tasks?${params}`);
-    const data = await res.json();
-    if (data.code === 0) {
-      setTasks(data.data?.list || []);
-      setTotal(data.data?.total || 0);
+    try {
+      const params = new URLSearchParams();
+      if (keyword) params.set('keyword', keyword);
+      if (filterStatus && filterStatus !== 'all') params.set('status', filterStatus);
+      if (user?.id && !isAdmin) params.set('created_by', user.id);
+      const res = await fetch(`/api/tasks?${params}`);
+      const data = await readApiJson<{ code: number; message?: string; data?: { list?: Task[]; total?: number } }>(res);
+      if (data.code === 0) {
+        setTasks(data.data?.list || []);
+        setTotal(data.data?.total || 0);
+      } else {
+        toast.error(data.message || '获取体验计划失败');
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '获取体验计划失败');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-  }, [filterStatus, isAdmin, keyword, user?.id]);
+  }, [filterStatus, isAdmin, keyword, user]);
 
   useEffect(() => {
     fetchCategories();

@@ -177,9 +177,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     const rawContent = await invokeConfiguredAI({
-      request,
       client,
-      forceBuiltInModel: 'doubao-seed-2-0-pro-260215',
       defaultTemperature: 0.4,
       messages: [
         { role: 'system', content: systemPrompt },

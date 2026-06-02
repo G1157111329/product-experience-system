@@ -34,6 +34,52 @@ interface ImageEditorDialogProps {
 
 const COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6', '#000000', '#ffffff'];
 
+function renderAction(ctx: CanvasRenderingContext2D, action: DrawAction, scale: number) {
+  ctx.save();
+  if (action.type === 'draw' && action.points && action.points.length > 1) {
+    ctx.strokeStyle = action.color || '#ef4444';
+    ctx.lineWidth = (action.width || 3) * scale;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(action.points[0].x * scale, action.points[0].y * scale);
+    for (let i = 1; i < action.points.length; i++) {
+      ctx.lineTo(action.points[i].x * scale, action.points[i].y * scale);
+    }
+    ctx.stroke();
+  } else if (action.type === 'arrow' && action.start && action.end) {
+    drawArrow(ctx, action.start.x * scale, action.start.y * scale, action.end.x * scale, action.end.y * scale, (action.color || '#ef4444'), (action.width || 3) * scale);
+  } else if (action.type === 'mosaic' && action.mosaicRects) {
+    for (const rect of action.mosaicRects) {
+      const [r, g, b] = rect.pixels[0];
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(rect.x * scale, rect.y * scale, rect.w * scale, rect.h * scale);
+    }
+  } else if (action.type === 'text' && action.text && action.textPos) {
+    ctx.fillStyle = action.color || '#ef4444';
+    ctx.font = `bold ${(action.fontSize || 20) * scale}px sans-serif`;
+    ctx.textBaseline = 'top';
+    // Text shadow for readability
+    ctx.shadowColor = action.color === '#ffffff' ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.7)';
+    ctx.shadowBlur = 3 * scale;
+    ctx.fillText(action.text, action.textPos.x * scale, action.textPos.y * scale);
+    ctx.shadowBlur = 0;
+  }
+  ctx.restore();
+}
+
+function drawArrow(ctx: CanvasRenderingContext2D, fromX: number, fromY: number, toX: number, toY: number, color: string, width: number) {
+  const headLen = Math.max(width * 4, 12);
+  const angle = Math.atan2(toY - fromY, toX - fromX);
+  ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = width;
+  ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(fromX, fromY); ctx.lineTo(toX, toY); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(toX, toY);
+  ctx.lineTo(toX - headLen * Math.cos(angle - Math.PI / 6), toY - headLen * Math.sin(angle - Math.PI / 6));
+  ctx.lineTo(toX - headLen * Math.cos(angle + Math.PI / 6), toY - headLen * Math.sin(angle + Math.PI / 6));
+  ctx.closePath(); ctx.fill();
+}
+
 export function ImageEditorDialog({
   open, onOpenChange, imageUrl, onSave, fileName = 'edited-image',
 }: ImageEditorDialogProps) {
@@ -332,52 +378,6 @@ export function ImageEditorDialog({
     } finally {
       setSaving(false);
     }
-  };
-
-  const renderAction = (ctx: CanvasRenderingContext2D, action: DrawAction, scale: number) => {
-    ctx.save();
-    if (action.type === 'draw' && action.points && action.points.length > 1) {
-      ctx.strokeStyle = action.color || '#ef4444';
-      ctx.lineWidth = (action.width || 3) * scale;
-      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-      ctx.beginPath();
-      ctx.moveTo(action.points[0].x * scale, action.points[0].y * scale);
-      for (let i = 1; i < action.points.length; i++) {
-        ctx.lineTo(action.points[i].x * scale, action.points[i].y * scale);
-      }
-      ctx.stroke();
-    } else if (action.type === 'arrow' && action.start && action.end) {
-      drawArrow(ctx, action.start.x * scale, action.start.y * scale, action.end.x * scale, action.end.y * scale, (action.color || '#ef4444'), (action.width || 3) * scale);
-    } else if (action.type === 'mosaic' && action.mosaicRects) {
-      for (const rect of action.mosaicRects) {
-        const [r, g, b] = rect.pixels[0];
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
-        ctx.fillRect(rect.x * scale, rect.y * scale, rect.w * scale, rect.h * scale);
-      }
-    } else if (action.type === 'text' && action.text && action.textPos) {
-      ctx.fillStyle = action.color || '#ef4444';
-      ctx.font = `bold ${(action.fontSize || 20) * scale}px sans-serif`;
-      ctx.textBaseline = 'top';
-      // Text shadow for readability
-      ctx.shadowColor = action.color === '#ffffff' ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.7)';
-      ctx.shadowBlur = 3 * scale;
-      ctx.fillText(action.text, action.textPos.x * scale, action.textPos.y * scale);
-      ctx.shadowBlur = 0;
-    }
-    ctx.restore();
-  };
-
-  const drawArrow = (ctx: CanvasRenderingContext2D, fromX: number, fromY: number, toX: number, toY: number, color: string, width: number) => {
-    const headLen = Math.max(width * 4, 12);
-    const angle = Math.atan2(toY - fromY, toX - fromX);
-    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = width;
-    ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(fromX, fromY); ctx.lineTo(toX, toY); ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(toX, toY);
-    ctx.lineTo(toX - headLen * Math.cos(angle - Math.PI / 6), toY - headLen * Math.sin(angle - Math.PI / 6));
-    ctx.lineTo(toX - headLen * Math.cos(angle + Math.PI / 6), toY - headLen * Math.sin(angle + Math.PI / 6));
-    ctx.closePath(); ctx.fill();
   };
 
   const cursorMap: Record<Tool, string> = {

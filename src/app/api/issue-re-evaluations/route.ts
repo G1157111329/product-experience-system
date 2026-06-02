@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
 
   // Also fetch related materials (by re_evaluation_id)
   const reEvalIds = (data || []).map((r: Record<string, unknown>) => r.id as string);
-  let materialsMap: Record<string, unknown[]> = {};
+  const materialsMap: Record<string, unknown[]> = {};
   if (reEvalIds.length > 0) {
     const { data: materials } = await client
       .from('materials')

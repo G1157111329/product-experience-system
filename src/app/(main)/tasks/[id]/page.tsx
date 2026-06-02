@@ -203,10 +203,10 @@ export default function TaskDetailPage() {
     setReportRecipes(await loadRecipesForTask(id));
   }, [id]);
 
-  const handleAgentAccepted = useCallback(() => {
+  const handleAgentAccepted = useCallback((mode: 'senses' | 'recipes') => {
     fetchTask();
     fetchReportRecipes();
-    setActiveTab('senses');
+    setActiveTab(mode === 'recipes' ? 'functions' : 'senses');
   }, [fetchReportRecipes, fetchTask]);
 
   const handleMaterialsChanged = useCallback(() => {

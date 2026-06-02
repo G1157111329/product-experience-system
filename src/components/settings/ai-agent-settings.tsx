@@ -26,6 +26,7 @@ interface ModelConfig {
   supports_vision: boolean;
   custom_api_url: string;
   custom_api_key?: string;
+  has_custom_api_key?: boolean;
   is_active?: boolean;
 }
 
@@ -48,13 +49,13 @@ interface SkillTemplate {
 
 const emptyModel: ModelConfig = {
   name: '默认AI模型',
-  provider: 'builtin',
-  model: 'doubao-seed-2-0-pro-260215',
+  provider: 'custom',
+  model: 'Bear-Model-VL',
   temperature: 0.5,
   max_tokens: 2400,
   supports_vision: true,
-  custom_api_url: '',
-  custom_api_key: '',
+  custom_api_url: 'http://ds.bears.com.cn:8000/v1/chat/completions',
+  custom_api_key: 'local',
 };
 
 const skillModuleLabels: Record<string, string> = {
@@ -121,7 +122,7 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
     } catch (err) {
       setSkillsError(err instanceof Error ? err.message : 'Prompt 模板读取失败');
     }
-  }, [user?.id]);
+  }, [user]);
 
   useEffect(() => {
     if (open) fetchData();
@@ -327,7 +328,12 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
                   </div>
                   <div className="space-y-2">
                     <Label className="text-xs">API Key</Label>
-                    <Input type="password" value={modelForm.custom_api_key || ''} onChange={(event) => setModelForm({ ...modelForm, custom_api_key: event.target.value })} />
+                    <Input
+                      type="password"
+                      value={modelForm.custom_api_key || ''}
+                      placeholder={modelForm.has_custom_api_key ? '已保存，留空则沿用原 API Key' : ''}
+                      onChange={(event) => setModelForm({ ...modelForm, custom_api_key: event.target.value })}
+                    />
                   </div>
                 </>
               )}

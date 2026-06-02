@@ -498,18 +498,21 @@ INSERT INTO platform_users (id, account, password_hash, name, role, status)
 VALUES (
   gen_random_uuid(),
   'bear2026',
-  'a3d2f8c1e9b4567890abcdef1234567890abcdef1234567890abcdef12345678',
+  '821e2ed1ef455f2b09f2bfd5cfa356833da3fc5790ba1367a84adb971f108588',
   '管理员',
   'admin',
   'approved'
-) ON CONFLICT (account) DO NOTHING;
+) ON CONFLICT (account) DO UPDATE SET
+  password_hash = EXCLUDED.password_hash,
+  role = 'admin',
+  status = 'approved';
 
 -- ============================================================
 -- 种子数据：平台默认设置
 -- ============================================================
 INSERT INTO platform_settings (key, value) VALUES
   ('standard_options', '{"usage_phases":["开箱","首次安装","产品使用","清洁收纳","其他"],"experience_flows":{"开箱":["拿取外包装","拆开内包装"],"首次安装":["配件梳理","外观美观","外观缺陷","标识文字","首次安装"],"产品使用":["放置及组装","操作交互","产品运行"],"清洁收纳":["冲水","擦拭","晾干","收纳"],"其他":["其他"]},"sensory_dimensions":["视觉","听觉","触觉","嗅觉","味觉"]}'),
-  ('ai_config', '{"provider":"builtin","model":"doubao-seed-2-0-pro-260215","temperature":5}')
+  ('ai_config', '{"provider":"custom","model":"Bear-Model-VL","temperature":5,"custom_api_url":"http://ds.bears.com.cn:8000/v1/chat/completions","custom_api_key":"local"}')
 ON CONFLICT (key) DO NOTHING;
 
 -- ============================================================

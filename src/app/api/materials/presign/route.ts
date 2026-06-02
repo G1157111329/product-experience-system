@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { S3Storage } from 'coze-coding-dev-sdk';
+import { generatePresignedUrl } from '@/lib/server/storage';
 
 // POST /api/materials/presign - 批量获取素材签名URL
 export async function POST(request: NextRequest) {
@@ -14,16 +14,13 @@ export async function POST(request: NextRequest) {
     // 限制单次最多50个
     const limitedPaths = paths.slice(0, 50);
 
-    // 使用与 upload 一致的初始化方式（SDK 自动读取 COZE_BUCKET_* 环境变量）
-    const storage = new S3Storage();
-
     // 并行生成签名URL（有效期7天）
     const results = await Promise.allSettled(
       limitedPaths.map(async (path) => {
         try {
-          const url = await storage.generatePresignedUrl({
+          const url = await generatePresignedUrl({
             key: path,
-            expireTime: 86400 * 7, // 7天有效期
+            expireTime: 86400 * 7,
           });
           return { path, url };
         } catch (err) {

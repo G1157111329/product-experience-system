@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { LLMClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
+import { invokeConfiguredAI } from '@/lib/server/ai';
 import { getActiveSkillVersion } from '@/lib/server/agent-skills';
 import { getDefaultSkillDefinitions, renderPromptTemplate } from '@/lib/agent-skills';
 
@@ -105,66 +105,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       ? renderPromptTemplate(userPromptTemplate, { recipe_snapshot: contextText })
       : contextText;
 
-    // Fetch AI config
-    const { data: aiConfigData } = await client
-      .from('platform_settings')
-      .select('value')
-      .eq('key', 'ai_config')
-      .maybeSingle();
-
-    const aiConfig = (aiConfigData?.value || {}) as {
-      provider?: string;
-      model?: string;
-      temperature?: number;
-      custom_api_url?: string;
-      custom_api_key?: string;
-    };
-
-    const model = aiConfig.model || 'doubao-seed-2-0-pro-260215';
-    const temperature = aiConfig.temperature ?? 0.3;
-
-    const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);
-
-    let aiContent = '';
-
-    if (aiConfig.provider === 'custom' && aiConfig.custom_api_url && aiConfig.custom_api_key) {
-      const response = await fetch(aiConfig.custom_api_url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${aiConfig.custom_api_key}`,
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPromptText },
-          ],
-          temperature,
-          max_tokens: 2000,
-        }),
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        console.error('[ai-detect-problems] Custom API error:', response.status, errText);
-        return NextResponse.json({ code: 1, message: `AI服务调用失败(${response.status})` }, { status: 500 });
-      }
-
-      const result = await response.json();
-      aiContent = result.choices?.[0]?.message?.content || '';
-    } else {
-      const config = new Config();
-      const llmClient = new LLMClient(config, customHeaders);
-
-      const messages = [
-        { role: 'system' as const, content: systemPrompt },
-        { role: 'user' as const, content: userPromptText },
-      ];
-
-      const response = await llmClient.invoke(messages, { model, temperature });
-      aiContent = response.content || '';
-    }
+    const aiContent = await invokeConfiguredAI({
+      client,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPromptText },
+      ],
+      defaultTemperature: 0.3,
+      maxTokens: 2000,
+    });
 
     // Parse AI result
     const problems = parseProblems(aiContent);

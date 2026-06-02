@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { BookOpen, Plus, Trash2, Upload } from 'lucide-react';
+import { AlertCircle, BookOpen, Plus, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -23,6 +23,7 @@ type ExperienceStandardsSectionProps = {
 export function ExperienceStandardsSection({ categories, isAdmin }: ExperienceStandardsSectionProps) {
   const [standards, setStandards] = useState<Standard[]>([]);
   const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
   const [keyword, setKeyword] = useState('');
   const [filterCategory, setFilterCategory] = useState<string>('');
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -32,13 +33,25 @@ export function ExperienceStandardsSection({ categories, isAdmin }: ExperienceSt
 
   const fetchStandards = useCallback(async () => {
     setLoading(true);
-    const params = new URLSearchParams();
-    if (keyword) params.set('keyword', keyword);
-    if (filterCategory) params.set('category', filterCategory);
-    const res = await fetch(`/api/standards?${params}`);
-    const data = await res.json();
-    if (data.code === 0) setStandards(data.data || []);
-    setLoading(false);
+    setErrorMessage('');
+    try {
+      const params = new URLSearchParams();
+      if (keyword.trim()) params.set('keyword', keyword.trim());
+      if (filterCategory && filterCategory !== 'all') params.set('category', filterCategory);
+      const res = await fetch(`/api/standards?${params}`, { cache: 'no-store' });
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : null;
+      if (!res.ok || data?.code !== 0) {
+        throw new Error(data?.message || `标准接口请求失败 (${res.status})`);
+      }
+      setStandards(data.data || []);
+      setSelectedIds(new Set());
+    } catch (error) {
+      setStandards([]);
+      setErrorMessage(error instanceof Error ? error.message : '标准列表加载失败');
+    } finally {
+      setLoading(false);
+    }
   }, [keyword, filterCategory]);
 
   useEffect(() => { fetchStandards(); }, [fetchStandards]);
@@ -79,7 +92,7 @@ export function ExperienceStandardsSection({ categories, isAdmin }: ExperienceSt
 
       <FilterBar>
         <SearchField placeholder="搜索标准..." value={keyword} onChange={(e) => setKeyword(e.target.value)} className="h-8 text-xs" />
-        <Select value={filterCategory} onValueChange={setFilterCategory}>
+        <Select value={filterCategory || 'all'} onValueChange={(value) => setFilterCategory(value === 'all' ? '' : value)}>
           <SelectTrigger className="w-28 h-8 text-xs"><SelectValue placeholder="全部分类" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部分类</SelectItem>
@@ -90,6 +103,19 @@ export function ExperienceStandardsSection({ categories, isAdmin }: ExperienceSt
 
       {loading ? (
         <SkeletonList rows={3} />
+      ) : errorMessage ? (
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-destructive/20 bg-destructive/5 p-3">
+          <div className="flex min-w-0 items-start gap-2">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-destructive">标准列表加载失败</p>
+              <p className="mt-1 break-words text-xs text-muted-foreground">{errorMessage}</p>
+            </div>
+          </div>
+          <Button variant="outline" size="sm" className="h-8 shrink-0 text-xs" onClick={fetchStandards}>
+            重新加载
+          </Button>
+        </div>
       ) : standards.length === 0 ? (
         <EmptyState icon={BookOpen} title="暂无标准" />
       ) : (
@@ -124,7 +150,7 @@ export function ExperienceStandardsSection({ categories, isAdmin }: ExperienceSt
         </div>
       )}
 
-      <StandardCreateDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen} categories={categories} />
+      <StandardCreateDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen} categories={categories} onAdded={fetchStandards} />
       <StandardImportDialog open={importDialogOpen} onOpenChange={setImportDialogOpen} categories={categories} onImported={fetchStandards} />
       <StandardBatchDeleteDialog
         open={deleteDialogOpen}

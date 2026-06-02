@@ -6,7 +6,7 @@
 
 **Architecture:** Add Drizzle schema definitions for Agent tables, centralize AI model resolution in `src/lib/server/ai.ts`, add server-side skill template helpers and API routes, then expose an admin settings UI and a task-detail Agent preset entry. First implementation keeps Agent suggestions as reviewable drafts; only user-confirmed selections write to check records or recipes.
 
-**Tech Stack:** Next.js 16 App Router, React 19, TypeScript 5, Supabase PostgreSQL, Drizzle schema, shadcn/ui, Tailwind CSS 4, coze-coding-dev-sdk plus OpenAI-compatible custom API.
+**Tech Stack:** Next.js 16 App Router, React 19, TypeScript 5, Supabase PostgreSQL, Drizzle schema, shadcn/ui, Tailwind CSS 4, S3-compatible storage, and OpenAI-compatible custom API.
 
 ---
 

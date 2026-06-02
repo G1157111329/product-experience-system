@@ -3,7 +3,7 @@
  * Database client factory.
  *
  * Mode selection:
- *  - If COZE_SUPABASE_URL is set → use real Supabase JS client (cloud)
+ *  - If NEXT_PUBLIC_SUPABASE_URL is set → use real Supabase JS client (cloud)
  *  - Otherwise → use local PostgreSQL via Drizzle ORM (self-hosted)
  *
  * Self-hosted mode uses SupabasePgClient which provides a Supabase-compatible
@@ -21,11 +21,11 @@ export { platformUsers, platformAuditRequests, platformCategories, platformProdu
   agentSkillVersions, agentSkillAuditLogs } from './shared/schema';
 
 function getSupabaseUrl(): string | undefined {
-  return process.env.COZE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  return process.env.NEXT_PUBLIC_SUPABASE_URL;
 }
 
 function getSupabaseAnonKey(): string | undefined {
-  return process.env.COZE_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  return process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 }
 
 function hasSupabaseConfig(): boolean {
@@ -73,7 +73,7 @@ function getSupabaseCredentials() {
 }
 
 function getSupabaseServiceRoleKey(): string | undefined {
-  return process.env.COZE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  return process.env.SUPABASE_SERVICE_ROLE_KEY;
 }
 
 // Keep loadEnv for compatibility but it's no-op in self-hosted mode

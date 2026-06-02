@@ -27,6 +27,18 @@ interface CategoryWithProducts {
   products: Array<{ id: string; name: string; category_id: string; sort_order: number }>;
 }
 
+async function readApiJson<T = { code: number; message?: string }>(response: Response): Promise<T> {
+  const text = await response.text();
+  if (!text.trim()) {
+    throw new Error(response.ok ? '接口未返回数据' : `接口请求失败(${response.status})`);
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(response.ok ? '接口返回格式异常' : `接口请求失败(${response.status})`);
+  }
+}
+
 const navItems = [
   { href: '/dashboard', label: '工作台', icon: LayoutDashboard },
   { href: '/standards', label: '标准管理', icon: BookOpen },
@@ -87,7 +99,7 @@ function CategoryProductSettings({ open, onOpenChange }: { open: boolean; onOpen
 
   const fetchCategories = useCallback(async () => {
     const res = await fetch('/api/categories');
-    const data = await res.json();
+    const data = await readApiJson<{ code: number; data?: CategoryWithProducts[]; message?: string }>(res);
     if (data.code === 0) setCategories(data.data || []);
   }, []);
 
@@ -114,16 +126,18 @@ function CategoryProductSettings({ open, onOpenChange }: { open: boolean; onOpen
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'category', name: newCatName.trim() }),
       });
-      const data = await res.json();
+      const data = await readApiJson(res);
       if (data.code === 0) { setNewCatName(''); fetchCategories(); toast.success('品类已添加'); }
       else toast.error(data.message);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '品类添加失败');
     } finally { setAddingCat(false); }
   };
 
   const handleDeleteCategory = async (catId: string) => {
     setDeletingCatId(null);
     const res = await fetch(`/api/categories?type=category&id=${catId}`, { method: 'DELETE' });
-    const data = await res.json();
+    const data = await readApiJson(res);
     if (data.code === 0) { fetchCategories(); toast.success('品类已删除'); }
     else toast.error(data.message);
   };
@@ -136,16 +150,18 @@ function CategoryProductSettings({ open, onOpenChange }: { open: boolean; onOpen
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'product', name: newProdName.trim(), category_id: selectedCatId }),
       });
-      const data = await res.json();
+      const data = await readApiJson(res);
       if (data.code === 0) { setNewProdName(''); fetchCategories(); toast.success('产品已添加'); }
       else toast.error(data.message);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '产品添加失败');
     } finally { setAddingProd(false); }
   };
 
   const handleDeleteProduct = async (prodId: string) => {
     setDeletingProdId(null);
     const res = await fetch(`/api/categories?type=product&id=${prodId}`, { method: 'DELETE' });
-    const data = await res.json();
+    const data = await readApiJson(res);
     if (data.code === 0) { fetchCategories(); toast.success('产品已删除'); }
     else toast.error(data.message);
   };
@@ -284,16 +300,42 @@ function StandardOptionsSettings({ open, onOpenChange }: { open: boolean; onOpen
     sensory_dimensions: ['视觉', '听觉', '触觉', '嗅觉', '味觉'],
   }), []);
 
+  const normalizeOptions = useCallback((value: unknown): typeof options => {
+    const row = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+    const testPhases = Array.isArray(row.test_phases)
+      ? row.test_phases
+      : Array.isArray(row.usage_phases)
+        ? row.usage_phases
+        : defaultOptions.test_phases;
+    const experienceFlows = row.experience_flows && typeof row.experience_flows === 'object' && !Array.isArray(row.experience_flows)
+      ? row.experience_flows as Record<string, unknown>
+      : defaultOptions.experience_flows;
+    const sensoryDimensions = Array.isArray(row.sensory_dimensions)
+      ? row.sensory_dimensions
+      : defaultOptions.sensory_dimensions;
+
+    return {
+      test_phases: testPhases.map(String).filter(Boolean),
+      experience_flows: Object.fromEntries(
+        Object.entries(experienceFlows).map(([phase, flows]) => [
+          phase,
+          Array.isArray(flows) ? flows.map(String).filter(Boolean) : [],
+        ])
+      ),
+      sensory_dimensions: sensoryDimensions.map(String).filter(Boolean),
+    };
+  }, [defaultOptions]);
+
   const fetchOptions = useCallback(async () => {
     const res = await fetch('/api/settings?key=standard_options');
     const data = await res.json();
     if (data.code === 0 && data.data && Object.keys(data.data).length > 0) {
-      setOptions(data.data);
+      setOptions(normalizeOptions(data.data));
     } else {
       // Initialize with defaults
       setOptions(defaultOptions);
     }
-  }, [defaultOptions]);
+  }, [defaultOptions, normalizeOptions]);
 
   useEffect(() => {
     if (open) fetchOptions();
