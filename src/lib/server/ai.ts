@@ -43,7 +43,7 @@ interface ResolveOptions {
 
 // Default AI config — local deployment endpoint
 const DEFAULT_API_URL = 'http://ds.bears.com.cn:8000/v1/chat/completions';
-const DEFAULT_API_KEY = 'local';
+const DEFAULT_API_KEY = 'Bear2025IT!';
 const DEFAULT_MODEL = 'Bear-Model-VL';
 
 export function normalizeChatCompletionsUrl(apiUrl: string): string {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Sparkles, Save, Power, Pencil, RefreshCw } from 'lucide-react';
+import { Sparkles, Save, Power, Pencil, Trash2, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -9,7 +9,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
@@ -48,14 +47,14 @@ interface SkillTemplate {
 }
 
 const emptyModel: ModelConfig = {
-  name: '默认AI模型',
+  name: 'Bear',
   provider: 'custom',
   model: 'Bear-Model-VL',
   temperature: 0.5,
   max_tokens: 2400,
   supports_vision: true,
-  custom_api_url: 'http://ds.bears.com.cn:8000/v1/chat/completions',
-  custom_api_key: 'local',
+  custom_api_url: 'http://ds.bears.com.cn:8000/v1',
+  custom_api_key: 'Bear2025IT!',
 };
 
 const skillModuleLabels: Record<string, string> = {
@@ -162,6 +161,18 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
       fetchData();
     } else {
       toast.error(data.message || '启用失败');
+    }
+  };
+
+  const deleteModel = async (id: string) => {
+    if (!user?.id || !confirm('确定删除此模型配置？')) return;
+    const res = await fetch(`/api/ai/model-configs?id=${id}&admin_user_id=${user.id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.code === 0) {
+      toast.success('已删除');
+      fetchData();
+    } else {
+      toast.error(data.message || '删除失败');
     }
   };
 
@@ -290,53 +301,39 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
                 <Label className="text-xs">配置名称</Label>
                 <Input value={modelForm.name} onChange={(event) => setModelForm({ ...modelForm, name: event.target.value })} />
               </div>
+              <div className="space-y-2">
+                <Label className="text-xs">模型名</Label>
+                <Input value={modelForm.model} onChange={(event) => setModelForm({ ...modelForm, model: event.target.value })} />
+              </div>
               <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-2">
-                  <Label className="text-xs">服务</Label>
-                  <Select value={modelForm.provider} onValueChange={(value) => setModelForm({ ...modelForm, provider: value })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="builtin">内置模型</SelectItem>
-                      <SelectItem value="custom">自定义API</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
                 <div className="space-y-2">
                   <Label className="text-xs">温度</Label>
                   <Input type="number" min={0} max={1} step={0.1} value={modelForm.temperature}
                     onChange={(event) => setModelForm({ ...modelForm, temperature: Number(event.target.value) })} />
                 </div>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-xs">模型名</Label>
-                <Input value={modelForm.model} onChange={(event) => setModelForm({ ...modelForm, model: event.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-xs">最大 token</Label>
-                <Input type="number" value={modelForm.max_tokens}
-                  onChange={(event) => setModelForm({ ...modelForm, max_tokens: Number(event.target.value) })} />
+                <div className="space-y-2">
+                  <Label className="text-xs">最大 token</Label>
+                  <Input type="number" value={modelForm.max_tokens}
+                    onChange={(event) => setModelForm({ ...modelForm, max_tokens: Number(event.target.value) })} />
+                </div>
               </div>
               <div className="flex items-center justify-between rounded-md border px-3 py-2">
                 <Label className="text-xs">支持视觉输入</Label>
                 <Switch checked={modelForm.supports_vision} onCheckedChange={(checked) => setModelForm({ ...modelForm, supports_vision: checked })} />
               </div>
-              {modelForm.provider === 'custom' && (
-                <>
-                  <div className="space-y-2">
-                    <Label className="text-xs">API 地址</Label>
-                    <Input value={modelForm.custom_api_url} onChange={(event) => setModelForm({ ...modelForm, custom_api_url: event.target.value })} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs">API Key</Label>
-                    <Input
-                      type="password"
-                      value={modelForm.custom_api_key || ''}
-                      placeholder={modelForm.has_custom_api_key ? '已保存，留空则沿用原 API Key' : ''}
-                      onChange={(event) => setModelForm({ ...modelForm, custom_api_key: event.target.value })}
-                    />
-                  </div>
-                </>
-              )}
+              <div className="space-y-2">
+                <Label className="text-xs">调用地址</Label>
+                <Input value={modelForm.custom_api_url} onChange={(event) => setModelForm({ ...modelForm, custom_api_url: event.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs">API Key</Label>
+                <Input
+                  type="password"
+                  value={modelForm.custom_api_key || ''}
+                  placeholder={modelForm.has_custom_api_key ? '已保存，留空则沿用原 API Key' : ''}
+                  onChange={(event) => setModelForm({ ...modelForm, custom_api_key: event.target.value })}
+                />
+              </div>
               <Button className="w-full gap-2" onClick={saveModel} disabled={saving}>
                 <Save className="h-4 w-4" /> 保存模型配置
               </Button>
@@ -350,13 +347,18 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
                         <div className="truncate text-sm font-medium">{model.name}</div>
                         <div className="truncate text-xs text-muted-foreground">{model.model}</div>
                       </div>
-                      {model.is_active ? (
-                        <Badge>启用中</Badge>
-                      ) : (
-                        <Button variant="outline" size="sm" className="gap-1" onClick={() => model.id && activateModel(model.id)}>
-                          <Power className="h-3.5 w-3.5" /> 启用
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {model.is_active ? (
+                          <Badge>启用中</Badge>
+                        ) : (
+                          <Button variant="outline" size="sm" className="gap-1" onClick={() => model.id && activateModel(model.id)}>
+                            <Power className="h-3.5 w-3.5" /> 启用
+                          </Button>
+                        )}
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => model.id && deleteModel(model.id)}>
+                          <Trash2 className="h-3.5 w-3.5" />
                         </Button>
-                      )}
+                      </div>
                     </div>
                   ))}
                 </div>

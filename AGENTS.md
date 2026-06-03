@@ -13,7 +13,7 @@
 - **Styling**: Tailwind CSS 4
 - **Database**: Supabase (PostgreSQL) / 自建 PostgreSQL (Drizzle ORM)
 - **File Storage**: S3 兼容对象存储 (MinIO / AWS S3 / 火山引擎 TOS)
-- **AI/LLM**: Bear-Model-VL (OpenAI 兼容 API, 默认地址 http://ds.bears.com.cn:8000/v1) + 自定义模型支持
+- **AI/LLM**: Bear-Model-VL (OpenAI 兼容 API, 默认地址 http://ds.bears.com.cn:8000/v1, 默认 API Key: Bear2025IT!)
 - **PDF解析**: pdf-parse (本地解析) + xlsx (Excel解析)
 - **Theme**: Teal 主色 / Business 字体 / Cool 阴影
 
@@ -443,3 +443,11 @@ pnpm start
 ### 问题管理导出
 
 - **问题数据导出**：新增 `src/app/api/issues/export/route.ts`，支持按筛选条件导出问题列表为 CSV。
+
+### AI 模型配置更新
+
+- **移除"内置模型"选项**：模型接入服务只保留"自定义 API"一种方式，默认自动填充 Bear 模型信息（配置名称：Bear，调用地址：http://ds.bears.com.cn:8000/v1，模型：Bear-Model-VL，API Key：Bear2025IT!）。
+- **默认 API Key**：从 `local` 更新为 `Bear2025IT!`。
+- **模型列表删除**：已保存模型列表中每个配置增加删除按钮，删除后清除该模型配置数据。
+- **API 字段始终可见**：调用地址和 API Key 字段始终显示，不再根据服务类型隐藏。
+- **数据库默认值**：`ai_model_configs.provider` 默认值从 `builtin` 改为 `custom`。

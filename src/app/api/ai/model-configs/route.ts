@@ -81,6 +81,26 @@ export async function PUT(request: NextRequest) {
   return NextResponse.json({ code: 0, message: '模型配置已启用', data });
 }
 
+export async function DELETE(request: NextRequest) {
+  const client = getSupabaseClient();
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get('id');
+  const adminUserId = searchParams.get('admin_user_id');
+
+  if (!id) return NextResponse.json({ code: 1, message: '缺少配置 ID' }, { status: 400 });
+
+  try {
+    await assertAdmin(client, adminUserId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '无权限';
+    return NextResponse.json({ code: 1, message }, { status: 403 });
+  }
+
+  const { error } = await client.from('ai_model_configs').delete().eq('id', id);
+  if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
+  return NextResponse.json({ code: 0, message: '已删除' });
+}
+
 function normalizeTemperatureScale(value: unknown) {
   const num = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(num)) return 5;

@@ -394,7 +394,7 @@ CREATE TABLE IF NOT EXISTS platform_settings (
 CREATE TABLE IF NOT EXISTS ai_model_configs (
   id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
   name VARCHAR(100) NOT NULL,
-  provider VARCHAR(20) NOT NULL DEFAULT 'builtin',  -- builtin / custom
+  provider VARCHAR(20) NOT NULL DEFAULT 'custom',  -- custom
   model VARCHAR(100) NOT NULL,
   temperature INTEGER NOT NULL DEFAULT 5,
   max_tokens INTEGER NOT NULL DEFAULT 2400,
@@ -516,7 +516,7 @@ VALUES (
 -- ============================================================
 INSERT INTO platform_settings (key, value) VALUES
   ('standard_options', '{"usage_phases":["开箱","首次安装","产品使用","清洁收纳","其他"],"experience_flows":{"开箱":["拿取外包装","拆开内包装"],"首次安装":["配件梳理","外观美观","外观缺陷","标识文字","首次安装"],"产品使用":["放置及组装","操作交互","产品运行"],"清洁收纳":["冲水","擦拭","晾干","收纳"],"其他":["其他"]},"sensory_dimensions":["视觉","听觉","触觉","嗅觉","味觉"]}'),
-  ('ai_config', '{"provider":"custom","model":"Bear-Model-VL","temperature":5,"custom_api_url":"http://ds.bears.com.cn:8000/v1/chat/completions","custom_api_key":"local"}')
+  ('ai_config', '{"provider":"custom","model":"Bear-Model-VL","temperature":5,"custom_api_url":"http://ds.bears.com.cn:8000/v1","custom_api_key":"Bear2025IT!"}')
 ON CONFLICT (key) DO NOTHING;
 
 -- ============================================================

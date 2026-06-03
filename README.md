@@ -101,13 +101,14 @@ pnpm dev
 
 ## AI 配置
 
-默认模型配置：
+默认模型配置（内置模型）：
 
 | 字段 | 默认值 |
 | --- | --- |
-| API 地址 | `http://ds.bears.com.cn:8000/v1/chat/completions` |
+| 配置名称 | `Bear` |
+| 调用地址 | `http://ds.bears.com.cn:8000/v1` |
 | 模型 | `Bear-Model-VL` |
-| API Key | `local` |
+| API Key | `Bear2025IT!` |
 
 管理员可以在应用内的“AI Agent / Prompt 模板”设置中新增或切换 OpenAI 兼容模型。API Key 存储在 `ai_model_configs.custom_api_key_encrypted` 字段；设置页不会回显原始 Key，留空保存会沿用已保存 Key。
 

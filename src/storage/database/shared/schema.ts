@@ -474,7 +474,7 @@ export const platformSettings = pgTable("platform_settings", {
 export const aiModelConfigs = pgTable("ai_model_configs", {
 	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
 	name: varchar({ length: 100 }).notNull(),
-	provider: varchar({ length: 20 }).default('builtin').notNull(),
+	provider: varchar({ length: 20 }).default('custom').notNull(),
 	model: varchar({ length: 100 }).notNull(),
 	temperature: integer().default(5).notNull(),
 	maxTokens: integer("max_tokens").default(2400).notNull(),
