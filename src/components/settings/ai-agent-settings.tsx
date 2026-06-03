@@ -47,14 +47,14 @@ interface SkillTemplate {
 }
 
 const emptyModel: ModelConfig = {
-  name: 'Bear',
+  name: '',
   provider: 'custom',
-  model: 'Bear-Model-VL',
+  model: '',
   temperature: 0.5,
   max_tokens: 2400,
   supports_vision: true,
-  custom_api_url: 'http://ds.bears.com.cn:8000/v1',
-  custom_api_key: 'Bear2025IT!',
+  custom_api_url: '',
+  custom_api_key: '',
 };
 
 const skillModuleLabels: Record<string, string> = {
