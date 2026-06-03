@@ -98,14 +98,14 @@ export default function IssueDetailPage() {
       {/* Status Flow */}
       <Card>
         <CardContent className="p-4">
-          <div className="flex items-center justify-between gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {statusFlow.map((step, idx) => (
-              <div key={step} className="flex items-center gap-2 flex-1">
+              <div key={step} className="min-w-0">
                 <button
                   disabled={!editing}
                   onClick={() => editing && setForm({ ...form, status: step })}
                   className={cn(
-                    'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                    'flex min-h-10 w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors',
                     issue.status === step ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground',
                     editing && 'cursor-pointer hover:opacity-80'
                   )}

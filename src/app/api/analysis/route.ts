@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
   const date_to = searchParams.get('date_to');
 
   // 1. Fetch tasks with filters
-  let taskQuery = client.from('experience_tasks').select('id, task_name, product_category, product, product_model, project_type, project_phase, organizer, status, created_by, created_at');
+  let taskQuery = client.from('experience_tasks').select('id, task_name, product_category, product, product_model, project_number, project_type, project_phase, organizer, status, created_by, created_at');
   if (!is_admin && created_by) taskQuery = taskQuery.eq('created_by', created_by);
   if (product_category) taskQuery = taskQuery.eq('product_category', product_category);
   if (product) taskQuery = taskQuery.eq('product', product);
@@ -205,9 +205,9 @@ export async function POST(request: NextRequest) {
   const { data: issues } = await client.from('issues').select('*');
 
   if (format === 'csv') {
-    const taskHeaders = '任务名称,品类,产品,型号,项目类型,项目阶段,组织者,状态,创建时间\n';
+    const taskHeaders = '任务名称,项目单号,品类,产品,型号,项目类型,项目阶段,组织者,状态,创建时间\n';
     const taskRows = ((tasks || []) as DataRow[]).map((t) =>
-      `"${t.task_name}","${t.product_category || ''}","${t.product || ''}","${t.product_model}","${t.project_type || ''}","${t.project_phase || ''}","${t.organizer || ''}","${t.status}","${t.created_at}"`
+      `"${t.task_name}","${t.project_number || ''}","${t.product_category || ''}","${t.product || ''}","${t.product_model}","${t.project_type || ''}","${t.project_phase || ''}","${t.organizer || ''}","${t.status}","${t.created_at}"`
     ).join('\n');
 
     const issueHeaders = '问题标题,等级,状态,来源类型,产品型号,整改方案,责任人,创建时间\n';

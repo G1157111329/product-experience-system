@@ -141,19 +141,26 @@ async function imageUrlToPrintableDataUrl(url: string, mode: PrintMode): Promise
 }
 
 async function batchPresignUrls(paths: string[]): Promise<Record<string, string>> {
-  if (!paths.length) return {};
+  const objectKeys = paths.filter((path) => !isDirectPrintableUrl(path));
+  const directUrls = paths.filter(isDirectPrintableUrl);
+  const directMap = Object.fromEntries(directUrls.map((url) => [url, url]));
+  if (!objectKeys.length) return directMap;
   try {
     const res = await fetch('/api/materials/presign', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths }),
+      body: JSON.stringify({ paths: objectKeys }),
     });
-    if (!res.ok) return {};
+    if (!res.ok) return directMap;
     const data = await res.json();
-    return data.code === 0 ? data.data : {};
+    return data.code === 0 ? { ...directMap, ...data.data } : directMap;
   } catch {
-    return {};
+    return directMap;
   }
+}
+
+function isDirectPrintableUrl(value: string): boolean {
+  return value.startsWith('http') || value.startsWith('/uploads/') || value.startsWith('/media/') || value.startsWith('data:');
 }
 
 function parseProblemPoints(value?: string | null): ProblemPoint[] {
@@ -624,7 +631,7 @@ function ReportPrintContent() {
       if (!obj || typeof obj !== 'object') return;
       const record = obj as Record<string, unknown>;
       for (const [key, val] of Object.entries(record)) {
-        if ((key === 'file_url' || key === 'file_path') && typeof val === 'string' && val && !val.startsWith('http')) {
+        if ((key === 'file_url' || key === 'file_path') && typeof val === 'string' && val && !isDirectPrintableUrl(val)) {
           filePaths.push(val);
         } else if (Array.isArray(val)) {
           val.forEach(item => collectPaths(item));

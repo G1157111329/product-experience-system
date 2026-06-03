@@ -47,7 +47,7 @@ interface RecipeLibRef {
 }
 
 interface TaskDetail {
-  id: string; task_name: string; product_category: string; product: string | null; product_model: string;
+  id: string; task_name: string; product_category: string; product: string | null; product_model: string; project_number: string | null;
   project_type: string | null; project_phase: string | null; test_date: string | null; organizer: string | null;
   target_user: string | null; test_purpose: string | null; test_method: string | null;
   status: string; assigned_to: string | null; created_at: string;
@@ -395,7 +395,7 @@ export default function TaskDetailPage() {
               {statusConfig[task.status]?.label || task.status}
             </Badge>
           </div>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-1 break-all">{task.product_model} | {task.product_category}{task.product ? ` - ${task.product}` : ''}{task.project_type ? ` | ${task.project_type}` : ''}{task.project_phase ? ` | ${task.project_phase}` : ''}</p>
+          <p className="text-xs sm:text-sm text-muted-foreground mt-1 break-all">{task.product_model}{task.project_number ? ` | ${task.project_number}` : ''} | {task.product_category}{task.product ? ` - ${task.product}` : ''}{task.project_type ? ` | ${task.project_type}` : ''}{task.project_phase ? ` | ${task.project_phase}` : ''}</p>
         </div>
         <div className="grid grid-cols-2 gap-2 shrink-0 w-full sm:flex sm:w-auto sm:justify-end">
           {isAdmin && (
@@ -685,6 +685,7 @@ function BasicInfoTab({ task, onRefresh }: { task: TaskDetail; onRefresh: () => 
     product_category: task.product_category || '',
     product: task.product || '',
     product_model: task.product_model || '',
+    project_number: task.project_number || '',
     project_type: task.project_type || '',
     project_phase: task.project_phase || '',
     test_date: task.test_date || '',
@@ -729,6 +730,7 @@ function BasicInfoTab({ task, onRefresh }: { task: TaskDetail; onRefresh: () => 
     { label: '产品品类', key: 'product_category' as const, type: 'category' },
     { label: '产品', key: 'product' as const, type: 'product' },
     { label: '产品型号', key: 'product_model' as const, type: 'text' },
+    { label: '项目单号', key: 'project_number' as const, type: 'text' },
     { label: '项目类型', key: 'project_type' as const, type: 'project_type' },
     { label: '项目阶段', key: 'project_phase' as const, type: 'project_phase' },
     { label: '体验时间', key: 'test_date' as const, type: 'date' },
@@ -744,7 +746,7 @@ function BasicInfoTab({ task, onRefresh }: { task: TaskDetail; onRefresh: () => 
       <CardContent className="p-4 space-y-3">
         <div className="flex justify-end">
           {!editing ? (
-            <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => { setForm({ task_name: task.task_name || '', product_category: task.product_category || '', product: task.product || '', product_model: task.product_model || '', project_type: task.project_type || '', project_phase: task.project_phase || '', test_date: task.test_date || '', organizer: task.organizer || '', target_user: task.target_user || '', test_purpose: task.test_purpose || '', test_method: task.test_method || '', status: task.status || '' }); setEditing(true); }}>
+            <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => { setForm({ task_name: task.task_name || '', product_category: task.product_category || '', product: task.product || '', product_model: task.product_model || '', project_number: task.project_number || '', project_type: task.project_type || '', project_phase: task.project_phase || '', test_date: task.test_date || '', organizer: task.organizer || '', target_user: task.target_user || '', test_purpose: task.test_purpose || '', test_method: task.test_method || '', status: task.status || '' }); setEditing(true); }}>
               <Pencil className="h-3 w-3" /> 编辑
             </Button>
           ) : (

@@ -257,6 +257,7 @@ export const experienceTasks = pgTable("experience_tasks", {
 	taskName: varchar("task_name", { length: 200 }).notNull(),
 	productCategory: varchar("product_category", { length: 50 }).notNull(),
 	productModel: varchar("product_model", { length: 50 }).notNull(),
+	projectNumber: varchar("project_number", { length: 100 }),
 	projectPhase: varchar("project_phase", { length: 50 }),
 	testDate: date("test_date"),
 	organizer: varchar({ length: 50 }),

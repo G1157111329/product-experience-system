@@ -10,6 +10,25 @@ const CACHE_TTL = 7 * 24 * 3600 * 1000; // 7天缓存
 let batchQueue: { filePath: string; resolve: (url: string) => void }[] = [];
 let batchTimer: ReturnType<typeof setTimeout> | null = null;
 
+const pendingMediaDataUrl =
+  `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="180" viewBox="0 0 240 180"><rect width="240" height="180" rx="10" fill="#f7f2e9"/><text x="120" y="94" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#8a735c">正在加载素材</text></svg>',
+  )}`;
+
+function isDataUrl(value: string): boolean {
+  return value.startsWith('data:');
+}
+
+function isDirectMediaUrl(value: string): boolean {
+  return value.startsWith('http') || value.startsWith('/uploads/') || value.startsWith('/media/') || isDataUrl(value);
+}
+
+function getStorageKey(material: { file_url?: string | null; file_path?: string | null }): string | null {
+  if (material.file_path && !isDirectMediaUrl(material.file_path)) return material.file_path;
+  if (material.file_url && !isDirectMediaUrl(material.file_url)) return material.file_url;
+  return null;
+}
+
 /**
  * 批量请求签名 URL
  * 将短时间内的多次调用合并为一次 API 请求
@@ -61,7 +80,7 @@ function scheduleBatch(filePath: string, resolve: (url: string) => void) {
         const cachedEntry = globalCache.get(item.filePath);
         if (cachedEntry && cachedEntry.expireAt > Date.now()) {
           cached.push({ ...item, url: cachedEntry.url });
-        } else if (item.filePath.startsWith('http')) {
+        } else if (isDirectMediaUrl(item.filePath)) {
           // 兼容旧数据：已经是完整URL
           cached.push({ ...item, url: item.filePath });
         } else {
@@ -94,25 +113,26 @@ function scheduleBatch(filePath: string, resolve: (url: string) => void) {
 export function getMediaSrc(material: { file_url?: string | null; file_path?: string | null }): string | null {
   const filePath = material.file_path;
   const fileUrl = material.file_url;
+  const storageKey = getStorageKey(material);
 
-  // 优先使用 file_path（新数据）
-  if (filePath && !filePath.startsWith('http')) {
+  // 优先使用 file_path，其次兼容旧数据里存到 file_url 的对象 key。
+  if (storageKey) {
     // 检查缓存
-    const cached = globalCache.get(filePath);
+    const cached = globalCache.get(storageKey);
     if (cached && cached.expireAt > Date.now()) {
       return cached.url;
     }
-    // 返回 filePath，由 hook 异步签名
-    return filePath;
+    // 返回对象 key，由 hook 异步签名
+    return storageKey;
   }
 
   // 兼容旧数据：file_url 是完整签名 URL
-  if (fileUrl && fileUrl.startsWith('http')) {
+  if (fileUrl && isDirectMediaUrl(fileUrl)) {
     // 检查签名是否过期
     const signMatch = fileUrl.match(/[?&]sign=[^&]+/);
     if (signMatch) {
       // 有签名参数，可能过期了 - 尝试使用 file_path
-      if (filePath && !filePath.startsWith('http')) {
+      if (filePath && !isDirectMediaUrl(filePath)) {
         return filePath; // 返回 path，由 hook 异步签名
       }
       // 没有 file_path，直接返回旧 URL（可能过期）
@@ -133,7 +153,7 @@ export function getMediaSrc(material: { file_url?: string | null; file_path?: st
 export function usePresignedUrl(filePath: string | null | undefined): string | null {
   const [url, setUrl] = useState<string | null>(() => {
     if (!filePath) return null;
-    if (filePath.startsWith('http')) return filePath;
+    if (isDirectMediaUrl(filePath)) return filePath;
     const cached = globalCache.get(filePath);
     if (cached && cached.expireAt > Date.now()) return cached.url;
     return null;
@@ -148,7 +168,7 @@ export function usePresignedUrl(filePath: string | null | undefined): string | n
     }
 
     // 兼容旧数据：已经是完整URL
-    if (filePath.startsWith('http')) {
+    if (isDirectMediaUrl(filePath)) {
       setUrl(filePath);
       return;
     }
@@ -189,29 +209,29 @@ export function usePresignedUrls<T extends { id: string; file_url?: string | nul
     const toRequest: string[] = [];
 
     for (const m of materials) {
-      const filePath = m.file_path;
+      const filePath = getStorageKey(m);
       const fileUrl = m.file_url;
 
       // 兼容旧数据：已经是完整URL
-      if (fileUrl && fileUrl.startsWith('http') && !fileUrl.includes('sign=')) {
+      if (!filePath && fileUrl && isDirectMediaUrl(fileUrl) && !fileUrl.includes('sign=')) {
         result.set(m.id, fileUrl);
         continue;
       }
 
-      // 有 file_path 且不是完整 URL
-      if (filePath && !filePath.startsWith('http')) {
+      // 有对象 key 且不是完整 URL
+      if (filePath) {
         const cached = globalCache.get(filePath);
         if (cached && cached.expireAt > Date.now()) {
           result.set(m.id, cached.url);
         } else {
           toRequest.push(filePath);
-          result.set(m.id, filePath); // 临时占位
+          result.set(m.id, pendingMediaDataUrl); // 临时占位，避免旧对象 key 被浏览器当成相对路径请求
         }
         continue;
       }
 
       // 兼容旧数据：file_url 是签名 URL
-      if (fileUrl) {
+      if (fileUrl && isDirectMediaUrl(fileUrl)) {
         result.set(m.id, fileUrl);
       }
     }
@@ -223,7 +243,7 @@ export function usePresignedUrls<T extends { id: string; file_url?: string | nul
       requestPresignedUrls(toRequest).then((urls) => {
         if (!mountedRef.current) return;
         for (const m of materials) {
-          const filePath = m.file_path;
+          const filePath = getStorageKey(m);
           if (filePath && toRequest.includes(filePath)) {
             const signedUrl = urls.get(filePath);
             if (signedUrl) {
@@ -247,7 +267,7 @@ export function usePresignedUrls<T extends { id: string; file_url?: string | nul
  * 服务端用：直接请求签名 URL（不使用 hook）
  */
 export async function fetchPresignedUrl(filePath: string): Promise<string> {
-  if (filePath.startsWith('http')) return filePath;
+  if (isDirectMediaUrl(filePath)) return filePath;
 
   const cached = globalCache.get(filePath);
   if (cached && cached.expireAt > Date.now()) return cached.url;

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { deleteFile } from '@/lib/server/storage';
 
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
@@ -66,7 +67,23 @@ export async function DELETE(request: NextRequest) {
 
   if (!id) return NextResponse.json({ code: 1, message: '缺少id' }, { status: 400 });
 
+  const { data: material } = await client
+    .from('materials')
+    .select('file_path, file_url')
+    .eq('id', id)
+    .single();
+
   const { error } = await client.from('materials').delete().eq('id', id);
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
+
+  try {
+    const fileKey = (material as { file_path?: string | null; file_url?: string | null } | null)?.file_path
+      || (material as { file_path?: string | null; file_url?: string | null } | null)?.file_url;
+    await deleteFile(fileKey);
+  } catch (storageError) {
+    console.error('[materials] Physical file delete failed:', storageError);
+    return NextResponse.json({ code: 0, message: '删除成功', warning: 'physical_file_delete_failed' });
+  }
+
   return NextResponse.json({ code: 0, message: '删除成功' });
 }

@@ -44,7 +44,7 @@ export function TaskDetailHeader({
     <>
       <PageHeader
         title={task.task_name}
-        description={`${task.product_model} | ${task.product_category}${task.product ? ` - ${task.product}` : ''}${task.project_type ? ` | ${task.project_type}` : ''}${task.project_phase ? ` | ${task.project_phase}` : ''}`}
+        description={`${task.product_model}${task.project_number ? ` | ${task.project_number}` : ''} | ${task.product_category}${task.product ? ` - ${task.product}` : ''}${task.project_type ? ` | ${task.project_type}` : ''}${task.project_phase ? ` | ${task.project_phase}` : ''}`}
         backAction={onBack}
         meta={
           <Badge variant="secondary" className={statusConfig[task.status]?.color}>

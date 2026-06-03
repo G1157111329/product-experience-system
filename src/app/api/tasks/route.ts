@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   if (status) query = query.eq('status', status);
   if (product_category) query = query.eq('product_category', product_category);
   if (product) query = query.eq('product', product);
-  if (keyword) query = query.or(`task_name.ilike.%${keyword}%,product_model.ilike.%${keyword}%`);
+  if (keyword) query = query.or(`task_name.ilike.%${keyword}%,product_model.ilike.%${keyword}%,project_number.ilike.%${keyword}%`);
   if (created_by) query = query.eq('created_by', created_by);
 
   const from = (page - 1) * pageSize;
@@ -49,6 +49,7 @@ export async function POST(request: NextRequest) {
     product_category: body.product_category,
     product: body.product || null,
     product_model: body.product_model,
+    project_number: body.project_number || null,
     project_type: body.project_type || null,
     project_phase: body.project_phase || null,
     test_date: body.test_date || null,

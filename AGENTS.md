@@ -396,3 +396,50 @@ pnpm start
 | 删除五感体验/食谱/步骤导致素材被删除 | DB外键 onDelete("cascade") 级联删除素材 + API显式删除素材 | DB外键改为 onDelete("set null")，API改为 update({record_id/recipe_step_id/recipe_library_step_id: null}) 解除关联 |
 | 食谱AI探索返回空内容 | platform_settings.ai_config 中模型配置过时 | 同上，已迁移至统一 API 调用方式 |
 | 复评估素材无法关联 | 素材通过issue_id关联，无法区分同一问题下不同次复评估的素材 | materials表新增re_evaluation_id字段，素材通过复评估ID精确关联；DELETE时解除re_evaluation_id而非issue_id |
+
+## 2026-06-03 Codex 交接进度：UI 规格统一与布局巡检
+
+### 本轮已完成
+
+- **页面级控件规格统一**：新增 `src/components/app/control-styles.ts`，集中定义页面操作按钮、筛选控件、列表项的共享规格，并在 `src/components/app/index.ts` 导出。
+- **按钮/筛选控件统一范围**：
+  - `src/app/(main)/reports/page.tsx`：报告中心”显示全部/显示个人”、报告对比按钮、品类筛选下拉统一页面级尺寸。
+  - `src/app/(main)/issues/page.tsx`：问题管理”导出数据”按钮、状态/等级筛选统一尺寸；移动端头部改为上下排列，避免按钮挤压标题。
+  - `src/app/(main)/analysis/page.tsx`：数据分析”导出项目列表””重置”和所有筛选输入统一尺寸。
+  - `src/app/(main)/standards/components/experience-standards-section.tsx` 与 `recipe-library-section.tsx`：标准管理/食谱库头部按钮和筛选控件统一尺寸，筛选条改为 `sticky={false}`，避免移动端轻微横向溢出。
+- **列表项规格统一**：
+  - `src/components/app/entity-list-item.tsx` 已接入共享列表样式，作为全局列表项基准。
+  - `src/app/(main)/standards/components/experience-standards-section.tsx` 的标准列表改为标题、描述、meta 三层结构。
+  - `src/app/(main)/standards/components/recipe-library-section.tsx` 的食谱库顶层列表也改为同样结构，展开后的步骤详情保持原信息密度。
+  - `pageListCardClass` 已覆盖 shadcn `Card` 默认 `py-4 sm:py-6`，避免首页 `EntityListItem` 被额外撑高。
+
+### 已验证
+
+- `pnpm ts-check` 已通过。
+- `pnpm build` 已通过（含列表规格调整后的完整构建复验）。
+- `next-env.d.ts` 已恢复为 dev 引用（`./.next/dev/types/routes.d.ts`），避免构建副作用影响开发模式。
+- 报告中心和问题管理页面**不适用** `pageList*` 简单列表规格——这两个页面使用 CardHeader+统计网格+子项目的复杂卡片结构，强行套用 `pageListCardClass`（含 `py-0 gap-0`）会破坏布局。它们保持原有 `overflow-hidden transition-colors hover:border-primary/30` 卡片样式。
+
+### 建议后续继续统一的方向
+
+- 体验计划列表页已使用 `EntityListItem`，标准管理和食谱库已使用 `pageList*`，这三个列表是统一的。
+- 报告中心和问题管理因结构复杂（统计网格+子项目），保持独立卡片样式，不套用简单列表规格。
+- 对”页面级操作按钮””行内小图标按钮””弹窗主按钮””筛选输入”保持不同规格，不要全部强行同高；目前的原则是页面级按钮桌面 `32px`、移动 `36px`，筛选控件移动优先 `36px`，搜索框保留较大触控高度。
+
+### 标准管理页面布局优化
+
+- **移除冗余标题**：体验标准和食谱库的 Tab 切换器下方不再重复显示板块标题（与 Tab 文字重复），改为仅在 PageHeader 显示”标准管理”总标题。
+- **操作按钮移至 PageHeader**：批量导入、新建标准、删除、添加食谱等操作按钮从板块内部移到 PageHeader 的 `actions` 区域（右上角），与”体验计划”页面的”新建任务”按钮位置一致；通过 `forwardRef` + `useImperativeHandle` 让页面组件调用板块内部的对话框方法。
+- **间距收紧**：PageShell 间距从 `space-y-4` 调整为 `space-y-3`，板块内部也从 `space-y-4` 调为 `space-y-3`，Tab 切换器与内容之间的垂直空间更紧凑。
+- **食谱库标签对齐**：食谱列表中”5步骤”StatusBadge 与旁边的食材/参数文本使用 `items-center` + `leading-none` 垂直居中对齐。
+
+### 存储模块重构
+
+- **双模式存储**：`src/lib/server/storage.ts` 从纯 S3 模式重构为 local 静态目录 + S3 兼容存储双模式；默认 `STORAGE_DRIVER=local`，文件写入 `LOCAL_UPLOAD_DIR`（默认 `public/uploads`），通过 `LOCAL_PUBLIC_BASE_PATH` 暴露静态路径。
+- **presigned URL 兼容**：`src/lib/use-presigned-url.ts` 新增 `isDirectMediaUrl` / `getStorageKey` 工具函数，正确处理本地路径（`/uploads/...`）、data URL、完整 HTTP URL 三种情况；本地模式下不再调用 presign API，直接使用静态路径。
+- **环境变量**：新增 `STORAGE_DRIVER`（local/s3）、`LOCAL_UPLOAD_DIR`、`LOCAL_PUBLIC_BASE_PATH`、`PUBLIC_MEDIA_BASE_URL`；S3 变量保持不变，仅在 S3 模式下使用。
+- **缺失素材兜底**：本地模式文件不存在时返回 SVG 占位图（”素材文件缺失”），前端加载中时显示”正在加载素材”占位。
+
+### 问题管理导出
+
+- **问题数据导出**：新增 `src/app/api/issues/export/route.ts`，支持按筛选条件导出问题列表为 CSV。

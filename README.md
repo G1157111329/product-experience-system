@@ -1,6 +1,6 @@
 # 产品体验管理平台
 
-面向体验工程师的本地化产品体验管理平台，覆盖体验计划、素材采集、五感体验、功能效果、问题整改、报告输出和数据分析。当前项目按本地部署优先维护：数据库使用本地 PostgreSQL，文件存储使用 S3 兼容服务，AI 使用 OpenAI 兼容接口。
+面向体验工程师的本地化产品体验管理平台，覆盖体验计划、素材采集、五感体验、功能效果、问题整改、报告输出和数据分析。当前项目按本地/单机内网部署优先维护：数据库使用本地 PostgreSQL，文件存储默认写入项目指定静态资源目录，保留 S3 兼容对象存储切换能力，AI 使用 OpenAI 兼容接口。
 
 ## 技术栈
 
@@ -9,7 +9,7 @@
 | Web | Next.js 16 App Router, React 19, TypeScript 5 |
 | UI | shadcn/ui, Radix UI, Tailwind CSS 4 |
 | 数据库 | PostgreSQL + Drizzle ORM，本地模式通过 Supabase 兼容层复用 API 写法 |
-| 文件存储 | S3 兼容对象存储，推荐本地 MinIO |
+| 文件存储 | 默认 local 模式写入 `public/uploads`；可切换 S3 兼容对象存储（MinIO / AWS S3 / 火山引擎 TOS） |
 | AI | OpenAI 兼容 Chat Completions API，默认 Bear-Model-VL |
 | 文档解析 | pdf-parse, xlsx |
 | 包管理 | pnpm |
@@ -19,7 +19,7 @@
 - Node.js 24+
 - pnpm 9+
 - PostgreSQL 14+
-- 可选：Docker，用于启动 MinIO 或 PostgreSQL
+- 可选：Docker，用于启动 PostgreSQL，或在 S3 模式下启动 MinIO
 
 项目默认端口为 `5000`。开发和生产启动都读取 `PORT`，未设置时使用 `5000`。
 
@@ -36,11 +36,20 @@ pnpm install
 ```bash
 DATABASE_URL=postgresql://xp_admin:password@127.0.0.1:5432/xp_experience
 
-S3_ENDPOINT=http://127.0.0.1:9000
-S3_REGION=us-east-1
-S3_BUCKET=xp-experience-media
-S3_ACCESS_KEY=minioadmin
-S3_SECRET_KEY=minioadmin
+# ── 文件存储 ──
+# 默认 local 模式：上传文件写入本地目录，通过静态路径访问
+STORAGE_DRIVER=local
+LOCAL_UPLOAD_DIR=./public/uploads
+LOCAL_PUBLIC_BASE_PATH=/uploads
+# 云服务器/内网部署时必须配置，AI 视觉模型通过此地址读取图片
+PUBLIC_MEDIA_BASE_URL=http://127.0.0.1:5000
+
+# 如需切回 S3/MinIO，将 STORAGE_DRIVER 改为 s3 并取消以下注释
+# S3_ENDPOINT=http://127.0.0.1:9000
+# S3_REGION=us-east-1
+# S3_BUCKET=xp-experience-media
+# S3_ACCESS_KEY=minioadmin
+# S3_SECRET_KEY=minioadmin
 
 PORT=5000
 NODE_ENV=development
@@ -56,13 +65,23 @@ psql -U xp_admin -d xp_experience -f database-schema.sql
 
 初始化脚本会创建业务表、索引、默认品类/产品、默认平台设置和初始管理员账号。
 
-4. 启动 MinIO
+4. 准备素材静态目录
+
+```bash
+mkdir -p public/uploads
+```
+
+本地模式会把上传素材写入 `public/uploads`，数据库仅记录相对对象 key（如 `materials/xxx.jpg`）。`LOCAL_UPLOAD_DIR` 指向文件系统目录，`LOCAL_PUBLIC_BASE_PATH` 是 Web 静态路径前缀，`PUBLIC_MEDIA_BASE_URL` 是平台可访问的完整地址（AI 模型读取图片时使用）。缺失文件会返回 SVG 占位图而非 404。
+
+Docker 或云服务器部署时必须把 `public/uploads` 目录挂载到持久化 volume，否则重建容器后图片和视频会丢失。
+
+如果使用 S3/MinIO 模式，可启动 MinIO：
 
 ```bash
 docker run -p 9000:9000 -p 9001:9001 minio/minio server /data --console-address ":9001"
 ```
 
-启动后在 `http://127.0.0.1:9001` 创建 bucket：`xp-experience-media`。
+启动后在 `http://127.0.0.1:9001` 创建 bucket：`xp-experience-media`，并将 `STORAGE_DRIVER=s3`。
 
 5. 启动开发服务
 
@@ -113,11 +132,24 @@ PORT=5000 pnpm start
 
 - `DATABASE_URL` 指向本地 PostgreSQL。
 - 不设置 `NEXT_PUBLIC_SUPABASE_URL` 和 `NEXT_PUBLIC_SUPABASE_ANON_KEY` 时，系统走本地 PostgreSQL 模式。
-- MinIO bucket 已创建，且 `.env.local` 中的 S3 配置一致。
+- local 模式下 `public/uploads` 已创建，并在 Docker/云服务器中挂载为持久化目录。
+- S3 模式下 MinIO bucket 已创建，且 `.env.local` 中的 S3 配置一致。
 - `pnpm ts-check` 通过。
 - `pnpm build` 通过。
 - 浏览器访问 `http://localhost:5000`，使用 `bear2026 / bear2026` 登录。
 - 在“AI Agent / Prompt 模板”中确认当前启用模型可访问。
+
+## 存储模式说明
+
+| 模式 | `STORAGE_DRIVER` | 文件去向 | URL 生成 |
+| --- | --- | --- | --- |
+| 本地（默认） | `local` | 写入 `LOCAL_UPLOAD_DIR`（默认 `./public/uploads`） | `PUBLIC_MEDIA_BASE_URL` + `LOCAL_PUBLIC_BASE_PATH` + key |
+| S3 兼容 | `s3` | 上传到 S3/MinIO bucket | presigned URL（86400 秒有效期） |
+
+- **local 模式**：文件直接写入磁盘，Next.js 通过静态路径提供访问；AI 模型读取图片时需要 `PUBLIC_MEDIA_BASE_URL` 指向平台可访问的地址。
+- **S3 模式**：使用 AWS SDK 上传文件到 S3 兼容存储，访问时生成 presigned URL；素材删除调用 `DeleteObjectCommand`。
+- **缺失素材兜底**：local 模式下文件不存在时返回 SVG 占位图；presign API 对已缺失的 key 也返回占位图。
+- **前端兼容**：`usePresignedUrl` hook 自动识别本地路径（`/uploads/...`）、data URL、完整 HTTP URL，仅对 S3 对象 key 调用 presign 接口。
 
 ## 主要目录
 
@@ -137,7 +169,7 @@ src/
   components/                      通用组件和设置组件
   lib/
     server/ai.ts                   OpenAI 兼容 AI 调用
-    server/storage.ts              S3 兼容存储封装
+    server/storage.ts              local 静态目录 + S3 兼容存储封装
     agent-skills.ts                Agent Skill 默认定义
   storage/database/
     supabase-client.ts             云/本地双模式入口
@@ -159,6 +191,7 @@ database-schema.sql                 本地数据库初始化 SQL
 - `dist/`
 - `node_modules/`
 - `.codex-logs/`
+- `public/uploads/`
 - `*.log`
 - `*.tsbuildinfo`
 

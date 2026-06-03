@@ -14,7 +14,7 @@ import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
-import { MetricCard, PageHeader, PageShell } from '@/components/app';
+import { MetricCard, PageHeader, PageShell, pageActionButtonClass, pageFilterControlClass } from '@/components/app';
 
 interface CoreMetrics {
   totalTasks: number; completedTasks: number; completionRate: number;
@@ -113,9 +113,8 @@ export default function AnalysisPage() {
       });
       const data = await res.json();
       if (data.code === 0) {
-        downloadCsv(data.data.tasksCsv, '体验任务数据.csv');
-        setTimeout(() => downloadCsv(data.data.issuesCsv, '问题点数据.csv'), 500);
-        toast.success('数据导出成功');
+        downloadCsv(data.data.tasksCsv, '项目列表数据.csv');
+        toast.success('项目列表导出成功');
       }
     } catch {
       toast.error('导出失败');
@@ -162,8 +161,8 @@ export default function AnalysisPage() {
         title="数据分析"
         description="产品体验核心数据看板"
         actions={isAdmin && (
-          <Button variant="outline" size="sm" onClick={handleExport} className="gap-1.5">
-            <Download className="h-4 w-4" /> 导出数据
+          <Button variant="outline" size="sm" onClick={handleExport} className={pageActionButtonClass}>
+            <Download className="h-4 w-4" /> 导出项目列表
           </Button>
         )}
       />
@@ -174,13 +173,13 @@ export default function AnalysisPage() {
           <div className="flex items-center gap-2 mb-3">
             <Filter className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm font-medium">筛选条件</span>
-            <Button variant="ghost" size="sm" className="ml-auto text-xs h-7" onClick={resetFilters}>重置</Button>
+            <Button variant="ghost" size="sm" className={cn(pageActionButtonClass, 'ml-auto')} onClick={resetFilters}>重置</Button>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7">
             <div className="space-y-1">
               <Label className="text-xs">品类</Label>
               <Select value={fCategory} onValueChange={handleCategoryChange}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectTrigger className={pageFilterControlClass}><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">全部品类</SelectItem>
                   {filterOptions.categories.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
@@ -190,7 +189,7 @@ export default function AnalysisPage() {
             <div className="space-y-1">
               <Label className="text-xs">产品</Label>
               <Select value={fProduct} onValueChange={setFProduct} disabled={fCategory === 'all'}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectTrigger className={pageFilterControlClass}><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">全部产品</SelectItem>
                   {availableProducts.map(p => <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>)}
@@ -200,7 +199,7 @@ export default function AnalysisPage() {
             <div className="space-y-1">
               <Label className="text-xs">项目类型</Label>
               <Select value={fProjectType} onValueChange={setFProjectType}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectTrigger className={pageFilterControlClass}><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">全部类型</SelectItem>
                   {filterOptions.projectTypes.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
@@ -210,7 +209,7 @@ export default function AnalysisPage() {
             <div className="space-y-1">
               <Label className="text-xs">任务人</Label>
               <Select value={fOrganizer} onValueChange={setFOrganizer}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectTrigger className={pageFilterControlClass}><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">全部</SelectItem>
                   {filterOptions.organizers.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
@@ -220,7 +219,7 @@ export default function AnalysisPage() {
             <div className="space-y-1">
               <Label className="text-xs">问题点分类</Label>
               <Select value={fIssueLevel} onValueChange={setFIssueLevel}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectTrigger className={pageFilterControlClass}><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">全部</SelectItem>
                   <SelectItem value="一类">一类</SelectItem>
@@ -231,11 +230,11 @@ export default function AnalysisPage() {
             </div>
             <div className="space-y-1">
               <Label className="text-xs">开始日期</Label>
-              <Input type="date" value={fDateFrom} onChange={e => setFDateFrom(e.target.value)} className="h-8 text-xs" />
+              <Input type="date" value={fDateFrom} onChange={e => setFDateFrom(e.target.value)} className={pageFilterControlClass} />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">结束日期</Label>
-              <Input type="date" value={fDateTo} onChange={e => setFDateTo(e.target.value)} className="h-8 text-xs" />
+              <Input type="date" value={fDateTo} onChange={e => setFDateTo(e.target.value)} className={pageFilterControlClass} />
             </div>
           </div>
         </CardContent>

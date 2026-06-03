@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { ChefHat, Loader2, Pencil, Trash2, Plus, X, ChevronDown, ChevronUp, GripVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,16 +13,33 @@ import {
 import { cn } from '@/lib/utils';
 import { usePresignedUrls } from '@/lib/use-presigned-url';
 import { toast } from 'sonner';
-import { FilterBar, StatusBadge, EmptyState, SkeletonList } from '@/components/app';
+import {
+  FilterBar,
+  StatusBadge,
+  EmptyState,
+  SkeletonList,
+  pageFilterControlClass,
+  pageListBodyClass,
+  pageListCardClass,
+  pageListContentClass,
+  pageListDescriptionClass,
+  pageListMetaClass,
+  pageListTitleClass,
+} from '@/components/app';
 import type { CategoryWithProducts, RecipeLibItem, RecipeLibStep } from '../types';
 import { RecipeAddDialog, RecipeEditDialog } from './recipe-library-dialogs';
+
+export interface RecipeSectionRef {
+  openAddDialog: () => void;
+}
 
 type RecipeLibrarySectionProps = {
   categories: CategoryWithProducts[];
   isAdmin: boolean;
 };
 
-export function RecipeLibrarySection({ categories, isAdmin }: RecipeLibrarySectionProps) {
+export const RecipeLibrarySection = forwardRef<RecipeSectionRef, RecipeLibrarySectionProps>(
+function RecipeLibrarySection({ categories, isAdmin }, ref) {
   const [recipes, setRecipes] = useState<RecipeLibItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterCategory, setFilterCategory] = useState('');
@@ -51,6 +68,10 @@ export function RecipeLibrarySection({ categories, isAdmin }: RecipeLibrarySecti
   // Flatten all step materials for presigned URL resolution
   const flatStepMaterials = Object.values(stepMaterials).flat();
   const presignedUrls = usePresignedUrls(flatStepMaterials);
+
+  useImperativeHandle(ref, () => ({
+    openAddDialog: () => setAddOpen(true),
+  }));
 
   const fetchRecipes = useCallback(async () => {
     setLoading(true);
@@ -195,22 +216,9 @@ export function RecipeLibrarySection({ categories, isAdmin }: RecipeLibrarySecti
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <ChefHat className="h-5 w-5 text-emerald-600" />
-          <h2 className="text-base font-semibold">食谱库</h2>
-          <StatusBadge kind="generic" value={String(recipes.length)} className="text-[10px]" />
-        </div>
-        {isAdmin && (
-          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setAddOpen(true)}>
-            <Plus className="h-3 w-3" /> 添加食谱
-          </Button>
-        )}
-      </div>
-
-      <FilterBar>
+      <FilterBar sticky={false}>
         <Select value={filterCategory} onValueChange={(v) => { setFilterCategory(v === 'all' ? '' : v); setFilterProduct(''); }}>
-          <SelectTrigger className="w-32 h-8 text-xs"><SelectValue placeholder="全部品类" /></SelectTrigger>
+          <SelectTrigger className={cn(pageFilterControlClass, 'w-full sm:w-32')}><SelectValue placeholder="全部品类" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部品类</SelectItem>
             {categories.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
@@ -218,7 +226,7 @@ export function RecipeLibrarySection({ categories, isAdmin }: RecipeLibrarySecti
         </Select>
         {filterCategory && (
           <Select value={filterProduct} onValueChange={(v) => setFilterProduct(v === 'all' ? '' : v)}>
-            <SelectTrigger className="w-32 h-8 text-xs"><SelectValue placeholder="全部产品" /></SelectTrigger>
+            <SelectTrigger className={cn(pageFilterControlClass, 'w-full sm:w-32')}><SelectValue placeholder="全部产品" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">全部产品</SelectItem>
               {(selectedCat?.products || []).map(p => <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>)}
@@ -234,20 +242,22 @@ export function RecipeLibrarySection({ categories, isAdmin }: RecipeLibrarySecti
       ) : (
         <div className="grid gap-2">
           {recipes.map(recipe => (
-            <div key={recipe.id} className={cn('rounded-lg border bg-card transition-colors', expandedId === recipe.id && 'ring-1 ring-primary/30')}>
-              <div className="p-3">
-                <div className="flex items-center gap-3">
-                  <StatusBadge kind="recipe" value={recipe.recipe_type} className="text-[9px] shrink-0" />
-                  <div className="flex-1 min-w-0 cursor-pointer" onClick={() => handleExpand(recipe)}>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-medium truncate">{recipe.name}</span>
-                      <span className="text-[10px] text-muted-foreground">
-                        {recipe.product_category || '通用'}{recipe.product ? ` - ${recipe.product}` : ''}
-                      </span>
+            <div key={recipe.id} className={cn('rounded-lg border bg-card', pageListCardClass, expandedId === recipe.id && 'ring-1 ring-primary/30')}>
+              <div className={pageListContentClass}>
+                <div className={pageListBodyClass}>
+                  <StatusBadge kind="recipe" value={recipe.recipe_type} className="mt-0.5 shrink-0 text-[9px]" />
+                  <div className="min-w-0 flex-1 cursor-pointer" onClick={() => handleExpand(recipe)}>
+                    <div className={pageListTitleClass}>{recipe.name}</div>
+                    <div className={pageListDescriptionClass}>
+                      {recipe.product_category || '通用'}{recipe.product ? ` - ${recipe.product}` : ''}
                     </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] text-muted-foreground">{recipe.recipe_library_steps?.length || 0} 步骤</span>
-                      {recipe.ingredients && <span className="text-[10px] text-muted-foreground truncate max-w-[200px]">{recipe.ingredients}</span>}
+                    <div className={cn(pageListMetaClass, 'items-center')}>
+                      <StatusBadge kind="generic" value={`${recipe.recipe_library_steps?.length || 0} 步骤`} className="text-[10px]" />
+                      {recipe.ingredients && (
+                        <span className="max-w-full truncate text-[10px] text-muted-foreground leading-none sm:max-w-[240px]">
+                          {recipe.ingredients}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
@@ -412,4 +422,4 @@ export function RecipeLibrarySection({ categories, isAdmin }: RecipeLibrarySecti
       <RecipeEditDialog open={editOpen} onOpenChange={setEditOpen} recipe={editingRecipe} categories={categories} onSaved={fetchRecipes} />
     </div>
   );
-}
+});

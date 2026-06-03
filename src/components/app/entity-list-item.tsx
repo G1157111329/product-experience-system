@@ -3,6 +3,14 @@ import Link from 'next/link';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  pageListBodyClass,
+  pageListCardClass,
+  pageListContentClass,
+  pageListDescriptionClass,
+  pageListMetaClass,
+  pageListTitleClass,
+} from './control-styles';
 
 type EntityListItemProps = {
   href?: string;
@@ -28,14 +36,14 @@ export function EntityListItem({
   onClick,
 }: EntityListItemProps) {
   const content = (
-    <Card className={cn('min-w-0 transition-colors hover:border-primary/30 hover:bg-muted/20', className)}>
-      <CardContent className="p-3 sm:p-4">
-        <div className="flex min-w-0 items-start gap-3">
+    <Card className={cn(pageListCardClass, className)}>
+      <CardContent className={pageListContentClass}>
+        <div className={pageListBodyClass}>
           {leading && <div className="shrink-0">{leading}</div>}
           <div className="min-w-0 flex-1">
-            <div className="min-w-0 break-words text-sm font-medium leading-5 sm:text-base">{title}</div>
-            {description && <div className="mt-1 break-words text-xs text-muted-foreground">{description}</div>}
-            {meta && <div className="mt-2 flex flex-wrap gap-1.5">{meta}</div>}
+            <div className={pageListTitleClass}>{title}</div>
+            {description && <div className={pageListDescriptionClass}>{description}</div>}
+            {meta && <div className={pageListMetaClass}>{meta}</div>}
           </div>
           {(actions || showChevron) && (
             <div className="flex shrink-0 items-center gap-1" onClick={(event) => event.stopPropagation()}>

@@ -23,6 +23,24 @@ interface MediaGalleryProps {
   PreviewComponent?: React.ReactNode;
 }
 
+const missingMediaDataUrl =
+  `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="180" viewBox="0 0 240 180"><rect width="240" height="180" rx="10" fill="#f7f2e9"/><path d="M72 66h86a10 10 0 0 1 10 10v52a10 10 0 0 1-10 10H72a10 10 0 0 1-10-10V76a10 10 0 0 1 10-10Z" fill="none" stroke="#d8c7ad" stroke-width="4"/><path d="m76 122 28-28 22 22 13-13 29 29" fill="none" stroke="#d8c7ad" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="145" cy="85" r="8" fill="#d8c7ad"/><text x="120" y="154" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#8a735c">素材文件缺失</text></svg>',
+  )}`;
+
+function isDirectMediaUrl(value: string | null | undefined): boolean {
+  return Boolean(
+    value &&
+    (value.startsWith('http') || value.startsWith('/uploads/') || value.startsWith('/media/') || value.startsWith('data:'))
+  );
+}
+
+function getInitialMediaUrl(material: Material): string {
+  if (isDirectMediaUrl(material.file_path)) return material.file_path as string;
+  if (isDirectMediaUrl(material.file_url)) return material.file_url;
+  return missingMediaDataUrl;
+}
+
 function MediaThumbnail({
   url,
   type,
@@ -45,6 +63,8 @@ function MediaThumbnail({
           ? 'h-32 w-32'
           : 'h-20 w-20';
 
+  const isImagePlaceholder = url.startsWith('data:image/');
+
   return (
     <div
       className={cn(
@@ -54,7 +74,7 @@ function MediaThumbnail({
       )}
       onClick={onClick}
     >
-      {type === 'video' ? (
+      {type === 'video' && !isImagePlaceholder ? (
         <>
           <video
             src={url}
@@ -78,6 +98,10 @@ function MediaThumbnail({
           alt=""
           className="h-full w-full object-cover"
           loading="lazy"
+          onError={(event) => {
+            const img = event.currentTarget;
+            if (img.src !== missingMediaDataUrl) img.src = missingMediaDataUrl;
+          }}
         />
       )}
     </div>
@@ -139,7 +163,7 @@ export function MediaGallery({
     <>
       <div className={cn('grid min-w-0', gridCols, gap, className)}>
         {materials.map((mat) => {
-          const resolvedUrl = presignedMap.get(mat.id) || mat.file_url;
+          const resolvedUrl = presignedMap.get(mat.id) || getInitialMediaUrl(mat);
           return (
             <MediaThumbnail
               key={mat.id}

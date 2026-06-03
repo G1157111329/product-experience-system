@@ -24,6 +24,7 @@ export interface TaskDetail {
   product_category: string;
   product: string | null;
   product_model: string;
+  project_number: string | null;
   project_type: string | null;
   project_phase: string | null;
   test_date: string | null;

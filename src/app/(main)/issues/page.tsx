@@ -10,10 +10,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Sparkles, Plus, Loader2, Pencil } from 'lucide-react';
+import { Download, Sparkles, Plus, Loader2, Pencil } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
-import { PageShell } from '@/components/app';
+import { PageShell, pageActionButtonClass, pageFilterSelectClass } from '@/components/app';
 import { MaterialPicker, type Material } from '@/components/material-picker';
 import { toast } from 'sonner';
 
@@ -286,6 +286,41 @@ export default function IssuesPage() {
     }
   };
 
+  const downloadCsv = (csvContent: string, filename: string) => {
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportIssues = async () => {
+    try {
+      if (!isAdmin && userTaskIds.length === 0) {
+        toast.info('暂无可导出的问题点');
+        return;
+      }
+
+      const params = new URLSearchParams({ limit: '2000' });
+      if (filterStatus !== 'all') params.set('status', filterStatus);
+      if (filterLevel !== 'all') params.set('level', filterLevel);
+      if (!isAdmin) params.set('task_ids', userTaskIds.join(','));
+
+      const res = await fetch(`/api/issues/export?${params}`);
+      const data = await res.json();
+      if (data.code !== 0) {
+        toast.error(data.message || '导出失败');
+        return;
+      }
+      downloadCsv(data.data.csv, '问题点数据.csv');
+      toast.success(`已导出 ${data.data.count || 0} 条问题点`);
+    } catch {
+      toast.error('导出失败');
+    }
+  };
+
   // Fetch re-evaluations for the selected issue
   const fetchReEvaluations = useCallback(async (issueId: string) => {
     const res = await fetch(`/api/issue-re-evaluations?issue_id=${issueId}`);
@@ -425,11 +460,15 @@ export default function IssuesPage() {
 
   return (
     <PageShell size="wide" className="space-y-4 sm:space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-bold">问题管理</h1>
           <p className="text-sm text-muted-foreground mt-1">不合格检查项与食谱功能问题汇总</p>
         </div>
+        <Button variant="outline" size="sm" className={cn(pageActionButtonClass, 'w-full sm:w-auto')} onClick={handleExportIssues}>
+          <Download className="h-4 w-4" />
+          导出数据
+        </Button>
       </div>
 
       {/* Stats */}
@@ -450,16 +489,16 @@ export default function IssuesPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex gap-2 flex-wrap">
+      <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
         <Select value={filterStatus} onValueChange={setFilterStatus}>
-          <SelectTrigger className="w-28"><SelectValue placeholder="状态" /></SelectTrigger>
+          <SelectTrigger className={pageFilterSelectClass}><SelectValue placeholder="状态" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部状态</SelectItem>
             {STATUS_LIST.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={filterLevel} onValueChange={setFilterLevel}>
-          <SelectTrigger className="w-28"><SelectValue placeholder="等级" /></SelectTrigger>
+          <SelectTrigger className={pageFilterSelectClass}><SelectValue placeholder="等级" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部等级</SelectItem>
             {LEVEL_LIST.map(l => <SelectItem key={l} value={l}>{l}</SelectItem>)}
@@ -496,10 +535,10 @@ export default function IssuesPage() {
                         <Badge variant="outline" className="text-[10px] shrink-0">食谱/功能</Badge>
                       )}
                       <span className="text-sm flex-1 min-w-0 truncate">{issue.title}</span>
-                      <div className="flex gap-1 shrink-0 w-full sm:w-auto" onClick={(e) => e.stopPropagation()}>
+                      <div className="grid w-full shrink-0 grid-cols-4 gap-1 sm:flex sm:w-auto" onClick={(e) => e.stopPropagation()}>
                         {STATUS_LIST.map(s => (
                           <button key={s} onClick={() => handleStatusChange(issue.id, s)}
-                            className={cn('px-1.5 py-0.5 rounded text-[10px] transition-colors flex-1 sm:flex-none lg:min-w-14',
+                            className={cn('min-h-8 rounded px-2 py-1.5 text-[11px] transition-colors sm:min-h-7 sm:flex-none sm:px-2 sm:py-1 lg:min-w-14',
                               issue.status === s ? STATUS_COLORS[s] + ' font-medium' : 'text-muted-foreground hover:bg-muted/50')}>
                             {s}
                           </button>
@@ -541,10 +580,10 @@ export default function IssuesPage() {
                 </div>
                 <div className="space-y-1.5">
                   <Label>整改状态</Label>
-                  <div className="flex gap-1">
+                  <div className="grid grid-cols-2 gap-1 sm:grid-cols-4">
                     {STATUS_LIST.map(s => (
                       <button key={s} onClick={() => handleStatusChange(selectedIssue.id, s)}
-                        className={cn('flex-1 px-1 py-1.5 rounded text-[10px] font-medium border transition-colors',
+                        className={cn('min-h-9 rounded border px-2 py-1.5 text-xs font-medium transition-colors',
                           selectedIssue.status === s ? STATUS_COLORS[s] + ' border-current' : 'bg-background border-border hover:bg-muted/50')}>
                         {s}
                       </button>

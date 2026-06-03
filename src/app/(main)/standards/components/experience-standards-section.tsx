@@ -1,26 +1,49 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react';
 import Link from 'next/link';
-import { AlertCircle, BookOpen, Plus, Trash2, Upload } from 'lucide-react';
+import { AlertCircle, BookOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import { FilterBar, SearchField, StatusBadge, EmptyState, SkeletonList } from '@/components/app';
+import { cn } from '@/lib/utils';
+import {
+  FilterBar,
+  SearchField,
+  StatusBadge,
+  EmptyState,
+  SkeletonList,
+  pageActionButtonClass,
+  pageFilterControlClass,
+  pageListBodyClass,
+  pageListCardClass,
+  pageListContentClass,
+  pageListDescriptionClass,
+  pageListMetaClass,
+  pageListTitleClass,
+} from '@/components/app';
 import type { CategoryWithProducts, Standard } from '../types';
 import { categoryConfig } from '../types';
 import { StandardCreateDialog } from './standard-create-dialog';
 import { StandardImportDialog } from './standard-create-dialog';
 import { StandardBatchDeleteDialog } from './standard-batch-delete-dialog';
 
+export interface StandardsSectionRef {
+  openCreateDialog: () => void;
+  openImportDialog: () => void;
+  openDeleteDialog: () => void;
+}
+
 type ExperienceStandardsSectionProps = {
   categories: CategoryWithProducts[];
   isAdmin: boolean;
+  onSelectedCountChange?: (count: number) => void;
 };
 
-export function ExperienceStandardsSection({ categories, isAdmin }: ExperienceStandardsSectionProps) {
+export const ExperienceStandardsSection = forwardRef<StandardsSectionRef, ExperienceStandardsSectionProps>(
+function ExperienceStandardsSection({ categories, isAdmin, onSelectedCountChange }, ref) {
   const [standards, setStandards] = useState<Standard[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
@@ -30,6 +53,16 @@ export function ExperienceStandardsSection({ categories, isAdmin }: ExperienceSt
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+
+  useImperativeHandle(ref, () => ({
+    openCreateDialog: () => setCreateDialogOpen(true),
+    openImportDialog: () => setImportDialogOpen(true),
+    openDeleteDialog: () => setDeleteDialogOpen(true),
+  }));
+
+  useEffect(() => {
+    onSelectedCountChange?.(selectedIds.size);
+  }, [selectedIds.size, onSelectedCountChange]);
 
   const fetchStandards = useCallback(async () => {
     setLoading(true);
@@ -65,35 +98,10 @@ export function ExperienceStandardsSection({ categories, isAdmin }: ExperienceSt
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <BookOpen className="h-5 w-5 text-primary" />
-          <h2 className="text-base font-semibold">体验标准</h2>
-          <StatusBadge kind="generic" value={String(standards.length)} className="text-[10px]" />
-        </div>
-        <div className="flex gap-2">
-          {selectedIds.size > 0 && (
-            <Button size="sm" variant="destructive" className="h-7 text-xs shrink-0" onClick={() => setDeleteDialogOpen(true)}>
-              <Trash2 className="h-3 w-3 mr-1" /> 删除({selectedIds.size})
-            </Button>
-          )}
-          {isAdmin && (
-            <>
-              <Button variant="outline" size="sm" className="h-7 text-xs gap-1 shrink-0" onClick={() => setImportDialogOpen(true)}>
-                <Upload className="h-3 w-3" /> 批量导入
-              </Button>
-              <Button size="sm" className="h-7 text-xs gap-1 shrink-0" onClick={() => setCreateDialogOpen(true)}>
-                <Plus className="h-3 w-3" /> 新建标准
-              </Button>
-            </>
-          )}
-        </div>
-      </div>
-
-      <FilterBar>
-        <SearchField placeholder="搜索标准..." value={keyword} onChange={(e) => setKeyword(e.target.value)} className="h-8 text-xs" />
+      <FilterBar sticky={false}>
+        <SearchField placeholder="搜索标准..." value={keyword} onChange={(e) => setKeyword(e.target.value)} className={pageFilterControlClass} />
         <Select value={filterCategory || 'all'} onValueChange={(value) => setFilterCategory(value === 'all' ? '' : value)}>
-          <SelectTrigger className="w-28 h-8 text-xs"><SelectValue placeholder="全部分类" /></SelectTrigger>
+          <SelectTrigger className={cn(pageFilterControlClass, 'w-full sm:w-32')}><SelectValue placeholder="全部分类" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部分类</SelectItem>
             {Object.entries(categoryConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
@@ -112,7 +120,7 @@ export function ExperienceStandardsSection({ categories, isAdmin }: ExperienceSt
               <p className="mt-1 break-words text-xs text-muted-foreground">{errorMessage}</p>
             </div>
           </div>
-          <Button variant="outline" size="sm" className="h-8 shrink-0 text-xs" onClick={fetchStandards}>
+          <Button variant="outline" size="sm" className={cn(pageActionButtonClass, 'shrink-0')} onClick={fetchStandards}>
             重新加载
           </Button>
         </div>
@@ -132,15 +140,19 @@ export function ExperienceStandardsSection({ categories, isAdmin }: ExperienceSt
                 <Checkbox checked={selectedIds.has(std.id)} onCheckedChange={() => toggleSelect(std.id)} className="h-4 w-4 shrink-0" />
               )}
               <Link href={`/standards/${std.id}`} className="flex-1 min-w-0">
-                <div className="rounded-lg border bg-card p-3 hover:bg-muted/30 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <StatusBadge kind="standard" value={std.category} className="text-[9px] shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-medium truncate">{std.standard_name}</span>
-                        {std.product_category && <span className="text-[10px] text-muted-foreground">{std.product_category}{std.product ? ` - ${std.product}` : ''}</span>}
+                <div className={cn('rounded-lg border bg-card', pageListCardClass)}>
+                  <div className={pageListContentClass}>
+                    <div className={pageListBodyClass}>
+                      <StatusBadge kind="standard" value={std.category} className="mt-0.5 shrink-0 text-[9px]" />
+                      <div className="min-w-0 flex-1">
+                        <div className={pageListTitleClass}>{std.standard_name}</div>
+                        <div className={pageListDescriptionClass}>
+                          {std.product_category ? `${std.product_category}${std.product ? ` - ${std.product}` : ''}` : '平台通用标准'}
+                        </div>
+                        <div className={pageListMetaClass}>
+                          <StatusBadge kind="generic" value={`${std.standard_items?.[0]?.count || 0} 项检查项`} className="text-[10px]" />
+                        </div>
                       </div>
-                      <span className="text-[10px] text-muted-foreground">{std.standard_items?.[0]?.count || 0} 项检查项</span>
                     </div>
                   </div>
                 </div>
@@ -161,4 +173,4 @@ export function ExperienceStandardsSection({ categories, isAdmin }: ExperienceSt
       />
     </div>
   );
-}
+});

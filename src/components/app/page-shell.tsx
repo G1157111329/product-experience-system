@@ -16,7 +16,7 @@ export function PageShell({ className, size = 'default', ...props }: PageShellPr
     <div
       className={cn(
         'w-full px-3 py-4 sm:px-4 lg:px-6 lg:py-6',
-        'pb-[calc(5rem+env(safe-area-inset-bottom))] lg:pb-6',
+        'pb-[calc(5.75rem+env(safe-area-inset-bottom))] lg:pb-6',
         sizeClass[size],
         className
       )}

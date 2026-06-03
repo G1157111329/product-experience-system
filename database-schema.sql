@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS experience_tasks (
   product_category VARCHAR(50) NOT NULL,            -- 品类
   product VARCHAR(200),                             -- 产品
   product_model VARCHAR(50),                        -- 产品型号（自研/改型降本优化时必填，其他类型可选）
+  project_number VARCHAR(100),                      -- 项目单号
   project_type VARCHAR(50),                         -- ODM/OEM/竞品研究/自研/前期研究/改型降本优化/海外产品
   project_phase VARCHAR(50),                        -- 手板研究/试制阶段/试产阶段/量产阶段
   test_date DATE,

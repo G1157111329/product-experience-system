@@ -45,6 +45,7 @@ interface Task {
   product_category: string;
   product: string | null;
   product_model: string;
+  project_number: string | null;
   project_type: string | null;
   project_phase: string | null;
   test_date: string | null;
@@ -62,6 +63,7 @@ const emptyForm = {
   product_category: '',
   product: '',
   product_model: '',
+  project_number: '',
   project_type: '',
   project_phase: '',
   test_date: '',
@@ -303,13 +305,23 @@ export default function TasksPage() {
                     </Select>
                   </div>
                 </div>
-                <div className="space-y-1.5">
-                  <Label>产品型号 {productModelRequired ? '*' : ''}</Label>
-                  <Input
-                    placeholder="如：PBJ-F10U1"
-                    value={form.product_model}
-                    onChange={(event) => setForm({ ...form, product_model: event.target.value })}
-                  />
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>产品型号 {productModelRequired ? '*' : ''}</Label>
+                    <Input
+                      placeholder="如：PBJ-F10U1"
+                      value={form.product_model}
+                      onChange={(event) => setForm({ ...form, product_model: event.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>项目单号</Label>
+                    <Input
+                      placeholder="填写项目单号"
+                      value={form.project_number}
+                      onChange={(event) => setForm({ ...form, project_number: event.target.value })}
+                    />
+                  </div>
                 </div>
                 <div className="space-y-1.5">
                   <Label>项目类型 *</Label>
@@ -423,7 +435,7 @@ export default function TasksPage() {
           ))}
         </div>
         <SearchField
-          placeholder="搜索型号、任务名称..."
+          placeholder="搜索单号、型号、任务名称..."
           value={keyword}
           onChange={(event) => setKeyword(event.target.value)}
         />
@@ -448,6 +460,7 @@ export default function TasksPage() {
                 <span>
                   {task.product_category}
                   {task.product ? ` - ${task.product}` : ''}
+                  {task.project_number ? ` | ${task.project_number}` : ''}
                   {task.product_model ? ` | ${task.product_model}` : ''}
                 </span>
               }

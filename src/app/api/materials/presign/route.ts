@@ -5,14 +5,15 @@ import { generatePresignedUrl } from '@/lib/server/storage';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { paths } = body as { paths: string[] };
+    const { paths, file_paths } = body as { paths?: string[]; file_paths?: string[] };
+    const requestedPaths = Array.isArray(paths) ? paths : file_paths;
 
-    if (!paths || !Array.isArray(paths) || paths.length === 0) {
+    if (!requestedPaths || !Array.isArray(requestedPaths) || requestedPaths.length === 0) {
       return NextResponse.json({ code: 1, message: 'paths 参数必填' }, { status: 400 });
     }
 
     // 限制单次最多50个
-    const limitedPaths = paths.slice(0, 50);
+    const limitedPaths = requestedPaths.slice(0, 50);
 
     // 并行生成签名URL（有效期7天）
     const results = await Promise.allSettled(

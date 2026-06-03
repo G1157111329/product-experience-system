@@ -35,9 +35,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       <AppSidebar />
       <MobileNav />
       <main className="flex-1 min-w-0 overflow-y-auto pt-14 lg:pt-0">
-        <div className="pb-20 lg:pb-0">
-          {children}
-        </div>
+        {children}
       </main>
       <BottomNav />
     </div>
