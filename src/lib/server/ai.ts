@@ -41,14 +41,13 @@ interface ResolveOptions {
   maxTokens?: number;
 }
 
-// Default AI config — local deployment endpoint
-const DEFAULT_API_URL = 'http://ds.bears.com.cn:8000/v1/chat/completions';
-const DEFAULT_API_KEY = 'Bear2025IT!';
-const DEFAULT_MODEL = 'Bear-Model-VL';
+const DEFAULT_API_URL = process.env.AI_API_URL || process.env.AI_API_BASE_URL || '';
+const DEFAULT_API_KEY = process.env.AI_API_KEY || '';
+const DEFAULT_MODEL = process.env.AI_MODEL || '';
 
 export function normalizeChatCompletionsUrl(apiUrl: string): string {
   const trimmed = apiUrl.trim().replace(/\/+$/, '');
-  if (!trimmed) return DEFAULT_API_URL;
+  if (!trimmed) return '';
   if (trimmed.endsWith('/chat/completions')) return trimmed;
   return `${trimmed}/chat/completions`;
 }
@@ -108,6 +107,10 @@ export async function invokeConfiguredAI({
 
   const apiUrl = normalizeChatCompletionsUrl(aiConfig.customApiUrl || DEFAULT_API_URL);
   const apiKey = aiConfig.customApiKey || DEFAULT_API_KEY;
+
+  if (!model.trim() || !apiUrl.trim() || !apiKey.trim()) {
+    throw new Error('AI配置未完成，请先在设置页或运行环境中配置 AI 接入信息');
+  }
 
   let response: Response;
   try {

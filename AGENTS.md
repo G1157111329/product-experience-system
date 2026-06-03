@@ -13,7 +13,7 @@
 - **Styling**: Tailwind CSS 4
 - **Database**: Supabase (PostgreSQL) / 自建 PostgreSQL (Drizzle ORM)
 - **File Storage**: S3 兼容对象存储 (MinIO / AWS S3 / 火山引擎 TOS)
-- **AI/LLM**: Bear-Model-VL (OpenAI 兼容 API, 默认地址 http://ds.bears.com.cn:8000/v1, 默认 API Key: Bear2025IT!)
+- **AI/LLM**: 可配置的 Chat Completions 兼容接口；仓库文档不记录具体敏感连接信息
 - **PDF解析**: pdf-parse (本地解析) + xlsx (Excel解析)
 - **Theme**: Teal 主色 / Business 字体 / Cool 阴影
 
@@ -185,16 +185,18 @@
 
 ### 环境变量
 
+仓库提供 `.env.example` 作为本地部署模板；真实 `.env.local` 不提交到仓库。
+
 | 变量名 | 说明 | 示例值 |
 |--------|------|--------|
-| `DATABASE_URL` | PostgreSQL 连接字符串（本地模式） | `postgresql://xp_admin:password@127.0.0.1:5432/xp_experience` |
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase 项目 URL（云模式） | `https://xxx.supabase.co` |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase 匿名密钥（云模式） | `eyJ...` |
-| `S3_ENDPOINT` | S3 兼容存储端点 | `http://127.0.0.1:9000` |
-| `S3_REGION` | S3 区域 | `us-east-1` |
-| `S3_BUCKET` | 存储桶名称 | `xp-experience-media` |
-| `S3_ACCESS_KEY` | 存储访问密钥 | `minioadmin` |
-| `S3_SECRET_KEY` | 存储密钥 | `minioadmin` |
+| `DATABASE_URL` | PostgreSQL 连接字符串（本地模式） | `postgresql://<user>:<password>@<host>:<port>/<database>` |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase 项目 URL（云模式） | `<supabase-url>` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase 匿名密钥（云模式） | `<supabase-anon-key>` |
+| `S3_ENDPOINT` | S3 兼容存储端点 | `http://<s3-host>:<port>` |
+| `S3_REGION` | S3 区域 | `<region>` |
+| `S3_BUCKET` | 存储桶名称 | `<bucket-name>` |
+| `S3_ACCESS_KEY` | 存储访问密钥 | `<access-key>` |
+| `S3_SECRET_KEY` | 存储密钥 | `<secret-key>` |
 | `DEPLOY_RUN_PORT` | 服务监听端口 | `5000` |
 | `NODE_ENV` | 运行环境 | `development` / `production` |
 
@@ -256,7 +258,7 @@ pnpm start
 6. **PDF导出**: 通过打印页面(`/reports/print?id=xxx`)实现，浏览器原生打印为PDF，含照片/视频预览图
 7. **数据库**: Supabase PostgreSQL，Drizzle ORM，RLS 公开读写
 8. **AI 预留**: materials 表预留 ai_analysis_status 和 ai_result 字段
-9. **标准批量导入**: 支持 PDF（pdf-parse 本地提取文本 + AI 结构化解析）和 Excel（xlsx 直接解析），使用 Bear-Model-VL 模型，按标准分类使用不同 prompt
+9. **标准批量导入**: 支持 PDF（pdf-parse 本地提取文本 + AI 结构化解析）和 Excel（xlsx 直接解析），按标准分类使用不同 prompt，并调用当前启用的 AI 配置
 10. **标准分类维度重构**: 四类标准（通用/品类/感官评价/食谱功能）有不同输入字段结构，创建和编辑时按分类展示不同表单
 11. **五感体验-新增问题点重构**: 移除"从标准库引用"栏目，改为选择"标准类型"后按类型展示不同筛选/输入字段；通用标准选择产品使用阶段→体验流程→感官维度后自动带出触点和检验范围及具体要求
 12. **权限控制**: 管理账号(admin)可编辑标准、导入、删除；使用账号(user)只读，侧边栏底部切换角色
@@ -296,7 +298,7 @@ pnpm start
 46. **报告时间格式化**: 报告中心 created_at/updated_at 以北京时间（UTC+8）格式显示，隐藏 created_by 字段
 47. **页面内边距统一**: 工作台/报告中心/问题管理等主页面统一使用 p-4 lg:p-6 内边距，与体验计划/标准管理/数据分析页面一致
 48. **食谱效果评价**: 每个食谱/功能新增"效果/出品效果评价"板块（与步骤同等级），包含效果描述输入框+附件素材框+AI总结评分；AI通过视觉评估食物状态和功能效果，按美食评委评分制（满分10分）输出分数
-49. **AI模型配置**: 管理员可在个人设置中配置AI模型和API信息，支持自定义 OpenAI 兼容 API；默认使用 Bear-Model-VL（http://ds.bears.com.cn:8000/v1）；配置存储在 ai_model_configs 表或 platform_settings(ai_config)
+49. **AI模型配置**: 管理员可在个人设置中配置 AI 接入信息，支持兼容 Chat Completions 的服务；具体敏感连接信息不写入仓库文档，配置存储在 `ai_model_configs` 表或平台设置中
 50. **食谱效果素材关联**: materials表新增recipe_id字段，可关联食谱效果评价的附件素材；MaterialPicker组件支持recipe_id参数
 51. **AI效果评价API**: POST /api/recipes/[id]/ai-evaluate 端点，接收食谱描述+图片素材，调用AI模型按四维评价体系（质感/透彻/纯净/恒定）生成评价，每维度0-10分+评语，综合评分自动保存到recipes.effect_score，完整结果保存到recipes.effect_ai_result(JSONB)
 52. **效果评价问题点**: 效果/出品效果评价板块新增问题点输入框（effect_problem_point字段），与步骤的问题点格式一致；报告生成时效果问题点也会自动创建问题记录
@@ -321,7 +323,7 @@ pnpm start
 71. **报告问题点清单分行呈现**: 报告详情页、打印页、分享页的问题清单优化为多行结构化呈现——第一行：等级+标题+状态；第二行：标准/分类（如有）；第三行：问题来源；第四行：整改方案（含责任人、计划完成日期）；第五行：验证结果（如有）
 72. **素材预览放大**: MaterialPicker中已选素材缩略图支持点击放大查看（图片）或播放（视频），使用Dialog全屏预览
 73. **问题点保存同步效果评价**: 问题点板块的"保存"按钮调用handleSaveEffect，同时保存效果描述和问题点数据
-74. **AI模型切换**: 已迁移至 OpenAI 兼容 API；默认模型 Bear-Model-VL（http://ds.bears.com.cn:8000/v1），支持在 ai_model_configs 表配置自定义 provider/model/api_url/api_key；移除 forceBuiltInModel 参数，统一走 fetch 调用
+74. **AI模型切换**: 已迁移至统一的兼容接口调用方式；支持在 `ai_model_configs` 表配置当前启用的 AI 接入信息；移除 `forceBuiltInModel` 参数，统一走 fetch 调用
 75. **Agent预设错误上报**: Agent预设API(agent-presets)不再静默吞掉AI调用失败错误；无结果且有错误时返回code:1和500状态码，部分失败时在warnings字段返回错误详情，前端toast显示失败原因
 76. **标准建议过滤放宽**: normalizePresetSuggestions对standards的过滤条件从"必须有standardItemId"放宽为"有standardItemId或reason或focus"，使AI生成的新建议（无DB ID）也能展示
 77.
@@ -338,6 +340,7 @@ pnpm start
 - 禁止 Hydration 错误：不在 JSX 中使用 typeof window/Date.now() 等
 - 权限系统：基于数据库 `platform_users.role` 字段，管理账号(admin)可编辑标准、批量导入/删除、审核账号；使用账号(user)只读；`useAuth()` hook 获取当前用户信息
 - **移动端溢出处理**: flex-1 元素必须添加 `min-w-0`；长文本使用 `break-all` 或 `truncate`；Badge 使用 `max-w-[Npx] truncate`；根 body 已设置 `overflow-x-hidden`
+- **仓库目录骨架**: 可提交空目录占位文件（如 `public/uploads/.gitkeep`）以保留部署目录结构；真实上传素材、日志、构建产物和 `.env.local` 不提交。
 
 ## 权限说明
 
@@ -388,8 +391,8 @@ pnpm start
 | 产品型号所有项目类型都必填 | 表单验证未区分项目类型 | 仅"自研"和"改型/降本/优化"时必填，其他类型可选 |
 | 食谱库/注册等RLS策略缺失 | 启用了RLS但没有策略，INSERT/UPDATE被拒绝 | 为 recipe_library, recipe_library_steps, platform_users, platform_settings, report_shares 添加公开读写策略 |
 | gen_random_uuid运行时错误 | schema.ts 中作为JS函数调用，改为 sql`gen_random_uuid()` 模板语法 | 所有 gen_random_uuid() 改为 sql`gen_random_uuid()`，导致所有API返回500 |
-| AI模型名无效 | 旧模型名 doubao-seed-2-0-lite 缺少日期后缀 | 已迁移至 OpenAI 兼容 API，使用 Bear-Model-VL 或在设置中配置自定义模型 |
-| AI探索返回空内容 | platform_settings.ai_config 中模型配置过时 | 已迁移至 ai_model_configs 表，默认使用 Bear-Model-VL；agent-presets API 无结果时返回错误信息而非空数据 |
+| AI配置无效 | 旧 AI 配置不可用或已过期 | 已迁移至统一的兼容接口调用方式，可在设置中配置当前启用的 AI 服务 |
+| AI探索返回空内容 | platform_settings.ai_config 中模型配置过时 | 已迁移至 ai_model_configs 表；agent-presets API 无结果时返回错误信息而非空数据 |
 | 步骤保存后无法编辑 | handleEditStep 使用 as unknown 类型转换导致素材数据丢失 | 直接使用 step.materials 访问，编辑对话框传入 initialMaterials |
 | 侧边栏与内容长度不一致 | 主布局使用 min-h-screen 导致内容无限拉长 | 改为 h-screen overflow-hidden + overflow-y-auto 实现固定视口滚动 |
 | 编辑任务空日期报错 | PUT /api/tasks/[id] 未处理空字符串日期 | test_date: body.test_date \|\| null 转换空字符串为 null |
@@ -444,10 +447,10 @@ pnpm start
 
 - **问题数据导出**：新增 `src/app/api/issues/export/route.ts`，支持按筛选条件导出问题列表为 CSV。
 
-### AI 模型配置更新
+### AI 配置更新
 
-- **移除"内置模型"选项**：模型接入服务只保留"自定义 API"一种方式，默认自动填充 Bear 模型信息（配置名称：Bear，调用地址：http://ds.bears.com.cn:8000/v1，模型：Bear-Model-VL，API Key：Bear2025IT!）。
-- **默认 API Key**：从 `local` 更新为 `Bear2025IT!`。
-- **模型列表删除**：已保存模型列表中每个配置增加删除按钮，删除后清除该模型配置数据。
-- **API 字段始终可见**：调用地址和 API Key 字段始终显示，不再根据服务类型隐藏。
+- **移除“内置模型”选项**：AI 接入服务只保留用户配置方式，避免在仓库文档中固化具体服务信息。
+- **敏感信息脱敏**：README 和 AGENTS 不记录具体敏感连接信息；此类信息仅通过运行环境或应用设置维护。
+- **模型列表删除**：已保存配置列表中每个配置增加删除按钮，删除后清除该配置数据。
+- **配置字段统一展示**：设置页保持必要的连接配置字段可编辑，但文档只描述配置原则，不写真实值。
 - **数据库默认值**：`ai_model_configs.provider` 默认值从 `builtin` 改为 `custom`。

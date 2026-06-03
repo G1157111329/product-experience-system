@@ -1,6 +1,6 @@
 # 产品体验管理平台
 
-面向体验工程师的本地化产品体验管理平台，覆盖体验计划、素材采集、五感体验、功能效果、问题整改、报告输出和数据分析。当前项目按本地/单机内网部署优先维护：数据库使用本地 PostgreSQL，文件存储默认写入项目指定静态资源目录，保留 S3 兼容对象存储切换能力，AI 使用 OpenAI 兼容接口。
+面向体验工程师的本地化产品体验管理平台，覆盖体验计划、素材采集、五感体验、功能效果、问题整改、报告输出和数据分析。当前项目按本地/单机内网部署优先维护：数据库使用本地 PostgreSQL，文件存储默认写入项目指定静态资源目录，保留 S3 兼容对象存储切换能力，AI 接入通过运行环境或应用设置配置。
 
 ## 技术栈
 
@@ -10,7 +10,7 @@
 | UI | shadcn/ui, Radix UI, Tailwind CSS 4 |
 | 数据库 | PostgreSQL + Drizzle ORM，本地模式通过 Supabase 兼容层复用 API 写法 |
 | 文件存储 | 默认 local 模式写入 `public/uploads`；可切换 S3 兼容对象存储（MinIO / AWS S3 / 火山引擎 TOS） |
-| AI | OpenAI 兼容 Chat Completions API，默认 Bear-Model-VL |
+| AI | 可配置的 Chat Completions 兼容接口 |
 | 文档解析 | pdf-parse, xlsx |
 | 包管理 | pnpm |
 
@@ -34,22 +34,28 @@ pnpm install
 2. 创建 `.env.local`
 
 ```bash
-DATABASE_URL=postgresql://xp_admin:password@127.0.0.1:5432/xp_experience
+cp .env.example .env.local
+```
+
+然后按本机或服务器环境修改 `.env.local`：
+
+```bash
+DATABASE_URL=postgresql://<user>:<password>@<host>:<port>/<database>
 
 # ── 文件存储 ──
 # 默认 local 模式：上传文件写入本地目录，通过静态路径访问
 STORAGE_DRIVER=local
 LOCAL_UPLOAD_DIR=./public/uploads
 LOCAL_PUBLIC_BASE_PATH=/uploads
-# 云服务器/内网部署时必须配置，AI 视觉模型通过此地址读取图片
-PUBLIC_MEDIA_BASE_URL=http://127.0.0.1:5000
+# 云服务器/内网部署时建议配置为平台可访问的完整站点地址
+PUBLIC_MEDIA_BASE_URL=http://<host>:5000
 
 # 如需切回 S3/MinIO，将 STORAGE_DRIVER 改为 s3 并取消以下注释
-# S3_ENDPOINT=http://127.0.0.1:9000
-# S3_REGION=us-east-1
-# S3_BUCKET=xp-experience-media
-# S3_ACCESS_KEY=minioadmin
-# S3_SECRET_KEY=minioadmin
+# S3_ENDPOINT=http://<s3-host>:<port>
+# S3_REGION=<region>
+# S3_BUCKET=<bucket-name>
+# S3_ACCESS_KEY=<access-key>
+# S3_SECRET_KEY=<secret-key>
 
 PORT=5000
 NODE_ENV=development
@@ -71,7 +77,7 @@ psql -U xp_admin -d xp_experience -f database-schema.sql
 mkdir -p public/uploads
 ```
 
-本地模式会把上传素材写入 `public/uploads`，数据库仅记录相对对象 key（如 `materials/xxx.jpg`）。`LOCAL_UPLOAD_DIR` 指向文件系统目录，`LOCAL_PUBLIC_BASE_PATH` 是 Web 静态路径前缀，`PUBLIC_MEDIA_BASE_URL` 是平台可访问的完整地址（AI 模型读取图片时使用）。缺失文件会返回 SVG 占位图而非 404。
+本地模式会把上传素材写入 `public/uploads`，数据库仅记录相对对象 key（如 `materials/xxx.jpg`）。`LOCAL_UPLOAD_DIR` 指向文件系统目录，`LOCAL_PUBLIC_BASE_PATH` 是 Web 静态路径前缀，`PUBLIC_MEDIA_BASE_URL` 是平台可访问的完整地址。缺失文件会返回 SVG 占位图而非 404。
 
 Docker 或云服务器部署时必须把 `public/uploads` 目录挂载到持久化 volume，否则重建容器后图片和视频会丢失。
 
@@ -101,16 +107,9 @@ pnpm dev
 
 ## AI 配置
 
-默认模型配置（内置模型）：
+AI 服务通过应用内的“AI Agent / Prompt 模板”设置或运行环境进行配置。仓库文档不写入具体敏感连接信息。
 
-| 字段 | 默认值 |
-| --- | --- |
-| 配置名称 | `Bear` |
-| 调用地址 | `http://ds.bears.com.cn:8000/v1` |
-| 模型 | `Bear-Model-VL` |
-| API Key | `Bear2025IT!` |
-
-管理员可以在应用内的“AI Agent / Prompt 模板”设置中新增或切换 OpenAI 兼容模型。API Key 存储在 `ai_model_configs.custom_api_key_encrypted` 字段；设置页不会回显原始 Key，留空保存会沿用已保存 Key。
+管理员可以在设置页新增、切换和测试兼容 Chat Completions 的 AI 配置。敏感字段由后端持久化保存，设置页不会回显原始值；留空保存会沿用已保存值。
 
 ## 常用命令
 
@@ -131,14 +130,14 @@ PORT=5000 pnpm start
 
 ## 本地部署检查清单
 
-- `DATABASE_URL` 指向本地 PostgreSQL。
+- `DATABASE_URL` 指向本地 PostgreSQL，提交到仓库前不要写入真实账号和密码。
 - 不设置 `NEXT_PUBLIC_SUPABASE_URL` 和 `NEXT_PUBLIC_SUPABASE_ANON_KEY` 时，系统走本地 PostgreSQL 模式。
 - local 模式下 `public/uploads` 已创建，并在 Docker/云服务器中挂载为持久化目录。
 - S3 模式下 MinIO bucket 已创建，且 `.env.local` 中的 S3 配置一致。
 - `pnpm ts-check` 通过。
 - `pnpm build` 通过。
 - 浏览器访问 `http://localhost:5000`，使用 `bear2026 / bear2026` 登录。
-- 在“AI Agent / Prompt 模板”中确认当前启用模型可访问。
+- 在“AI Agent / Prompt 模板”中确认当前启用的 AI 配置可访问。
 
 ## 存储模式说明
 
@@ -147,7 +146,7 @@ PORT=5000 pnpm start
 | 本地（默认） | `local` | 写入 `LOCAL_UPLOAD_DIR`（默认 `./public/uploads`） | `PUBLIC_MEDIA_BASE_URL` + `LOCAL_PUBLIC_BASE_PATH` + key |
 | S3 兼容 | `s3` | 上传到 S3/MinIO bucket | presigned URL（86400 秒有效期） |
 
-- **local 模式**：文件直接写入磁盘，Next.js 通过静态路径提供访问；AI 模型读取图片时需要 `PUBLIC_MEDIA_BASE_URL` 指向平台可访问的地址。
+- **local 模式**：文件直接写入磁盘，Next.js 通过静态路径提供访问；如需让外部服务读取素材，`PUBLIC_MEDIA_BASE_URL` 需指向平台可访问的地址。
 - **S3 模式**：使用 AWS SDK 上传文件到 S3 兼容存储，访问时生成 presigned URL；素材删除调用 `DeleteObjectCommand`。
 - **缺失素材兜底**：local 模式下文件不存在时返回 SVG 占位图；presign API 对已缺失的 key 也返回占位图。
 - **前端兼容**：`usePresignedUrl` hook 自动识别本地路径（`/uploads/...`）、data URL、完整 HTTP URL，仅对 S3 对象 key 调用 presign 接口。
@@ -169,7 +168,7 @@ src/
     api/                           后端 API 路由
   components/                      通用组件和设置组件
   lib/
-    server/ai.ts                   OpenAI 兼容 AI 调用
+    server/ai.ts                   AI 调用封装
     server/storage.ts              local 静态目录 + S3 兼容存储封装
     agent-skills.ts                Agent Skill 默认定义
   storage/database/
@@ -185,14 +184,14 @@ database-schema.sql                 本地数据库初始化 SQL
 
 运行和调试日志统一放在 `.codex-logs/` 下。历史散落在根目录的日志已归档到 `.codex-logs/root-archive/`。
 
-以下内容不应提交到仓库：
+仓库会保留必要的目录骨架，例如 `public/uploads/.gitkeep`，方便 clone 后直接看到静态资源目录。以下运行数据和敏感配置不应提交到仓库：
 
 - `.env.local`
 - `.next/`
 - `dist/`
 - `node_modules/`
 - `.codex-logs/`
-- `public/uploads/`
+- `public/uploads/` 中除 `.gitkeep` 之外的实际上传文件
 - `*.log`
 - `*.tsbuildinfo`
 

@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
   const payload: Record<string, unknown> = {
     name: body.name || 'AI模型配置',
     provider: body.provider || 'custom',
-    model: body.model || 'Bear-Model-VL',
+    model: body.model || '',
     temperature: normalizeTemperatureScale(body.temperature),
     max_tokens: Number(body.max_tokens || body.maxTokens || 2400),
     supports_vision: Boolean(body.supports_vision ?? body.supportsVision),

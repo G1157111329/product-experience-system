@@ -34,7 +34,7 @@ async function main() {
   const active = await resolveAIConfig(makeClient({
     activeModel: {
       provider: 'custom',
-      model: 'gpt-4o',
+      model: 'vision-model',
       temperature: 6,
       max_tokens: 3000,
       custom_api_url: 'https://example.com/v1/chat/completions',
@@ -44,7 +44,7 @@ async function main() {
 
   assert.deepEqual(active, {
     provider: 'custom',
-    model: 'gpt-4o',
+    model: 'vision-model',
     temperature: 0.6,
     maxTokens: 3000,
     customApiUrl: 'https://example.com/v1/chat/completions',
@@ -54,20 +54,20 @@ async function main() {
   const legacy = await resolveAIConfig(makeClient({
     legacy: {
       provider: 'custom',
-      model: 'Bear-Model-VL',
+      model: 'legacy-model',
       temperature: 0.4,
     },
   }));
 
   assert.equal(legacy.provider, 'custom');
-  assert.equal(legacy.model, 'Bear-Model-VL');
+  assert.equal(legacy.model, 'legacy-model');
   assert.equal(legacy.temperature, 0.4);
   assert.equal(legacy.maxTokens, 2400);
 
   const fallback = await resolveAIConfig(makeClient({}));
 
   assert.equal(fallback.provider, 'custom');
-  assert.equal(fallback.model, 'Bear-Model-VL');
+  assert.equal(fallback.model, '');
   assert.equal(fallback.temperature, 0.5);
 }
 

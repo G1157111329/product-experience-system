@@ -94,7 +94,7 @@ ${textChunk}`;
   ];
 
   const client = getSupabaseClient();
-  const aiConfig = await resolveAIConfig(client, { defaultModel: 'Bear-Model-VL', defaultTemperature: 0.05 });
+  const aiConfig = await resolveAIConfig(client, { defaultTemperature: 0.05 });
 
   const apiUrl = normalizeChatCompletionsUrl(aiConfig.customApiUrl);
   const apiKey = aiConfig.customApiKey;
