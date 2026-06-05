@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { copyToClipboard } from '@/lib/clipboard';
 import { FileText, Printer, BarChart3, Users, User as UserIcon, ChevronRight, Trash2, Share2, Copy, X, Sparkles, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -205,7 +206,7 @@ export default function ReportsPage() {
   };
 
   const handleCopyLink = (link: string) => {
-    navigator.clipboard.writeText(link).then(() => toast.success('链接已复制')).catch(() => toast.error('复制失败'));
+    copyToClipboard(link).then(() => toast.success('链接已复制')).catch(() => toast.error('复制失败'));
   };
 
   const handleRevokeShare = async (id: string) => {

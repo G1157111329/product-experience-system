@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
+import { copyToClipboard } from '@/lib/clipboard';
 import { useImagePreview } from '@/components/image-preview';
 import { toast } from 'sonner';
 import { PageShell } from '@/components/app';
@@ -653,7 +654,7 @@ export default function ReportDetailPage() {
   };
 
   const handleCopyLink = (link: string) => {
-    navigator.clipboard.writeText(link).then(() => toast.success('链接已复制')).catch(() => toast.error('复制失败'));
+    copyToClipboard(link).then(() => toast.success('链接已复制')).catch(() => toast.error('复制失败'));
   };
 
   const handleRevokeShare = async (shareId: string) => {

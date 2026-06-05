@@ -139,10 +139,13 @@ export default function TasksPage() {
   }, [fetchCategories]);
 
   useEffect(() => {
-    if (dialogOpen && !form.organizer && user?.name) {
-      setForm((current) => ({ ...current, organizer: user.name || '' }));
+    if (dialogOpen && user?.name) {
+      setForm((current) => {
+        if (!current.organizer) return { ...current, organizer: user.name || '' };
+        return current;
+      });
     }
-  }, [dialogOpen, form.organizer, user?.name]);
+  }, [dialogOpen, user?.name]);
 
   useEffect(() => {
     if (user?.id) fetchTasks();
