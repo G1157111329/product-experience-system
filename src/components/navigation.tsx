@@ -19,6 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/lib/auth-context';
+import { BrandLogo } from '@/components/brand-logo';
 import { AiAgentSettings } from '@/components/settings/ai-agent-settings';
 import { toast } from 'sonner';
 
@@ -54,9 +55,7 @@ function NavContent({ onNavigate }: { onNavigate?: () => void }) {
     <div className="flex flex-col h-full">
       <div className="px-4 py-5 border-b border-border">
         <Link href="/dashboard" className="flex items-center gap-2.5" onClick={onNavigate}>
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-            <span className="text-primary-foreground font-bold text-sm">EX</span>
-          </div>
+          <BrandLogo className="h-9 w-9 shrink-0" />
           <div className="flex flex-col">
             <span className="font-semibold text-sm leading-tight">产品体验</span>
             <span className="text-xs text-muted-foreground leading-tight">管理平台</span>
@@ -286,7 +285,6 @@ function StandardOptionsSettings({ open, onOpenChange }: { open: boolean; onOpen
   const [deletingFlowIdx, setDeletingFlowIdx] = useState<number | null>(null);
   const [deletingDimIdx, setDeletingDimIdx] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
-  const { user } = useAuth();
 
   const defaultOptions = useMemo(() => ({
     test_phases: ['开箱', '首次安装', '产品使用', '清洁收纳', '其他'],
@@ -358,7 +356,7 @@ function StandardOptionsSettings({ open, onOpenChange }: { open: boolean; onOpen
     try {
       const res = await fetch('/api/settings', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: 'standard_options', value: newOptions, admin_user_id: user?.id }),
+        body: JSON.stringify({ key: 'standard_options', value: newOptions }),
       });
       const data = await res.json();
       if (data.code === 0) {
@@ -661,7 +659,7 @@ function UserSection() {
 
   useEffect(() => {
     if (profileOpen && isAdmin && user?.id) {
-      fetch(`/api/auth/users?admin_user_id=${user.id}`)
+      fetch('/api/auth/users')
         .then(res => res.json())
         .then(data => { if (data.code === 0) setAllUsers(data.data || []); })
         .catch(() => {});
@@ -674,7 +672,7 @@ function UserSection() {
     try {
       const res = await fetch('/api/auth/profile', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id, field: editField, value: editValue }),
+        body: JSON.stringify({ field: editField, value: editValue }),
       });
       const data = await res.json();
       if (data.code === 0) { toast.success(data.message); setEditField(null); setEditValue(''); }
@@ -688,12 +686,12 @@ function UserSection() {
     try {
       const res = await fetch('/api/auth/users', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ admin_user_id: user.id, target_user_id: targetUserId, action }),
+        body: JSON.stringify({ target_user_id: targetUserId, action }),
       });
       const data = await res.json();
       if (data.code === 0) {
         toast.success(data.message);
-        const usersRes = await fetch(`/api/auth/users?admin_user_id=${user.id}`);
+        const usersRes = await fetch('/api/auth/users');
         const usersData = await usersRes.json();
         if (usersData.code === 0) setAllUsers(usersData.data || []);
       } else toast.error(data.message);
@@ -706,12 +704,12 @@ function UserSection() {
     try {
       const res = await fetch('/api/auth/users', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ admin_user_id: user?.id, target_user_id: targetUserId, action: 'delete' }),
+        body: JSON.stringify({ target_user_id: targetUserId, action: 'delete' }),
       });
       const data = await res.json();
       if (data.code === 0) {
         toast.success('账号已删除');
-        const usersRes = await fetch(`/api/auth/users?admin_user_id=${user?.id}`);
+        const usersRes = await fetch('/api/auth/users');
         const usersData = await usersRes.json();
         if (usersData.code === 0) setAllUsers(usersData.data || []);
       } else toast.error(data.message);
@@ -890,9 +888,7 @@ export function MobileNav() {
         </SheetContent>
       </Sheet>
       <Link href="/dashboard" className="flex items-center gap-2 ml-1 min-w-0">
-        <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center shadow-sm shrink-0">
-          <span className="text-primary-foreground font-bold text-[10px]">EX</span>
-        </div>
+        <BrandLogo className="h-8 w-8 shrink-0" />
         <span className="font-semibold text-sm truncate">产品体验</span>
       </Link>
       <div className="ml-auto"><MobileUserIcon /></div>

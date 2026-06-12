@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { BrandLogo } from '@/components/brand-logo';
 import { toast } from 'sonner';
 
 export default function LoginPage() {
@@ -52,7 +53,6 @@ export default function LoginPage() {
       });
       const data = await res.json();
       if (data.code === 0) {
-        localStorage.setItem('current_user', JSON.stringify(data.data));
         toast.success('登录成功');
         window.location.href = '/dashboard';
       } else {
@@ -120,9 +120,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="flex flex-col items-center mb-8">
-          <div className="w-14 h-14 rounded-2xl bg-primary flex items-center justify-center mb-3">
-            <span className="text-primary-foreground font-bold text-xl">EX</span>
-          </div>
+          <BrandLogo priority className="mb-3 h-28 w-28" />
           <h1 className="text-xl font-semibold">产品体验管理平台</h1>
           <p className="text-sm text-muted-foreground mt-1">体验计划 · 现场走查 · 报告输出 · 数据分析</p>
         </div>
@@ -198,7 +196,7 @@ export default function LoginPage() {
                 <Label>密码</Label>
                 <Input
                   type="password"
-                  placeholder="至少4个字符"
+                  placeholder="至少10个字符，需包含字母和数字"
                   value={regForm.password}
                   onChange={(e) => setRegForm({ ...regForm, password: e.target.value })}
                 />
@@ -212,7 +210,7 @@ export default function LoginPage() {
                 />
               </div>
             </div>
-            <DialogFooter className="gap-2 sm:gap-0">
+            <DialogFooter className="gap-3 sm:gap-3">
               <Button variant="outline" onClick={() => setRegDialogOpen(false)}>取消</Button>
               <Button onClick={handleRegister} disabled={regLoading}>{regLoading ? '提交中...' : '提交注册'}</Button>
             </DialogFooter>
@@ -239,7 +237,7 @@ export default function LoginPage() {
                 <Label>新密码</Label>
                 <Input
                   type="password"
-                  placeholder="至少4个字符"
+                  placeholder="至少10个字符，需包含字母和数字"
                   value={fpForm.new_password}
                   onChange={(e) => setFpForm({ ...fpForm, new_password: e.target.value })}
                 />

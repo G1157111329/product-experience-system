@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { isAuthResponse, requireAdmin } from '@/lib/server/auth';
 
-export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+  const admin = await requireAdmin(request, client);
+  if (isAuthResponse(admin)) return admin;
 
   const { data, error } = await client
     .from('agent_skill_versions')

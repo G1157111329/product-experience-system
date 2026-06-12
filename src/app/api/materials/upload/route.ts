@@ -1,13 +1,131 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { uploadFile } from '@/lib/server/storage';
+import { generatePresignedUrl, uploadFile } from '@/lib/server/storage';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { canAccessTask, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
+import { checkSharedRateLimit } from '@/lib/server/rate-limit';
+import { writeSecurityAudit } from '@/lib/server/security-audit';
 
-// Allow up to 100MB file uploads with extended timeout
-export const maxDuration = 120; // seconds - extended for large video uploads
+export const maxDuration = 120;
 export const dynamic = 'force-dynamic';
+
+const ALLOWED_UPLOAD_TYPES: Record<string, { materialType: 'image' | 'video'; mimeTypes: string[] }> = {
+  jpg: { materialType: 'image', mimeTypes: ['image/jpeg', 'image/jpg'] },
+  jpeg: { materialType: 'image', mimeTypes: ['image/jpeg', 'image/jpg'] },
+  png: { materialType: 'image', mimeTypes: ['image/png'] },
+  gif: { materialType: 'image', mimeTypes: ['image/gif'] },
+  webp: { materialType: 'image', mimeTypes: ['image/webp'] },
+  heic: { materialType: 'image', mimeTypes: ['image/heic', 'image/heif'] },
+  heif: { materialType: 'image', mimeTypes: ['image/heic', 'image/heif'] },
+  mp4: { materialType: 'video', mimeTypes: ['video/mp4'] },
+  m4v: { materialType: 'video', mimeTypes: ['video/mp4', 'video/x-m4v'] },
+  mov: { materialType: 'video', mimeTypes: ['video/quicktime', 'video/mp4'] },
+  webm: { materialType: 'video', mimeTypes: ['video/webm'] },
+};
+
+async function getRelatedTaskIds(client: ReturnType<typeof getSupabaseClient>, ids: {
+  task_id?: string | null;
+  record_id?: string | null;
+  recipe_step_id?: string | null;
+  recipe_id?: string | null;
+  issue_id?: string | null;
+  re_evaluation_id?: string | null;
+}) {
+  const taskIds = new Set<string>();
+  if (ids.task_id) taskIds.add(ids.task_id);
+
+  if (ids.record_id) {
+    const { data } = await client.from('check_records').select('task_id').eq('id', ids.record_id).maybeSingle();
+    if (data?.task_id) taskIds.add(String(data.task_id));
+  }
+  if (ids.recipe_id) {
+    const { data } = await client.from('recipes').select('task_id').eq('id', ids.recipe_id).maybeSingle();
+    if (data?.task_id) taskIds.add(String(data.task_id));
+  }
+  if (ids.recipe_step_id) {
+    const { data: step } = await client.from('recipe_steps').select('recipe_id').eq('id', ids.recipe_step_id).maybeSingle();
+    if (step?.recipe_id) {
+      const { data: recipe } = await client.from('recipes').select('task_id').eq('id', step.recipe_id).maybeSingle();
+      if (recipe?.task_id) taskIds.add(String(recipe.task_id));
+    }
+  }
+  if (ids.issue_id) {
+    const { data } = await client.from('issues').select('task_id').eq('id', ids.issue_id).maybeSingle();
+    if (data?.task_id) taskIds.add(String(data.task_id));
+  }
+  if (ids.re_evaluation_id) {
+    const { data: reEval } = await client.from('issue_re_evaluations').select('issue_id').eq('id', ids.re_evaluation_id).maybeSingle();
+    if (reEval?.issue_id) {
+      const { data: issue } = await client.from('issues').select('task_id').eq('id', reEval.issue_id).maybeSingle();
+      if (issue?.task_id) taskIds.add(String(issue.task_id));
+    }
+  }
+
+  return [...taskIds];
+}
+
+function getFileExtension(fileName: string) {
+  const match = fileName.toLowerCase().match(/\.([a-z0-9]+)$/);
+  return match?.[1] || '';
+}
+
+function isIsoBaseMediaFile(buffer: Buffer) {
+  return buffer.length >= 12 && buffer.subarray(4, 8).toString('ascii') === 'ftyp';
+}
+
+function hasValidImageMagic(buffer: Buffer, extension: string) {
+  const hex = buffer.subarray(0, 12).toString('hex');
+  const ascii = buffer.subarray(0, 12).toString('ascii');
+  if (extension === 'jpg' || extension === 'jpeg') return hex.startsWith('ffd8ff');
+  if (extension === 'png') return hex.startsWith('89504e470d0a1a0a');
+  if (extension === 'gif') return ascii.startsWith('GIF87a') || ascii.startsWith('GIF89a');
+  if (extension === 'webp') {
+    return buffer.subarray(0, 4).toString('ascii') === 'RIFF'
+      && buffer.subarray(8, 12).toString('ascii') === 'WEBP';
+  }
+  if (extension === 'heic' || extension === 'heif') return isIsoBaseMediaFile(buffer);
+  return false;
+}
+
+function hasValidVideoMagic(buffer: Buffer, extension: string) {
+  const hex = buffer.subarray(0, 16).toString('hex');
+  if (extension === 'webm') return hex.startsWith('1a45dfa3');
+  if (extension === 'mp4' || extension === 'm4v' || extension === 'mov') return isIsoBaseMediaFile(buffer);
+  return false;
+}
+
+function validateUploadType(file: File, buffer: Buffer) {
+  const extension = getFileExtension(file.name);
+  const typeSpec = ALLOWED_UPLOAD_TYPES[extension];
+  if (!typeSpec) return { ok: false as const, message: '仅支持 jpg、png、gif、webp、heic、mp4、mov、webm 等图片和视频文件' };
+
+  const declaredMime = (file.type || '').toLowerCase();
+  if (!typeSpec.mimeTypes.includes(declaredMime)) {
+    return { ok: false as const, message: '文件扩展名与Content-Type不匹配' };
+  }
+
+  const validMagic = typeSpec.materialType === 'image'
+    ? hasValidImageMagic(buffer, extension)
+    : hasValidVideoMagic(buffer, extension);
+  if (!validMagic) {
+    return { ok: false as const, message: '文件内容与声明类型不匹配' };
+  }
+
+  return { ok: true as const, materialType: typeSpec.materialType, extension };
+}
 
 export async function POST(request: NextRequest) {
   try {
+    const client = getSupabaseClient();
+    const user = await requireUser(request, client);
+    if (isAuthResponse(user)) return user;
+    const limited = await checkSharedRateLimit(request, {
+      scope: 'materials-upload',
+      subject: user.id,
+      limit: 60,
+      windowMs: 60 * 60 * 1000,
+    });
+    if (limited) return limited;
+
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
     const record_id = formData.get('record_id') as string | null;
@@ -23,24 +141,34 @@ export async function POST(request: NextRequest) {
     }
 
     if (!task_id && !recipe_library_step_id && !issue_id && !re_evaluation_id) {
-      return NextResponse.json({ code: 1, message: '缺少必要参数(需提供task_id、recipe_library_step_id、issue_id或re_evaluation_id)' }, { status: 400 });
+      return NextResponse.json({ code: 1, message: '缺少必要关联参数' }, { status: 400 });
     }
 
-    // 文件大小校验 (100MB)
+    if (recipe_library_step_id && user.role !== 'admin') return forbidden();
+
+    const relatedTaskIds = await getRelatedTaskIds(client, {
+      task_id,
+      record_id,
+      recipe_step_id,
+      recipe_id,
+      issue_id,
+      re_evaluation_id,
+    });
+    if (!recipe_library_step_id && relatedTaskIds.length === 0) return forbidden();
+    for (const relatedTaskId of relatedTaskIds) {
+      if (!(await canAccessTask(client, user, relatedTaskId))) return forbidden();
+    }
+
     const MAX_SIZE = 100 * 1024 * 1024;
     if (file.size > MAX_SIZE) {
       return NextResponse.json({ code: 1, message: '文件大小超过100MB限制' }, { status: 400 });
     }
 
-    // 文件类型校验
-    const allowedTypes = ['image/', 'video/'];
-    if (!allowedTypes.some(t => file.type.startsWith(t))) {
+    const declaredMime = (file.type || '').toLowerCase();
+    if (!declaredMime.startsWith('image/') && !declaredMime.startsWith('video/')) {
       return NextResponse.json({ code: 1, message: '仅支持图片和视频文件' }, { status: 400 });
     }
 
-    const materialType = file.type.startsWith('image/') ? 'image' : 'video';
-
-    // Use streaming for large files (>5MB)
     const isLargeFile = file.size > 5 * 1024 * 1024;
     let buffer: Buffer;
     try {
@@ -51,11 +179,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ code: 1, message: `文件读取失败(${(file.size / 1024 / 1024).toFixed(1)}MB)，请重试` }, { status: 500 });
     }
 
+    const uploadType = validateUploadType(file, buffer);
+    if (!uploadType.ok) {
+      return NextResponse.json({ code: 1, message: uploadType.message }, { status: 400 });
+    }
+    const materialType = uploadType.materialType;
+
     const timestamp = Date.now();
     const folderId = recipe_library_step_id || issue_id || task_id || 'unknown';
     const fileName = `experience-media/${folderId}/${materialType}/${timestamp}_${file.name}`;
 
-    // Upload to S3-compatible storage (with retry for large files)
     let fileKey: string | undefined;
     const maxRetries = isLargeFile ? 2 : 0;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -71,10 +204,9 @@ export async function POST(request: NextRequest) {
         if (attempt === maxRetries) {
           return NextResponse.json({
             code: 1,
-            message: `文件上传失败(${(file.size / 1024 / 1024).toFixed(1)}MB)，请检查网络后重试`
+            message: `文件上传失败(${(file.size / 1024 / 1024).toFixed(1)}MB)，请检查网络后重试`,
           }, { status: 500 });
         }
-        // Wait before retry
         await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
       }
     }
@@ -83,11 +215,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ code: 1, message: '文件上传失败' }, { status: 500 });
     }
 
-    // 保存素材记录到数据库
-    const client = getSupabaseClient();
     const { data, error } = await client.from('materials').insert({
       record_id: record_id || null,
-      task_id: task_id || null,
+      task_id: task_id || relatedTaskIds[0] || null,
       recipe_step_id: recipe_step_id || null,
       recipe_library_step_id: recipe_library_step_id || null,
       recipe_id: recipe_id || null,
@@ -102,13 +232,29 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.error('[upload] DB insert failed:', error);
-      return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
+      return NextResponse.json({ code: 1, message: '素材保存失败' }, { status: 500 });
     }
 
-    return NextResponse.json({ code: 0, message: '上传成功', data: { ...data, file_url: fileKey } });
+    await writeSecurityAudit(client, {
+      request,
+      actor: user,
+      action: 'material.upload',
+      outcome: 'success',
+      targetType: 'material',
+      targetId: String(data.id),
+      metadata: { materialType, fileSize: file.size, storageDriver: process.env.STORAGE_DRIVER || 'local' },
+    });
+
+    let accessibleUrl = fileKey;
+    try {
+      accessibleUrl = await generatePresignedUrl({ key: fileKey, expireTime: 30 * 60 });
+    } catch (urlError) {
+      console.error('[upload] URL generation failed:', urlError);
+    }
+
+    return NextResponse.json({ code: 0, message: '上传成功', data: { ...data, file_url: accessibleUrl } });
   } catch (err) {
     console.error('[upload] Unexpected error:', err);
-    const message = err instanceof Error ? err.message : '上传失败';
-    return NextResponse.json({ code: 1, message }, { status: 500 });
+    return NextResponse.json({ code: 1, message: '上传失败' }, { status: 500 });
   }
 }

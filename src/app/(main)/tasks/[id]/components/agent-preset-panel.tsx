@@ -36,11 +36,9 @@ type AcceptingMode = 'senses' | 'recipes' | null;
 
 export function AgentPresetPanel({
   taskId,
-  userId,
   onAccepted,
 }: {
   taskId: string;
-  userId?: string;
   onAccepted: (mode: Exclude<AcceptingMode, null>) => void;
 }) {
   const [runningMode, setRunningMode] = useState<RunningMode>(null);
@@ -56,7 +54,7 @@ export function AgentPresetPanel({
       const res = await fetch(`/api/tasks/${taskId}/agent-presets`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ skill_keys: skillKeys, user_id: userId }),
+        body: JSON.stringify({ skill_keys: skillKeys }),
       });
       const data = await res.json();
       if (data.code !== 0) {
@@ -102,7 +100,7 @@ export function AgentPresetPanel({
       const res = await fetch(`/api/tasks/${taskId}/agent-presets`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'accept_suggestion', user_id: userId, standards, recipes }),
+        body: JSON.stringify({ action: 'accept_suggestion', standards, recipes }),
       });
       const data = await res.json();
       if (data.code !== 0) {

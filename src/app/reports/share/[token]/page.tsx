@@ -78,7 +78,7 @@ interface ReportData {
 
 const taskFieldLabels: Record<string, string> = {
   task_name: '任务名称', product_category: '产品品类', product: '产品', product_model: '产品型号',
-  project_type: '项目类型', project_phase: '项目阶段', test_date: '测试日期',
+  project_number: '项目单号', project_type: '项目类型', project_phase: '项目阶段', test_date: '测试日期',
   organizer: '组织人', target_user: '目标用户', test_purpose: '测试目的',
   test_method: '测试方法', status: '状态', assigned_to: '负责人',
   created_at: '创建时间', updated_at: '更新时间',
@@ -133,35 +133,70 @@ function getBoundMaterials(materials: Material[] | undefined, ids: string[] | un
 function SharedAiSummary({ summary }: { summary?: AiSummaryLike | null }) {
   if (!summary || (!summary.summary && !summary.tag && !summary.historical_position)) return null;
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <h3 className="font-semibold text-sm text-primary shrink-0">总结</h3>
-          {summary.tag && <Badge className="text-[10px] shrink-0">{summary.tag}</Badge>}
-          {summary.satisfaction_score !== undefined && <Badge variant="outline" className="text-[10px] ml-auto shrink-0">满意度 {summary.satisfaction_score}/10</Badge>}
+    <Card className="overflow-hidden">
+      <CardHeader className="pb-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <h3 className="text-base font-semibold leading-6 text-foreground">总结</h3>
+            <p className="text-xs text-muted-foreground">核心判断、优势、风险和后续动作</p>
+          </div>
+          {summary.tag && <Badge className="shrink-0 text-xs">{summary.tag}</Badge>}
+          {summary.satisfaction_score !== undefined && <Badge variant="outline" className="shrink-0 text-xs">满意度 {summary.satisfaction_score}/10</Badge>}
         </div>
       </CardHeader>
-      <CardContent className="space-y-2">
-        {summary.summary && <p className="text-sm leading-relaxed break-all whitespace-pre-wrap">{summary.summary}</p>}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      <CardContent className="space-y-4">
+        {summary.summary && (
+          <div className="rounded-md bg-muted/30 px-4 py-3">
+            <p className="whitespace-pre-wrap break-words text-sm leading-7 text-foreground sm:text-[15px]">{summary.summary}</p>
+          </div>
+        )}
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           {(summary.strengths || []).length > 0 && (
-            <div className="rounded-lg bg-muted/30 p-2">
-              <p className="text-[10px] font-medium text-emerald-700 mb-1">主要优势</p>
-              {summary.strengths!.map((item, idx) => <p key={idx} className="text-xs text-muted-foreground break-all">{item}</p>)}
+            <div className="rounded-md border bg-emerald-50/60 p-3">
+              <p className="mb-2 text-sm font-semibold text-emerald-800">主要优势</p>
+              <ul className="space-y-2">
+                {summary.strengths!.map((item, idx) => (
+                  <li key={idx} className="flex gap-2 text-sm leading-6 text-foreground">
+                    <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+                    <span className="break-words">{item}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
           {(summary.risks || []).length > 0 && (
-            <div className="rounded-lg bg-muted/30 p-2">
-              <p className="text-[10px] font-medium text-amber-700 mb-1">主要风险</p>
-              {summary.risks!.map((item, idx) => <p key={idx} className="text-xs text-muted-foreground break-all">{item}</p>)}
+            <div className="rounded-md border bg-amber-50/70 p-3">
+              <p className="mb-2 text-sm font-semibold text-amber-800">主要风险</p>
+              <ul className="space-y-2">
+                {summary.risks!.map((item, idx) => (
+                  <li key={idx} className="flex gap-2 text-sm leading-6 text-foreground">
+                    <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
+                    <span className="break-words">{item}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
         </div>
-        {summary.historical_position && <p className="text-xs text-muted-foreground break-all">历史表现：{summary.historical_position}</p>}
+        {summary.historical_position && (
+          <div className="rounded-md border bg-muted/20 px-3 py-2 text-sm leading-6 text-muted-foreground">
+            <span className="font-medium text-foreground">历史表现：</span>
+            <span className="break-words">{summary.historical_position}</span>
+          </div>
+        )}
         {(summary.suggestions || []).length > 0 && (
-          <div>
-            <p className="text-[10px] font-medium text-muted-foreground mb-1">后续建议</p>
-            {summary.suggestions!.map((item, idx) => <p key={idx} className="text-xs text-muted-foreground break-all">{idx + 1}. {item}</p>)}
+          <div className="rounded-md border bg-background p-3">
+            <p className="mb-2 text-sm font-semibold text-foreground">后续建议</p>
+            <ol className="space-y-2">
+              {summary.suggestions!.map((item, idx) => (
+                <li key={idx} className="flex gap-2 text-sm leading-6 text-muted-foreground">
+                  <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-foreground">
+                    {idx + 1}
+                  </span>
+                  <span className="break-words">{item}</span>
+                </li>
+              ))}
+            </ol>
           </div>
         )}
       </CardContent>

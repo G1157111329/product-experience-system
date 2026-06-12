@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { Inspector } from 'react-dev-inspector';
 import { Toaster } from '@/components/ui/sonner';
 import { AuthProvider } from '@/lib/auth-context';
 import './globals.css';
@@ -18,13 +17,10 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const isDev = process.env.NODE_ENV === 'development';
-
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <body className="antialiased bg-background text-foreground overflow-x-hidden" suppressHydrationWarning>
         <AuthProvider>
-          {isDev && <Inspector />}
           {children}
           <Toaster position="top-center" />
         </AuthProvider>

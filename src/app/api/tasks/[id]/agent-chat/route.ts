@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { invokeConfiguredAI } from '@/lib/server/ai';
+import { canAccessTask, isAuthResponse, requireUser } from '@/lib/server/auth';
 
 type ChatMessage = {
   role: 'user' | 'assistant';
@@ -10,6 +11,11 @@ type ChatMessage = {
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+  if (!(await canAccessTask(client, user, id))) {
+    return NextResponse.json({ code: 1, message: '无权访问该任务助手' }, { status: 403 });
+  }
 
   try {
     const body = await request.json();

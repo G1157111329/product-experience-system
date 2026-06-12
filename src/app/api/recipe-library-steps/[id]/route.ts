@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { isAuthResponse, requireAdmin } from '@/lib/server/auth';
 
 // PUT: Update a single step
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+  const admin = await requireAdmin(request, client);
+  if (isAuthResponse(admin)) return admin;
+
   const body = await request.json();
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -22,6 +26,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+  const admin = await requireAdmin(request, client);
+  if (isAuthResponse(admin)) return admin;
 
   // Unlink materials associated with this step (don't delete them, just remove the association)
   await client.from('materials').update({ recipe_library_step_id: null }).eq('recipe_library_step_id', id);

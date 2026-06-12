@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { isAuthResponse, requireAdmin, requireUser } from '@/lib/server/auth';
 
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+
   const { searchParams } = new URL(request.url);
   const standard_id = searchParams.get('standard_id');
 
@@ -22,6 +26,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const client = getSupabaseClient();
+  const admin = await requireAdmin(request, client);
+  if (isAuthResponse(admin)) return admin;
+
   const body = await request.json();
 
   // 批量插入支持

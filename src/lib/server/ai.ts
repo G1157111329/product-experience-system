@@ -1,4 +1,6 @@
 import { generatePresignedUrl } from './storage';
+import { decryptSecret } from './secret-crypto';
+import { writeSecurityAudit } from './security-audit';
 
 type SupabaseLike = {
   from: (table: string) => {
@@ -52,6 +54,18 @@ export function normalizeChatCompletionsUrl(apiUrl: string): string {
   return `${trimmed}/chat/completions`;
 }
 
+export function assertSafeAIEndpoint(apiUrl: string) {
+  const url = new URL(apiUrl);
+  const hostname = url.hostname.toLowerCase();
+  const allowedHosts = (process.env.AI_ALLOWED_HOSTS || '')
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+  if (allowedHosts.length > 0 && !allowedHosts.includes(hostname)) {
+    throw new Error('AI 服务地址不在允许的域名白名单内');
+  }
+}
+
 export async function resolveAIConfig(
   client: SupabaseLike,
   {
@@ -73,7 +87,7 @@ export async function resolveAIConfig(
       temperature: normalizeTemperature(activeModel.temperature, defaultTemperature),
       maxTokens: normalizePositiveInt(activeModel.max_tokens ?? activeModel.maxTokens, maxTokens),
       customApiUrl: normalizeChatCompletionsUrl(String(activeModel.custom_api_url || activeModel.customApiUrl || DEFAULT_API_URL)),
-      customApiKey: String(activeModel.custom_api_key_encrypted || activeModel.customApiKeyEncrypted || DEFAULT_API_KEY),
+      customApiKey: decryptSecret(String(activeModel.custom_api_key_encrypted || activeModel.customApiKeyEncrypted || DEFAULT_API_KEY)),
     };
   }
 
@@ -90,7 +104,7 @@ export async function resolveAIConfig(
     temperature: normalizeTemperature(legacyValue.temperature, defaultTemperature),
     maxTokens,
     customApiUrl: normalizeChatCompletionsUrl(String(legacyValue.custom_api_url || DEFAULT_API_URL)),
-    customApiKey: String(legacyValue.custom_api_key || DEFAULT_API_KEY),
+    customApiKey: decryptSecret(String(legacyValue.custom_api_key || DEFAULT_API_KEY)),
   };
 }
 
@@ -111,6 +125,8 @@ export async function invokeConfiguredAI({
   if (!model.trim() || !apiUrl.trim() || !apiKey.trim()) {
     throw new Error('AI配置未完成，请先在设置页或运行环境中配置 AI 接入信息');
   }
+  assertSafeAIEndpoint(apiUrl);
+  const aiHost = new URL(apiUrl).hostname;
 
   let response: Response;
   try {
@@ -130,14 +146,35 @@ export async function invokeConfiguredAI({
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'network error';
+    await writeSecurityAudit(client, {
+      action: 'ai.invoke',
+      outcome: 'failed',
+      targetType: 'ai_endpoint',
+      targetId: aiHost,
+      metadata: { model, reason: message.slice(0, 200) },
+    });
     throw new Error(`AI服务连接失败: ${message}`);
   }
 
   if (!response.ok) {
+    await writeSecurityAudit(client, {
+      action: 'ai.invoke',
+      outcome: 'failed',
+      targetType: 'ai_endpoint',
+      targetId: aiHost,
+      metadata: { model, status: response.status },
+    });
     throw new Error(`AI服务调用失败(${response.status})`);
   }
 
   const result = await response.json();
+  await writeSecurityAudit(client, {
+    action: 'ai.invoke',
+    outcome: 'success',
+    targetType: 'ai_endpoint',
+    targetId: aiHost,
+    metadata: { model, maxTokens: aiConfig.maxTokens },
+  });
   return result.choices?.[0]?.message?.content || '';
 }
 

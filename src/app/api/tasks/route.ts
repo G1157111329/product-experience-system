@@ -1,16 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { isAuthResponse, requireUser } from '@/lib/server/auth';
 
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+
   const { searchParams } = new URL(request.url);
   const status = searchParams.get('status');
   const product_category = searchParams.get('product_category');
   const product = searchParams.get('product');
   const keyword = searchParams.get('keyword');
   const created_by = searchParams.get('created_by');
-  const page = parseInt(searchParams.get('page') || '1');
-  const pageSize = parseInt(searchParams.get('pageSize') || '20');
+  const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+  const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '20', 10)));
 
   let query = client.from('experience_tasks').select('*', { count: 'exact' });
 
@@ -18,14 +22,18 @@ export async function GET(request: NextRequest) {
   if (product_category) query = query.eq('product_category', product_category);
   if (product) query = query.eq('product', product);
   if (keyword) query = query.or(`task_name.ilike.%${keyword}%,product_model.ilike.%${keyword}%,project_number.ilike.%${keyword}%`);
-  if (created_by) query = query.eq('created_by', created_by);
+  if (user.role === 'admin') {
+    if (created_by) query = query.eq('created_by', created_by);
+  } else {
+    query = query.eq('created_by', user.id);
+  }
 
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
   query = query.order('created_at', { ascending: false }).range(from, to);
 
   const { data, error, count } = await query;
-  if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ code: 1, message: '查询失败' }, { status: 500 });
 
   return NextResponse.json({
     code: 0,
@@ -36,6 +44,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+
   const body = await request.json();
 
   let taskName = body.task_name;
@@ -43,6 +54,8 @@ export async function POST(request: NextRequest) {
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     taskName = `${body.product_category || ''}${body.product || ''}${body.product_model || ''}${body.project_type || ''}${dateStr}${body.organizer ? '-' + body.organizer : ''}`;
   }
+
+  const createdBy = user.role === 'admin' && body.created_by ? body.created_by : user.id;
 
   const { data, error } = await client.from('experience_tasks').insert({
     task_name: taskName,
@@ -54,7 +67,7 @@ export async function POST(request: NextRequest) {
     project_phase: body.project_phase || null,
     test_date: body.test_date || null,
     organizer: body.organizer || null,
-    created_by: body.created_by || null,
+    created_by: createdBy,
     target_user: body.target_user || null,
     test_purpose: body.test_purpose || null,
     test_method: body.test_method || null,
@@ -63,6 +76,6 @@ export async function POST(request: NextRequest) {
     status: '待执行',
   }).select().single();
 
-  if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ code: 1, message: '创建失败' }, { status: 500 });
   return NextResponse.json({ code: 0, message: '创建成功', data });
 }

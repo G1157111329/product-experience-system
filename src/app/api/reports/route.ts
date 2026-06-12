@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { getDb } from '@/storage/database/pg-db';
+import { canAccessTask, isAuthResponse, requireUser } from '@/lib/server/auth';
 import {
   issues as issuesTable,
   recipeLibrary,
@@ -50,17 +51,24 @@ function groupRowsByField(rows: Array<Record<string, unknown>>, field: string) {
 
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+
   const { searchParams } = new URL(request.url);
   const task_id = searchParams.get('task_id');
   const created_by = searchParams.get('created_by'); // filter by user's tasks
+  const scope = searchParams.get('scope') === 'mine' ? 'mine' : 'all';
   const keyword = searchParams.get('keyword')?.trim();
   const limit = parsePositiveInt(searchParams.get('limit'), 50, 200);
   const offset = Math.max(0, Number(searchParams.get('offset') || '0') || 0);
 
   // Step 1: If created_by filter, get user's task IDs first
   let userTaskIds: string[] = [];
-  if (created_by) {
-    const { data: userTasks } = await client.from('experience_tasks').select('id').eq('created_by', created_by);
+  const ownerFilter = user.role === 'admin'
+    ? created_by || (scope === 'mine' ? user.id : null)
+    : scope === 'mine' ? user.id : null;
+  if (ownerFilter) {
+    const { data: userTasks } = await client.from('experience_tasks').select('id').eq('created_by', ownerFilter);
     userTaskIds = (userTasks || []).map((t: { id: string }) => t.id);
   }
 
@@ -68,8 +76,8 @@ export async function GET(request: NextRequest) {
     .from('reports')
     .select('id, task_id, template_id, title, status, version, product_model, created_at, updated_at');
   if (task_id) query = query.eq('task_id', task_id);
-  if (created_by && userTaskIds.length > 0) query = query.in('task_id', userTaskIds);
-  if (created_by && userTaskIds.length === 0) {
+  if (ownerFilter && userTaskIds.length > 0) query = query.in('task_id', userTaskIds);
+  if (ownerFilter && userTaskIds.length === 0) {
     return NextResponse.json({ code: 0, message: 'success', data: [], meta: { limit, offset, total: 0 } });
   }
   const dbPaginated = !keyword;
@@ -78,7 +86,7 @@ export async function GET(request: NextRequest) {
   const { data, error } = await query.order('created_at', { ascending: false });
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
 
-  let reports = data || [];
+  const reports = data || [];
 
   // Enrich with task info for grouping
   const taskIds = [...new Set<string>(reports.map((r: Record<string, unknown>) => String(r.task_id || '')).filter(Boolean))];
@@ -161,7 +169,14 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+
   const body = await request.json();
+  if (!body.task_id || !(await canAccessTask(client, user, body.task_id))) {
+    return NextResponse.json({ code: 1, message: '无权限' }, { status: 403 });
+  }
+
   const { data: previousReport } = await client
     .from('reports')
     .select('content')

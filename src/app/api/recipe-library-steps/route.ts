@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { isAuthResponse, requireAdmin, requireUser } from '@/lib/server/auth';
 
 // GET: List steps for a recipe library item
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+
   const { searchParams } = new URL(request.url);
   const recipe_library_id = searchParams.get('recipe_library_id');
 
@@ -21,6 +25,9 @@ export async function GET(request: NextRequest) {
 // POST: Create a step for a recipe library item
 export async function POST(request: NextRequest) {
   const client = getSupabaseClient();
+  const admin = await requireAdmin(request, client);
+  if (isAuthResponse(admin)) return admin;
+
   const body = await request.json();
   const { recipe_library_id, step_number, operation, problem_point, problem_points } = body;
 
@@ -43,6 +50,9 @@ export async function POST(request: NextRequest) {
 // PUT: Batch update step ordering, or update a single step
 export async function PUT(request: NextRequest) {
   const client = getSupabaseClient();
+  const admin = await requireAdmin(request, client);
+  if (isAuthResponse(admin)) return admin;
+
   const body = await request.json();
 
   // Batch reorder: { steps: [{ id, step_number }] }

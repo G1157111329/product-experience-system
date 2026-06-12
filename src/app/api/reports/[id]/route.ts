@@ -1,20 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { assertAdmin } from '@/lib/server/agent-skills';
+import { canAccessReport, canReadReport, forbidden, isAuthResponse, requireAdmin, requireUser } from '@/lib/server/auth';
+import { writeSecurityAudit } from '@/lib/server/security-audit';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+  if (!(await canReadReport(client, user, id))) return forbidden();
+
   const { data, error } = await client.from('reports').select('*').eq('id', id).single();
-  if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 404 });
+  if (error) return NextResponse.json({ code: 1, message: '报告不存在' }, { status: 404 });
   return NextResponse.json({ code: 0, message: 'success', data });
 }
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
-  const body = await request.json();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+  if (!(await canAccessReport(client, user, id))) return forbidden();
 
+  const body = await request.json();
   const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (body.title !== undefined) updateData.title = body.title;
   if (body.content !== undefined) updateData.content = body.content;
@@ -24,22 +32,27 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
   const { data, error } = await client.from('reports').update(updateData).eq('id', id).select().single();
 
-  if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ code: 1, message: '更新失败' }, { status: 500 });
   return NextResponse.json({ code: 0, message: '更新成功', data });
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
-
-  try {
-    await assertAdmin(client, request.nextUrl.searchParams.get('admin_user_id'));
-  } catch (err) {
-    const message = err instanceof Error ? err.message : '仅管理员可删除报告';
-    return NextResponse.json({ code: 1, message }, { status: 403 });
-  }
+  const admin = await requireAdmin(request, client);
+  if (isAuthResponse(admin)) return admin;
 
   const { error } = await client.from('reports').delete().eq('id', id);
-  if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
+  if (!error) {
+    await writeSecurityAudit(client, {
+      request,
+      actor: admin,
+      action: 'report.delete',
+      outcome: 'success',
+      targetType: 'report',
+      targetId: id,
+    });
+  }
+  if (error) return NextResponse.json({ code: 1, message: '删除失败' }, { status: 500 });
   return NextResponse.json({ code: 0, message: '删除成功' });
 }

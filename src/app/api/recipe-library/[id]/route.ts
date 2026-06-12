@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { isAuthResponse, requireAdmin } from '@/lib/server/auth';
 
 type IdRow = { id: string };
 
@@ -7,6 +8,9 @@ type IdRow = { id: string };
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+  const admin = await requireAdmin(request, client);
+  if (isAuthResponse(admin)) return admin;
+
   const body = await request.json();
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -33,6 +37,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+  const admin = await requireAdmin(request, client);
+  if (isAuthResponse(admin)) return admin;
 
   // Get all step IDs for this recipe
   const { data: steps } = await client.from('recipe_library_steps').select('id').eq('recipe_library_id', id);

@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { isAuthResponse, requireAdmin, requireUser } from '@/lib/server/auth';
 
 type CategoryRow = { id: string; name: string; sort_order?: number | null };
 type ProductRow = { id: string; name: string; category_id: string; sort_order?: number | null };
 
 // GET: list categories with their products
-export async function GET() {
+export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
 
   const { data: categories, error: catError } = await client
     .from('platform_categories')
@@ -34,6 +37,9 @@ export async function GET() {
 // POST: add category or product
 export async function POST(request: NextRequest) {
   const client = getSupabaseClient();
+  const admin = await requireAdmin(request, client);
+  if (isAuthResponse(admin)) return admin;
+
   const body = await request.json();
 
   if (body.type === 'category') {
@@ -76,6 +82,9 @@ export async function POST(request: NextRequest) {
 // DELETE: remove category or product
 export async function DELETE(request: NextRequest) {
   const client = getSupabaseClient();
+  const admin = await requireAdmin(request, client);
+  if (isAuthResponse(admin)) return admin;
+
   const { searchParams } = new URL(request.url);
   const type = searchParams.get('type');
   const id = searchParams.get('id');

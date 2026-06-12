@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { asc, eq } from 'drizzle-orm';
 import { getDb } from '@/storage/database/pg-db';
+import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { standardItems, standards } from '@/storage/database/shared/schema';
+import { isAuthResponse, requireAdmin, requireUser } from '@/lib/server/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,7 +55,10 @@ function toApiStandard(
   };
 }
 
-export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const auth = await requireUser(request, getSupabaseClient());
+  if (isAuthResponse(auth)) return auth;
+
   const { id } = await params;
   const db = getDb();
 
@@ -77,6 +82,9 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 }
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const auth = await requireAdmin(request, getSupabaseClient());
+  if (isAuthResponse(auth)) return auth;
+
   const { id } = await params;
   const db = getDb();
   const body = await request.json();
@@ -103,7 +111,10 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   return NextResponse.json({ code: 0, message: '更新成功', data: toApiStandard(updated) });
 }
 
-export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const auth = await requireAdmin(request, getSupabaseClient());
+  if (isAuthResponse(auth)) return auth;
+
   const { id } = await params;
   const db = getDb();
 

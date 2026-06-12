@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { canAccessIssueReEvaluation, isAuthResponse, requireUser } from '@/lib/server/auth';
 
 // PUT /api/issue-re-evaluations/[id] — update a re-evaluation
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+  if (!(await canAccessIssueReEvaluation(client, user, id))) {
+    return NextResponse.json({ code: 1, message: '无权更新该问题复评估' }, { status: 403 });
+  }
 
   try {
     const body = await request.json();
@@ -36,6 +42,11 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+  if (!(await canAccessIssueReEvaluation(client, user, id))) {
+    return NextResponse.json({ code: 1, message: '无权删除该问题复评估' }, { status: 403 });
+  }
 
   try {
     // Disassociate materials (set re_evaluation_id to null) instead of deleting them

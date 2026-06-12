@@ -108,7 +108,7 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
     }
 
     try {
-      const skillsRes = await fetch(`/api/ai/skill-templates?admin_user_id=${user?.id || ''}`);
+      const skillsRes = await fetch('/api/ai/skill-templates');
       const skillsData = await skillsRes.json();
       if (skillsData.code === 0) {
         setSkills(skillsData.data || []);
@@ -121,7 +121,7 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
     } catch (err) {
       setSkillsError(err instanceof Error ? err.message : 'Prompt 模板读取失败');
     }
-  }, [user]);
+  }, []);
 
   useEffect(() => {
     if (open) fetchData();
@@ -134,7 +134,7 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
       const res = await fetch('/api/ai/model-configs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...modelForm, admin_user_id: user.id }),
+        body: JSON.stringify(modelForm),
       });
       const data = await res.json();
       if (data.code !== 0) {
@@ -153,7 +153,7 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
     const res = await fetch('/api/ai/model-configs', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, admin_user_id: user.id }),
+      body: JSON.stringify({ id }),
     });
     const data = await res.json();
     if (data.code === 0) {
@@ -166,7 +166,7 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
 
   const deleteModel = async (id: string) => {
     if (!user?.id || !confirm('确定删除此模型配置？')) return;
-    const res = await fetch(`/api/ai/model-configs?id=${id}&admin_user_id=${user.id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/ai/model-configs?id=${id}`, { method: 'DELETE' });
     const data = await res.json();
     if (data.code === 0) {
       toast.success('已删除');
@@ -181,7 +181,7 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
     const res = await fetch('/api/ai/skill-templates', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ template_id: template.id, is_enabled: enabled, admin_user_id: user.id }),
+      body: JSON.stringify({ template_id: template.id, is_enabled: enabled }),
     });
     const data = await res.json();
     if (data.code === 0) {
@@ -213,7 +213,7 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
       const res = await fetch('/api/ai/skill-templates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'ensure_defaults', admin_user_id: user.id }),
+        body: JSON.stringify({ action: 'ensure_defaults' }),
       });
       const data = await res.json();
       if (data.code !== 0) {
@@ -246,7 +246,6 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
         user_prompt_template: userPromptTemplate,
         output_schema: version.output_schema || {},
         notes: '管理员调整模板',
-        admin_user_id: user.id,
       }),
     });
     const data = await res.json();

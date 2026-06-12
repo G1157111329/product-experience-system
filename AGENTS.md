@@ -11,8 +11,8 @@
 - **Language**: TypeScript 5
 - **UI 组件**: shadcn/ui (基于 Radix UI)
 - **Styling**: Tailwind CSS 4
-- **Database**: Supabase (PostgreSQL) / 自建 PostgreSQL (Drizzle ORM)
-- **File Storage**: S3 兼容对象存储 (MinIO / AWS S3 / 火山引擎 TOS)
+- **Database**: 自建 PostgreSQL / Supabase PostgreSQL；服务端通过 Supabase 兼容层 + Drizzle ORM 访问
+- **File Storage**: 默认 local 模式写入 `public/uploads`；可切换 S3 兼容对象存储 (MinIO / AWS S3 / 火山引擎 TOS)
 - **AI/LLM**: 可配置的 Chat Completions 兼容接口；仓库文档不记录具体敏感连接信息
 - **PDF解析**: pdf-parse (本地解析) + xlsx (Excel解析)
 - **Theme**: Teal 主色 / Business 字体 / Cool 阴影
@@ -47,7 +47,7 @@
 │   │   │   │   └── search/      # 标准检查项跨标准搜索（支持standard_category/experience_flow筛选）
 │   │   │   ├── tasks/           # 体验任务 CRUD
 │   │   │   ├── records/         # 检查记录 CRUD（含standard_category等字段，编辑时同步更新对应issue状态）
-│   │   │   ├── materials/       # 素材管理（上传/删除/重命名/关联，支持recipe_library_step_id）
+│   │   │   ├── materials/       # 素材管理（上传/删除/重命名/关联，含 presign/file 访问接口）
 │   │   │   ├── issues/          # 问题整改 CRUD
 │   │   │   ├── reports/         # 报告生成/CRUD
 │   │   │   │   ├── export-pdf/  # PDF导出API
@@ -90,7 +90,7 @@
 | `standard_items` | 标准检查项（含分类特定字段：experience_flow, touch_point, experience_standard, sub_check_dimension, check_standard, evaluation_prep, subjective_score, subjective_rating, reference_images） |
 | `experience_tasks` | 体验任务（含 created_by 用户隔离字段, project_type: ODM/OEM/竞品研究/自研/前期研究/改型降本优化/海外产品, project_phase: 手板研究/试制阶段/试产阶段/量产阶段） |
 | `check_records` | 检查记录（走查，含 standard_category, check_dimension, sub_check_dimension, check_standard, experience_flow, touch_point, experience_standard, check_tool, problem_level） |
-| `materials` | 素材（图片/视频，含 AI 预留字段，可关联record或recipe_step或recipe_library_step或recipe，task_id可选） |
+| `materials` | 素材（图片/视频，含 AI 预留字段，可关联record或recipe_step或recipe_library_step或recipe或issue/re-evaluation，task_id可选） |
 | `issues` | 问题整改（含 level: 一类/二类/三类, source, source_report_id, source_type: record_fail/recipe_problem, UNIQUE(title, source_type, task_id)） |
 | `report_templates` | 报告模板 |
 | `reports` | 报告（含 product_model 用于同型号合并） |
@@ -100,6 +100,9 @@
 | `recipe_library_steps` | 食谱库步骤 |
 | `recipes` | 食谱/功能（含 effect_description 效果评价描述, effect_score AI评分, effect_problem_point 效果问题点, effect_ai_result AI四维评价完整结果JSONB） |
 | `recipe_steps` | 食谱步骤 |
+| `security_audit_logs` | 统一安全审计日志（登录、越权、上传、分享、AI调用、导出、配置变更等） |
+| `security_rate_limits` | 多实例共享限速状态 |
+| `ai_model_configs` | AI 模型配置（API Key 加密保存） |
 
 ## 标准分类体系
 
@@ -131,7 +134,7 @@
 | POST | `/api/auth/forgot-password` | 忘记密码（验证账号存在，需管理员审核） |
 | GET | `/api/auth/profile` | 获取用户信息 |
 | PUT | `/api/auth/profile` | 修改名称/密码（需管理员审核） |
-| GET | `/api/auth/audit` | 获取审核请求（admin_user_id: 管理员查所有; user_id: 普通用户查自己的） |
+| GET | `/api/auth/audit` | 获取审核请求（基于当前登录会话判断：管理员查全部，普通用户查自己的） |
 | PUT | `/api/auth/audit` | 审核（approve/reject，管理员，参数 request_id）；取消申请（cancel，用户自己） |
 | GET | `/api/auth/users` | 获取用户列表（管理员） |
 | POST | `/api/auth/users` | 升级/降级用户角色、删除用户账号（管理员）；删除时级联清理report_shares和audit_requests） |
@@ -179,9 +182,11 @@
 ## 构建与运行
 
 ### 环境要求
-- **Node.js**: 24+（本地/Docker 环境需安装 Node.js 24）
+- **Node.js**: 24+（本地/服务器环境需安装 Node.js 24）
 - **包管理器**: pnpm (禁止 npm / yarn)
-- **端口**: 5000 (开发与生产统一，`DEPLOY_RUN_PORT` 环境变量)
+- **数据库**: PostgreSQL 14+（本地 Docker 使用 postgres:16-alpine）
+- **端口**: 5000（开发与生产统一读取 `PORT`，未设置时默认 5000）
+- **Docker**: 仅用于本地测试模拟环境；实际上线仍按服务器 Node.js + PostgreSQL + 反向代理部署
 
 ### 环境变量
 
@@ -189,15 +194,28 @@
 
 | 变量名 | 说明 | 示例值 |
 |--------|------|--------|
+| `DATABASE_ACCESS_MODE` | 生产数据库访问模式：`self-hosted-postgres` 或 `supabase-service-role` | `self-hosted-postgres` |
 | `DATABASE_URL` | PostgreSQL 连接字符串（本地模式） | `postgresql://<user>:<password>@<host>:<port>/<database>` |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase 项目 URL（云模式） | `<supabase-url>` |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase 匿名密钥（云模式） | `<supabase-anon-key>` |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key，仅服务端保存 | `<service-role-key>` |
+| `AUTH_SESSION_SECRET` | 生产会话签名密钥 | `<long-random-session-secret>` |
+| `AI_CONFIG_ENCRYPTION_KEY` | AI API Key 加密密钥 | `<long-random-ai-config-key>` |
+| `SECURITY_SCHEMA_VERIFIED` | 目标库执行并验证安全 schema 后才设为 true | `true` |
+| `STORAGE_DRIVER` | 文件存储驱动，默认 local，可切换 s3 | `local` |
+| `LOCAL_UPLOAD_DIR` | local 模式文件写入目录 | `./public/uploads` |
+| `LOCAL_PUBLIC_BASE_PATH` | local 静态访问前缀 | `/uploads` |
+| `LOCAL_UPLOAD_PUBLIC_ACCESS` | local 访问模式，默认 public；可显式 protected | `public` |
+| `PUBLIC_MEDIA_BASE_URL` | 平台可访问的完整媒体基准地址 | `http://<host>:5000` |
 | `S3_ENDPOINT` | S3 兼容存储端点 | `http://<s3-host>:<port>` |
 | `S3_REGION` | S3 区域 | `<region>` |
 | `S3_BUCKET` | 存储桶名称 | `<bucket-name>` |
 | `S3_ACCESS_KEY` | 存储访问密钥 | `<access-key>` |
 | `S3_SECRET_KEY` | 存储密钥 | `<secret-key>` |
-| `DEPLOY_RUN_PORT` | 服务监听端口 | `5000` |
+| `AI_ALLOWED_HOSTS` | 可选 AI 外联主机白名单 | `ai-gateway.internal` |
+| `INITIAL_ADMIN_ACCOUNT` | 生产首次管理员账号，仅初始化时临时配置 | `<account>` |
+| `INITIAL_ADMIN_PASSWORD` | 生产首次管理员强密码，仅初始化时临时配置 | `<strong-password>` |
+| `PORT` | 服务监听端口 | `5000` |
 | `NODE_ENV` | 运行环境 | `development` / `production` |
 
 ### 开发命令
@@ -222,55 +240,103 @@ pnpm build
 pnpm start
 ```
 
-### 本地部署命令
+### 服务器生产部署流程
 
-> 项目使用本地/Docker 部署，以下命令用于安装、开发、构建和启动：
+> 实际上线不要求使用 Docker。推荐服务器上使用 Node.js + PostgreSQL + Nginx/Caddy 反向代理，Docker 只作为本地模拟生产环境。
 
 ```bash
-# 安装依赖
-pnpm install
+# 1. 安装依赖
+pnpm install --frozen-lockfile
 
-# 开发模式（端口 5000）
-pnpm dev
+# 2. 初始化/升级目标数据库
+psql "$DATABASE_URL" -f database-schema.sql
+psql "$DATABASE_URL" -f scripts/verify-security-schema.sql
 
-# 构建生产版本
+# 3. 验证通过后设置 SECURITY_SCHEMA_VERIFIED=true，再执行检查和构建
+pnpm ts-check
 pnpm build
+pnpm audit --audit-level moderate --registry https://registry.npmjs.org
 
-# 启动生产环境
-pnpm start
+# 4. 生产启动
+NODE_ENV=production PORT=5000 pnpm start
 ```
 
-### 初始账号
+生产部署注意：
+
+- 生产环境必须显式配置 `DATABASE_ACCESS_MODE`、`AUTH_SESSION_SECRET`、`AI_CONFIG_ENCRYPTION_KEY` 和 `SECURITY_SCHEMA_VERIFIED=true`。
+- `SECURITY_SCHEMA_VERIFIED=true` 只能在目标库执行 `database-schema.sql` 和 `scripts/verify-security-schema.sql` 成功后设置。
+- 自建 PostgreSQL 模式使用 `DATABASE_ACCESS_MODE=self-hosted-postgres`，生产环境不要同时暴露 `NEXT_PUBLIC_SUPABASE_URL` 或 `NEXT_PUBLIC_SUPABASE_ANON_KEY`。
+- Supabase 模式使用 `DATABASE_ACCESS_MODE=supabase-service-role`，service role key 只允许服务端环境变量保存，不能下发到前端。
+- 文件存储默认 local，上传写入 `public/uploads`；服务器部署必须将该目录挂载到持久化磁盘。
+- local 默认保留 `/uploads/*` 静态直连，避免历史报告和分享页长期查看时裂图；更高安全要求环境可显式设置 `LOCAL_UPLOAD_PUBLIC_ACCESS=protected`。
+- AI 内网、本机或 HTTP 地址不会默认拦截，便于内网优先部署；公网部署建议配置 `AI_ALLOWED_HOSTS` 并配合网络出口 ACL。
+
+### Docker 本地测试模拟环境
+
+```bash
+docker compose -f docker-compose.local.yml up --build
+```
+
+默认访问：
+
+```text
+http://localhost:5000
+```
+
+默认 Docker 本地管理员：
 
 | 角色 | 账号 | 密码 |
 |------|------|------|
-| 管理员 | bear2026 | bear2026 |
+| 管理员 | dockeradmin | DockerLocal2026 |
 
-> 注册新账号需管理员审核通过后可登录
+停止本地 Docker 环境：
+
+```bash
+docker compose -f docker-compose.local.yml down
+```
+
+清空本地 Docker 测试数据和上传文件：
+
+```bash
+docker compose -f docker-compose.local.yml down -v
+```
+
+`down -v` 只用于本地测试，会删除 Docker volume 中的测试数据库和素材。
+
+### 本地开发初始账号
+
+系统不再内置硬编码默认管理员。本地开发首次初始化管理员时，也需要在 `.env.local` 中显式配置：
+
+```bash
+INITIAL_ADMIN_ACCOUNT=<account>
+INITIAL_ADMIN_PASSWORD=<strong-password>
+```
+
+密码必须至少 10 位，并同时包含字母和数字，不能使用 `bear2026` 等弱口令。首次登录会按该配置创建管理员；创建完成后请移除这两个环境变量。注册新账号需管理员审核通过后可登录。
 
 ## 关键设计决策
 
 1. **响应式布局**: 桌面端左侧导航 + 右侧内容；移动端顶部汉堡菜单 + 底部Tab导航
 2. **任务详情页四Tab**: 基本信息 / 素材仓库 / 五感体验 / 功能效果，顶部"报告生成"按钮
 3. **素材引用**: 五感体验新增问题点和功能效果新增步骤时均可引用素材库图片（MaterialPicker组件）
-4. **素材上传**: 100MB 限制，仅图片/视频，上传至 S3 对象存储，可关联record_id或recipe_step_id
+4. **素材上传**: 100MB 限制，仅图片/视频；默认上传至 local `public/uploads`，可切换 S3 兼容对象存储；可关联record_id、recipe_step_id、recipe_library_step_id、recipe_id、issue_id、re_evaluation_id
 5. **报告生成**: 包含任务信息+检查记录+问题清单+食谱/功能详细列表+素材附录
 6. **PDF导出**: 通过打印页面(`/reports/print?id=xxx`)实现，浏览器原生打印为PDF，含照片/视频预览图
-7. **数据库**: Supabase PostgreSQL，Drizzle ORM，RLS 公开读写
+7. **数据库**: 自建 PostgreSQL / Supabase PostgreSQL 双模式；生产环境禁止 `allow_all`，必须执行 `database-schema.sql` 和 `scripts/verify-security-schema.sql` 后再设置 `SECURITY_SCHEMA_VERIFIED=true`
 8. **AI 预留**: materials 表预留 ai_analysis_status 和 ai_result 字段
 9. **标准批量导入**: 支持 PDF（pdf-parse 本地提取文本 + AI 结构化解析）和 Excel（xlsx 直接解析），按标准分类使用不同 prompt，并调用当前启用的 AI 配置
 10. **标准分类维度重构**: 四类标准（通用/品类/感官评价/食谱功能）有不同输入字段结构，创建和编辑时按分类展示不同表单
 11. **五感体验-新增问题点重构**: 移除"从标准库引用"栏目，改为选择"标准类型"后按类型展示不同筛选/输入字段；通用标准选择产品使用阶段→体验流程→感官维度后自动带出触点和检验范围及具体要求
-12. **权限控制**: 管理账号(admin)可编辑标准、导入、删除；使用账号(user)只读，侧边栏底部切换角色
+12. **权限控制**: 服务端以 `requireUser`、`requireAdmin` 和资源级 `canAccess*` 为可信边界；管理账号(admin)可编辑标准、导入、删除和管理账号；使用账号(user)可执行自身任务相关操作
 13. **问题管理重构**: 问题点来源从手动创建改为自动从报告汇总（不合格检查项+食谱功能问题），按报告名称分组；等级合并为一类/二类/三类；状态可切换（待整改/整改中/已验证/不整改）
 14. **报告中心重构**: 移除"生成报告"按钮，新增"报告对比"功能；自研/改型降本优化报告按product_model在列表页分组，详情页/打印页内容级合并
 15. **报告内容级合并**: 自研和改型/降本/优化类型的报告，在报告详情页和打印页中，同product_model的所有报告按时间排序合并展示，每份报告连续完整，用分割线和阶段/时间标注区分
 16. **体验计划项目类型**: 新建时选择项目类型（ODM/OEM/竞品研究/自研/前期研究/改型降本优化/海外产品），自研可选项目阶段（手板研究/试制阶段/试产阶段/量产阶段）
 17. **检查记录编辑重构**: 点击问题点用现有记录数据预填充表单，复用新增问题点对话框（标准类型选择+级联字段+检查结果+素材管理），保存调用 PUT /api/records/[id]；编辑模式切换标准类型时自动从记录预填充共享字段（sensory_dimension/problem_description/evaluationResult等）
-18. **数据隔离**: 体验计划和问题管理按用户隔离（experience_tasks.created_by字段），工作台数据按用户过滤；标准管理和报告中心保持平台共享（因同型号不同阶段可能不同账号承接）；管理账号(admin)可查看所有数据
+18. **数据隔离**: 体验计划和问题管理按用户隔离（experience_tasks.created_by字段），工作台数据按用户过滤；标准管理和报告中心保持平台共享（因同型号不同阶段可能不同账号承接）；报告中心支持“全部报告/个人报告”，普通登录用户可读取内部报告，编辑/分享按归属或管理员权限控制
 19. **非管理员待申请**: 非管理员工作台"待审核"改为"待申请"，显示该账号的密码/名称修改待审核列表（排除注册记录），可用叉图标取消申请
 20. **数据分析**: 所有账号可浏览数据分析页面，核心指标为任务数/完成率/问题总数/整改率；支持按品类/项目类型/任务人/问题点分类/时间范围多维筛选；保留任务状态分布/问题等级分布(一类/二类/三类)/问题整改进度(按状态×等级)；管理账号可导出数据
-21. **报告分享**: 报告中心和报告详情页可生成分享链接，设置有效期（7天/30天/永久）；公开页面 `/reports/share/[token]` 无需登录，只读查看，支持导出PDF、图片放大、视频播放；可查看已创建的分享链接列表并撤销
+21. **报告分享**: 报告中心和报告详情页可生成分享链接，设置有效期（7天/30天/永久）；公开页面 `/reports/share/[token]` 无需登录，只读查看，支持导出PDF、图片放大、视频播放；分享创建、访问、撤销写入安全审计
 22. **报告重新生成**: 同一任务重新生成报告时，先删除旧报告和旧问题，再创建新报告和新问题，确保每个任务始终只有一份最新报告
 23. **问题自动创建**: 问题在报告生成时由后端自动创建（非前端同步），使用 `createdKeys` Set 去重确保每个唯一问题（按 title+source_type）只创建一条，与素材数量无关；前端仅做只读查询
 24. **报告合并类型检查**: 报告详情页合并同型号报告时，仅合并"自研"和"改型/降本/优化"类型的报告，其他类型（如"海外产品"）的同型号报告不参与合并
@@ -287,7 +353,7 @@ pnpm start
 35. **食谱库按品类-产品分类**: 食谱库独立存储在 recipe_library 表，按品类-产品分类，整合显示在标准管理页面；报告生成时自动去重保存到食谱库（仅按食谱名称去重，不考虑品类和产品不同）；名称全局唯一约束
 36. **任务状态自动流转**: 移除"待审核"状态，仅保留待执行/进行中/已完成；待执行→进行中（新增五感体验/食谱内容时自动触发）；进行中→已完成（生成报告时）；已完成→进行中（编辑已完成报告内容时）
 37. **报告状态修正**: 报告生成后状态直接为"已完成"（非"草稿"）；旧"草稿"状态在列表中显示为"已完成"
-38. **体验计划转移**: 管理员可将体验计划从用户A转移到用户B，转移后所有资料（素材、五感体验、食谱功能等）归属目标用户；仅管理员可操作；转移时需传递 admin_user_id 获取用户列表
+38. **体验计划转移**: 管理员可将体验计划从用户A转移到用户B，转移后所有资料（素材、五感体验、食谱功能等）归属目标用户；仅管理员可操作；前端获取用户列表和转移操作均以当前登录会话鉴权，不再依赖前端传入 `admin_user_id`
 39. **标准管理双板块**: 标准管理页面划分为"体验标准"和"食谱库"两大板块，通过顶部Tab切换；体验标准列表采用与食谱库一致的卡片样式
 40. **问题去重增强**: 报告生成时问题创建增加 DB 级唯一约束 `UNIQUE(title, source_type, task_id)`，insert 失败时静默跳过；前端报告生成按钮增加防重复点击锁
 41. **食谱库步骤管理**: 食谱库支持展开查看步骤详情；添加步骤时支持直接上传图片（先创建步骤获取ID再上传）；步骤支持编辑/删除/拖拽排序
@@ -338,14 +404,16 @@ pnpm start
 - 所有 API 返回统一结构 `{ code, message, data }`
 - React 组件使用 'use client' 标注客户端组件
 - 禁止 Hydration 错误：不在 JSX 中使用 typeof window/Date.now() 等
-- 权限系统：基于数据库 `platform_users.role` 字段，管理账号(admin)可编辑标准、批量导入/删除、审核账号；使用账号(user)只读；`useAuth()` hook 获取当前用户信息
+- 权限系统：基于数据库 `platform_users.role` 字段和服务端 `requireUser` / `requireAdmin` / `canAccess*` 判断；管理账号(admin)可管理标准、账号和全局数据，使用账号(user)可维护自己归属的体验计划、素材、记录、问题与报告相关操作；`useAuth()` hook 仅用于前端显示状态，不作为安全边界
 - **移动端溢出处理**: flex-1 元素必须添加 `min-w-0`；长文本使用 `break-all` 或 `truncate`；Badge 使用 `max-w-[Npx] truncate`；根 body 已设置 `overflow-x-hidden`
 - **仓库目录骨架**: 可提交空目录占位文件（如 `public/uploads/.gitkeep`）以保留部署目录结构；真实上传素材、日志、构建产物和 `.env.local` 不提交。
 
 ## 权限说明
 
 ### 账号体系
-- **初始管理账号**: bear2026 / bear2026
+- **本地开发初始管理账号**: 不再内置硬编码默认账号；通过 `INITIAL_ADMIN_ACCOUNT` 和 `INITIAL_ADMIN_PASSWORD` 显式临时配置
+- **Docker 本地模拟账号**: dockeradmin / DockerLocal2026，仅用于 `docker-compose.local.yml`
+- **生产首次管理员**: 通过 `INITIAL_ADMIN_ACCOUNT` 和 `INITIAL_ADMIN_PASSWORD` 显式临时配置，初始化后移除；生产不会自动创建 `bear2026`
 - **注册流程**: 填写账号/密码/名称 → 提交审核 → 管理员审核通过后可登录
 - **忘记密码**: 验证账号存在 → 填写新密码 → 提交审核 → 管理员审核通过后生效
 - **修改信息**: 名称/密码修改需提交审核 → 管理员审核通过后生效
@@ -367,7 +435,9 @@ pnpm start
 | 审核账号注册/密码/名称 | ✅ | ❌ |
 | 升级/降级用户角色 | ✅ | ❌ |
 | 删除用户账号 | ✅ | ❌ |
-| 查看所有体验计划/问题/报告 | ✅ | ❌(仅自己的) |
+| 查看所有体验计划/问题 | ✅ | ❌(仅自己的) |
+| 查看报告中心全部报告 | ✅ | ✅(内部共享只读) |
+| 编辑/分享报告 | ✅ | 仅自己任务生成的报告 |
 | 数据分析导出 | ✅ | ❌ |
 | 数据分析浏览 | ✅ | ✅ |
 
@@ -381,7 +451,7 @@ pnpm start
 | 报告合并了不应合并的类型 | 合并逻辑未检查候选报告的 project_type | 添加 `rProjectType` 过滤，仅合并"自研"/"改型降本优化" |
 | 移动端长字段穿透屏幕 | flex-1 无 min-w-0、Badge 无 max-w | body 加 `overflow-x-hidden`，flex-1 加 `min-w-0`，长文本用 `break-all`，Badge 用 `max-w-[Npx] truncate` |
 | 视频素材不显示缩略图 | 五感体验和PDF附录过滤了 video 类型 | 移除 `material_type === 'image'` 过滤，视频用 `<video preload="metadata">` + 播放图标 |
-| 转移功能无反应 | 前端调用 `/api/auth/users` 未传 `admin_user_id` | 添加 `admin_user_id` 参数：`/api/auth/users?admin_user_id=${user?.id}` |
+| 转移功能提示目标用户异常 | 前端候选用户与任务当前归属判断不一致，或后端仅凭前端身份参数判断 | 用户列表和转移接口统一基于当前登录会话鉴权，前端按任务 `created_by` 排除当前归属用户 |
 | 问题点偶发重复 | 报告生成并发或双击导致重复创建 | DB 唯一约束 `UNIQUE(title, source_type, task_id)`，insert 失败静默跳过 |
 | 编辑问题点素材取消选择不生效 | 保存时只处理新增关联，未处理取消关联 | 保存时对比 `initialMaterialIds` 与 `selectedMaterialIds`，差异项设 `record_id=null` |
 | 编辑问题点切换标准类型后表单为空 | `populateFormsFromRecord` 只填充原始类别表单 | 切换类别时从 `editRecordData` 自动预填充共享字段（sensory_dimension/evaluationResult等） |
@@ -389,7 +459,7 @@ pnpm start
 | 食谱库删除图标报错 | 重写 route.ts 时丢失 DELETE handler | 重新添加 DELETE handler，含步骤和素材级联清理 |
 | 效果评价图片重复出现 | MaterialPicker已有initialMaterials展示，下方又有独立预览区块 | 移除重复的素材预览区块，仅保留MaterialPicker |
 | 产品型号所有项目类型都必填 | 表单验证未区分项目类型 | 仅"自研"和"改型/降本/优化"时必填，其他类型可选 |
-| 食谱库/注册等RLS策略缺失 | 启用了RLS但没有策略，INSERT/UPDATE被拒绝 | 为 recipe_library, recipe_library_steps, platform_users, platform_settings, report_shares 添加公开读写策略 |
+| 生产库残留 `allow_all` 或 RLS 边界不清 | 旧策略会扩大匿名访问面，影响等保整改 | `database-schema.sql` 启用 RLS 并删除 `allow_all`，上线前必须执行 `scripts/verify-security-schema.sql` 并留存结果 |
 | gen_random_uuid运行时错误 | schema.ts 中作为JS函数调用，改为 sql`gen_random_uuid()` 模板语法 | 所有 gen_random_uuid() 改为 sql`gen_random_uuid()`，导致所有API返回500 |
 | AI配置无效 | 旧 AI 配置不可用或已过期 | 已迁移至统一的兼容接口调用方式，可在设置中配置当前启用的 AI 服务 |
 | AI探索返回空内容 | platform_settings.ai_config 中模型配置过时 | 已迁移至 ai_model_configs 表；agent-presets API 无结果时返回错误信息而非空数据 |
@@ -439,7 +509,7 @@ pnpm start
 ### 存储模块重构
 
 - **双模式存储**：`src/lib/server/storage.ts` 从纯 S3 模式重构为 local 静态目录 + S3 兼容存储双模式；默认 `STORAGE_DRIVER=local`，文件写入 `LOCAL_UPLOAD_DIR`（默认 `public/uploads`），通过 `LOCAL_PUBLIC_BASE_PATH` 暴露静态路径。
-- **presigned URL 兼容**：`src/lib/use-presigned-url.ts` 新增 `isDirectMediaUrl` / `getStorageKey` 工具函数，正确处理本地路径（`/uploads/...`）、data URL、完整 HTTP URL 三种情况；本地模式下不再调用 presign API，直接使用静态路径。
+- **presigned URL 兼容**：`src/lib/use-presigned-url.ts` 新增 `isDirectMediaUrl` / `getStorageKey` 工具函数，正确处理本地路径（`/uploads/...`）、data URL、完整 HTTP URL 三种情况；local public 模式直接使用静态路径，local protected 或 S3 模式按需通过 presign/file 接口获取可访问 URL。
 - **环境变量**：新增 `STORAGE_DRIVER`（local/s3）、`LOCAL_UPLOAD_DIR`、`LOCAL_PUBLIC_BASE_PATH`、`PUBLIC_MEDIA_BASE_URL`；S3 变量保持不变，仅在 S3 模式下使用。
 - **缺失素材兜底**：本地模式文件不存在时返回 SVG 占位图（”素材文件缺失”），前端加载中时显示”正在加载素材”占位。
 

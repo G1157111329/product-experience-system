@@ -34,6 +34,7 @@ export interface TaskDetail {
   test_method: string | null;
   status: string;
   assigned_to: string | null;
+  created_by: string | null;
   created_at: string;
   records: CheckRecord[];
   issues: Issue[];

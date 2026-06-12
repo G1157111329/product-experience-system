@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { isAuthResponse, requireUser } from '@/lib/server/auth';
 
 type DashboardRow = {
   id: string;
@@ -13,7 +14,10 @@ type DashboardRow = {
 
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
-  const created_by = request.nextUrl.searchParams.get('created_by');
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+  const requestedCreatedBy = request.nextUrl.searchParams.get('created_by');
+  const created_by = user.role === 'admin' ? requestedCreatedBy : user.id;
 
   // 任务统计
   let taskQuery = client.from('experience_tasks').select('id, status, created_at');

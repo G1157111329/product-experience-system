@@ -46,7 +46,7 @@ const readiness = buildReportReadiness({
   aiSummary: null,
 });
 
-assert.equal(readiness.score, 46);
+assert.equal(readiness.score, 48);
 assert.equal(readiness.stats.records, 2);
 assert.equal(readiness.stats.recipes, 1);
 assert.equal(readiness.stats.media, 1);
@@ -56,7 +56,7 @@ assert.ok(readiness.items.some((item) => item.id === 'record-evidence'));
 assert.ok(readiness.items.some((item) => item.id === 'ai-summary'));
 assert.ok(readiness.items.some((item) => item.id === 'recipe-effect-description'));
 assert.ok(readiness.items.some((item) => item.id === 'recipe-step-evidence'));
-assert.ok(readiness.items.some((item) => item.id === 'raw-json-problem-points'));
+assert.equal(readiness.items.find((item) => item.id === 'raw-json-problem-points')?.status, 'ok');
 
 const complete = buildReportReadiness({
   task: {

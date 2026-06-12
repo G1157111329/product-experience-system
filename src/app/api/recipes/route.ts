@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { asc, eq, ilike } from 'drizzle-orm';
 import { getDb } from '@/storage/database/pg-db';
 import { recipeSteps, recipes } from '@/storage/database/shared/schema';
+import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { canAccessRecipe, canAccessTask, isAuthResponse, requireUser } from '@/lib/server/auth';
 
 function toApiStep(step: typeof recipeSteps.$inferSelect) {
   return {
@@ -54,6 +56,10 @@ async function loadRecipesWithSteps(recipeRows: Array<typeof recipes.$inferSelec
 
 export async function GET(request: NextRequest) {
   const db = getDb();
+  const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+
   const { searchParams } = new URL(request.url);
   const taskId = searchParams.get('task_id');
   const keyword = searchParams.get('keyword')?.trim();
@@ -69,6 +75,10 @@ export async function GET(request: NextRequest) {
 
   if (!taskId) return NextResponse.json({ code: 1, message: '缺少 task_id' }, { status: 400 });
 
+  if (!(await canAccessTask(client, user, taskId))) {
+    return NextResponse.json({ code: 1, message: '无权访问该任务' }, { status: 403 });
+  }
+
   const recipeRows = await db
     .select()
     .from(recipes)
@@ -80,7 +90,14 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const db = getDb();
+  const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+
   const body = await request.json();
+  if (!body.task_id || !(await canAccessTask(client, user, String(body.task_id)))) {
+    return NextResponse.json({ code: 1, message: '无权访问该任务' }, { status: 403 });
+  }
 
   const [recipe] = await db.insert(recipes).values({
     taskId: body.task_id,
@@ -94,9 +111,18 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   const db = getDb();
+  const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+
   const body = await request.json();
 
   if (body.recipes && Array.isArray(body.recipes)) {
+    for (const item of body.recipes) {
+      if (!item?.id || !(await canAccessRecipe(client, user, String(item.id)))) {
+        return NextResponse.json({ code: 1, message: '无权更新该食谱排序' }, { status: 403 });
+      }
+    }
     await db.transaction(async (tx) => {
       for (const item of body.recipes) {
         await tx

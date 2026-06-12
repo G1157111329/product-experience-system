@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 /** 签名 URL 全局缓存（避免重复请求） */
 const globalCache = new Map<string, { url: string; expireAt: number }>();
-const CACHE_TTL = 7 * 24 * 3600 * 1000; // 7天缓存
+const CACHE_TTL = 25 * 60 * 1000;
 
 /** 正在进行的批量请求 */
 let batchQueue: { filePath: string; resolve: (url: string) => void }[] = [];
@@ -20,13 +20,31 @@ function isDataUrl(value: string): boolean {
 }
 
 function isDirectMediaUrl(value: string): boolean {
-  return value.startsWith('http') || value.startsWith('/uploads/') || value.startsWith('/media/') || isDataUrl(value);
+  return value.startsWith('http')
+    || value.startsWith('/api/materials/file/')
+    || value.startsWith('/media/')
+    || isDataUrl(value);
+}
+
+function toStorageKey(value: string | null | undefined): string | null {
+  if (!value) return null;
+  if (value.startsWith('/uploads/')) return value.slice('/uploads/'.length);
+  if (value.startsWith('/api/materials/file/')) return null;
+  return value;
 }
 
 function getStorageKey(material: { file_url?: string | null; file_path?: string | null }): string | null {
-  if (material.file_path && !isDirectMediaUrl(material.file_path)) return material.file_path;
-  if (material.file_url && !isDirectMediaUrl(material.file_url)) return material.file_url;
+  const filePath = toStorageKey(material.file_path);
+  const fileUrl = toStorageKey(material.file_url);
+  if (filePath && !isDirectMediaUrl(filePath)) return filePath;
+  if (fileUrl && !isDirectMediaUrl(fileUrl)) return fileUrl;
   return null;
+}
+
+function getShareTokenFromLocation(): string | null {
+  if (typeof window === 'undefined') return null;
+  const match = window.location.pathname.match(/^\/reports\/share\/([^/]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
 /**
@@ -41,7 +59,7 @@ async function requestPresignedUrls(filePaths: string[]): Promise<Map<string, st
     const res = await fetch('/api/materials/presign', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths: filePaths }),
+      body: JSON.stringify({ paths: filePaths, share_token: getShareTokenFromLocation() }),
     });
     const json = await res.json();
     if (json.code === 0 && json.data) {

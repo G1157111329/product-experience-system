@@ -3,6 +3,7 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { extractJsonObject, invokeConfiguredAI } from '@/lib/server/ai';
 import { ensureDefaultSkillTemplates, getActiveSkillVersion, logAgentAudit } from '@/lib/server/agent-skills';
 import { getDefaultSkillDefinitions, renderPromptTemplate } from '@/lib/agent-skills';
+import { canReadReport, isAuthResponse, requireUser } from '@/lib/server/auth';
 
 interface CompareResult {
   winner_report_id: string | null;
@@ -35,11 +36,20 @@ const COMPARE_SKILL_KEY = 'report_product_compare';
 export async function POST(request: NextRequest) {
   const client = getSupabaseClient();
   try {
+    const user = await requireUser(request, client);
+    if (isAuthResponse(user)) return user;
+
     const body = await request.json();
     const reportIds = Array.isArray(body.report_ids) ? body.report_ids.slice(0, 2) : [];
-    const actorUserId = body.user_id || null;
+    const actorUserId = user.id;
     if (reportIds.length !== 2) {
       return NextResponse.json({ code: 1, message: '请选择两份报告进行对比' }, { status: 400 });
+    }
+
+    for (const reportId of reportIds) {
+      if (!(await canReadReport(client, user, String(reportId)))) {
+        return NextResponse.json({ code: 1, message: '无权对比该报告' }, { status: 403 });
+      }
     }
 
     await ensureDefaultSkillTemplates(client, actorUserId);

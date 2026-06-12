@@ -1,18 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient as createClient } from '@/storage/database/supabase-client';
-import crypto from 'crypto';
-
-const HASH_SALT = 'xp_experience_platform';
-
-function hashPassword(password: string): string {
-  return crypto.createHash('sha256').update(HASH_SALT + password).digest('hex');
-}
+import { hashPassword, validatePasswordStrength } from '@/lib/server/password';
+import { checkSharedRateLimit } from '@/lib/server/rate-limit';
+import { writeSecurityAudit } from '@/lib/server/security-audit';
 
 // Register: create user with status=pending + create audit request
 export async function POST(request: NextRequest) {
   try {
+    const supabase = createClient();
     const body = await request.json();
     const { account, password, name } = body;
+    const limited = await checkSharedRateLimit(request, {
+      scope: 'auth-register',
+      subject: String(account || 'unknown'),
+      limit: 5,
+      windowMs: 60 * 60 * 1000,
+    });
+    if (limited) {
+      await writeSecurityAudit(supabase, {
+        request,
+        action: 'auth.register.rate_limited',
+        outcome: 'denied',
+        actorAccount: account || null,
+      });
+      return limited;
+    }
 
     if (!account || !password || !name) {
       return NextResponse.json({ code: 1, message: '请填写完整信息' });
@@ -22,11 +34,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ code: 1, message: '账号至少4个字符' });
     }
 
-    if (password.length < 4) {
-      return NextResponse.json({ code: 1, message: '密码至少4个字符' });
+    const passwordError = validatePasswordStrength(password);
+    if (passwordError) {
+      return NextResponse.json({ code: 1, message: passwordError });
     }
-
-    const supabase = createClient();
 
     // Check if account already exists
     const { data: existing } = await supabase
@@ -71,6 +82,14 @@ export async function POST(request: NextRequest) {
       request_type: 'register',
       status: 'pending',
       new_value: JSON.stringify({ account, name }),
+    });
+
+    await writeSecurityAudit(supabase, {
+      request,
+      action: 'auth.register.request',
+      outcome: 'success',
+      actorUserId: newUser.id,
+      actorAccount: account,
     });
 
     return NextResponse.json({

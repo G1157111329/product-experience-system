@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { AppSidebar, MobileNav, BottomNav } from '@/components/navigation';
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
@@ -13,12 +13,12 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   }, []);
 
   useEffect(() => {
-    if (checked && !isAuthenticated) {
+    if (checked && !isLoading && !isAuthenticated) {
       window.location.href = '/login';
     }
-  }, [checked, isAuthenticated]);
+  }, [checked, isAuthenticated, isLoading]);
 
-  if (!checked) {
+  if (!checked || isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />

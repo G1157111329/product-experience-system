@@ -51,6 +51,7 @@ interface Task {
   test_date: string | null;
   organizer: string | null;
   status: string;
+  created_by: string | null;
   created_at: string;
 }
 
@@ -118,7 +119,6 @@ export default function TasksPage() {
       const params = new URLSearchParams();
       if (keyword) params.set('keyword', keyword);
       if (filterStatus && filterStatus !== 'all') params.set('status', filterStatus);
-      if (user?.id && !isAdmin) params.set('created_by', user.id);
       const res = await fetch(`/api/tasks?${params}`);
       const data = await readApiJson<{ code: number; message?: string; data?: { list?: Task[]; total?: number } }>(res);
       if (data.code === 0) {
@@ -132,7 +132,7 @@ export default function TasksPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterStatus, isAdmin, keyword, user]);
+  }, [filterStatus, keyword]);
 
   useEffect(() => {
     fetchCategories();
@@ -178,7 +178,7 @@ export default function TasksPage() {
     const res = await fetch('/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, task_name: taskName, created_by: user?.id }),
+      body: JSON.stringify({ ...form, task_name: taskName }),
     });
     const data = await res.json();
     if (data.code === 0) {
@@ -212,10 +212,10 @@ export default function TasksPage() {
 
   const handleOpenTransfer = async (task: Task) => {
     setTransferTask(task);
-    const res = await fetch(`/api/auth/users?admin_user_id=${user?.id}`);
+    const res = await fetch('/api/auth/users');
     const data = await res.json();
     if (data.code === 0) {
-      setTransferUsers((data.data || []).filter((u: Record<string, unknown>) => u.id !== user?.id));
+      setTransferUsers((data.data || []).filter((u: Record<string, unknown>) => u.id !== task.created_by));
       setTransferTargetId('');
       setTransferOpen(true);
     } else {
@@ -230,7 +230,7 @@ export default function TasksPage() {
       const res = await fetch(`/api/tasks/${transferTask.id}/transfer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target_user_id: transferTargetId, admin_user_id: user?.id }),
+        body: JSON.stringify({ target_user_id: transferTargetId }),
       });
       const data = await res.json();
       if (data.code === 0) {
@@ -556,7 +556,7 @@ export default function TasksPage() {
           <div className="space-y-3 py-2">
             <div className="rounded-lg border bg-muted/30 p-3">
               <p className="text-xs text-muted-foreground">
-                转移后，该体验计划将从原用户列表中移除，目标用户将获得所有资料的所有权。
+                转移后，该体验计划将从当前归属用户列表中移除，目标用户将获得所有资料的所有权。
               </p>
             </div>
             <div className="space-y-1.5">

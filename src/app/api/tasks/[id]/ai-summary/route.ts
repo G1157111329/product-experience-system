@@ -3,6 +3,7 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { extractJsonObject, getImageUrlsForAI, invokeConfiguredAI } from '@/lib/server/ai';
 import { getActiveSkillVersion } from '@/lib/server/agent-skills';
 import { getDefaultSkillDefinitions, renderPromptTemplate } from '@/lib/agent-skills';
+import { canAccessTask, isAuthResponse, requireUser } from '@/lib/server/auth';
 
 interface AiTaskSummary {
   tag: string;
@@ -28,9 +29,15 @@ const emptySummary = (): AiTaskSummary => ({
 
 const summaryKey = (taskId: string) => `ai_sum_${taskId}`;
 
-export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+  if (!(await canAccessTask(client, user, id))) {
+    return NextResponse.json({ code: 1, message: '无权访问该任务AI总结' }, { status: 403 });
+  }
+
   const { data, error } = await client
     .from('platform_settings')
     .select('value')
@@ -44,6 +51,12 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+  if (!(await canAccessTask(client, user, id))) {
+    return NextResponse.json({ code: 1, message: '无权保存该任务AI总结' }, { status: 403 });
+  }
+
   const body = await request.json();
   const value = {
     ...emptySummary(),
@@ -64,6 +77,11 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+  if (!(await canAccessTask(client, user, id))) {
+    return NextResponse.json({ code: 1, message: '无权生成该任务AI总结' }, { status: 403 });
+  }
 
   try {
     const { data: task, error: taskError } = await client.from('experience_tasks').select('*').eq('id', id).single();

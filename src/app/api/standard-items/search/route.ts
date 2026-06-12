@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { isAuthResponse, requireUser } from '@/lib/server/auth';
 
 type StandardRow = {
   id: string;
@@ -16,6 +17,9 @@ type StandardItemRow = {
 
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+
   const { searchParams } = new URL(request.url);
   const sensory_dimension = searchParams.get('sensory_dimension');
   const test_phase = searchParams.get('test_phase');

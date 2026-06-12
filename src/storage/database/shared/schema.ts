@@ -1,4 +1,4 @@
-import { pgTable, serial, timestamp, pgPolicy, varchar, jsonb, boolean, index, foreignKey, integer, text, unique, date } from "drizzle-orm/pg-core"
+﻿import { pgTable, serial, timestamp, varchar, jsonb, boolean, index, foreignKey, integer, text, unique, date } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 
@@ -16,10 +16,6 @@ export const reportTemplates = pgTable("report_templates", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 }, () => [
-	pgPolicy("report_templates_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
-	pgPolicy("report_templates_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
-	pgPolicy("report_templates_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),
-	pgPolicy("report_templates_允许公开删除", { as: "permissive", for: "delete", to: ["public"] }),
 ]);
 
 export const reports = pgTable("reports", {
@@ -48,10 +44,6 @@ export const reports = pgTable("reports", {
 			foreignColumns: [reportTemplates.id],
 			name: "reports_template_id_report_templates_id_fk"
 		}),
-	pgPolicy("reports_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
-	pgPolicy("reports_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
-	pgPolicy("reports_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),
-	pgPolicy("reports_允许公开删除", { as: "permissive", for: "delete", to: ["public"] }),
 ]);
 
 export const recipes = pgTable("recipes", {
@@ -75,10 +67,6 @@ export const recipes = pgTable("recipes", {
 			foreignColumns: [experienceTasks.id],
 			name: "recipes_task_id_fkey"
 		}).onDelete("cascade"),
-	pgPolicy("recipes_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
-	pgPolicy("recipes_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
-	pgPolicy("recipes_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),
-	pgPolicy("recipes_允许公开删除", { as: "permissive", for: "delete", to: ["public"] }),
 ]);
 
 export const recipeSteps = pgTable("recipe_steps", {
@@ -98,10 +86,6 @@ export const recipeSteps = pgTable("recipe_steps", {
 			foreignColumns: [recipes.id],
 			name: "recipe_steps_recipe_id_fkey"
 		}).onDelete("cascade"),
-	pgPolicy("recipe_steps_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
-	pgPolicy("recipe_steps_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
-	pgPolicy("recipe_steps_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),
-	pgPolicy("recipe_steps_允许公开删除", { as: "permissive", for: "delete", to: ["public"] }),
 ]);
 
 export const standardItems = pgTable("standard_items", {
@@ -137,10 +121,6 @@ export const standardItems = pgTable("standard_items", {
 			foreignColumns: [standards.id],
 			name: "standard_items_standard_id_standards_id_fk"
 		}).onDelete("cascade"),
-	pgPolicy("standard_items_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
-	pgPolicy("standard_items_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
-	pgPolicy("standard_items_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),
-	pgPolicy("standard_items_允许公开删除", { as: "permissive", for: "delete", to: ["public"] }),
 ]);
 
 export const checkRecords = pgTable("check_records", {
@@ -176,10 +156,6 @@ export const checkRecords = pgTable("check_records", {
 			foreignColumns: [experienceTasks.id],
 			name: "check_records_task_id_experience_tasks_id_fk"
 		}).onDelete("cascade"),
-	pgPolicy("check_records_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
-	pgPolicy("check_records_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
-	pgPolicy("check_records_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),
-	pgPolicy("check_records_允许公开删除", { as: "permissive", for: "delete", to: ["public"] }),
 ]);
 
 export const issues = pgTable("issues", {
@@ -225,10 +201,6 @@ export const issues = pgTable("issues", {
 			name: "issues_record_id_check_records_id_fk"
 		}).onDelete("set null"),
 	unique("issues_unique_per_task").on(table.taskId, table.title, table.sourceType),
-	pgPolicy("issues_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
-	pgPolicy("issues_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
-	pgPolicy("issues_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),
-	pgPolicy("issues_允许公开删除", { as: "permissive", for: "delete", to: ["public"] }),
 ]);
 
 export const issueReEvaluations = pgTable("issue_re_evaluations", {
@@ -246,10 +218,6 @@ export const issueReEvaluations = pgTable("issue_re_evaluations", {
 			foreignColumns: [issues.id],
 			name: "issue_re_evaluations_issue_id_issues_id_fk"
 		}).onDelete("cascade"),
-	pgPolicy("issue_re_evaluations_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
-	pgPolicy("issue_re_evaluations_允许公开写入", { as: "permissive", for: "insert", to: ["public"], withCheck: sql`true` }),
-	pgPolicy("issue_re_evaluations_允许公开更新", { as: "permissive", for: "update", to: ["public"], using: sql`true`, withCheck: sql`true` }),
-	pgPolicy("issue_re_evaluations_允许公开删除", { as: "permissive", for: "delete", to: ["public"], using: sql`true` }),
 ]);
 
 export const experienceTasks = pgTable("experience_tasks", {
@@ -276,10 +244,6 @@ export const experienceTasks = pgTable("experience_tasks", {
 	index("experience_tasks_created_at_idx").using("btree", table.createdAt.asc().nullsLast().op("timestamptz_ops")),
 	index("experience_tasks_product_category_idx").using("btree", table.productCategory.asc().nullsLast().op("text_ops")),
 	index("experience_tasks_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
-	pgPolicy("experience_tasks_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
-	pgPolicy("experience_tasks_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
-	pgPolicy("experience_tasks_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),
-	pgPolicy("experience_tasks_允许公开删除", { as: "permissive", for: "delete", to: ["public"] }),
 ]);
 
 export const platformUsers = pgTable("platform_users", {
@@ -351,10 +315,6 @@ export const standards = pgTable("standards", {
 }, (table) => [
 	index("standards_category_idx").using("btree", table.category.asc().nullsLast().op("text_ops")),
 	index("standards_product_category_idx").using("btree", table.productCategory.asc().nullsLast().op("text_ops")),
-	pgPolicy("standards_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
-	pgPolicy("standards_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
-	pgPolicy("standards_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),
-	pgPolicy("standards_允许公开删除", { as: "permissive", for: "delete", to: ["public"] }),
 ]);
 
 export const recipeLibrary = pgTable("recipe_library", {
@@ -369,10 +329,6 @@ export const recipeLibrary = pgTable("recipe_library", {
 }, (table) => [
 	index("recipe_library_product_idx").using("btree", table.productCategory.asc().nullsLast().op("text_ops"), table.product.asc().nullsLast().op("text_ops")),
 	unique("recipe_library_name_key").on(table.name),
-	pgPolicy("recipe_library_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
-	pgPolicy("recipe_library_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
-	pgPolicy("recipe_library_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),
-	pgPolicy("recipe_library_允许公开删除", { as: "permissive", for: "delete", to: ["public"] }),
 ]);
 
 export const recipeLibrarySteps = pgTable("recipe_library_steps", {
@@ -391,10 +347,6 @@ export const recipeLibrarySteps = pgTable("recipe_library_steps", {
 			foreignColumns: [recipeLibrary.id],
 			name: "recipe_library_steps_recipe_library_id_fkey"
 		}).onDelete("cascade"),
-	pgPolicy("recipe_library_steps_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
-	pgPolicy("recipe_library_steps_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
-	pgPolicy("recipe_library_steps_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),
-	pgPolicy("recipe_library_steps_允许公开删除", { as: "permissive", for: "delete", to: ["public"] }),
 ]);
 
 export const materials = pgTable("materials", {
@@ -443,10 +395,6 @@ export const materials = pgTable("materials", {
 			foreignColumns: [issueReEvaluations.id],
 			name: "materials_re_evaluation_id_issue_re_evaluations_id_fk"
 		}).onDelete("set null"),
-	pgPolicy("materials_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
-	pgPolicy("materials_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
-	pgPolicy("materials_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),
-	pgPolicy("materials_允许公开删除", { as: "permissive", for: "delete", to: ["public"] }),
 ]);
 
 export const platformAuditRequests = pgTable("platform_audit_requests", {
@@ -471,6 +419,39 @@ export const platformSettings = pgTable("platform_settings", {
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 });
 
+export const securityAuditLogs = pgTable("security_audit_logs", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	action: varchar({ length: 80 }).notNull(),
+	actorUserId: varchar("actor_user_id", { length: 36 }),
+	actorAccount: varchar("actor_account", { length: 100 }),
+	targetType: varchar("target_type", { length: 50 }),
+	targetId: varchar("target_id", { length: 100 }),
+	outcome: varchar({ length: 20 }).notNull(),
+	ipAddress: varchar("ip_address", { length: 80 }),
+	userAgent: text("user_agent"),
+	requestPath: text("request_path"),
+	requestMethod: varchar("request_method", { length: 10 }),
+	metadata: jsonb().default({}).notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("security_audit_logs_action_idx").using("btree", table.action.asc().nullsLast().op("text_ops")),
+	index("security_audit_logs_actor_user_id_idx").using("btree", table.actorUserId.asc().nullsLast().op("text_ops")),
+	index("security_audit_logs_target_idx").using("btree", table.targetType.asc().nullsLast().op("text_ops"), table.targetId.asc().nullsLast().op("text_ops")),
+	index("security_audit_logs_created_at_idx").using("btree", table.createdAt.asc().nullsLast().op("timestamptz_ops")),
+	foreignKey({
+		columns: [table.actorUserId],
+		foreignColumns: [platformUsers.id],
+		name: "security_audit_logs_actor_user_id_fkey"
+	}).onDelete("set null"),
+]);
+
+export const securityRateLimits = pgTable("security_rate_limits", {
+	rateKey: varchar("rate_key", { length: 240 }).primaryKey().notNull(),
+	count: integer().default(0).notNull(),
+	resetAt: timestamp("reset_at", { withTimezone: true, mode: 'string' }).notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+});
+
 export const aiModelConfigs = pgTable("ai_model_configs", {
 	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
 	name: varchar({ length: 100 }).notNull(),
@@ -492,10 +473,6 @@ export const aiModelConfigs = pgTable("ai_model_configs", {
 		foreignColumns: [platformUsers.id],
 		name: "ai_model_configs_created_by_fkey"
 	}).onDelete("set null"),
-	pgPolicy("ai_model_configs_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
-	pgPolicy("ai_model_configs_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
-	pgPolicy("ai_model_configs_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),
-	pgPolicy("ai_model_configs_允许公开删除", { as: "permissive", for: "delete", to: ["public"] }),
 ]);
 
 export const agentSkillTemplates = pgTable("agent_skill_templates", {
@@ -522,10 +499,6 @@ export const agentSkillTemplates = pgTable("agent_skill_templates", {
 		name: "agent_skill_templates_created_by_fkey"
 	}).onDelete("set null"),
 	unique("agent_skill_templates_skill_key_key").on(table.skillKey),
-	pgPolicy("agent_skill_templates_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
-	pgPolicy("agent_skill_templates_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
-	pgPolicy("agent_skill_templates_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),
-	pgPolicy("agent_skill_templates_允许公开删除", { as: "permissive", for: "delete", to: ["public"] }),
 ]);
 
 export const agentSkillVersions = pgTable("agent_skill_versions", {
@@ -551,10 +524,6 @@ export const agentSkillVersions = pgTable("agent_skill_versions", {
 		name: "agent_skill_versions_created_by_fkey"
 	}).onDelete("set null"),
 	unique("agent_skill_versions_template_version_key").on(table.templateId, table.version),
-	pgPolicy("agent_skill_versions_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
-	pgPolicy("agent_skill_versions_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
-	pgPolicy("agent_skill_versions_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),
-	pgPolicy("agent_skill_versions_允许公开删除", { as: "permissive", for: "delete", to: ["public"] }),
 ]);
 
 export const agentSkillAuditLogs = pgTable("agent_skill_audit_logs", {
@@ -593,8 +562,4 @@ export const agentSkillAuditLogs = pgTable("agent_skill_audit_logs", {
 		foreignColumns: [experienceTasks.id],
 		name: "agent_skill_audit_logs_task_id_fkey"
 	}).onDelete("set null"),
-	pgPolicy("agent_skill_audit_logs_允许公开读取", { as: "permissive", for: "select", to: ["public"], using: sql`true` }),
-	pgPolicy("agent_skill_audit_logs_允许公开写入", { as: "permissive", for: "insert", to: ["public"] }),
-	pgPolicy("agent_skill_audit_logs_允许公开更新", { as: "permissive", for: "update", to: ["public"] }),
-	pgPolicy("agent_skill_audit_logs_允许公开删除", { as: "permissive", for: "delete", to: ["public"] }),
 ]);

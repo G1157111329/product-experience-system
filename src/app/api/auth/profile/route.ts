@@ -1,22 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient as createClient } from '@/storage/database/supabase-client';
-import crypto from 'crypto';
+import { getCurrentUser, unauthorized } from '@/lib/server/auth';
+import { hashPassword, validatePasswordStrength } from '@/lib/server/password';
 
-const HASH_SALT = 'xp_experience_platform';
-
-function hashPassword(password: string): string {
-  return crypto.createHash('sha256').update(HASH_SALT + password).digest('hex');
-}
-
-// GET: fetch current user profile
 export async function GET(request: NextRequest) {
   try {
-    const userId = request.nextUrl.searchParams.get('user_id');
-    if (!userId) {
-      return NextResponse.json({ code: 1, message: '缺少用户ID' });
-    }
-
     const supabase = createClient();
+    const currentUser = await getCurrentUser(request, supabase);
+    if (!currentUser) return unauthorized();
+
+    const requestedUserId = request.nextUrl.searchParams.get('user_id');
+    const userId = currentUser.role === 'admin' && requestedUserId ? requestedUserId : currentUser.id;
+
     const { data: user, error } = await supabase
       .from('platform_users')
       .select('id, account, name, role, status')
@@ -24,44 +19,44 @@ export async function GET(request: NextRequest) {
       .maybeSingle();
 
     if (error || !user) {
-      return NextResponse.json({ code: 1, message: '用户不存在' });
+      return NextResponse.json({ code: 1, message: '用户不存在' }, { status: 404 });
     }
 
     return NextResponse.json({ code: 0, data: user });
   } catch {
-    return NextResponse.json({ code: 1, message: '获取用户信息失败' });
+    return NextResponse.json({ code: 1, message: '获取用户信息失败' }, { status: 500 });
   }
 }
 
-// PUT: update user profile (name/password changes require admin approval)
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { user_id, field, value } = body;
+    const { field, value } = body;
 
-    if (!user_id || !field || !value) {
-      return NextResponse.json({ code: 1, message: '参数不完整' });
+    if (!field || !value) {
+      return NextResponse.json({ code: 1, message: '参数不完整' }, { status: 400 });
     }
 
     const supabase = createClient();
+    const currentUser = await getCurrentUser(request, supabase);
+    if (!currentUser) return unauthorized();
+    const userId = currentUser.id;
 
-    // Verify user exists
     const { data: user } = await supabase
       .from('platform_users')
       .select('id, name, role')
-      .eq('id', user_id)
+      .eq('id', userId)
       .maybeSingle();
 
     if (!user) {
-      return NextResponse.json({ code: 1, message: '用户不存在' });
+      return NextResponse.json({ code: 1, message: '用户不存在' }, { status: 404 });
     }
 
     if (field === 'name') {
-      // Check if there's already a pending name change request
       const { data: existingReq } = await supabase
         .from('platform_audit_requests')
         .select('id')
-        .eq('user_id', user_id)
+        .eq('user_id', userId)
         .eq('request_type', 'name_change')
         .eq('status', 'pending')
         .maybeSingle();
@@ -73,7 +68,7 @@ export async function PUT(request: NextRequest) {
           .eq('id', existingReq.id);
       } else {
         await supabase.from('platform_audit_requests').insert({
-          user_id,
+          user_id: userId,
           request_type: 'name_change',
           status: 'pending',
           old_value: user.name,
@@ -85,11 +80,15 @@ export async function PUT(request: NextRequest) {
     }
 
     if (field === 'password') {
-      // Check if there's already a pending password change request
+      const passwordError = validatePasswordStrength(String(value));
+      if (passwordError) {
+        return NextResponse.json({ code: 1, message: passwordError }, { status: 400 });
+      }
+
       const { data: existingReq } = await supabase
         .from('platform_audit_requests')
         .select('id')
-        .eq('user_id', user_id)
+        .eq('user_id', userId)
         .eq('request_type', 'password_change')
         .eq('status', 'pending')
         .maybeSingle();
@@ -101,7 +100,7 @@ export async function PUT(request: NextRequest) {
           .eq('id', existingReq.id);
       } else {
         await supabase.from('platform_audit_requests').insert({
-          user_id,
+          user_id: userId,
           request_type: 'password_change',
           status: 'pending',
           new_value: hashPassword(value),
@@ -111,8 +110,8 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ code: 0, message: '密码修改申请已提交，请等待管理员审核' });
     }
 
-    return NextResponse.json({ code: 1, message: '不支持的字段' });
+    return NextResponse.json({ code: 1, message: '不支持的字段' }, { status: 400 });
   } catch {
-    return NextResponse.json({ code: 1, message: '修改失败' });
+    return NextResponse.json({ code: 1, message: '修改失败' }, { status: 500 });
   }
 }

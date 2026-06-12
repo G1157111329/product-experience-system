@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { canAccessRecipe, isAuthResponse, requireUser } from '@/lib/server/auth';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+  if (!(await canAccessRecipe(client, user, id))) {
+    return NextResponse.json({ code: 1, message: '无权访问该食谱' }, { status: 403 });
+  }
+
   const { data, error } = await client
     .from('recipes')
     .select('*, recipe_steps(*)')
@@ -28,6 +35,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+  if (!(await canAccessRecipe(client, user, id))) {
+    return NextResponse.json({ code: 1, message: '无权更新该食谱' }, { status: 403 });
+  }
+
   const body = await request.json();
 
   // Update recipe basic fields + effect fields
@@ -68,6 +81,11 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+  if (!(await canAccessRecipe(client, user, id))) {
+    return NextResponse.json({ code: 1, message: '无权删除该食谱' }, { status: 403 });
+  }
 
   // Unlink effect materials first
   await client.from('materials').update({ recipe_id: null }).eq('recipe_id', id);

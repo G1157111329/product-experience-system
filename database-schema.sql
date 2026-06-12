@@ -389,7 +389,40 @@ CREATE TABLE IF NOT EXISTS platform_settings (
 );
 
 -- ============================================================
--- 21. AI模型配置表
+-- 21. 安全审计日志表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS security_audit_logs (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  action VARCHAR(80) NOT NULL,
+  actor_user_id VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  actor_account VARCHAR(100),
+  target_type VARCHAR(50),
+  target_id VARCHAR(100),
+  outcome VARCHAR(20) NOT NULL,
+  ip_address VARCHAR(80),
+  user_agent TEXT,
+  request_path TEXT,
+  request_method VARCHAR(10),
+  metadata JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS security_audit_logs_action_idx ON security_audit_logs(action);
+CREATE INDEX IF NOT EXISTS security_audit_logs_actor_user_id_idx ON security_audit_logs(actor_user_id);
+CREATE INDEX IF NOT EXISTS security_audit_logs_target_idx ON security_audit_logs(target_type, target_id);
+CREATE INDEX IF NOT EXISTS security_audit_logs_created_at_idx ON security_audit_logs(created_at);
+
+-- ============================================================
+-- 22. 共享限速状态表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS security_rate_limits (
+  rate_key VARCHAR(240) PRIMARY KEY,
+  count INTEGER NOT NULL DEFAULT 0,
+  reset_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ============================================================
+-- 23. AI模型配置表
 -- ============================================================
 CREATE TABLE IF NOT EXISTS ai_model_configs (
   id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -494,24 +527,6 @@ INSERT INTO platform_products (name, category_id, sort_order) VALUES
 ON CONFLICT DO NOTHING;
 
 -- ============================================================
--- 种子数据：初始管理员账号
--- 密码: bear2026
--- Hash方式: SHA-256(salt + password), salt = xp_experience_platform
--- ============================================================
-INSERT INTO platform_users (id, account, password_hash, name, role, status)
-VALUES (
-  gen_random_uuid(),
-  'bear2026',
-  '821e2ed1ef455f2b09f2bfd5cfa356833da3fc5790ba1367a84adb971f108588',
-  '管理员',
-  'admin',
-  'approved'
-) ON CONFLICT (account) DO UPDATE SET
-  password_hash = EXCLUDED.password_hash,
-  role = 'admin',
-  status = 'approved';
-
--- ============================================================
 -- 种子数据：平台默认设置
 -- ============================================================
 INSERT INTO platform_settings (key, value) VALUES
@@ -520,8 +535,8 @@ INSERT INTO platform_settings (key, value) VALUES
 ON CONFLICT (key) DO NOTHING;
 
 -- ============================================================
--- RLS 策略（Supabase 必需，自建 PostgreSQL 可跳过）
--- 对所有表启用 RLS 并设置为公开读写
+-- 安全策略（Supabase 必需，自建 PostgreSQL 可跳过）
+-- 生产环境禁止 allow_all。服务端应使用 service role 或自建 PostgreSQL 受控账号访问。
 -- ============================================================
 DO $$
 DECLARE
@@ -532,7 +547,8 @@ BEGIN
     WHERE schemaname = 'public'
       AND tablename IN (
         'platform_users', 'platform_audit_requests', 'platform_categories', 'platform_products',
-        'platform_settings', 'standards', 'standard_items', 'experience_tasks', 'check_records',
+        'platform_settings', 'security_audit_logs', 'security_rate_limits',
+        'standards', 'standard_items', 'experience_tasks', 'check_records',
         'materials', 'issues', 'issue_re_evaluations', 'report_templates', 'reports', 'report_shares',
         'recipes', 'recipe_steps', 'recipe_library', 'recipe_library_steps',
         'health_check', 'ai_model_configs', 'agent_skill_templates', 'agent_skill_versions',
@@ -541,6 +557,17 @@ BEGIN
   LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
     EXECUTE format('DROP POLICY IF EXISTS allow_all ON %I', tbl);
-    EXECUTE format('CREATE POLICY allow_all ON %I FOR ALL USING (true) WITH CHECK (true)', tbl);
   END LOOP;
 END $$;
+
+CREATE OR REPLACE FUNCTION prevent_security_audit_log_mutation()
+RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'security_audit_logs is append-only';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS security_audit_logs_append_only ON security_audit_logs;
+CREATE TRIGGER security_audit_logs_append_only
+BEFORE UPDATE OR DELETE ON security_audit_logs
+FOR EACH ROW EXECUTE FUNCTION prevent_security_audit_log_mutation();

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { canAccessRecipeStep, isAuthResponse, requireUser } from '@/lib/server/auth';
 
 /** Recalculate and update problem_count for a recipe based on its steps */
 async function updateRecipeProblemCount(client: ReturnType<typeof getSupabaseClient>, recipeId: string) {
@@ -19,6 +20,12 @@ async function updateRecipeProblemCount(client: ReturnType<typeof getSupabaseCli
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+  if (!(await canAccessRecipeStep(client, user, id))) {
+    return NextResponse.json({ code: 1, message: '无权更新该食谱步骤' }, { status: 403 });
+  }
+
   const body = await request.json();
 
   const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -43,6 +50,11 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+  if (!(await canAccessRecipeStep(client, user, id))) {
+    return NextResponse.json({ code: 1, message: '无权删除该食谱步骤' }, { status: 403 });
+  }
 
   // Get recipe_id before deleting, so we can update problem_count
   const { data: step } = await client.from('recipe_steps').select('recipe_id').eq('id', id).single();

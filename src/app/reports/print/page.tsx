@@ -74,7 +74,7 @@ interface ReportData {
 
 const taskFieldLabels: Record<string, string> = {
   task_name: '任务名称', product_category: '产品品类', product: '产品', product_model: '产品型号',
-  project_type: '项目类型', project_phase: '项目阶段',
+  project_number: '项目单号', project_type: '项目类型', project_phase: '项目阶段',
   test_date: '测试日期', organizer: '组织人', target_user: '目标用户',
   test_purpose: '测试目的', test_method: '测试方法', status: '状态',
   assigned_to: '负责人', created_at: '创建时间', updated_at: '更新时间',
@@ -231,17 +231,48 @@ function PrintAiSummary({ summary }: { summary?: AiSummaryLike | null }) {
   if (!summary || (!summary.summary && !summary.tag && !summary.historical_position)) return null;
   return (
     <>
-      <h3 style={{ fontSize: '15px', margin: '16px 0 8px', color: '#0d9488', borderBottom: '1px solid #0d9488', paddingBottom: '4px' }}>总结</h3>
-      <div style={{ padding: '12px', background: '#fff', border: '1px solid #d1d5db', borderRadius: '8px', margin: '8px 0' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
-          {summary.tag && <span style={{ fontSize: '11px', fontWeight: 600, color: '#0f766e', background: '#ccfbf1', padding: '2px 8px', borderRadius: '4px' }}>{summary.tag}</span>}
-          {summary.satisfaction_score !== undefined && <span style={{ fontSize: '11px', color: '#0f766e' }}>满意度 {summary.satisfaction_score}/10</span>}
+      <h3 style={{ fontSize: '17px', margin: '18px 0 10px', color: '#0f766e', borderBottom: '2px solid #0d9488', paddingBottom: '6px' }}>总结</h3>
+      <div style={{ padding: '14px', background: '#fff', border: '1px solid #d1d5db', borderRadius: '8px', margin: '8px 0 14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
+          {summary.tag && <span style={{ fontSize: '12px', fontWeight: 700, color: '#0f766e', background: '#ccfbf1', padding: '3px 9px', borderRadius: '4px' }}>{summary.tag}</span>}
+          {summary.satisfaction_score !== undefined && <span style={{ fontSize: '12px', fontWeight: 600, color: '#0f766e' }}>满意度 {summary.satisfaction_score}/10</span>}
         </div>
-        {summary.summary && <div style={{ fontSize: '12px', whiteSpace: 'pre-wrap', marginBottom: '6px' }}>{summary.summary}</div>}
-        {(summary.strengths || []).length > 0 && <div style={{ fontSize: '11px', color: '#555' }}><strong>主要优势：</strong>{summary.strengths!.join('；')}</div>}
-        {(summary.risks || []).length > 0 && <div style={{ fontSize: '11px', color: '#555' }}><strong>主要风险：</strong>{summary.risks!.join('；')}</div>}
-        {summary.historical_position && <div style={{ fontSize: '11px', color: '#555' }}><strong>历史表现：</strong>{summary.historical_position}</div>}
-        {(summary.suggestions || []).length > 0 && <div style={{ fontSize: '11px', color: '#555' }}><strong>后续建议：</strong>{summary.suggestions!.join('；')}</div>}
+        {summary.summary && (
+          <div style={{ fontSize: '13px', lineHeight: 1.75, whiteSpace: 'pre-wrap', marginBottom: '12px', color: '#111827' }}>
+            {summary.summary}
+          </div>
+        )}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+          {(summary.strengths || []).length > 0 && (
+            <div style={{ border: '1px solid #d1fae5', background: '#ecfdf5', borderRadius: '6px', padding: '10px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: '#047857', marginBottom: '6px' }}>主要优势</div>
+              {(summary.strengths || []).map((item, idx) => (
+                <div key={idx} style={{ fontSize: '12px', lineHeight: 1.6, color: '#1f2937', marginBottom: '4px' }}>• {item}</div>
+              ))}
+            </div>
+          )}
+          {(summary.risks || []).length > 0 && (
+            <div style={{ border: '1px solid #fde68a', background: '#fffbeb', borderRadius: '6px', padding: '10px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: '#b45309', marginBottom: '6px' }}>主要风险</div>
+              {(summary.risks || []).map((item, idx) => (
+                <div key={idx} style={{ fontSize: '12px', lineHeight: 1.6, color: '#1f2937', marginBottom: '4px' }}>• {item}</div>
+              ))}
+            </div>
+          )}
+        </div>
+        {summary.historical_position && (
+          <div style={{ fontSize: '12px', lineHeight: 1.6, color: '#4b5563', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '8px 10px', marginBottom: '10px' }}>
+            <strong style={{ color: '#111827' }}>历史表现：</strong>{summary.historical_position}
+          </div>
+        )}
+        {(summary.suggestions || []).length > 0 && (
+          <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', padding: '10px' }}>
+            <div style={{ fontSize: '12px', fontWeight: 700, color: '#111827', marginBottom: '6px' }}>后续建议</div>
+            {summary.suggestions!.map((item, idx) => (
+              <div key={idx} style={{ fontSize: '12px', lineHeight: 1.6, color: '#4b5563', marginBottom: '4px' }}>{idx + 1}. {item}</div>
+            ))}
+          </div>
+        )}
       </div>
     </>
   );
@@ -562,7 +593,7 @@ function ReportPrintContent() {
           }
         }
         // Fetch live issues
-        const issuesRes = await fetch('/api/issues?limit=500');
+        const issuesRes = await fetch(`/api/issues?source_report_id=${rpt.id}&limit=500`);
         const issuesData = await issuesRes.json();
         const raw = issuesData.data;
         const allIssues: IssueItem[] = Array.isArray(raw) ? raw : (raw?.list || []);
@@ -594,7 +625,7 @@ function ReportPrintContent() {
   // Fetch live issues for sibling reports
   useEffect(() => {
     if (siblingReports.length === 0) return;
-    fetch('/api/issues?limit=500').then(r => r.json()).then(async data => {
+    fetch(`/api/issues?source_report_id=${reportId}&limit=500`).then(r => r.json()).then(async data => {
       const raw = data.data;
       const allIssues: IssueItem[] = Array.isArray(raw) ? raw : (raw?.list || []);
       const map: Record<string, IssueItem[]> = {};

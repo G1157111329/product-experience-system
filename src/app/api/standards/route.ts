@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, count, desc, eq, ilike, inArray } from 'drizzle-orm';
 import { getDb } from '@/storage/database/pg-db';
+import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { standardItems, standards } from '@/storage/database/shared/schema';
+import { isAuthResponse, requireAdmin, requireUser } from '@/lib/server/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,6 +27,9 @@ function toApiStandard(
 }
 
 export async function GET(request: NextRequest) {
+  const auth = await requireUser(request, getSupabaseClient());
+  if (isAuthResponse(auth)) return auth;
+
   const db = getDb();
   const { searchParams } = new URL(request.url);
   const category = searchParams.get('category')?.trim();
@@ -65,6 +70,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const auth = await requireAdmin(request, getSupabaseClient());
+  if (isAuthResponse(auth)) return auth;
+
   const db = getDb();
   const body = await request.json();
 

@@ -95,7 +95,7 @@ export default function IssuesPage() {
   // Fetch current user's task IDs (for non-admin filtering)
   useEffect(() => {
     if (user?.id && !isAdmin) {
-      fetch(`/api/tasks?created_by=${user.id}&pageSize=200`)
+      fetch('/api/tasks?pageSize=200')
         .then(r => r.json())
         .then(data => {
           if (data.code === 0) {
@@ -354,7 +354,6 @@ export default function IssuesPage() {
         body: JSON.stringify({
           issue_id: selectedIssue.id,
           description: newReEvalDescription,
-          created_by: user?.id,
         }),
       });
       const data = await res.json();

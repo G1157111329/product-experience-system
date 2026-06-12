@@ -162,7 +162,7 @@ export function StandardImportDialog({ open, onOpenChange, categories, onImporte
     const file = e.target.files?.[0];
     if (file) {
       const ext = file.name.toLowerCase();
-      if (!ext.endsWith('.pdf') && !ext.endsWith('.xlsx') && !ext.endsWith('.xls') && !ext.endsWith('.csv')) {
+      if (!ext.endsWith('.pdf') && !ext.endsWith('.xlsx') && !ext.endsWith('.csv')) {
         toast.error('仅支持PDF或Excel文件'); return;
       }
       setSelectedFile(file);
@@ -221,7 +221,7 @@ export function StandardImportDialog({ open, onOpenChange, categories, onImporte
                 <div><Upload className="h-8 w-8 text-muted-foreground/50 mx-auto mb-2" /><p className="text-sm text-muted-foreground">点击上传</p><p className="text-xs text-muted-foreground mt-1">PDF / Excel</p></div>
               )}
             </div>
-            <input ref={fileInputRef} type="file" className="hidden" accept=".pdf,.xlsx,.xls,.csv" onChange={handleFileChange} />
+            <input ref={fileInputRef} type="file" className="hidden" accept=".pdf,.xlsx,.csv" onChange={handleFileChange} />
           </div>
           {importing && <div className="flex items-center justify-center gap-2 py-2"><Loader2 className="h-4 w-4 animate-spin" /><span className="text-sm text-muted-foreground">正在解析导入...</span></div>}
           <Button onClick={handleImport} className="w-full" disabled={!selectedFile || importing}>{importing ? '导入中...' : '开始导入'}</Button>

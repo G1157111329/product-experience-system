@@ -13,18 +13,22 @@ import {
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { access, mkdir, unlink, writeFile } from 'fs/promises';
+import crypto from 'crypto';
+import { access, mkdir, readFile, unlink, writeFile } from 'fs/promises';
 import path from 'path';
+import { isProductionRuntime, requireProductionEnv } from './security-config';
 
 const STORAGE_DRIVER = (process.env.STORAGE_DRIVER || 'local').toLowerCase();
-const LOCAL_UPLOAD_DIR = process.env.LOCAL_UPLOAD_DIR || path.join(process.cwd(), 'public', 'uploads');
+const DEFAULT_LOCAL_UPLOAD_DIR = path.join(/*turbopackIgnore: true*/ process.cwd(), 'public', 'uploads');
+const LOCAL_UPLOAD_DIR = path.resolve(/*turbopackIgnore: true*/ process.env.LOCAL_UPLOAD_DIR || DEFAULT_LOCAL_UPLOAD_DIR);
 const LOCAL_PUBLIC_BASE_PATH = normalizePublicBasePath(process.env.LOCAL_PUBLIC_BASE_PATH || '/uploads');
+const LOCAL_PROTECTED_BASE_PATH = normalizePublicBasePath(process.env.LOCAL_PROTECTED_BASE_PATH || '/api/materials/file');
 const PUBLIC_MEDIA_BASE_URL = process.env.PUBLIC_MEDIA_BASE_URL?.replace(/\/+$/, '') || '';
 const S3_ENDPOINT = process.env.S3_ENDPOINT || 'http://127.0.0.1:9000';
 const S3_REGION = process.env.S3_REGION || 'us-east-1';
 const S3_BUCKET = process.env.S3_BUCKET || 'xp-experience-media';
-const S3_ACCESS_KEY = process.env.S3_ACCESS_KEY || 'minioadmin';
-const S3_SECRET_KEY = process.env.S3_SECRET_KEY || 'minioadmin';
+const S3_ACCESS_KEY = process.env.S3_ACCESS_KEY || (isProductionRuntime() ? '' : 'minioadmin');
+const S3_SECRET_KEY = process.env.S3_SECRET_KEY || (isProductionRuntime() ? '' : 'minioadmin');
 
 const MISSING_MEDIA_DATA_URL =
   `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
@@ -35,6 +39,11 @@ let _s3Client: S3Client | null = null;
 
 function getS3Client(): S3Client {
   if (!_s3Client) {
+    if (isS3Driver()) {
+      requireProductionEnv('S3_ACCESS_KEY');
+      requireProductionEnv('S3_SECRET_KEY');
+      requireProductionEnv('S3_BUCKET');
+    }
     const endpoint = S3_ENDPOINT;
     _s3Client = new S3Client({
       region: S3_REGION,
@@ -90,9 +99,8 @@ function normalizeObjectKey(key: string): string {
 
 function resolveLocalFilePath(key: string): string {
   const safeKey = normalizeObjectKey(key);
-  const root = path.resolve(LOCAL_UPLOAD_DIR);
-  const target = path.resolve(root, ...safeKey.split('/'));
-  if (target !== root && !target.startsWith(root + path.sep)) {
+  const target = path.resolve(/*turbopackIgnore: true*/ LOCAL_UPLOAD_DIR, ...safeKey.split('/'));
+  if (target !== LOCAL_UPLOAD_DIR && !target.startsWith(LOCAL_UPLOAD_DIR + path.sep)) {
     throw new Error('Invalid local storage path');
   }
   return target;
@@ -104,6 +112,48 @@ function localPublicUrl(key: string): string {
   const relativeUrl = `${LOCAL_PUBLIC_BASE_PATH}/${encodedKey}`;
   if (!PUBLIC_MEDIA_BASE_URL) return relativeUrl;
   return `${PUBLIC_MEDIA_BASE_URL}${relativeUrl}`;
+}
+
+function getLocalMediaSigningSecret() {
+  const secret = process.env.LOCAL_MEDIA_SIGNING_SECRET
+    || process.env.AUTH_SESSION_SECRET
+    || process.env.SESSION_SECRET;
+  if (secret) return secret;
+  if (isProductionRuntime()) throw new Error('LOCAL_MEDIA_SIGNING_SECRET or AUTH_SESSION_SECRET is required in production');
+  return 'development-only-local-media-signing-secret';
+}
+
+function signLocalMediaToken(key: string, expiresAt: number) {
+  return crypto
+    .createHmac('sha256', getLocalMediaSigningSecret())
+    .update(`${key}.${expiresAt}`)
+    .digest('base64url');
+}
+
+function localProtectedUrl(key: string, expireTime?: number): string {
+  const safeKey = normalizeObjectKey(key);
+  const encodedKey = safeKey.split('/').map(encodeURIComponent).join('/');
+  const expiresAt = Math.floor(Date.now() / 1000) + (expireTime || 30 * 60);
+  const token = signLocalMediaToken(safeKey, expiresAt);
+  const relativeUrl = `${LOCAL_PROTECTED_BASE_PATH}/${encodedKey}?exp=${expiresAt}&token=${encodeURIComponent(token)}`;
+  if (!PUBLIC_MEDIA_BASE_URL) return relativeUrl;
+  return `${PUBLIC_MEDIA_BASE_URL}${relativeUrl}`;
+}
+
+export function verifyLocalMediaToken(key: string, token: string | null, expiresAtText: string | null) {
+  if (!token || !expiresAtText) return false;
+  const expiresAt = Number(expiresAtText);
+  if (!Number.isFinite(expiresAt) || expiresAt <= Math.floor(Date.now() / 1000)) return false;
+
+  const safeKey = normalizeObjectKey(key);
+  const expected = signLocalMediaToken(safeKey, expiresAt);
+  const tokenBuffer = Buffer.from(token);
+  const expectedBuffer = Buffer.from(expected);
+  return tokenBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(tokenBuffer, expectedBuffer);
+}
+
+export function isLocalUploadPublicAccess() {
+  return (process.env.LOCAL_UPLOAD_PUBLIC_ACCESS || 'public').trim().toLowerCase() === 'public';
 }
 
 /**
@@ -141,7 +191,7 @@ export async function uploadFile(params: {
 
 /**
  * Generate a browser/AI-accessible URL for a stored file.
- * In local mode this is a static URL; in S3 mode it is a presigned URL.
+ * In local mode this is a signed application URL; in S3 mode it is a presigned URL.
  */
 export async function generatePresignedUrl(params: {
   key: string;
@@ -155,7 +205,8 @@ export async function generatePresignedUrl(params: {
     } catch {
       return MISSING_MEDIA_DATA_URL;
     }
-    return localPublicUrl(params.key);
+    if (isLocalUploadPublicAccess()) return localPublicUrl(params.key);
+    return localProtectedUrl(params.key, params.expireTime);
   }
 
   const client = getS3Client();
@@ -184,4 +235,20 @@ export async function deleteFile(key: string | null | undefined): Promise<void> 
   await client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: normalizeObjectKey(key) }));
 }
 
-export { LOCAL_PUBLIC_BASE_PATH, LOCAL_UPLOAD_DIR, S3_BUCKET, STORAGE_DRIVER };
+export async function readLocalFile(key: string): Promise<Buffer> {
+  return readFile(resolveLocalFilePath(key));
+}
+
+export function getLocalContentType(key: string) {
+  const ext = path.extname(key).toLowerCase();
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.png') return 'image/png';
+  if (ext === '.gif') return 'image/gif';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.mp4') return 'video/mp4';
+  if (ext === '.webm') return 'video/webm';
+  if (ext === '.mov') return 'video/quicktime';
+  return 'application/octet-stream';
+}
+
+export { LOCAL_PUBLIC_BASE_PATH, LOCAL_PROTECTED_BASE_PATH, LOCAL_UPLOAD_DIR, S3_BUCKET, STORAGE_DRIVER };

@@ -43,7 +43,7 @@ const RECT_STATUS_COLORS: Record<string, string> = {
 };
 
 export default function AnalysisPage() {
-  const { user, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
   const [loading, setLoading] = useState(true);
   const [metrics, setMetrics] = useState<CoreMetrics | null>(null);
   const [taskStatusDist, setTaskStatusDist] = useState<Record<string, number>>({});
@@ -72,8 +72,6 @@ export default function AnalysisPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams();
-    if (!isAdmin && user?.id) params.set('created_by', user.id);
-    if (isAdmin) params.set('is_admin', 'true');
     if (fCategory !== 'all') params.set('product_category', fCategory);
     if (fProduct !== 'all') params.set('product', fProduct);
     if (fProjectType !== 'all') params.set('project_type', fProjectType);
@@ -100,7 +98,7 @@ export default function AnalysisPage() {
     } finally {
       setLoading(false);
     }
-  }, [isAdmin, user, fCategory, fProduct, fProjectType, fOrganizer, fIssueLevel, fDateFrom, fDateTo]);
+  }, [fCategory, fProduct, fProjectType, fOrganizer, fIssueLevel, fDateFrom, fDateTo]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -109,7 +107,7 @@ export default function AnalysisPage() {
       const res = await fetch('/api/analysis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ is_admin: true, format: 'csv' }),
+        body: JSON.stringify({ format: 'csv' }),
       });
       const data = await res.json();
       if (data.code === 0) {
@@ -230,11 +228,23 @@ export default function AnalysisPage() {
             </div>
             <div className="space-y-1">
               <Label className="text-xs">开始日期</Label>
-              <Input type="date" value={fDateFrom} onChange={e => setFDateFrom(e.target.value)} className={pageFilterControlClass} />
+              <Input
+                type="date"
+                lang="zh-CN"
+                value={fDateFrom}
+                onChange={e => setFDateFrom(e.target.value)}
+                className={pageFilterControlClass}
+              />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">结束日期</Label>
-              <Input type="date" value={fDateTo} onChange={e => setFDateTo(e.target.value)} className={pageFilterControlClass} />
+              <Input
+                type="date"
+                lang="zh-CN"
+                value={fDateTo}
+                onChange={e => setFDateTo(e.target.value)}
+                className={pageFilterControlClass}
+              />
             </div>
           </div>
         </CardContent>

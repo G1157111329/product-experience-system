@@ -9,13 +9,20 @@ import {
   type AgentSkillKey,
   type NormalizedPresetSuggestions,
 } from '@/lib/agent-skills';
+import { canAccessTask, isAuthResponse, requireUser } from '@/lib/server/auth';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+  if (!(await canAccessTask(client, user, id))) {
+    return NextResponse.json({ code: 1, message: '无权运行该任务Agent' }, { status: 403 });
+  }
+
   const body = await request.json();
   const skillKeys = normalizeSkillKeys(body.skill_keys);
-  const actorUserId = body.user_id || null;
+  const actorUserId = user.id;
 
   await ensureDefaultSkillTemplates(client, actorUserId);
 
@@ -142,8 +149,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+  if (!(await canAccessTask(client, user, id))) {
+    return NextResponse.json({ code: 1, message: '无权更新该任务Agent建议' }, { status: 403 });
+  }
+
   const body = await request.json();
-  const actorUserId = body.user_id || null;
+  const actorUserId = user.id;
   const action = body.action === 'reject_suggestion' ? 'reject_suggestion' : 'accept_suggestion';
 
   if (action === 'reject_suggestion') {

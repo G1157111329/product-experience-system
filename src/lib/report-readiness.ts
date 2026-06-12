@@ -99,10 +99,33 @@ function isFailingResult(value: string | null | undefined) {
   return false;
 }
 
-function looksLikeRawJsonProblemText(value: string | null | undefined) {
+function hasStructuredProblemPoints(points: Array<{ text?: string; material_ids?: string[] }> | null | undefined) {
+  return Boolean(points?.some((point) => hasText(point.text)));
+}
+
+function parsesAsStructuredProblemText(text: string) {
+  try {
+    const parsed = JSON.parse(text);
+    const rows = Array.isArray(parsed) ? parsed : [parsed];
+    return rows.some((row) => {
+      if (!row || typeof row !== 'object') return false;
+      const textValue = (row as Record<string, unknown>).text;
+      return typeof textValue === 'string' && textValue.trim().length > 0;
+    });
+  } catch {
+    return false;
+  }
+}
+
+function looksLikeRawJsonProblemText(
+  value: string | null | undefined,
+  structuredPoints?: Array<{ text?: string; material_ids?: string[] }>,
+) {
   const text = value?.trim() || '';
   if (!text) return false;
-  return (text.startsWith('[') || text.startsWith('{')) && /"text"|"material_ids"/.test(text);
+  if (hasStructuredProblemPoints(structuredPoints)) return false;
+  if (!(text.startsWith('[') || text.startsWith('{')) || !/"text"|"material_ids"/.test(text)) return false;
+  return !parsesAsStructuredProblemText(text);
 }
 
 function addItem(
@@ -137,8 +160,8 @@ export function buildReportReadiness(input: ReportReadinessInput): ReportReadine
   });
   const recipesMissingEffectDescription = recipes.filter((recipe) => !hasText(recipe.effect_description));
   const rawJsonProblemTexts =
-    recipes.filter((recipe) => looksLikeRawJsonProblemText(recipe.effect_problem_point)).length +
-    steps.filter((step) => looksLikeRawJsonProblemText(step.problem_point)).length;
+    recipes.filter((recipe) => looksLikeRawJsonProblemText(recipe.effect_problem_point, recipe.effect_problem_points)).length +
+    steps.filter((step) => looksLikeRawJsonProblemText(step.problem_point, step.problem_points)).length;
 
   const items: ReportReadinessItem[] = [];
   const task = input.task;

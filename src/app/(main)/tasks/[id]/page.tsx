@@ -50,7 +50,7 @@ interface TaskDetail {
   id: string; task_name: string; product_category: string; product: string | null; product_model: string; project_number: string | null;
   project_type: string | null; project_phase: string | null; test_date: string | null; organizer: string | null;
   target_user: string | null; test_purpose: string | null; test_method: string | null;
-  status: string; assigned_to: string | null; created_at: string;
+  status: string; assigned_to: string | null; created_by: string | null; created_at: string;
   records: CheckRecord[]; issues: Issue[];
 }
 
@@ -247,7 +247,7 @@ export default function TaskDetailPage() {
     try {
       const res = await fetch(`/api/tasks/${id}/transfer`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target_user_id: transferTargetId, admin_user_id: user?.id }),
+        body: JSON.stringify({ target_user_id: transferTargetId }),
       });
       const data = await res.json();
       if (data.code === 0) {
@@ -259,10 +259,10 @@ export default function TaskDetailPage() {
   };
 
   const handleOpenTransfer = async () => {
-    const res = await fetch(`/api/auth/users?admin_user_id=${user?.id}`);
+    const res = await fetch('/api/auth/users');
     const data = await res.json();
     if (data.code === 0) {
-      setTransferUsers((data.data || []).filter((u: Record<string, unknown>) => u.id !== user?.id));
+      setTransferUsers((data.data || []).filter((u: Record<string, unknown>) => u.id !== task?.created_by));
       setTransferTargetId('');
       setTransferOpen(true);
     } else {
@@ -423,7 +423,7 @@ export default function TaskDetailPage() {
 
       {/* Tab Content */}
       {activeTab === 'agent' && (
-        <AgentPresetPanel taskId={id} userId={user?.id} onAccepted={handleAgentAccepted} />
+        <AgentPresetPanel taskId={id} onAccepted={handleAgentAccepted} />
       )}
       {activeTab === 'info' && (
         <div className="space-y-4">
@@ -452,7 +452,7 @@ export default function TaskDetailPage() {
           </DialogHeader>
           <div className="space-y-3 py-2">
             <div className="p-3 rounded-lg bg-muted/30 border border-border">
-              <p className="text-xs text-muted-foreground">转移后，该体验计划将从您的列表中移除，目标用户将获得所有资料的所有权</p>
+              <p className="text-xs text-muted-foreground">转移后，该体验计划将从当前归属用户列表中移除，目标用户将获得所有资料的所有权</p>
             </div>
             <div className="space-y-1.5">
               <Label>选择目标用户</Label>

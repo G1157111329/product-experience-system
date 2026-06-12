@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { isAuthResponse, requireAdmin, requireUser } from '@/lib/server/auth';
 
 // GET: List recipe library items, optionally filter by product_category/product, or search by keyword
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+
   const { searchParams } = new URL(request.url);
   const product_category = searchParams.get('product_category');
   const product = searchParams.get('product');
@@ -31,6 +35,9 @@ export async function GET(request: NextRequest) {
 // POST: Create a recipe library item (with optional steps)
 export async function POST(request: NextRequest) {
   const client = getSupabaseClient();
+  const admin = await requireAdmin(request, client);
+  if (isAuthResponse(admin)) return admin;
+
   const body = await request.json();
   const { name, product_category, product, ingredients, recipe_type, steps } = body;
 

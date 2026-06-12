@@ -1,40 +1,84 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generatePresignedUrl } from '@/lib/server/storage';
+import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { getCurrentUser } from '@/lib/server/auth';
 
-// POST /api/materials/presign - 批量获取素材签名URL
+async function resolveSharedTaskId(client: ReturnType<typeof getSupabaseClient>, shareToken: string | null | undefined) {
+  if (!shareToken) return null;
+  const { data: share } = await client
+    .from('report_shares')
+    .select('id, report_id, expires_at')
+    .eq('share_token', shareToken)
+    .maybeSingle();
+  if (!share) return null;
+  if (share.expires_at && new Date(share.expires_at) < new Date()) return null;
+
+  const { data: report } = await client
+    .from('reports')
+    .select('id, task_id, content')
+    .eq('id', share.report_id)
+    .maybeSingle();
+  if (!report) return null;
+  return String(report.task_id || report.content?.task?.id || '');
+}
+
+async function findMaterialByPath(client: ReturnType<typeof getSupabaseClient>, path: string) {
+  const { data: byFilePath } = await client
+    .from('materials')
+    .select('id, file_path, file_url, task_id, recipe_library_step_id')
+    .eq('file_path', path)
+    .maybeSingle();
+  if (byFilePath) return byFilePath;
+
+  const { data: byFileUrl } = await client
+    .from('materials')
+    .select('id, file_path, file_url, task_id, recipe_library_step_id')
+    .eq('file_url', path)
+    .maybeSingle();
+  return byFileUrl;
+}
+
 export async function POST(request: NextRequest) {
   try {
+    const client = getSupabaseClient();
+    const user = await getCurrentUser(request, client);
+
     const body = await request.json();
-    const { paths, file_paths } = body as { paths?: string[]; file_paths?: string[] };
+    const { paths, file_paths, share_token } = body as {
+      paths?: string[];
+      file_paths?: string[];
+      share_token?: string;
+    };
     const requestedPaths = Array.isArray(paths) ? paths : file_paths;
+    const sharedTaskId = user ? null : await resolveSharedTaskId(client, share_token);
+    if (!user && !sharedTaskId) {
+      return NextResponse.json({ code: 1, message: '未登录' }, { status: 401 });
+    }
 
     if (!requestedPaths || !Array.isArray(requestedPaths) || requestedPaths.length === 0) {
       return NextResponse.json({ code: 1, message: 'paths 参数必填' }, { status: 400 });
     }
 
-    // 限制单次最多50个
-    const limitedPaths = requestedPaths.slice(0, 50);
-
-    // 并行生成签名URL（有效期7天）
-    const results = await Promise.allSettled(
-      limitedPaths.map(async (path) => {
-        try {
-          const url = await generatePresignedUrl({
-            key: path,
-            expireTime: 86400 * 7,
-          });
-          return { path, url };
-        } catch (err) {
-          console.error('[presign] Failed for path:', path, err);
-          return { path, url: null };
-        }
-      })
-    );
-
+    const limitedPaths = [...new Set(requestedPaths.filter((path) => typeof path === 'string' && path.trim()))].slice(0, 50);
     const urlMap: Record<string, string> = {};
-    for (const result of results) {
-      if (result.status === 'fulfilled' && result.value.url) {
-        urlMap[result.value.path] = result.value.url;
+
+    for (const path of limitedPaths) {
+      const material = await findMaterialByPath(client, path);
+      if (!material) continue;
+
+      const canAccess = user
+        ? user.role === 'admin'
+          || Boolean(material.task_id)
+        : Boolean(sharedTaskId && material.task_id && String(material.task_id) === sharedTaskId);
+      if (!canAccess) continue;
+
+      try {
+        urlMap[path] = await generatePresignedUrl({
+          key: path,
+          expireTime: 30 * 60,
+        });
+      } catch (err) {
+        console.error('[presign] Failed for path:', path, err);
       }
     }
 
@@ -43,7 +87,7 @@ export async function POST(request: NextRequest) {
     console.error('[presign] Error:', error);
     return NextResponse.json(
       { code: 1, message: '生成签名URL失败' },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

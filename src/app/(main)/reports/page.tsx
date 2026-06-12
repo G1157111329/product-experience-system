@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { copyToClipboard } from '@/lib/clipboard';
-import { FileText, Printer, BarChart3, Users, User as UserIcon, ChevronRight, Trash2, Share2, Copy, X, Sparkles, Loader2 } from 'lucide-react';
+import { FileText, Printer, BarChart3, ChevronRight, Trash2, Share2, Copy, X, Sparkles, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -24,7 +24,6 @@ import {
   PageShell,
   SearchField,
   pageActionButtonClass,
-  pageActionButtonFluidClass,
   pageFilterControlClass,
 } from '@/components/app';
 
@@ -118,8 +117,8 @@ export default function ReportsPage() {
   const router = useRouter();
   const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showAll, setShowAll] = useState(false);
   const [keyword, setKeyword] = useState('');
+  const [reportScope, setReportScope] = useState<'all' | 'mine'>('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [compareIds, setCompareIds] = useState<string[]>([]);
@@ -137,16 +136,13 @@ export default function ReportsPage() {
     setLoading(true);
     try {
       const params = new URLSearchParams({ limit: '200' });
-      // If "show all" mode, don't filter by user; otherwise filter by current user
-      if (!showAll && user?.id) {
-        params.set('created_by', user.id);
-      }
+      params.set('scope', reportScope);
       if (keyword.trim()) params.set('keyword', keyword.trim());
       const res = await fetch(`/api/reports?${params}`);
       const data = await res.json();
       if (data.code === 0) setReports(data.data || []);
     } finally { setLoading(false); }
-  }, [showAll, user?.id, keyword]);
+  }, [keyword, reportScope]);
 
   useEffect(() => { fetchReports(); }, [fetchReports]);
 
@@ -157,7 +153,7 @@ export default function ReportsPage() {
       setDeleteId(null);
       return;
     }
-    const res = await fetch(`/api/reports/${deleteId}?admin_user_id=${encodeURIComponent(user.id)}`, { method: 'DELETE' });
+    const res = await fetch(`/api/reports/${deleteId}`, { method: 'DELETE' });
     const data = await res.json();
     if (data.code === 0) { toast.success('已删除'); fetchReports(); }
     else toast.error(data.message);
@@ -168,7 +164,16 @@ export default function ReportsPage() {
     window.open(`/reports/print?id=${id}&mode=fast`, '_blank');
   };
 
+  const canManageReport = useCallback((report: Report | null | undefined) => {
+    return Boolean(report && (isAdmin || report.task_created_by === user?.id));
+  }, [isAdmin, user?.id]);
+
   const openShareDialog = async (reportId: string) => {
+    const report = reports.find((item) => item.id === reportId);
+    if (!canManageReport(report)) {
+      toast.error('仅报告负责人或管理员可生成分享链接');
+      return;
+    }
     setShareReportId(reportId);
     setShareLink(null);
     setShareDuration('30d');
@@ -187,7 +192,7 @@ export default function ReportsPage() {
       const res = await fetch('/api/reports/share', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ report_id: shareReportId, duration: shareDuration, created_by: user?.id }),
+        body: JSON.stringify({ report_id: shareReportId, duration: shareDuration }),
       });
       const data = await res.json();
       if (data.code === 0) {
@@ -250,7 +255,7 @@ export default function ReportsPage() {
       const res = await fetch('/api/reports/compare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ report_ids: compareIds, user_id: user?.id || null }),
+        body: JSON.stringify({ report_ids: compareIds }),
       });
       const data = await res.json();
       if (data.code === 0) {
@@ -305,15 +310,6 @@ export default function ReportsPage() {
         actions={
         <>
           {/* Toggle: 显示全部 / 显示个人 */}
-          <Button
-            variant="outline"
-            size="sm"
-            className={cn(pageActionButtonFluidClass, showAll && 'border-primary text-primary')}
-            onClick={() => { setShowAll(!showAll); setCompareIds([]); }}
-          >
-            {showAll ? <UserIcon className="h-3.5 w-3.5" /> : <Users className="h-3.5 w-3.5" />}
-            {showAll ? '显示个人' : '显示全部'}
-          </Button>
           {compareIds.length === 2 && (
             <Button size="sm" className={cn(pageActionButtonClass, 'hidden sm:inline-flex')} onClick={handleOpenCompare}>
               <BarChart3 className="h-3.5 w-3.5" /> 产品体验对比 ({compareIds.length})
@@ -324,6 +320,26 @@ export default function ReportsPage() {
       />
 
       <FilterBar>
+        <div className="flex w-full rounded-lg border bg-background p-1 sm:w-auto">
+          <Button
+            type="button"
+            size="sm"
+            variant={reportScope === 'all' ? 'default' : 'ghost'}
+            className="h-8 flex-1 px-3 text-xs sm:flex-none"
+            onClick={() => { setReportScope('all'); setCompareIds([]); }}
+          >
+            全部报告
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={reportScope === 'mine' ? 'default' : 'ghost'}
+            className="h-8 flex-1 px-3 text-xs sm:flex-none"
+            onClick={() => { setReportScope('mine'); setCompareIds([]); }}
+          >
+            个人报告
+          </Button>
+        </div>
         <SearchField
           value={keyword}
           onChange={(e) => { setKeyword(e.target.value); setCompareIds([]); }}
@@ -377,9 +393,11 @@ export default function ReportsPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
-                      <Button variant="ghost" size="icon" className="h-8 w-8" title="分享" aria-label="分享" onClick={() => openShareDialog(latestReport.id)}>
-                        <Share2 className="h-3.5 w-3.5" />
-                      </Button>
+                      {canManageReport(latestReport) && (
+                        <Button variant="ghost" size="icon" className="h-8 w-8" title="分享" aria-label="分享" onClick={() => openShareDialog(latestReport.id)}>
+                          <Share2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                       <Button variant="outline" size="sm" className="shrink-0 text-xs gap-1" title="打印" onClick={() => handlePrint(latestReport.id)}>
                         <Printer className="h-3 w-3" /> 打印
                       </Button>
@@ -445,9 +463,11 @@ export default function ReportsPage() {
                       </div>
                     </button>
                     <div className="flex shrink-0 items-center gap-1">
-                      <Button variant="ghost" size="icon" className="h-8 w-8" title="分享" aria-label="分享" onClick={() => openShareDialog(r.id)}>
-                        <Share2 className="h-3.5 w-3.5" />
-                      </Button>
+                      {canManageReport(r) && (
+                        <Button variant="ghost" size="icon" className="h-8 w-8" title="分享" aria-label="分享" onClick={() => openShareDialog(r.id)}>
+                          <Share2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                       <Button variant="outline" size="sm" className="shrink-0 gap-1 text-xs" title="打印" onClick={() => handlePrint(r.id)}>
                         <Printer className="h-3 w-3" /> 打印
                       </Button>

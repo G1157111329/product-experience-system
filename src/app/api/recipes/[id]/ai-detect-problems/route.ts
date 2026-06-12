@@ -3,10 +3,16 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { invokeConfiguredAI } from '@/lib/server/ai';
 import { getActiveSkillVersion } from '@/lib/server/agent-skills';
 import { getDefaultSkillDefinitions, renderPromptTemplate } from '@/lib/agent-skills';
+import { canAccessRecipe, isAuthResponse, requireUser } from '@/lib/server/auth';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+  if (!(await canAccessRecipe(client, user, id))) {
+    return NextResponse.json({ code: 1, message: '无权识别该食谱问题点' }, { status: 403 });
+  }
 
   try {
     // Fetch recipe data

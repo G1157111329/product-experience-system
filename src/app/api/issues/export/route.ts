@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { isAuthResponse, requireUser } from '@/lib/server/auth';
+import { writeSecurityAudit } from '@/lib/server/security-audit';
 
 type CsvValue = string | number | boolean | null | undefined;
 
@@ -9,6 +11,9 @@ function csvEscape(value: CsvValue): string {
 
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+
   const { searchParams } = new URL(request.url);
   const status = searchParams.get('status');
   const level = searchParams.get('level');
@@ -21,6 +26,14 @@ export async function GET(request: NextRequest) {
   if (taskIdsParam) {
     const taskIds = taskIdsParam.split(',').filter(Boolean);
     if (taskIds.length > 0) query = query.in('task_id', taskIds);
+  }
+  if (user.role !== 'admin') {
+    const { data: userTasks } = await client.from('experience_tasks').select('id').eq('created_by', user.id);
+    const userTaskIds = (userTasks || []).map((task: { id: string }) => task.id);
+    if (userTaskIds.length === 0) {
+      return NextResponse.json({ code: 0, data: { csv: '', count: 0 } });
+    }
+    query = query.in('task_id', userTaskIds);
   }
 
   const { data: issues, error } = await query.order('created_at', { ascending: false }).limit(limit);
@@ -71,6 +84,21 @@ export async function GET(request: NextRequest) {
       issue.responsible_person,
       issue.created_at,
     ].map(csvEscape).join(',');
+  });
+
+  await writeSecurityAudit(client, {
+    request,
+    actor: user,
+    action: 'issues.export_csv',
+    outcome: 'success',
+    targetType: 'issues',
+    metadata: {
+      count: issueRows.length,
+      limit,
+      status: status || null,
+      level: level || null,
+      taskIds: taskIdsParam ? taskIdsParam.split(',').filter(Boolean).slice(0, 50) : [],
+    },
   });
 
   return NextResponse.json({

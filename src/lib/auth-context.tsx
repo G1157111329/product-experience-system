@@ -20,6 +20,7 @@ interface AuthContextType {
   logout: () => void;
   refreshUser: () => Promise<void>;
   isAuthenticated: boolean;
+  isLoading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -31,53 +32,58 @@ const AuthContext = createContext<AuthContextType>({
   logout: () => {},
   refreshUser: async () => {},
   isAuthenticated: false,
+  isLoading: true,
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [role, setRoleState] = useState<UserRole>('user');
-
-  useEffect(() => {
-    const saved = localStorage.getItem('current_user');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as UserInfo;
-        setUser(parsed);
-        setRoleState(parsed.role);
-      } catch {
-        localStorage.removeItem('current_user');
-      }
-    }
-  }, []);
+  const [isLoading, setIsLoading] = useState(true);
 
   const login = useCallback((userInfo: UserInfo) => {
     setUser(userInfo);
     setRoleState(userInfo.role);
-    localStorage.setItem('current_user', JSON.stringify(userInfo));
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {
+      // Best-effort local cleanup still runs below.
+    }
     setUser(null);
     setRoleState('user');
-    localStorage.removeItem('current_user');
     window.location.href = '/login';
   }, []);
 
   const refreshUser = useCallback(async () => {
-    if (!user?.id) return;
     try {
-      const res = await fetch(`/api/auth/profile?user_id=${user.id}`);
+      const res = await fetch('/api/auth/profile');
       const data = await res.json();
       if (data.code === 0) {
-        const updated = { ...user, name: data.data.name, role: data.data.role };
+        const updated = {
+          id: data.data.id,
+          account: data.data.account,
+          name: data.data.name,
+          role: data.data.role,
+        } as UserInfo;
         setUser(updated);
         setRoleState(data.data.role);
-        localStorage.setItem('current_user', JSON.stringify(updated));
+      } else {
+        setUser(null);
+        setRoleState('user');
       }
     } catch {
-      // silently fail
+      setUser(null);
+      setRoleState('user');
+    } finally {
+      setIsLoading(false);
     }
-  }, [user]);
+  }, []);
+
+  useEffect(() => {
+    void refreshUser();
+  }, [refreshUser]);
 
   const setRole = useCallback((newRole: UserRole) => {
     setRoleState(newRole);
@@ -93,6 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       refreshUser,
       isAuthenticated: !!user,
+      isLoading,
     }}>
       {children}
     </AuthContext.Provider>

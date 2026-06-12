@@ -1,28 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient as createClient } from '@/storage/database/supabase-client';
-import crypto from 'crypto';
-
-const HASH_SALT = 'xp_experience_platform';
-
-function hashPassword(password: string): string {
-  return crypto.createHash('sha256').update(HASH_SALT + password).digest('hex');
-}
+import { hashPassword, validatePasswordStrength } from '@/lib/server/password';
+import { checkSharedRateLimit } from '@/lib/server/rate-limit';
+import { writeSecurityAudit } from '@/lib/server/security-audit';
 
 // Forgot password: verify account exists, create audit request
 export async function POST(request: NextRequest) {
   try {
+    const supabase = createClient();
     const body = await request.json();
     const { account, new_password } = body;
+    const limited = await checkSharedRateLimit(request, {
+      scope: 'auth-forgot-password',
+      subject: String(account || 'unknown'),
+      limit: 5,
+      windowMs: 60 * 60 * 1000,
+    });
+    if (limited) {
+      await writeSecurityAudit(supabase, {
+        request,
+        action: 'auth.password_reset.rate_limited',
+        outcome: 'denied',
+        actorAccount: account || null,
+      });
+      return limited;
+    }
 
     if (!account || !new_password) {
       return NextResponse.json({ code: 1, message: '请填写账号和新密码' });
     }
 
-    if (new_password.length < 4) {
-      return NextResponse.json({ code: 1, message: '密码至少4个字符' });
+    const passwordError = validatePasswordStrength(new_password);
+    if (passwordError) {
+      return NextResponse.json({ code: 1, message: passwordError });
     }
-
-    const supabase = createClient();
 
     // Verify account exists
     const { data: user } = await supabase
@@ -63,6 +74,14 @@ export async function POST(request: NextRequest) {
         new_value: hashPassword(new_password),
       });
     }
+
+    await writeSecurityAudit(supabase, {
+      request,
+      action: 'auth.password_reset.request',
+      outcome: 'success',
+      actorUserId: user.id,
+      actorAccount: account,
+    });
 
     return NextResponse.json({
       code: 0,

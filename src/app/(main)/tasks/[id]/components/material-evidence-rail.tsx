@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Camera, Check, Film, Image as ImageIcon, Link2, Package, Play, RefreshCw, Upload, Video, X } from 'lucide-react';
+import { Camera, Check, Film, Image as ImageIcon, Link2, Package, Play, RefreshCw, Trash2, Upload, Video, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -150,6 +150,20 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange 
     await fetchMaterials();
   };
 
+  const handleDeleteSelected = async () => {
+    if (selectedIds.length === 0) return;
+    const confirmed = window.confirm(`确认删除选中的 ${selectedIds.length} 个素材？删除后会从所有已绑定位置移除。`);
+    if (!confirmed) return;
+
+    await Promise.all(
+      selectedIds.map((id) => fetch(`/api/materials?id=${id}`, { method: 'DELETE' }))
+    );
+
+    toast.success(`已删除 ${selectedIds.length} 个素材`);
+    setSelectedIds([]);
+    await fetchMaterials();
+  };
+
   return (
     <section className="rounded-lg border bg-card p-3 shadow-sm">
       <PreviewComponent />
@@ -251,6 +265,9 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange 
           <div className="flex gap-2 sm:ml-auto">
             <Button variant="ghost" size="sm" onClick={() => setSelectedIds([])}>
               <X className="mr-1.5 h-4 w-4" />取消
+            </Button>
+            <Button variant="destructive" size="sm" onClick={handleDeleteSelected}>
+              <Trash2 className="mr-1.5 h-4 w-4" />删除素材
             </Button>
             <Button size="sm" onClick={handleBindSelected} disabled={!bindingTarget}>
               <Link2 className="mr-1.5 h-4 w-4" />

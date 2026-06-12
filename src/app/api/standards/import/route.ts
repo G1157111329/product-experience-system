@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { getDb } from '@/storage/database/pg-db';
 import { standardItems, standards } from '@/storage/database/shared/schema';
-import { normalizeChatCompletionsUrl, resolveAIConfig } from '@/lib/server/ai';
-import * as xlsx from 'xlsx';
+import { invokeConfiguredAI } from '@/lib/server/ai';
+import { isAuthResponse, requireAdmin } from '@/lib/server/auth';
+import { checkSharedRateLimit } from '@/lib/server/rate-limit';
+import { writeSecurityAudit } from '@/lib/server/security-audit';
+import ExcelJS from 'exceljs';
 
 // Unified extracted item that covers all standard categories
 interface ExtractedItem {
@@ -94,39 +97,12 @@ ${textChunk}`;
   ];
 
   const client = getSupabaseClient();
-  const aiConfig = await resolveAIConfig(client, { defaultTemperature: 0.05 });
-
-  const apiUrl = normalizeChatCompletionsUrl(aiConfig.customApiUrl);
-  const apiKey = aiConfig.customApiKey;
-
-  let response: Response;
-  try {
-    response = await fetch(apiUrl, {
-      method: 'POST',
-      signal: AbortSignal.timeout(60000),
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: aiConfig.model,
-        messages,
-        temperature: aiConfig.temperature,
-        max_tokens: aiConfig.maxTokens,
-      }),
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'network error';
-    throw new Error(`AI服务连接失败，请检查模型服务地址 ${apiUrl}: ${message}`);
-  }
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`AI服务调用失败(${response.status}): ${errText.substring(0, 200)}`);
-  }
-
-  const result = await response.json();
-  const content = (result.choices?.[0]?.message?.content || '').trim();
+  const content = (await invokeConfiguredAI({
+    client,
+    messages,
+    defaultTemperature: 0.05,
+    maxTokens: 2400,
+  })).trim();
 
   let jsonStr: string | null = null;
   const cleanedContent = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
@@ -164,11 +140,83 @@ ${textChunk}`;
   }
 }
 
-function parseExcel(buffer: Buffer): ExtractedItem[] {
-  const workbook = xlsx.read(buffer, { type: 'buffer' });
-  const sheetName = workbook.SheetNames[0];
-  const sheet = workbook.Sheets[sheetName];
-  const rows = xlsx.utils.sheet_to_json<Record<string, string>>(sheet, { defval: '' });
+function cellToText(value: unknown) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object' && 'text' in value && typeof value.text === 'string') return value.text.trim();
+  if (typeof value === 'object' && 'result' in value) return cellToText((value as { result?: unknown }).result);
+  return String(value).trim();
+}
+
+function parseCsvRows(text: string) {
+  const rows: string[][] = [];
+  let field = '';
+  let row: string[] = [];
+  let quoted = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const next = text[i + 1];
+    if (quoted) {
+      if (char === '"' && next === '"') {
+        field += '"';
+        i += 1;
+      } else if (char === '"') {
+        quoted = false;
+      } else {
+        field += char;
+      }
+    } else if (char === '"') {
+      quoted = true;
+    } else if (char === ',') {
+      row.push(field.trim());
+      field = '';
+    } else if (char === '\n') {
+      row.push(field.trim());
+      rows.push(row);
+      row = [];
+      field = '';
+    } else if (char !== '\r') {
+      field += char;
+    }
+  }
+  row.push(field.trim());
+  rows.push(row);
+  return rows.filter((items) => items.some(Boolean));
+}
+
+function csvBufferToRows(buffer: Buffer) {
+  const csvRows = parseCsvRows(buffer.toString('utf8').replace(/^\uFEFF/, ''));
+  const headers = csvRows[0] || [];
+  return csvRows.slice(1).map((values) => {
+    const record: Record<string, string> = {};
+    headers.forEach((header, index) => {
+      if (header) record[header] = values[index] || '';
+    });
+    return record;
+  });
+}
+
+async function parseExcel(buffer: Buffer, preloadedRows?: Array<Record<string, string>>): Promise<ExtractedItem[]> {
+  let rows = preloadedRows;
+  if (!rows) {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
+    const sheet = workbook.worksheets[0];
+    if (!sheet) return [];
+    const headers: string[] = [];
+    sheet.getRow(1).eachCell({ includeEmpty: true }, (cell, columnNumber) => {
+      headers[columnNumber - 1] = cellToText(cell.value);
+    });
+    rows = [];
+    sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      if (rowNumber === 1) return;
+      const item: Record<string, string> = {};
+      headers.forEach((header, index) => {
+        if (header) item[header] = cellToText(row.getCell(index + 1).value);
+      });
+      if (Object.values(item).some(Boolean)) rows?.push(item);
+    });
+  }
 
   const columnMap: Record<string, string[]> = {
     sensory_dimension: ['感官维度', '感官', 'sensory_dimension'],
@@ -290,6 +338,17 @@ async function createImportedStandard(input: {
 
 export async function POST(request: NextRequest) {
   try {
+    const client = getSupabaseClient();
+    const admin = await requireAdmin(request, client);
+    if (isAuthResponse(admin)) return admin;
+    const limited = await checkSharedRateLimit(request, {
+      scope: 'standards-import',
+      subject: admin.id,
+      limit: 10,
+      windowMs: 60 * 60 * 1000,
+    });
+    if (limited) return limited;
+
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
     const standard_name = formData.get('standard_name') as string;
@@ -301,6 +360,10 @@ export async function POST(request: NextRequest) {
     if (!file || !standard_name || !category) {
       return NextResponse.json({ code: 1, message: '缺少必要参数' }, { status: 400 });
     }
+    const MAX_IMPORT_SIZE = 20 * 1024 * 1024;
+    if (file.size > MAX_IMPORT_SIZE) {
+      return NextResponse.json({ code: 1, message: '导入文件不能超过20MB' }, { status: 400 });
+    }
 
     let items: ExtractedItem[] = [];
 
@@ -309,9 +372,12 @@ export async function POST(request: NextRequest) {
     if (fileName.endsWith('.pdf')) {
       const buffer = Buffer.from(await file.arrayBuffer());
       items = await parsePdfWithLLM(buffer, category);
-    } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv')) {
+    } else if (fileName.endsWith('.xlsx')) {
       const buffer = Buffer.from(await file.arrayBuffer());
-      items = parseExcel(buffer);
+      items = await parseExcel(buffer);
+    } else if (fileName.endsWith('.csv')) {
+      const buffer = Buffer.from(await file.arrayBuffer());
+      items = await parseExcel(buffer, csvBufferToRows(buffer));
     } else {
       return NextResponse.json({ code: 1, message: '不支持的文件格式，请上传PDF或Excel文件' }, { status: 400 });
     }
@@ -327,6 +393,15 @@ export async function POST(request: NextRequest) {
       product: product || null,
       description: description || null,
       items,
+    });
+    await writeSecurityAudit(client, {
+      request,
+      actor: admin,
+      action: 'standard.import',
+      outcome: 'success',
+      targetType: 'standard',
+      targetId: standardId,
+      metadata: { category, itemCount: items.length, fileSize: file.size },
     });
 
     return NextResponse.json({

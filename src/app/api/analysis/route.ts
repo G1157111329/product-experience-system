@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { isAuthResponse, requireAdmin, requireUser } from '@/lib/server/auth';
+import { writeSecurityAudit } from '@/lib/server/security-audit';
 
 type DataRow = Record<string, string | null | undefined> & {
   id: string;
@@ -7,24 +9,28 @@ type DataRow = Record<string, string | null | undefined> & {
   created_at: string;
 };
 
+function csvEscape(value: unknown) {
+  return `"${String(value ?? '').replace(/"/g, '""')}"`;
+}
+
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
-  const { searchParams } = new URL(request.url);
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
 
-  // Filters
+  const { searchParams } = new URL(request.url);
   const created_by = searchParams.get('created_by');
-  const is_admin = searchParams.get('is_admin') === 'true';
   const product_category = searchParams.get('product_category');
   const product = searchParams.get('product');
   const project_type = searchParams.get('project_type');
   const organizer = searchParams.get('organizer');
-  const issue_level = searchParams.get('issue_level'); // 一类/二类/三类
+  const issue_level = searchParams.get('issue_level');
   const date_from = searchParams.get('date_from');
   const date_to = searchParams.get('date_to');
 
-  // 1. Fetch tasks with filters
   let taskQuery = client.from('experience_tasks').select('id, task_name, product_category, product, product_model, project_number, project_type, project_phase, organizer, status, created_by, created_at');
-  if (!is_admin && created_by) taskQuery = taskQuery.eq('created_by', created_by);
+  if (user.role !== 'admin') taskQuery = taskQuery.eq('created_by', user.id);
+  if (user.role === 'admin' && created_by) taskQuery = taskQuery.eq('created_by', created_by);
   if (product_category) taskQuery = taskQuery.eq('product_category', product_category);
   if (product) taskQuery = taskQuery.eq('product', product);
   if (project_type) taskQuery = taskQuery.eq('project_type', project_type);
@@ -34,20 +40,17 @@ export async function GET(request: NextRequest) {
 
   const { data: tasks } = await taskQuery;
   const taskList = (tasks || []) as DataRow[];
-  const taskIds = taskList.map((t) => t.id as string).filter(Boolean);
+  const taskIds = taskList.map((t) => t.id).filter(Boolean);
 
-  // 2. Fetch issues for these tasks
   let issueList: Array<Record<string, unknown>> = [];
   if (taskIds.length > 0) {
     let issueQuery = client.from('issues').select('id, title, level, status, source_type, task_id, product_model, created_at');
     issueQuery = issueQuery.in('task_id', taskIds);
     if (issue_level) issueQuery = issueQuery.eq('level', issue_level);
-
     const { data: issues } = await issueQuery;
     issueList = (issues || []) as Array<Record<string, unknown>>;
   }
 
-  // 3. Core metrics
   const totalTasks = taskList.length;
   const completedTasks = taskList.filter((t) => t.status === '已完成').length;
   const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
@@ -55,116 +58,56 @@ export async function GET(request: NextRequest) {
   const rectifiedIssues = issueList.filter(i => (i.status as string) === '已验证').length;
   const rectificationRate = totalIssues > 0 ? Math.round((rectifiedIssues / totalIssues) * 100) : 0;
 
-  // 4. Task status distribution
   const taskStatusDist: Record<string, number> = {};
-  for (const t of taskList) {
-    taskStatusDist[t.status] = (taskStatusDist[t.status] || 0) + 1;
-  }
+  for (const t of taskList) taskStatusDist[t.status] = (taskStatusDist[t.status] || 0) + 1;
 
-  // 5. Issue level distribution (一类/二类/三类)
-  const issueLevelDist: Record<string, number> = { '一类': 0, '二类': 0, '三类': 0 };
+  const issueLevelDist: Record<string, number> = {};
   for (const i of issueList) {
-    const level = (i.level as string) || '二类';
-    if (issueLevelDist[level] !== undefined) {
-      issueLevelDist[level]++;
-    } else {
-      issueLevelDist[level] = 1;
-    }
+    const level = String(i.level || '未分类');
+    issueLevelDist[level] = (issueLevelDist[level] || 0) + 1;
   }
 
-  // 6. Issue rectification progress: by status × level
   const issueRectificationGrid: Record<string, Record<string, number>> = {};
-  const statusOrder = ['待整改', '整改中', '已验证', '不整改'];
-  const levelOrder = ['一类', '二类', '三类'];
-  for (const s of statusOrder) {
-    issueRectificationGrid[s] = {};
-    for (const l of levelOrder) {
-      issueRectificationGrid[s][l] = 0;
-    }
-  }
   for (const i of issueList) {
-    const status = (i.status as string) || '待整改';
-    const level = (i.level as string) || '二类';
+    const status = String(i.status || '未分类');
+    const level = String(i.level || '未分类');
     if (!issueRectificationGrid[status]) issueRectificationGrid[status] = {};
     issueRectificationGrid[status][level] = (issueRectificationGrid[status][level] || 0) + 1;
   }
 
-  // 7. By product_category + product breakdown
-  const byCategoryProduct: Record<string, { tasks: number; completedTasks: number; issues: number; rectifiedIssues: number }> = {};
-  for (const t of taskList) {
-    const key = t.product_category ? `${t.product_category}${t.product ? ' - ' + t.product : ''}` : '未分类';
-    if (!byCategoryProduct[key]) byCategoryProduct[key] = { tasks: 0, completedTasks: 0, issues: 0, rectifiedIssues: 0 };
-    byCategoryProduct[key].tasks++;
-    if (t.status === '已完成') byCategoryProduct[key].completedTasks++;
-  }
-  const taskCatMap: Record<string, string> = {};
-  for (const t of taskList) taskCatMap[t.id] = t.product_category ? `${t.product_category}${t.product ? ' - ' + t.product : ''}` : '未分类';
-  for (const i of issueList) {
-    const key = taskCatMap[i.task_id as string] || '未分类';
-    if (!byCategoryProduct[key]) byCategoryProduct[key] = { tasks: 0, completedTasks: 0, issues: 0, rectifiedIssues: 0 };
-    byCategoryProduct[key].issues++;
-    if ((i.status as string) === '已验证') byCategoryProduct[key].rectifiedIssues++;
-  }
-
-  // 8. By project_type breakdown
   const byProjectType: Record<string, { tasks: number; completedTasks: number; issues: number; rectifiedIssues: number }> = {};
-  for (const t of taskList) {
-    const pt = t.project_type || '未分类';
-    if (!byProjectType[pt]) byProjectType[pt] = { tasks: 0, completedTasks: 0, issues: 0, rectifiedIssues: 0 };
-    byProjectType[pt].tasks++;
-    if (t.status === '已完成') byProjectType[pt].completedTasks++;
-  }
-  const taskPtMap: Record<string, string> = {};
-  for (const t of taskList) taskPtMap[t.id] = t.project_type || '未分类';
-  for (const i of issueList) {
-    const pt = taskPtMap[i.task_id as string] || '未分类';
-    if (!byProjectType[pt]) byProjectType[pt] = { tasks: 0, completedTasks: 0, issues: 0, rectifiedIssues: 0 };
-    byProjectType[pt].issues++;
-    if ((i.status as string) === '已验证') byProjectType[pt].rectifiedIssues++;
-  }
-
-  // 9. By organizer breakdown
   const byOrganizer: Record<string, { tasks: number; completedTasks: number; issues: number; rectifiedIssues: number }> = {};
-  for (const t of taskList) {
-    const org = t.organizer || '未指定';
-    if (!byOrganizer[org]) byOrganizer[org] = { tasks: 0, completedTasks: 0, issues: 0, rectifiedIssues: 0 };
-    byOrganizer[org].tasks++;
-    if (t.status === '已完成') byOrganizer[org].completedTasks++;
-  }
-  const taskOrgMap: Record<string, string> = {};
-  for (const t of taskList) taskOrgMap[t.id] = t.organizer || '未指定';
-  for (const i of issueList) {
-    const org = taskOrgMap[i.task_id as string] || '未指定';
-    if (!byOrganizer[org]) byOrganizer[org] = { tasks: 0, completedTasks: 0, issues: 0, rectifiedIssues: 0 };
-    byOrganizer[org].issues++;
-    if ((i.status as string) === '已验证') byOrganizer[org].rectifiedIssues++;
-  }
-
-  // 10. By issue level breakdown (一类/二类/三类)
-  const byIssueLevel: Record<string, number> = { '一类': 0, '二类': 0, '三类': 0 };
-  for (const i of issueList) {
-    const level = (i.level as string) || '二类';
-    byIssueLevel[level] = (byIssueLevel[level] || 0) + 1;
-  }
-
-  // 11. By month trend
+  const byCategoryProduct: Record<string, { tasks: number; completedTasks: number; issues: number; rectifiedIssues: number }> = {};
   const monthTrend: Record<string, { tasks: number; completedTasks: number; issues: number; rectifiedIssues: number }> = {};
+
+  const taskInfo = new Map(taskList.map((task) => [task.id, task]));
   for (const t of taskList) {
-    const month = (t.created_at as string).substring(0, 7);
-    if (!monthTrend[month]) monthTrend[month] = { tasks: 0, completedTasks: 0, issues: 0, rectifiedIssues: 0 };
-    monthTrend[month].tasks++;
-    if (t.status === '已完成') monthTrend[month].completedTasks++;
-  }
-  const taskMonthMap: Record<string, string> = {};
-  for (const t of taskList) taskMonthMap[t.id] = (t.created_at as string).substring(0, 7);
-  for (const i of issueList) {
-    const month = taskMonthMap[i.task_id as string] || 'unknown';
-    if (!monthTrend[month]) monthTrend[month] = { tasks: 0, completedTasks: 0, issues: 0, rectifiedIssues: 0 };
-    monthTrend[month].issues++;
-    if ((i.status as string) === '已验证') monthTrend[month].rectifiedIssues++;
+    const projectKey = t.project_type || '未分类';
+    const organizerKey = t.organizer || '未指定';
+    const categoryKey = t.product_category ? `${t.product_category}${t.product ? ' - ' + t.product : ''}` : '未分类';
+    const monthKey = String(t.created_at || '').slice(0, 7) || 'unknown';
+    for (const [map, key] of [[byProjectType, projectKey], [byOrganizer, organizerKey], [byCategoryProduct, categoryKey], [monthTrend, monthKey]] as const) {
+      if (!map[key]) map[key] = { tasks: 0, completedTasks: 0, issues: 0, rectifiedIssues: 0 };
+      map[key].tasks += 1;
+      if (t.status === '已完成') map[key].completedTasks += 1;
+    }
   }
 
-  // 12. Available filter options from platform config
+  for (const i of issueList) {
+    const task = taskInfo.get(String(i.task_id || ''));
+    const keys = [
+      [byProjectType, task?.project_type || '未分类'],
+      [byOrganizer, task?.organizer || '未指定'],
+      [byCategoryProduct, task?.product_category ? `${task.product_category}${task.product ? ' - ' + task.product : ''}` : '未分类'],
+      [monthTrend, String(task?.created_at || '').slice(0, 7) || 'unknown'],
+    ] as const;
+    for (const [map, key] of keys) {
+      if (!map[key]) map[key] = { tasks: 0, completedTasks: 0, issues: 0, rectifiedIssues: 0 };
+      map[key].issues += 1;
+      if (i.status === '已验证') map[key].rectifiedIssues += 1;
+    }
+  }
+
   const { data: catData } = await client.from('platform_categories').select('id, name, sort_order').order('sort_order');
   const { data: prodData } = await client.from('platform_products').select('id, name, category_id, sort_order').order('sort_order');
   const categories = ((catData || []) as DataRow[]).map((c) => ({
@@ -185,35 +128,61 @@ export async function GET(request: NextRequest) {
       byCategoryProduct,
       byProjectType,
       byOrganizer,
-      byIssueLevel,
+      byIssueLevel: issueLevelDist,
       monthTrend,
       filterOptions: { categories, projectTypes, organizers },
     },
   });
 }
 
-// Export data as CSV (admin only)
 export async function POST(request: NextRequest) {
-  const body = await request.json();
-  const { is_admin, format } = body;
-  if (!is_admin) {
-    return NextResponse.json({ code: 1, message: '仅管理员可导出数据' }, { status: 403 });
-  }
-
   const client = getSupabaseClient();
+  const admin = await requireAdmin(request, client);
+  if (isAuthResponse(admin)) return admin;
+
+  const body = await request.json();
+  const { format } = body;
   const { data: tasks } = await client.from('experience_tasks').select('*');
   const { data: issues } = await client.from('issues').select('*');
 
   if (format === 'csv') {
     const taskHeaders = '任务名称,项目单号,品类,产品,型号,项目类型,项目阶段,组织者,状态,创建时间\n';
-    const taskRows = ((tasks || []) as DataRow[]).map((t) =>
-      `"${t.task_name}","${t.project_number || ''}","${t.product_category || ''}","${t.product || ''}","${t.product_model}","${t.project_type || ''}","${t.project_phase || ''}","${t.organizer || ''}","${t.status}","${t.created_at}"`
-    ).join('\n');
+    const taskRows = ((tasks || []) as DataRow[]).map((t) => [
+      t.task_name,
+      t.project_number,
+      t.product_category,
+      t.product,
+      t.product_model,
+      t.project_type,
+      t.project_phase,
+      t.organizer,
+      t.status,
+      t.created_at,
+    ].map(csvEscape).join(',')).join('\n');
 
     const issueHeaders = '问题标题,等级,状态,来源类型,产品型号,整改方案,责任人,创建时间\n';
-    const issueRows = ((issues || []) as DataRow[]).map((i) =>
-      `"${i.title}","${i.level || ''}","${i.status}","${i.source_type || ''}","${i.product_model || ''}","${String(i.improve_plan || '').replace(/"/g, '""')}","${i.responsible_person || ''}","${i.created_at}"`
-    ).join('\n');
+    const issueRows = ((issues || []) as DataRow[]).map((i) => [
+      i.title,
+      i.level,
+      i.status,
+      i.source_type,
+      i.product_model,
+      i.improve_plan,
+      i.responsible_person,
+      i.created_at,
+    ].map(csvEscape).join(',')).join('\n');
+
+    await writeSecurityAudit(client, {
+      request,
+      actor: admin,
+      action: 'analysis.export_csv',
+      outcome: 'success',
+      targetType: 'analysis',
+      metadata: {
+        taskCount: (tasks || []).length,
+        issueCount: (issues || []).length,
+      },
+    });
 
     return NextResponse.json({
       code: 0,

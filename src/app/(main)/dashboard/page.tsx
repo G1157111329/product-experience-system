@@ -75,9 +75,7 @@ export default function DashboardPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (user?.id) params.set('created_by', user.id);
-      const res = await fetch(`/api/dashboard?${params}`);
+      const res = await fetch('/api/dashboard');
       const d = await res.json();
       setData(d.code === 0 ? d.data : emptyDashboard);
     } catch {
@@ -85,7 +83,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, []);
 
   useEffect(() => {
     fetchData();
@@ -93,14 +91,8 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!user?.id) return;
-    const params = new URLSearchParams();
-    if (isAdmin) {
-      params.set('admin_user_id', user.id);
-    } else {
-      params.set('user_id', user.id);
-    }
 
-    fetch(`/api/auth/audit?${params}`)
+    fetch('/api/auth/audit')
       .then((r) => r.json())
       .then((d) => {
         if (d.code !== 0) return;
@@ -121,7 +113,7 @@ export default function DashboardPage() {
     const res = await fetch('/api/auth/audit', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ request_id: id, action, admin_user_id: user?.id }),
+      body: JSON.stringify({ request_id: id, action }),
     });
     const d = await res.json();
     if (d.code === 0) {
@@ -138,7 +130,7 @@ export default function DashboardPage() {
     const res = await fetch('/api/auth/audit', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ request_id: cancelId, action: 'cancel', user_id: user?.id }),
+      body: JSON.stringify({ request_id: cancelId, action: 'cancel' }),
     });
     const d = await res.json();
     if (d.code === 0) {

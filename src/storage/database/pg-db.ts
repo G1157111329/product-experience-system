@@ -3,15 +3,16 @@
  * Replaces Supabase PostgREST for self-hosted deployments.
  *
  * Environment variables:
- *   DATABASE_URL=postgresql://xp_admin:bear2026@127.0.0.1:5432/xp_experience
+ *   DATABASE_URL=postgresql://<user>:<password>@<host>:<port>/<database>
  */
 
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
+import { getDevFallback } from '@/lib/server/security-config';
 
 const DATABASE_URL =
   process.env.DATABASE_URL ||
-  `postgresql://xp_admin:bear2026@127.0.0.1:5432/xp_experience`;
+  getDevFallback('DATABASE_URL', 'postgresql://xp_dev:change-me-dev-only@127.0.0.1:5432/xp_experience');
 
 let pool: Pool | null = null;
 let db: ReturnType<typeof drizzle> | null = null;

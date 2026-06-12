@@ -1,15 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { canAccessIssue, canReadIssue, isAuthResponse, requireUser } from '@/lib/server/auth';
 
 // GET /api/issue-re-evaluations?issue_id=xxx or ?issue_ids=id1,id2 — list re-evaluations for issue(s)
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+
   const { searchParams } = new URL(request.url);
   const issueId = searchParams.get('issue_id');
   const issueIds = searchParams.get('issue_ids');
 
   if (!issueId && !issueIds) {
     return NextResponse.json({ code: 1, message: '缺少 issue_id 或 issue_ids 参数' }, { status: 400 });
+  }
+
+  const requestedIssueIds = issueId ? [issueId] : (issueIds || '').split(',').map((id) => id.trim()).filter(Boolean);
+  for (const id of requestedIssueIds) {
+    if (!(await canReadIssue(client, user, id))) {
+      return NextResponse.json({ code: 1, message: '无权访问该问题复评估' }, { status: 403 });
+    }
   }
 
   let query = client
@@ -53,13 +64,19 @@ export async function GET(request: NextRequest) {
 // POST /api/issue-re-evaluations — create a new re-evaluation
 export async function POST(request: NextRequest) {
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
 
   try {
     const body = await request.json();
-    const { issue_id, description, created_by } = body;
+    const { issue_id, description } = body;
 
     if (!issue_id) {
       return NextResponse.json({ code: 1, message: '缺少 issue_id' }, { status: 400 });
+    }
+
+    if (!(await canAccessIssue(client, user, String(issue_id)))) {
+      return NextResponse.json({ code: 1, message: '无权创建该问题复评估' }, { status: 403 });
     }
 
     const { data, error } = await client
@@ -67,7 +84,7 @@ export async function POST(request: NextRequest) {
       .insert({
         issue_id,
         description: description || '',
-        created_by: created_by || null,
+        created_by: user.id,
       })
       .select()
       .single();

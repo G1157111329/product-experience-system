@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { assertAdmin, ensureDefaultSkillTemplates, logAgentAudit } from '@/lib/server/agent-skills';
+import { ensureDefaultSkillTemplates, logAgentAudit } from '@/lib/server/agent-skills';
 import type { AgentSkillKey } from '@/lib/agent-skills';
+import { isAuthResponse, requireAdmin } from '@/lib/server/auth';
 
 function readField<T>(row: Record<string, unknown>, snakeKey: string, camelKey: string, fallback: T): T {
   return (row[snakeKey] ?? row[camelKey] ?? fallback) as T;
@@ -78,9 +79,11 @@ async function listSkillTemplates(client: ReturnType<typeof getSupabaseClient>) 
 
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
-  const adminUserId = request.nextUrl.searchParams.get('admin_user_id');
+  const admin = await requireAdmin(request, client);
+  if (isAuthResponse(admin)) return admin;
+
   try {
-    const initResult = await ensureDefaultSkillTemplates(client, adminUserId);
+    const initResult = await ensureDefaultSkillTemplates(client, admin.id);
     const { templates, error } = await listSkillTemplates(client);
 
     if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
@@ -93,10 +96,12 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const client = getSupabaseClient();
+  const admin = await requireAdmin(request, client);
+  if (isAuthResponse(admin)) return admin;
+
   const body = await request.json();
 
   try {
-    await assertAdmin(client, body.admin_user_id);
   } catch (err) {
     const message = err instanceof Error ? err.message : '无权限';
     return NextResponse.json({ code: 1, message }, { status: 403 });
@@ -104,7 +109,7 @@ export async function POST(request: NextRequest) {
 
   if (body.action === 'ensure_defaults') {
     try {
-      const initResult = await ensureDefaultSkillTemplates(client, body.admin_user_id);
+      const initResult = await ensureDefaultSkillTemplates(client, admin.id);
       const { templates, error } = await listSkillTemplates(client);
       if (error) return NextResponse.json({ code: 1, message: error.message, meta: initResult }, { status: 500 });
       if (templates.length === 0 && initResult.errors.length > 0) {
@@ -121,7 +126,7 @@ export async function POST(request: NextRequest) {
 
   if (!templateId && skillKey) {
     try {
-      await ensureDefaultSkillTemplates(client, body.admin_user_id);
+      await ensureDefaultSkillTemplates(client, admin.id);
       const { data: template, error } = await client
         .from('agent_skill_templates')
         .select('*')
@@ -157,7 +162,7 @@ export async function POST(request: NextRequest) {
       user_prompt_template: body.user_prompt_template || '',
       output_schema: body.output_schema || {},
       notes: body.notes || null,
-      created_by: body.admin_user_id || null,
+      created_by: admin.id,
     })
     .select()
     .single();
@@ -184,7 +189,7 @@ export async function POST(request: NextRequest) {
       templateId,
       versionId: data.id,
       action: 'create_version',
-      actorUserId: body.admin_user_id,
+      actorUserId: admin.id,
       requestSnapshot: { notes: body.notes || null },
       responseSnapshot: { version: nextVersion },
     });
@@ -195,10 +200,12 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   const client = getSupabaseClient();
+  const admin = await requireAdmin(request, client);
+  if (isAuthResponse(admin)) return admin;
+
   const body = await request.json();
 
   try {
-    await assertAdmin(client, body.admin_user_id);
   } catch (err) {
     const message = err instanceof Error ? err.message : '无权限';
     return NextResponse.json({ code: 1, message }, { status: 403 });
@@ -233,7 +240,7 @@ export async function PUT(request: NextRequest) {
     templateId: body.template_id,
     versionId: body.active_version_id || data.active_version_id || null,
     action: auditAction,
-    actorUserId: body.admin_user_id,
+    actorUserId: admin.id,
     requestSnapshot: updates,
     responseSnapshot: { template_id: body.template_id },
   });

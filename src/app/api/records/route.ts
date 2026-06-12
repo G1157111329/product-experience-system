@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { canAccessTask, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
 
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+
   const { searchParams } = new URL(request.url);
   const task_id = searchParams.get('task_id');
+  if (task_id && !(await canAccessTask(client, user, task_id))) return forbidden();
 
   if (!task_id) {
     return NextResponse.json({ code: 1, message: '缺少 task_id' }, { status: 400 });
@@ -22,10 +27,16 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const client = getSupabaseClient();
+  const user = await requireUser(request, client);
+  if (isAuthResponse(user)) return user;
+
   const body = await request.json();
+  const targetTaskId = Array.isArray(body) ? body[0]?.task_id : body.task_id;
+  if (!targetTaskId || !(await canAccessTask(client, user, targetTaskId))) return forbidden();
 
   // 批量插入支持（从标准加载检查项时使用）
   if (Array.isArray(body)) {
+    if (!body.every((row) => row?.task_id === targetTaskId)) return forbidden();
     const { data, error } = await client.from('check_records').insert(body).select();
     if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
     return NextResponse.json({ code: 0, message: '批量创建成功', data });

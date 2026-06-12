@@ -7,7 +7,7 @@ import { Plus, Loader2, Film, Image as ImageIcon, Camera, Video } from 'lucide-r
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { MediaThumbnail } from './image-preview';
+import { ImagePreview, MediaThumbnail } from './image-preview';
 import { MediaCaptureDialog } from './media-capture-dialog';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -318,20 +318,7 @@ export function MaterialPicker({
 
   const renderPreviewModal = () => {
     if (!previewUrl) return null;
-    return (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.85)' }}
-        onClick={() => setPreviewUrl(null)}>
-        <div className="relative max-w-[90vw] max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
-          {previewUrl.match(/\.(mp4|webm|mov)/i) || previewUrl.includes('video') ? (
-            <video src={previewUrl} controls autoPlay className="max-w-full max-h-[85vh] rounded-lg" />
-          ) : (
-            <img src={previewUrl} alt="预览" className="max-w-full max-h-[85vh] object-contain rounded-lg" />
-          )}
-          <button type="button" className="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-white/90 text-gray-800 flex items-center justify-center text-lg font-bold shadow-lg hover:bg-white"
-            onClick={() => setPreviewUrl(null)}>×</button>
-        </div>
-      </div>
-    );
+    return <ImagePreview url={previewUrl} onClose={() => setPreviewUrl(null)} />;
   };
 
   const renderFilterButtons = () => (
