@@ -389,7 +389,7 @@ export default function IssuesPage() {
       setNewReEvalMaterialIds([]);
       setNewReEvalMaterials([]);
       fetchReEvaluations(selectedIssue.id);
-    } catch (err) {
+    } catch {
       toast.error('保存失败');
     } finally {
       setSavingReEval(false);

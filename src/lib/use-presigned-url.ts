@@ -219,6 +219,9 @@ export function usePresignedUrls<T extends { id: string; file_url?: string | nul
 ): Map<string, string> {
   const [urlMap, setUrlMap] = useState<Map<string, string>>(new Map());
   const mountedRef = useRef(true);
+  const materialSignature = materials
+    .map((m) => `${m.id}:${m.file_path ?? ''}:${m.file_url ?? ''}`)
+    .join('|');
 
   useEffect(() => {
     mountedRef.current = true;
@@ -276,7 +279,7 @@ export function usePresignedUrls<T extends { id: string; file_url?: string | nul
     return () => {
       mountedRef.current = false;
     };
-  }, [JSON.stringify(materials.map((m) => m.id))]);
+  }, [materials, materialSignature]);
 
   return urlMap;
 }

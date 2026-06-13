@@ -1,9 +1,6 @@
 'use client';
 
-/* eslint-disable @next/next/no-img-element */
-
 import { Suspense, useEffect, useState, useCallback, type CSSProperties } from 'react';
-import { usePresignedUrls } from '@/lib/use-presigned-url';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { buildDisplayReportContent, type AiSummaryLike, type ReportContentWithReview, type ReportReviewOverrides } from '@/lib/report-review-overrides';
@@ -213,6 +210,7 @@ function PrintMediaStrip({ materials, indent = 0 }: { materials?: Material[]; in
   return (
     <div style={{ display: 'flex', gap: '8px', marginTop: '8px', marginLeft: indent, flexWrap: 'wrap' }}>
       {images.map(mat => (
+        // eslint-disable-next-line @next/next/no-img-element
         <img key={mat.id} src={mat.file_url} alt={mat.file_name} style={mediaBoxStyle} crossOrigin="anonymous" />
       ))}
       {videos.map(mat => (
@@ -391,6 +389,7 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
                       {reMats && reMats.length > 0 && (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
                           {reMats.filter(m => m.material_type === 'image').map((m, mi) => (
+                            // eslint-disable-next-line @next/next/no-img-element
                             <img key={mi} src={String(m.file_url)} alt={String(m.file_name)} style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '3px', border: '1px solid #e5e7eb' }} />
                           ))}
                         </div>
@@ -519,6 +518,7 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
                   {recipe.effect_materials && recipe.effect_materials.length > 0 && !parseProblemPoints(recipe.effect_problem_point).some((point) => point.material_ids?.length) && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px', marginLeft: '20px' }}>
                       {recipe.effect_materials.filter(m => m.material_type === 'image').map(mat => (
+                        // eslint-disable-next-line @next/next/no-img-element
                         <img key={mat.id} src={mat.file_url} alt={mat.file_name} style={{ width: '50px', height: '50px', borderRadius: '3px', objectFit: 'cover', border: '1px solid #e5e7eb' }} crossOrigin="anonymous" />
                       ))}
                       {recipe.effect_materials.filter(m => m.material_type === 'video').map(mat => (
@@ -653,10 +653,10 @@ function ReportPrintContent() {
       }
       setLiveIssuesMap(prev => ({ ...prev, ...map }));
     });
-  }, [siblingReports]);
+  }, [siblingReports, reportId]);
 
   // Presign all file_url values before rendering/converting
-  const presignReportUrls = async (rpt: ReportData): Promise<ReportData> => {
+  const presignReportUrls = useCallback(async (rpt: ReportData): Promise<ReportData> => {
     const filePaths: string[] = [];
     const collectPaths = (obj: unknown) => {
       if (!obj || typeof obj !== 'object') return;
@@ -702,12 +702,12 @@ function ReportPrintContent() {
       }
     } catch { /* ignore */ }
     return rpt;
-  };
+  }, []);
 
   useEffect(() => {
     if (!report) return;
     presignReportUrls(report).then(rpt => setReport(rpt));
-  }, [report?.id]);
+  }, [report, presignReportUrls]);
 
   // Convert images for printing. Fast mode dedupes and compresses; high mode keeps originals.
   useEffect(() => {
@@ -781,7 +781,7 @@ function ReportPrintContent() {
     };
     const timer = setTimeout(convertImages, 500);
     return () => clearTimeout(timer);
-  }, [report, siblingReports, printMode]);
+  }, [report, siblingReports, printMode, liveIssuesMap]);
 
   useEffect(() => {
     if (report && imagesLoaded) {

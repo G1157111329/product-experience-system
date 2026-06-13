@@ -1,7 +1,5 @@
 'use client';
 
-/* eslint-disable @next/next/no-img-element */
-
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { PresignedImage, PresignedVideo } from '@/components/presigned-media';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
@@ -24,7 +22,6 @@ import { MaterialPicker } from '@/components/material-picker';
 import { MediaCaptureDialog } from '@/components/media-capture-dialog';
 import { ImageEditorDialog } from '@/components/image-editor-dialog';
 import { PageShell } from '@/components/app';
-import { usePresignedUrls } from '@/lib/use-presigned-url';
 import { MediaGallery } from '@/components/app/media-gallery';
 import { buildReportReadiness } from '@/lib/report-readiness';
 import { AgentPresetPanel } from './components/agent-preset-panel';
@@ -157,7 +154,7 @@ export default function TaskDetailPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
   const id = params.id as string;
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [loading, setLoading] = useState(true);

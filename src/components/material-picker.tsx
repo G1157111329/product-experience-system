@@ -1,7 +1,5 @@
 'use client';
 
-/* eslint-disable @next/next/no-img-element */
-
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Plus, Loader2, Film, Image as ImageIcon, Camera, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';

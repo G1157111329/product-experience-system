@@ -170,7 +170,6 @@ export function ImageEditorDialog({
       ctx.strokeRect(cropRect.x * s, cropRect.y * s, cropRect.w * s, cropRect.h * s);
       ctx.setLineDash([]);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rotation, imgSize, actions, currentAction, tool, cropRect]);
 
   useEffect(() => { redraw(); }, [redraw]);
