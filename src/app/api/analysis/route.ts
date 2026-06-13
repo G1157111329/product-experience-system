@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { isAuthResponse, requireAdmin, requireUser } from '@/lib/server/auth';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
+import { getPool } from '@/storage/database/pg-db';
 
 type DataRow = Record<string, string | null | undefined> & {
   id: string;
@@ -11,6 +12,31 @@ type DataRow = Record<string, string | null | undefined> & {
 
 function csvEscape(value: unknown) {
   return `"${String(value ?? '').replace(/"/g, '""')}"`;
+}
+
+function objectFromRows(rows: Array<{ key: string; count: string | number }>) {
+  return Object.fromEntries(rows.map((row) => [row.key, Number(row.count)]));
+}
+
+function mergeTaskIssueAgg(
+  taskRows: Array<{ key: string; tasks: string | number; completed_tasks: string | number }>,
+  issueRows: Array<{ key: string; issues: string | number; rectified_issues: string | number }>,
+) {
+  const result: Record<string, { tasks: number; completedTasks: number; issues: number; rectifiedIssues: number }> = {};
+  for (const row of taskRows) {
+    result[row.key] = {
+      tasks: Number(row.tasks),
+      completedTasks: Number(row.completed_tasks),
+      issues: 0,
+      rectifiedIssues: 0,
+    };
+  }
+  for (const row of issueRows) {
+    if (!result[row.key]) result[row.key] = { tasks: 0, completedTasks: 0, issues: 0, rectifiedIssues: 0 };
+    result[row.key].issues = Number(row.issues);
+    result[row.key].rectifiedIssues = Number(row.rectified_issues);
+  }
+  return result;
 }
 
 export async function GET(request: NextRequest) {
@@ -28,85 +54,130 @@ export async function GET(request: NextRequest) {
   const date_from = searchParams.get('date_from');
   const date_to = searchParams.get('date_to');
 
-  let taskQuery = client.from('experience_tasks').select('id, task_name, product_category, product, product_model, project_number, project_type, project_phase, organizer, status, created_by, created_at');
-  if (user.role !== 'admin') taskQuery = taskQuery.eq('created_by', user.id);
-  if (user.role === 'admin' && created_by) taskQuery = taskQuery.eq('created_by', created_by);
-  if (product_category) taskQuery = taskQuery.eq('product_category', product_category);
-  if (product) taskQuery = taskQuery.eq('product', product);
-  if (project_type) taskQuery = taskQuery.eq('project_type', project_type);
-  if (organizer) taskQuery = taskQuery.eq('organizer', organizer);
-  if (date_from) taskQuery = taskQuery.gte('created_at', date_from);
-  if (date_to) taskQuery = taskQuery.lte('created_at', date_to + 'T23:59:59');
+  const pool = getPool();
+  const params: unknown[] = [];
+  const taskConditions: string[] = [];
+  const addParam = (value: unknown) => {
+    params.push(value);
+    return `$${params.length}`;
+  };
 
-  const { data: tasks } = await taskQuery;
-  const taskList = (tasks || []) as DataRow[];
-  const taskIds = taskList.map((t) => t.id).filter(Boolean);
+  if (user.role !== 'admin') taskConditions.push(`t.created_by = ${addParam(user.id)}`);
+  if (user.role === 'admin' && created_by) taskConditions.push(`t.created_by = ${addParam(created_by)}`);
+  if (product_category) taskConditions.push(`t.product_category = ${addParam(product_category)}`);
+  if (product) taskConditions.push(`t.product = ${addParam(product)}`);
+  if (project_type) taskConditions.push(`t.project_type = ${addParam(project_type)}`);
+  if (organizer) taskConditions.push(`t.organizer = ${addParam(organizer)}`);
+  if (date_from) taskConditions.push(`t.created_at >= ${addParam(date_from)}`);
+  if (date_to) taskConditions.push(`t.created_at <= ${addParam(`${date_to}T23:59:59`)}`);
+  const issueLevelSql = issue_level ? `WHERE i.level = ${addParam(issue_level)}` : '';
 
-  let issueList: Array<Record<string, unknown>> = [];
-  if (taskIds.length > 0) {
-    let issueQuery = client.from('issues').select('id, title, level, status, source_type, task_id, product_model, created_at');
-    issueQuery = issueQuery.in('task_id', taskIds);
-    if (issue_level) issueQuery = issueQuery.eq('level', issue_level);
-    const { data: issues } = await issueQuery;
-    issueList = (issues || []) as Array<Record<string, unknown>>;
-  }
+  const filteredCte = `
+    WITH filtered_tasks AS (
+      SELECT id, task_name, product_category, product, product_model, project_number, project_type, project_phase, organizer, status, created_by, created_at
+      FROM experience_tasks t
+      ${taskConditions.length > 0 ? `WHERE ${taskConditions.join(' AND ')}` : ''}
+    ),
+    filtered_issues AS (
+      SELECT i.*, ft.product_category AS task_product_category, ft.product AS task_product, ft.project_type AS task_project_type,
+        ft.organizer AS task_organizer, ft.created_at AS task_created_at
+      FROM issues i
+      JOIN filtered_tasks ft ON ft.id = i.task_id
+      ${issueLevelSql}
+    )
+  `;
 
-  const totalTasks = taskList.length;
-  const completedTasks = taskList.filter((t) => t.status === '已完成').length;
+  const { rows: metricRows } = await pool.query<{
+    total_tasks: string;
+    completed_tasks: string;
+    total_issues: string;
+    rectified_issues: string;
+  }>(
+    `${filteredCte}
+    SELECT
+      (SELECT count(*) FROM filtered_tasks)::text AS total_tasks,
+      (SELECT count(*) FROM filtered_tasks WHERE status = '已完成')::text AS completed_tasks,
+      (SELECT count(*) FROM filtered_issues)::text AS total_issues,
+      (SELECT count(*) FROM filtered_issues WHERE status = '已验证')::text AS rectified_issues
+    `,
+    params,
+  );
+
+  const metrics = metricRows[0] || { total_tasks: '0', completed_tasks: '0', total_issues: '0', rectified_issues: '0' };
+  const totalTasks = Number(metrics.total_tasks);
+  const completedTasks = Number(metrics.completed_tasks);
   const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
-  const totalIssues = issueList.length;
-  const rectifiedIssues = issueList.filter(i => (i.status as string) === '已验证').length;
+  const totalIssues = Number(metrics.total_issues);
+  const rectifiedIssues = Number(metrics.rectified_issues);
   const rectificationRate = totalIssues > 0 ? Math.round((rectifiedIssues / totalIssues) * 100) : 0;
 
-  const taskStatusDist: Record<string, number> = {};
-  for (const t of taskList) taskStatusDist[t.status] = (taskStatusDist[t.status] || 0) + 1;
+  const { rows: taskStatusRows } = await pool.query<{ key: string; count: string }>(
+    `${filteredCte}
+    SELECT COALESCE(status, '未分类') AS key, count(*)::text AS count
+    FROM filtered_tasks
+    GROUP BY key
+    `,
+    params,
+  );
+  const taskStatusDist = objectFromRows(taskStatusRows);
 
-  const issueLevelDist: Record<string, number> = {};
-  for (const i of issueList) {
-    const level = String(i.level || '未分类');
-    issueLevelDist[level] = (issueLevelDist[level] || 0) + 1;
-  }
+  const { rows: issueLevelRows } = await pool.query<{ key: string; count: string }>(
+    `${filteredCte}
+    SELECT COALESCE(level, '未分类') AS key, count(*)::text AS count
+    FROM filtered_issues
+    GROUP BY key
+    `,
+    params,
+  );
+  const issueLevelDist = objectFromRows(issueLevelRows);
 
+  const { rows: issueRectRows } = await pool.query<{ status: string; level: string; count: string }>(
+    `${filteredCte}
+    SELECT COALESCE(status, '未分类') AS status, COALESCE(level, '未分类') AS level, count(*)::text AS count
+    FROM filtered_issues
+    GROUP BY status, level
+    `,
+    params,
+  );
   const issueRectificationGrid: Record<string, Record<string, number>> = {};
-  for (const i of issueList) {
-    const status = String(i.status || '未分类');
-    const level = String(i.level || '未分类');
-    if (!issueRectificationGrid[status]) issueRectificationGrid[status] = {};
-    issueRectificationGrid[status][level] = (issueRectificationGrid[status][level] || 0) + 1;
+  for (const row of issueRectRows) {
+    if (!issueRectificationGrid[row.status]) issueRectificationGrid[row.status] = {};
+    issueRectificationGrid[row.status][row.level] = Number(row.count);
   }
 
-  const byProjectType: Record<string, { tasks: number; completedTasks: number; issues: number; rectifiedIssues: number }> = {};
-  const byOrganizer: Record<string, { tasks: number; completedTasks: number; issues: number; rectifiedIssues: number }> = {};
-  const byCategoryProduct: Record<string, { tasks: number; completedTasks: number; issues: number; rectifiedIssues: number }> = {};
-  const monthTrend: Record<string, { tasks: number; completedTasks: number; issues: number; rectifiedIssues: number }> = {};
-
-  const taskInfo = new Map(taskList.map((task) => [task.id, task]));
-  for (const t of taskList) {
-    const projectKey = t.project_type || '未分类';
-    const organizerKey = t.organizer || '未指定';
-    const categoryKey = t.product_category ? `${t.product_category}${t.product ? ' - ' + t.product : ''}` : '未分类';
-    const monthKey = String(t.created_at || '').slice(0, 7) || 'unknown';
-    for (const [map, key] of [[byProjectType, projectKey], [byOrganizer, organizerKey], [byCategoryProduct, categoryKey], [monthTrend, monthKey]] as const) {
-      if (!map[key]) map[key] = { tasks: 0, completedTasks: 0, issues: 0, rectifiedIssues: 0 };
-      map[key].tasks += 1;
-      if (t.status === '已完成') map[key].completedTasks += 1;
-    }
+  async function groupedMetrics(taskKeySql: string, issueKeySql: string) {
+    const { rows: taskRows } = await pool.query<{ key: string; tasks: string; completed_tasks: string }>(
+      `${filteredCte}
+      SELECT ${taskKeySql} AS key,
+        count(*)::text AS tasks,
+        count(*) FILTER (WHERE status = '已完成')::text AS completed_tasks
+      FROM filtered_tasks
+      GROUP BY key
+      `,
+      params,
+    );
+    const { rows: issueRows } = await pool.query<{ key: string; issues: string; rectified_issues: string }>(
+      `${filteredCte}
+      SELECT ${issueKeySql} AS key,
+        count(*)::text AS issues,
+        count(*) FILTER (WHERE status = '已验证')::text AS rectified_issues
+      FROM filtered_issues
+      GROUP BY key
+      `,
+      params,
+    );
+    return mergeTaskIssueAgg(taskRows, issueRows);
   }
 
-  for (const i of issueList) {
-    const task = taskInfo.get(String(i.task_id || ''));
-    const keys = [
-      [byProjectType, task?.project_type || '未分类'],
-      [byOrganizer, task?.organizer || '未指定'],
-      [byCategoryProduct, task?.product_category ? `${task.product_category}${task.product ? ' - ' + task.product : ''}` : '未分类'],
-      [monthTrend, String(task?.created_at || '').slice(0, 7) || 'unknown'],
-    ] as const;
-    for (const [map, key] of keys) {
-      if (!map[key]) map[key] = { tasks: 0, completedTasks: 0, issues: 0, rectifiedIssues: 0 };
-      map[key].issues += 1;
-      if (i.status === '已验证') map[key].rectifiedIssues += 1;
-    }
-  }
+  const [byProjectType, byOrganizer, byCategoryProduct, monthTrend] = await Promise.all([
+    groupedMetrics("COALESCE(project_type, '未分类')", "COALESCE(task_project_type, '未分类')"),
+    groupedMetrics("COALESCE(organizer, '未指定')", "COALESCE(task_organizer, '未指定')"),
+    groupedMetrics(
+      "CASE WHEN product_category IS NULL OR product_category = '' THEN '未分类' ELSE product_category || CASE WHEN product IS NULL OR product = '' THEN '' ELSE ' - ' || product END END",
+      "CASE WHEN task_product_category IS NULL OR task_product_category = '' THEN '未分类' ELSE task_product_category || CASE WHEN task_product IS NULL OR task_product = '' THEN '' ELSE ' - ' || task_product END END",
+    ),
+    groupedMetrics("COALESCE(to_char(created_at, 'YYYY-MM'), 'unknown')", "COALESCE(to_char(task_created_at, 'YYYY-MM'), 'unknown')"),
+  ]);
 
   const { data: catData } = await client.from('platform_categories').select('id, name, sort_order').order('sort_order');
   const { data: prodData } = await client.from('platform_products').select('id, name, category_id, sort_order').order('sort_order');
@@ -115,7 +186,16 @@ export async function GET(request: NextRequest) {
     products: ((prodData || []) as DataRow[]).filter((p) => p.category_id === c.id),
   }));
   const projectTypes = ['ODM/OEM', '竞品研究', '自研', '前期研究', '改型/降本/优化', '海外产品'];
-  const organizers = [...new Set(taskList.map((t) => t.organizer).filter(Boolean))];
+  const { rows: organizerRows } = await pool.query<{ organizer: string }>(
+    `${filteredCte}
+    SELECT DISTINCT organizer
+    FROM filtered_tasks
+    WHERE organizer IS NOT NULL AND organizer <> ''
+    ORDER BY organizer
+    `,
+    params,
+  );
+  const organizers = organizerRows.map((row) => row.organizer);
 
   return NextResponse.json({
     code: 0,

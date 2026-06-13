@@ -92,12 +92,18 @@ type QueryResult = { data: unknown; error: DbError | null; count?: number | null
 type EqCondition = { field: string; value: unknown };
 type CompareCondition = { field: string; value: unknown };
 type OrderCondition = { field: string; order?: 'asc' | 'desc'; referencedTable?: string };
+type QueryHelpers = Awaited<ReturnType<typeof loadQueryHelpers>>;
 type RelationConfig = {
   schema: any;
   parentKey: string;
   childKey: string;
   defaultOrder?: string;
 };
+
+async function loadQueryHelpers() {
+  const { and, or, eq, ne, gte, lte, ilike, inArray, isNull, asc, desc, count } = await import('drizzle-orm');
+  return { and, or, eq, ne, gte, lte, ilike, inArray, isNull, asc, desc, count };
+}
 
 function toCamelCase(value: string) {
   return value.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
@@ -176,6 +182,7 @@ class QueryBuilder {
   private orderConditions: OrderCondition[] = [];
   private limitCount?: number;
   private offsetCount?: number;
+  private wantsExactCount = false;
   private insertData?: Record<string, unknown> | Record<string, unknown>[];
   private updateData?: Record<string, unknown>;
   private returningFields: string[] = ['*'];
@@ -185,7 +192,8 @@ class QueryBuilder {
     this.schema = tableSchemaMap[tableName];
   }
 
-  select(fields?: string): QueryBuilder {
+  select(fields?: string, options?: { count?: 'exact' }): QueryBuilder {
+    if (options?.count === 'exact') this.wantsExactCount = true;
     if (this.action === 'select') {
       this.action = 'select';
       if (fields) this.selectFields = fields.split(',').map((f) => f.trim());
@@ -302,8 +310,7 @@ class QueryBuilder {
     onfulfilled?: ((value: QueryResult) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
   ): Promise<TResult1 | TResult2> {
-    return this._execute()
-      .then((rows) => ({ data: rows, error: null, count: rows.length }))
+    return this._executeWithCount()
       .catch((error) => ({ data: null, error: normalizeDbError(error), count: null }))
       .then(onfulfilled as any, onrejected);
   }
@@ -311,17 +318,12 @@ class QueryBuilder {
   catch<TResult = unknown>(
     onrejected?: ((reason: unknown) => TResult | PromiseLike<TResult>) | null
   ): Promise<QueryResult | TResult> {
-    return this._execute()
-      .then((rows) => ({ data: rows, error: null, count: rows.length }))
+    return this._executeWithCount()
       .catch(onrejected) as any;
   }
 
-  async _execute(): Promise<unknown[]> {
-    const db = getDb();
-    const { and, or, eq, ne, gte, lte, ilike, inArray, isNull, asc, desc } = await import('drizzle-orm').then((m) => m);
-
-    if (!this.schema) throw new Error(`Unknown table: ${this.tableName}`);
-
+  private buildWhereClause(helpers: QueryHelpers) {
+    const { and, or, eq, ne, gte, lte, ilike, inArray, isNull } = helpers;
     const allConditions: any[] = [
       ...this.eqConditions.map((c) => eq(resolveColumn(this.schema, c.field), c.value)),
       ...this.neqConditions.map((c) => ne(resolveColumn(this.schema, c.field), c.value)),
@@ -355,7 +357,36 @@ class QueryBuilder {
         })
         .filter(Boolean),
     ];
-    const whereClause = allConditions.length > 0 ? and(...allConditions) : undefined;
+    return allConditions.length > 0 ? and(...allConditions) : undefined;
+  }
+
+  private async _executeCount(): Promise<number | null> {
+    if (!this.wantsExactCount || this.action !== 'select') return null;
+    const db = getDb();
+    const helpers = await loadQueryHelpers();
+    const whereClause = this.buildWhereClause(helpers);
+    let query: any = db.select({ value: helpers.count() }).from(this.schema as any);
+    if (whereClause) query = query.where(whereClause);
+    const rows = await query as Array<{ value: number | string | bigint }>;
+    return Number(rows[0]?.value || 0);
+  }
+
+  private async _executeWithCount(): Promise<QueryResult> {
+    const [rows, exactCount] = await Promise.all([
+      this._execute(),
+      this._executeCount(),
+    ]);
+    return { data: rows, error: null, count: exactCount ?? rows.length };
+  }
+
+  async _execute(): Promise<unknown[]> {
+    const db = getDb();
+    const helpers = await loadQueryHelpers();
+    const { inArray, asc, desc } = helpers;
+
+    if (!this.schema) throw new Error(`Unknown table: ${this.tableName}`);
+
+    const whereClause = this.buildWhereClause(helpers);
 
     switch (this.action) {
       case 'select': {

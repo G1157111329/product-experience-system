@@ -12,11 +12,12 @@ assert.deepEqual(AGENT_SKILL_KEYS, [
   'senses_standard_preset',
   'recipe_scene_preset',
   'effect_evaluation',
+  'problem_detection',
   'report_summary',
   'report_product_compare',
 ]);
 
-assert.equal(defaults.length, 5);
+assert.equal(defaults.length, 6);
 assert.equal(defaults.every((item) => item.systemPrompt.includes('JSON')), true);
 assert.equal(defaults.every((item) => item.outputSchema && typeof item.outputSchema === 'object'), true);
 
@@ -45,9 +46,10 @@ const normalized = normalizePresetSuggestions({
   ],
 });
 
-assert.equal(normalized.standards.length, 1);
+assert.equal(normalized.standards.length, 2);
 assert.equal(normalized.standards[0].standardItemId, 's1');
 assert.equal(normalized.standards[0].standardCategory, '通用标准');
+assert.equal(normalized.standards[1].focus, '会被过滤');
 assert.equal(normalized.recipes.length, 1);
 assert.equal(normalized.recipes[0].name, '快速豆浆');
 assert.equal(normalized.recipes[0].steps.length, 1);

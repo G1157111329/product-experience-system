@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { asc, eq, ilike } from 'drizzle-orm';
+import { asc, eq, ilike, inArray } from 'drizzle-orm';
 import { getDb } from '@/storage/database/pg-db';
 import { recipeSteps, recipes } from '@/storage/database/shared/schema';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
@@ -42,16 +42,19 @@ async function loadRecipesWithSteps(recipeRows: Array<typeof recipes.$inferSelec
   if (recipeRows.length === 0) return [];
 
   const db = getDb();
-  const result = [];
-  for (const recipe of recipeRows) {
-    const steps = await db
-      .select()
-      .from(recipeSteps)
-      .where(eq(recipeSteps.recipeId, recipe.id))
-      .orderBy(asc(recipeSteps.stepNumber), asc(recipeSteps.sortOrder));
-    result.push(toApiRecipe(recipe, steps));
+  const recipeIds = recipeRows.map((recipe) => recipe.id);
+  const steps = await db
+    .select()
+    .from(recipeSteps)
+    .where(inArray(recipeSteps.recipeId, recipeIds))
+    .orderBy(asc(recipeSteps.stepNumber), asc(recipeSteps.sortOrder));
+  const stepsByRecipeId = new Map<string, Array<typeof recipeSteps.$inferSelect>>();
+  for (const step of steps) {
+    const bucket = stepsByRecipeId.get(step.recipeId) || [];
+    bucket.push(step);
+    stepsByRecipeId.set(step.recipeId, bucket);
   }
-  return result;
+  return recipeRows.map((recipe) => toApiRecipe(recipe, stepsByRecipeId.get(recipe.id) || []));
 }
 
 export async function GET(request: NextRequest) {

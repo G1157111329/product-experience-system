@@ -4,6 +4,8 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessTask, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { checkSharedRateLimit } from '@/lib/server/rate-limit';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
+import { Readable } from 'stream';
+import type { ReadableStream as NodeReadableStream } from 'stream/web';
 
 export const maxDuration = 120;
 export const dynamic = 'force-dynamic';
@@ -113,6 +115,27 @@ function validateUploadType(file: File, buffer: Buffer) {
   return { ok: true as const, materialType: typeSpec.materialType, extension };
 }
 
+async function readFilePrefix(file: File, byteCount = 4096) {
+  const reader = file.stream().getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+
+  try {
+    while (total < byteCount) {
+      const { done, value } = await reader.read();
+      if (done || !value) break;
+      const remaining = byteCount - total;
+      const chunk = value.length > remaining ? value.slice(0, remaining) : value;
+      chunks.push(chunk);
+      total += chunk.length;
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+
+  return Buffer.concat(chunks, total);
+}
+
 export async function POST(request: NextRequest) {
   try {
     const client = getSupabaseClient();
@@ -170,16 +193,15 @@ export async function POST(request: NextRequest) {
     }
 
     const isLargeFile = file.size > 5 * 1024 * 1024;
-    let buffer: Buffer;
+    let filePrefix: Buffer;
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      buffer = Buffer.from(arrayBuffer);
+      filePrefix = await readFilePrefix(file);
     } catch (bufErr) {
-      console.error('[upload] Buffer creation failed:', bufErr);
+      console.error('[upload] File header read failed:', bufErr);
       return NextResponse.json({ code: 1, message: `文件读取失败(${(file.size / 1024 / 1024).toFixed(1)}MB)，请重试` }, { status: 500 });
     }
 
-    const uploadType = validateUploadType(file, buffer);
+    const uploadType = validateUploadType(file, filePrefix);
     if (!uploadType.ok) {
       return NextResponse.json({ code: 1, message: uploadType.message }, { status: 400 });
     }
@@ -194,7 +216,7 @@ export async function POST(request: NextRequest) {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         fileKey = await uploadFile({
-          fileContent: buffer,
+          fileContent: Readable.fromWeb(file.stream() as unknown as NodeReadableStream<Uint8Array>),
           fileName,
           contentType: file.type,
         });

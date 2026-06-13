@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
   const product_category = searchParams.get('product_category');
   const product = searchParams.get('product');
   const keyword = searchParams.get('keyword');
+  const limit = Math.min(200, Math.max(1, parseInt(searchParams.get('limit') || '100', 10)));
 
   // First get matching standards
   // When product_category is specified, include:
@@ -81,7 +82,8 @@ export async function GET(request: NextRequest) {
     .from('standard_items')
     .select('*')
     .in('standard_id', standardIds)
-    .order('sort_order', { ascending: true });
+    .order('sort_order', { ascending: true })
+    .limit(limit);
 
   if (sensory_dimension) itemQuery = itemQuery.eq('sensory_dimension', sensory_dimension);
   if (test_phase) itemQuery = itemQuery.eq('test_phase', test_phase);

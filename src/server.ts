@@ -3,10 +3,11 @@ import { parse } from 'url';
 import next from 'next';
 import { validateProductionStartupSecurity } from './lib/server/startup-security';
 import {
+  createLocalFileReadStream,
   getLocalContentType,
   isLocalUploadPublicAccess,
   LOCAL_PUBLIC_BASE_PATH,
-  readLocalFile,
+  statLocalFile,
   STORAGE_DRIVER,
 } from './lib/server/storage';
 
@@ -46,7 +47,7 @@ async function tryServeLocalUpload(req: IncomingMessage, res: ServerResponse) {
   }
 
   try {
-    const file = await readLocalFile(key);
+    const fileStat = await statLocalFile(key);
     const contentType = getLocalContentType(key);
     const range = req.headers.range;
     res.setHeader('Accept-Ranges', 'bytes');
@@ -57,34 +58,33 @@ async function tryServeLocalUpload(req: IncomingMessage, res: ServerResponse) {
       const match = range.match(/^bytes=(\d*)-(\d*)$/);
       if (!match) {
         res.statusCode = 416;
-        res.setHeader('Content-Range', `bytes */${file.length}`);
+        res.setHeader('Content-Range', `bytes */${fileStat.size}`);
         res.end();
         return true;
       }
 
       const start = match[1] ? Number(match[1]) : 0;
-      const end = match[2] ? Number(match[2]) : file.length - 1;
-      if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= file.length) {
+      const end = match[2] ? Number(match[2]) : fileStat.size - 1;
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= fileStat.size) {
         res.statusCode = 416;
-        res.setHeader('Content-Range', `bytes */${file.length}`);
+        res.setHeader('Content-Range', `bytes */${fileStat.size}`);
         res.end();
         return true;
       }
 
-      const safeEnd = Math.min(end, file.length - 1);
-      const chunk = file.subarray(start, safeEnd + 1);
+      const safeEnd = Math.min(end, fileStat.size - 1);
       res.statusCode = 206;
-      res.setHeader('Content-Length', chunk.length);
-      res.setHeader('Content-Range', `bytes ${start}-${safeEnd}/${file.length}`);
+      res.setHeader('Content-Length', safeEnd - start + 1);
+      res.setHeader('Content-Range', `bytes ${start}-${safeEnd}/${fileStat.size}`);
       if (req.method === 'HEAD') res.end();
-      else res.end(chunk);
+      else createLocalFileReadStream(key, { start, end: safeEnd }).pipe(res);
       return true;
     }
 
     res.statusCode = 200;
-    res.setHeader('Content-Length', file.length);
+    res.setHeader('Content-Length', fileStat.size);
     if (req.method === 'HEAD') res.end();
-    else res.end(file);
+    else createLocalFileReadStream(key).pipe(res);
     return true;
   } catch {
     return false;

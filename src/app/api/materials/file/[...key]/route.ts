@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessTask, getCurrentUser } from '@/lib/server/auth';
 import {
+  createLocalFileReadStream,
   getLocalContentType,
-  readLocalFile,
   STORAGE_DRIVER,
   verifyLocalMediaToken,
 } from '@/lib/server/storage';
+import { Readable } from 'stream';
 
 async function findMaterialByPath(client: ReturnType<typeof getSupabaseClient>, path: string) {
   const { data: byFilePath } = await client
@@ -51,8 +52,8 @@ export async function GET(
   }
 
   try {
-    const body = await readLocalFile(fileKey);
-    return new NextResponse(new Uint8Array(body), {
+    const body = Readable.toWeb(createLocalFileReadStream(fileKey)) as ReadableStream<Uint8Array>;
+    return new NextResponse(body, {
       headers: {
         'Content-Type': getLocalContentType(fileKey),
         'Cache-Control': hasValidToken ? 'private, max-age=300' : 'no-store',

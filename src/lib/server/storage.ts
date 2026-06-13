@@ -10,12 +10,15 @@ import {
   S3Client,
   GetObjectCommand,
   DeleteObjectCommand,
+  type PutObjectCommandInput,
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import crypto from 'crypto';
-import { access, mkdir, readFile, unlink, writeFile } from 'fs/promises';
+import { createReadStream, createWriteStream } from 'fs';
+import { access, mkdir, readFile, stat, unlink, writeFile } from 'fs/promises';
 import path from 'path';
+import { pipeline } from 'stream/promises';
 import { isProductionRuntime, requireProductionEnv } from './security-config';
 
 const STORAGE_DRIVER = (process.env.STORAGE_DRIVER || 'local').toLowerCase();
@@ -160,7 +163,7 @@ export function isLocalUploadPublicAccess() {
  * Upload a file to the configured storage driver and return its stable object key.
  */
 export async function uploadFile(params: {
-  fileContent: Buffer;
+  fileContent: Buffer | NodeJS.ReadableStream;
   fileName: string;
   contentType: string;
 }): Promise<string> {
@@ -169,7 +172,11 @@ export async function uploadFile(params: {
   if (!isS3Driver()) {
     const target = resolveLocalFilePath(fileName);
     await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, params.fileContent);
+    if (Buffer.isBuffer(params.fileContent)) {
+      await writeFile(target, params.fileContent);
+    } else {
+      await pipeline(params.fileContent, createWriteStream(target));
+    }
     return fileName;
   }
 
@@ -180,7 +187,7 @@ export async function uploadFile(params: {
     params: {
       Bucket: S3_BUCKET,
       Key: fileName,
-      Body: params.fileContent,
+      Body: params.fileContent as PutObjectCommandInput['Body'],
       ContentType: params.contentType,
     },
   });
@@ -237,6 +244,14 @@ export async function deleteFile(key: string | null | undefined): Promise<void> 
 
 export async function readLocalFile(key: string): Promise<Buffer> {
   return readFile(resolveLocalFilePath(key));
+}
+
+export function createLocalFileReadStream(key: string, options?: { start?: number; end?: number }) {
+  return createReadStream(resolveLocalFilePath(key), options);
+}
+
+export async function statLocalFile(key: string) {
+  return stat(resolveLocalFilePath(key));
 }
 
 export function getLocalContentType(key: string) {

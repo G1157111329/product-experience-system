@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { isAuthResponse, requireUser } from '@/lib/server/auth';
+import { getPool } from '@/storage/database/pg-db';
 
 type DashboardRow = {
   id: string;
@@ -19,32 +20,44 @@ export async function GET(request: NextRequest) {
   const requestedCreatedBy = request.nextUrl.searchParams.get('created_by');
   const created_by = user.role === 'admin' ? requestedCreatedBy : user.id;
 
-  // 任务统计
-  let taskQuery = client.from('experience_tasks').select('id, status, created_at');
-  if (created_by) taskQuery = taskQuery.eq('created_by', created_by);
-  const { data: tasks } = await taskQuery;
+  const params: unknown[] = [];
+  const ownerWhere = created_by ? `WHERE created_by = $${params.push(created_by)}` : '';
+  const issueOwnerWhere = created_by ? `WHERE t.created_by = $${params.length}` : '';
+  const pool = getPool();
 
-  const taskRows = (tasks || []) as DashboardRow[];
-  const totalTasks = taskRows.length;
-  const completedTasks = taskRows.filter((t) => t.status === '已完成').length || 0;
-
-  // 问题统计 - from user's task reports
-  let userTaskIds: string[] = [];
-  if (created_by) {
-    userTaskIds = taskRows.map((t) => t.id);
-  }
-
-  const { data: allReports } = await client.from('reports').select('id, task_id');
-  const reportRows = (allReports || []) as DashboardRow[];
-  const userReportIds = reportRows
-    .filter((r) => !created_by || userTaskIds.includes(r.task_id || ''))
-    .map((r) => r.id);
-
-  const { data: issues } = await client.from('issues').select('id, status, level, source_report_id, title, created_at');
-  const userIssues = ((issues || []) as DashboardRow[]).filter((i) => !created_by || userReportIds.includes(i.source_report_id || ''));
-
-  const totalIssues = userIssues.length;
-  const resolvedIssues = userIssues.filter((i) => i.status === '已验证').length;
+  const { rows: metricRows } = await pool.query<{
+    total_tasks: string;
+    completed_tasks: string;
+    total_issues: string;
+    resolved_issues: string;
+  }>(
+    `
+    WITH task_metrics AS (
+      SELECT
+        count(*)::text AS total_tasks,
+        count(*) FILTER (WHERE status = '已完成')::text AS completed_tasks
+      FROM experience_tasks
+      ${ownerWhere}
+    ),
+    issue_metrics AS (
+      SELECT
+        count(i.id)::text AS total_issues,
+        count(i.id) FILTER (WHERE i.status = '已验证')::text AS resolved_issues
+      FROM issues i
+      JOIN experience_tasks t ON t.id = i.task_id
+      ${issueOwnerWhere}
+    )
+    SELECT *
+    FROM task_metrics
+    CROSS JOIN issue_metrics
+    `,
+    params,
+  );
+  const metrics = metricRows[0] || { total_tasks: '0', completed_tasks: '0', total_issues: '0', resolved_issues: '0' };
+  const totalTasks = Number(metrics.total_tasks);
+  const completedTasks = Number(metrics.completed_tasks);
+  const totalIssues = Number(metrics.total_issues);
+  const resolvedIssues = Number(metrics.resolved_issues);
 
   // 最近任务
   let recentQuery = client
@@ -56,16 +69,24 @@ export async function GET(request: NextRequest) {
   const { data: recentTasks } = await recentQuery;
 
   // 最近问题
-  const recentIssues = userIssues
-    .sort((a: { created_at: string }, b: { created_at: string }) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    .slice(0, 5)
-    .map((i) => ({
-      id: i.id,
-      title: i.title || '',
-      status: i.status || '',
-      level: i.level || '',
-      created_at: i.created_at,
-    }));
+  const { rows: recentIssueRows } = await pool.query<DashboardRow>(
+    `
+    SELECT i.id, i.title, i.status, i.level, i.created_at
+    FROM issues i
+    JOIN experience_tasks t ON t.id = i.task_id
+    ${issueOwnerWhere}
+    ORDER BY i.created_at DESC
+    LIMIT 5
+    `,
+    params,
+  );
+  const recentIssues = recentIssueRows.map((i) => ({
+    id: i.id,
+    title: i.title || '',
+    status: i.status || '',
+    level: i.level || '',
+    created_at: i.created_at,
+  }));
 
   return NextResponse.json({
     code: 0,

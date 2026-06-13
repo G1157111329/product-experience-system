@@ -14,7 +14,8 @@ export async function GET(request: NextRequest) {
   const keyword = searchParams.get('keyword');
   const source_report_id = searchParams.get('source_report_id');
   const task_ids = searchParams.get('task_ids'); // comma-separated, for user data isolation
-  const limit = parseInt(searchParams.get('limit') || '500');
+  const limit = Math.min(500, Math.max(1, parseInt(searchParams.get('limit') || '100', 10)));
+  const offset = Math.max(0, parseInt(searchParams.get('offset') || '0', 10) || 0);
 
   let query = client.from('issues').select('*', { count: 'exact' });
   if (task_id) query = query.eq('task_id', task_id);
@@ -36,10 +37,10 @@ export async function GET(request: NextRequest) {
     query = query.in('task_id', userTaskIds);
   }
 
-  const { data, error, count } = await query.order('created_at', { ascending: false }).limit(limit);
+  const { data, error, count } = await query.order('created_at', { ascending: false }).range(offset, offset + limit - 1);
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
 
-  return NextResponse.json({ code: 0, message: 'success', data: { list: data, total: count } });
+  return NextResponse.json({ code: 0, message: 'success', data: { list: data, total: count, limit, offset } });
 }
 
 export async function POST(request: NextRequest) {
