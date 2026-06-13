@@ -1,11 +1,25 @@
 'use client';
 
 import { useAuth } from '@/lib/auth-context';
+import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AppSidebar, MobileNav, BottomNav } from '@/components/navigation';
 
+function hasOpenModalLayer() {
+  return Boolean(
+    document.querySelector(
+      [
+        '[data-slot="dialog-content"][data-state="open"]',
+        '[data-slot="sheet-content"][data-state="open"]',
+        '[data-radix-popper-content-wrapper]',
+      ].join(',')
+    )
+  );
+}
+
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
+  const pathname = usePathname();
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
@@ -17,6 +31,19 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       window.location.href = '/login';
     }
   }, [checked, isAuthenticated, isLoading]);
+
+  useEffect(() => {
+    const releaseStaleInteractionLock = () => {
+      if (hasOpenModalLayer()) return;
+      if (document.body.style.pointerEvents === 'none') {
+        document.body.style.pointerEvents = '';
+      }
+    };
+
+    releaseStaleInteractionLock();
+    const timeout = window.setTimeout(releaseStaleInteractionLock, 350);
+    return () => window.clearTimeout(timeout);
+  }, [pathname]);
 
   if (!checked || isLoading) {
     return (
