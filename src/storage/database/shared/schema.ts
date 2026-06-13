@@ -33,6 +33,7 @@ export const reports = pgTable("reports", {
 	index("reports_created_at_idx").using("btree", table.createdAt.asc().nullsLast().op("timestamptz_ops")),
 	index("reports_product_model_idx").using("btree", table.productModel.asc().nullsLast().op("text_ops")),
 	index("reports_product_model_created_at_idx").using("btree", table.productModel.asc().nullsLast().op("text_ops"), table.createdAt.asc().nullsLast().op("timestamptz_ops")),
+	index("reports_status_created_at_idx").using("btree", table.status.asc().nullsLast().op("text_ops"), table.createdAt.asc().nullsLast().op("timestamptz_ops")),
 	index("reports_task_id_idx").using("btree", table.taskId.asc().nullsLast().op("text_ops")),
 	foreignKey({
 			columns: [table.taskId],
@@ -188,6 +189,7 @@ export const issues = pgTable("issues", {
 }, (table) => [
 	index("issues_created_at_idx").using("btree", table.createdAt.asc().nullsLast().op("timestamptz_ops")),
 	index("issues_severity_idx").using("btree", table.severity.asc().nullsLast().op("text_ops")),
+	index("issues_source_type_idx").using("btree", table.sourceType.asc().nullsLast().op("text_ops")),
 	index("issues_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
 	index("issues_task_id_idx").using("btree", table.taskId.asc().nullsLast().op("text_ops")),
 	foreignKey({

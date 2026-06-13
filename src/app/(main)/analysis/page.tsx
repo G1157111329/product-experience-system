@@ -109,19 +109,24 @@ export default function AnalysisPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ format: 'csv' }),
       });
-      const data = await res.json();
-      if (data.code === 0) {
-        downloadCsv(data.data.tasksCsv, '项目列表数据.csv');
-        toast.success('项目列表导出成功');
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        toast.error(data?.message || '导出失败');
+        return;
       }
+      const blob = await res.blob();
+      const disposition = res.headers.get('content-disposition') || '';
+      const match = disposition.match(/filename="?([^"]+)"?/i);
+      downloadCsv(blob, match?.[1] || 'analysis-export.csv');
+      toast.success('项目列表导出成功');
     } catch {
       toast.error('导出失败');
     }
   };
 
-  const downloadCsv = (csvContent: string, filename: string) => {
+  const downloadCsv = (csvContent: string | Blob, filename: string) => {
     const BOM = '\uFEFF';
-    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const blob = csvContent instanceof Blob ? csvContent : new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;

@@ -75,7 +75,7 @@ function RecipeLibrarySection({ categories, isAdmin }, ref) {
 
   const fetchRecipes = useCallback(async () => {
     setLoading(true);
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({ limit: '100', include_steps: '1' });
     if (filterCategory) params.set('product_category', filterCategory);
     if (filterProduct) params.set('product', filterProduct);
     const res = await fetch(`/api/recipe-library?${params}`);

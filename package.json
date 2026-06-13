@@ -6,6 +6,7 @@
     "build": "pnpm next build && pnpm tsup src/server.ts --format cjs --platform node --target node20 --outDir dist --no-splitting --no-minify",
     "dev": "tsx watch src/server.ts",
     "audit:materials": "tsx scripts/audit-orphan-materials.ts",
+    "smoke:e2e": "playwright test",
     "preinstall": "npx only-allow pnpm",
     "lint": "eslint",
     "start": "node dist/server.js",
@@ -74,6 +75,7 @@
     "zod": "^4.3.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/pg": "^8.16.0",

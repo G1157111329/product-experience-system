@@ -206,6 +206,7 @@ CREATE TABLE IF NOT EXISTS issues (
 CREATE INDEX IF NOT EXISTS issues_task_id_idx ON issues(task_id);
 CREATE INDEX IF NOT EXISTS issues_status_idx ON issues(status);
 CREATE INDEX IF NOT EXISTS issues_severity_idx ON issues(severity);
+CREATE INDEX IF NOT EXISTS issues_source_type_idx ON issues(source_type);
 CREATE INDEX IF NOT EXISTS issues_created_at_idx ON issues(created_at);
 
 -- ============================================================
@@ -326,6 +327,7 @@ CREATE INDEX IF NOT EXISTS reports_task_id_idx ON reports(task_id);
 CREATE INDEX IF NOT EXISTS reports_created_at_idx ON reports(created_at);
 CREATE INDEX IF NOT EXISTS reports_product_model_idx ON reports(product_model);
 CREATE INDEX IF NOT EXISTS reports_product_model_created_at_idx ON reports(product_model, created_at);
+CREATE INDEX IF NOT EXISTS reports_status_created_at_idx ON reports(status, created_at);
 
 -- ============================================================
 -- 16. 报告分享表

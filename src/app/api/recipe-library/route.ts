@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { isAuthResponse, requireAdmin, requireUser } from '@/lib/server/auth';
+import { createApiTimer } from '@/lib/server/api-performance';
+
+function parsePositiveInt(value: string | null, fallback: number, max: number) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return fallback;
+  return Math.min(Math.floor(num), max);
+}
 
 // GET: List recipe library items, optionally filter by product_category/product, or search by keyword
 export async function GET(request: NextRequest) {
+  const finishTimer = createApiTimer('recipe-library.GET');
   const client = getSupabaseClient();
   const user = await requireUser(request, client);
   if (isAuthResponse(user)) return user;
@@ -12,14 +20,22 @@ export async function GET(request: NextRequest) {
   const product_category = searchParams.get('product_category');
   const product = searchParams.get('product');
   const keyword = searchParams.get('keyword');
+  const limit = parsePositiveInt(searchParams.get('limit'), 100, 200);
+  const offset = Math.max(0, Number(searchParams.get('offset') || '0') || 0);
+  const includeSteps = searchParams.get('include_steps') !== '0';
 
-  let query = client.from('recipe_library').select('*, recipe_library_steps(*)').order('created_at', { ascending: true });
+  const selectFields = includeSteps ? '*, recipe_library_steps(*)' : '*';
+  let query = client
+    .from('recipe_library')
+    .select(selectFields, { count: 'exact' })
+    .order('created_at', { ascending: true })
+    .range(offset, offset + limit - 1);
 
   if (product_category) query = query.eq('product_category', product_category);
   if (product) query = query.eq('product', product);
   if (keyword) query = query.ilike('name', `%${keyword}%`);
 
-  const { data, error } = await query;
+  const { data, error, count } = await query;
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
 
   // Sort steps by step_number
@@ -29,7 +45,13 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => (a.step_number as number) - (b.step_number as number)),
   }));
 
-  return NextResponse.json({ code: 0, message: 'success', data: result });
+  finishTimer({ rows: result.length, total: count, limit, offset, includeSteps });
+  return NextResponse.json({
+    code: 0,
+    message: 'success',
+    data: result,
+    meta: { limit, offset, total: count || 0, has_more: offset + result.length < (count || 0) },
+  });
 }
 
 // POST: Create a recipe library item (with optional steps)

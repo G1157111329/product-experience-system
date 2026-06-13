@@ -460,6 +460,16 @@ INITIAL_ADMIN_PASSWORD=<strong-password>
 | 编辑问题点切换标准类型后表单为空 | `populateFormsFromRecord` 只填充原始类别表单 | 切换类别时从 `editRecordData` 自动预填充共享字段（sensory_dimension/evaluationResult等） |
 | 食谱库步骤添加图片报"缺少必要参数" | upload API 要求 task_id 必填，食谱库步骤无 task_id | DB 将 materials.task_id 改为可选，新增 recipe_library_step_id 字段 |
 | 食谱库删除图标报错 | 重写 route.ts 时丢失 DELETE handler | 重新添加 DELETE handler，含步骤和素材级联清理 |
+
+## 2026-06-13 Codex hardening notes
+
+- `pnpm smoke:e2e` runs Playwright smoke tests against `E2E_BASE_URL` or `http://127.0.0.1:5000`. Keep this suite focused on real click paths: login, standards recipe library, task detail navigation, report detail navigation, and app error-boundary checks.
+- `GET /api/recipe-library` supports `limit`, `offset`, and `include_steps`. Existing UI requests `include_steps=1&limit=100`; new lightweight clients should use `include_steps=0` and page through results.
+- `GET /api/reports` defaults to active reports only. Pass `include_archived=1` only for history/debug views. Keyword search is pushed into database filters and remains paginated.
+- Report regeneration preserves history: previous reports are marked `status='archived'`, previous generated issues are marked with `_old` source types, and the new report gets an incremented `version`. Do not reintroduce physical delete-on-regenerate behavior without a product decision.
+- Current issue lists and data analysis exclude `_old` issue source types by default so archived report history does not double-count active risk metrics.
+- `POST /api/analysis` with `{ "format": "csv" }` streams one CSV response in batches instead of returning large JSON strings. Frontend export must read the response as a `Blob`.
+- High-risk list/export endpoints use `[api.performance]` slow-request logging; tune thresholds in `src/lib/server/api-performance.ts` if production logs are too noisy.
 | 效果评价图片重复出现 | MaterialPicker已有initialMaterials展示，下方又有独立预览区块 | 移除重复的素材预览区块，仅保留MaterialPicker |
 | 产品型号所有项目类型都必填 | 表单验证未区分项目类型 | 仅"自研"和"改型/降本/优化"时必填，其他类型可选 |
 | 生产库残留 `allow_all` 或 RLS 边界不清 | 旧策略会扩大匿名访问面，影响等保整改 | `database-schema.sql` 启用 RLS 并删除 `allow_all`，上线前必须执行 `scripts/verify-security-schema.sql` 并留存结果 |

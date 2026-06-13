@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { getDb } from '@/storage/database/pg-db';
 import { canAccessTask, isAuthResponse, requireUser } from '@/lib/server/auth';
+import { createApiTimer } from '@/lib/server/api-performance';
 import {
   issues as issuesTable,
   recipeLibrary,
@@ -50,6 +51,7 @@ function groupRowsByField(rows: Array<Record<string, unknown>>, field: string) {
 }
 
 export async function GET(request: NextRequest) {
+  const finishTimer = createApiTimer('reports.GET');
   const client = getSupabaseClient();
   const user = await requireUser(request, client);
   if (isAuthResponse(user)) return user;
@@ -59,6 +61,7 @@ export async function GET(request: NextRequest) {
   const created_by = searchParams.get('created_by'); // filter by user's tasks
   const scope = searchParams.get('scope') === 'mine' ? 'mine' : 'all';
   const keyword = searchParams.get('keyword')?.trim();
+  const includeArchived = searchParams.get('include_archived') === '1';
   const limit = parsePositiveInt(searchParams.get('limit'), 50, 200);
   const offset = Math.max(0, Number(searchParams.get('offset') || '0') || 0);
 
@@ -72,18 +75,35 @@ export async function GET(request: NextRequest) {
     userTaskIds = (userTasks || []).map((t: { id: string }) => t.id);
   }
 
+  let keywordTaskIds: string[] = [];
+  if (keyword) {
+    let taskSearch = client
+      .from('experience_tasks')
+      .select('id')
+      .or(`task_name.ilike.%${keyword}%,product_category.ilike.%${keyword}%,product.ilike.%${keyword}%,project_type.ilike.%${keyword}%`)
+      .limit(500);
+    if (ownerFilter && userTaskIds.length > 0) taskSearch = taskSearch.in('id', userTaskIds);
+    const { data: matchedTasks } = await taskSearch;
+    keywordTaskIds = (matchedTasks || []).map((task: { id: string }) => task.id);
+  }
+
   let query = client
     .from('reports')
-    .select('id, task_id, template_id, title, status, version, product_model, created_at, updated_at');
+    .select('id, task_id, template_id, title, status, version, product_model, created_at, updated_at', { count: 'exact' });
+  if (!includeArchived) query = query.neq('status', 'archived');
   if (task_id) query = query.eq('task_id', task_id);
   if (ownerFilter && userTaskIds.length > 0) query = query.in('task_id', userTaskIds);
   if (ownerFilter && userTaskIds.length === 0) {
     return NextResponse.json({ code: 0, message: 'success', data: [], meta: { limit, offset, total: 0 } });
   }
-  const dbPaginated = !keyword;
-  if (dbPaginated) query = query.range(offset, offset + limit - 1);
+  if (keyword) {
+    const orParts = [`title.ilike.%${keyword}%`, `product_model.ilike.%${keyword}%`];
+    if (keywordTaskIds.length > 0) orParts.push(`task_id.in.(${keywordTaskIds.join(',')})`);
+    query = query.or(orParts.join(','));
+  }
+  query = query.range(offset, offset + limit - 1);
 
-  const { data, error } = await query.order('created_at', { ascending: false });
+  const { data, error, count } = await query.order('created_at', { ascending: false });
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
 
   const reports = data || [];
@@ -144,26 +164,12 @@ export async function GET(request: NextRequest) {
     };
   });
 
-  const filtered = keyword
-    ? enriched.filter((r: Record<string, unknown>) => {
-        const haystack = [
-          r.title,
-          r.product_model,
-          r.task_name,
-          r.product_category,
-          r.product,
-          r.project_type,
-        ].filter(Boolean).join(' ').toLowerCase();
-        return haystack.includes(keyword.toLowerCase());
-      })
-    : enriched;
-
-  const paged = dbPaginated ? filtered : filtered.slice(offset, offset + limit);
+  finishTimer({ rows: enriched.length, total: count, limit, offset, keyword: Boolean(keyword), includeArchived });
   return NextResponse.json({
     code: 0,
     message: 'success',
-    data: paged,
-    meta: { limit, offset, total: dbPaginated ? undefined : filtered.length, has_more: dbPaginated ? reports.length === limit : offset + limit < filtered.length },
+    data: enriched,
+    meta: { limit, offset, total: count || 0, has_more: offset + enriched.length < (count || 0) },
   });
 }
 
@@ -177,13 +183,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ code: 1, message: '无权限' }, { status: 403 });
   }
 
-  const { data: previousReport } = await client
+  const { data: previousReports } = await client
     .from('reports')
-    .select('content')
+    .select('id, content, version')
     .eq('task_id', body.task_id)
+    .neq('status', 'archived')
     .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(20);
+  const previousReport = previousReports?.[0];
+  const previousReportIds = (previousReports || []).map((report: { id: string }) => report.id).filter(Boolean);
+  const nextVersion = Math.max(0, ...(previousReports || []).map((report: { version?: number | null }) => Number(report.version || 0))) + 1;
 
   // 自动生成报告 - 从任务和记录中填充内容
   const { data: task } = await client.from('experience_tasks').select('*').eq('id', body.task_id).single();
@@ -285,8 +294,26 @@ export async function POST(request: NextRequest) {
 
   const db = getDb();
   const savedReport = await db.transaction(async (tx) => {
-    await tx.delete(reportsTable).where(eq(reportsTable.taskId, body.task_id));
-    await tx.delete(issuesTable).where(eq(issuesTable.taskId, body.task_id));
+    await tx.update(reportsTable)
+      .set({ status: 'archived', updatedAt: new Date().toISOString() })
+      .where(eq(reportsTable.taskId, body.task_id));
+
+    if (previousReportIds.length > 0) {
+      await tx.update(issuesTable)
+        .set({
+          status: '历史归档',
+          sourceType: sql<string>`CASE
+            WHEN ${issuesTable.sourceType} = 'record_fail' THEN 'record_fail_old'
+            WHEN ${issuesTable.sourceType} = 'recipe_problem' THEN 'recipe_problem_old'
+            ELSE ${issuesTable.sourceType}
+          END`,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(and(
+          eq(issuesTable.taskId, body.task_id),
+          inArray(issuesTable.sourceReportId, previousReportIds),
+        ));
+    }
 
     const [report] = await tx.insert(reportsTable).values({
       taskId: body.task_id,
@@ -294,6 +321,7 @@ export async function POST(request: NextRequest) {
       title: body.title || `${task?.task_name || '体验'}报告`,
       productModel: task?.product_model || null,
       content: finalReportContent,
+      version: nextVersion,
       status: '已完成',
     }).returning();
 

@@ -14,10 +14,12 @@ export async function GET(request: NextRequest) {
   const keyword = searchParams.get('keyword');
   const source_report_id = searchParams.get('source_report_id');
   const task_ids = searchParams.get('task_ids'); // comma-separated, for user data isolation
+  const include_archived = searchParams.get('include_archived') === '1';
   const limit = Math.min(500, Math.max(1, parseInt(searchParams.get('limit') || '100', 10)));
   const offset = Math.max(0, parseInt(searchParams.get('offset') || '0', 10) || 0);
 
   let query = client.from('issues').select('*', { count: 'exact' });
+  if (!include_archived && !source_report_id) query = query.not('source_type', 'like', '%_old');
   if (task_id) query = query.eq('task_id', task_id);
   if (source_report_id) {
     if (!(await canReadReport(client, user, source_report_id))) return forbidden();

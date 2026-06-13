@@ -66,6 +66,7 @@ export default function StandardsPage() {
       {/* Section Tabs */}
       <div className="inline-flex w-full gap-1 rounded-lg border bg-card p-1 shadow-sm sm:w-auto">
         <button
+          data-testid="standards-section-tab"
           onClick={() => setActiveSection('standards')}
           className={cn(
             'flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium transition-colors sm:flex-none',
@@ -75,6 +76,7 @@ export default function StandardsPage() {
           <BookOpen className="h-4 w-4" /> 体验标准
         </button>
         <button
+          data-testid="recipe-library-section-tab"
           onClick={() => setActiveSection('recipes')}
           className={cn(
             'flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium transition-colors sm:flex-none',

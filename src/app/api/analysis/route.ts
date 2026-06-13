@@ -3,6 +3,7 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { isAuthResponse, requireAdmin, requireUser } from '@/lib/server/auth';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
 import { getPool } from '@/storage/database/pg-db';
+import { createApiTimer } from '@/lib/server/api-performance';
 
 type DataRow = Record<string, string | null | undefined> & {
   id: string;
@@ -40,6 +41,7 @@ function mergeTaskIssueAgg(
 }
 
 export async function GET(request: NextRequest) {
+  const finishTimer = createApiTimer('analysis.GET');
   const client = getSupabaseClient();
   const user = await requireUser(request, client);
   if (isAuthResponse(user)) return user;
@@ -70,7 +72,8 @@ export async function GET(request: NextRequest) {
   if (organizer) taskConditions.push(`t.organizer = ${addParam(organizer)}`);
   if (date_from) taskConditions.push(`t.created_at >= ${addParam(date_from)}`);
   if (date_to) taskConditions.push(`t.created_at <= ${addParam(`${date_to}T23:59:59`)}`);
-  const issueLevelSql = issue_level ? `WHERE i.level = ${addParam(issue_level)}` : '';
+  const issueConditions = [`COALESCE(i.source_type, '') NOT LIKE '%_old'`];
+  if (issue_level) issueConditions.push(`i.level = ${addParam(issue_level)}`);
 
   const filteredCte = `
     WITH filtered_tasks AS (
@@ -83,7 +86,7 @@ export async function GET(request: NextRequest) {
         ft.organizer AS task_organizer, ft.created_at AS task_created_at
       FROM issues i
       JOIN filtered_tasks ft ON ft.id = i.task_id
-      ${issueLevelSql}
+      WHERE ${issueConditions.join(' AND ')}
     )
   `;
 
@@ -197,6 +200,7 @@ export async function GET(request: NextRequest) {
   );
   const organizers = organizerRows.map((row) => row.organizer);
 
+  finishTimer({ totalTasks, totalIssues });
   return NextResponse.json({
     code: 0,
     message: 'success',
@@ -216,42 +220,25 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const finishTimer = createApiTimer('analysis.POST');
   const client = getSupabaseClient();
   const admin = await requireAdmin(request, client);
   if (isAuthResponse(admin)) return admin;
 
   const body = await request.json();
   const { format } = body;
-  const { data: tasks } = await client.from('experience_tasks').select('*');
-  const { data: issues } = await client.from('issues').select('*');
+  const pool = getPool();
 
   if (format === 'csv') {
+    const { rows: countRows } = await pool.query<{ task_count: string; issue_count: string }>(`
+      SELECT
+        (SELECT count(*) FROM experience_tasks)::text AS task_count,
+        (SELECT count(*) FROM issues WHERE COALESCE(source_type, '') NOT LIKE '%_old')::text AS issue_count
+    `);
+    const taskCount = Number(countRows[0]?.task_count || 0);
+    const issueCount = Number(countRows[0]?.issue_count || 0);
     const taskHeaders = '任务名称,项目单号,品类,产品,型号,项目类型,项目阶段,组织者,状态,创建时间\n';
-    const taskRows = ((tasks || []) as DataRow[]).map((t) => [
-      t.task_name,
-      t.project_number,
-      t.product_category,
-      t.product,
-      t.product_model,
-      t.project_type,
-      t.project_phase,
-      t.organizer,
-      t.status,
-      t.created_at,
-    ].map(csvEscape).join(',')).join('\n');
-
     const issueHeaders = '问题标题,等级,状态,来源类型,产品型号,整改方案,责任人,创建时间\n';
-    const issueRows = ((issues || []) as DataRow[]).map((i) => [
-      i.title,
-      i.level,
-      i.status,
-      i.source_type,
-      i.product_model,
-      i.improve_plan,
-      i.responsible_person,
-      i.created_at,
-    ].map(csvEscape).join(',')).join('\n');
-
     await writeSecurityAudit(client, {
       request,
       actor: admin,
@@ -259,16 +246,84 @@ export async function POST(request: NextRequest) {
       outcome: 'success',
       targetType: 'analysis',
       metadata: {
-        taskCount: (tasks || []).length,
-        issueCount: (issues || []).length,
+        taskCount,
+        issueCount,
+        streamed: true,
       },
     });
 
-    return NextResponse.json({
-      code: 0,
-      data: { tasksCsv: taskHeaders + taskRows, issuesCsv: issueHeaders + issueRows },
+    const encoder = new TextEncoder();
+    const batchSize = 500;
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const write = (value: string) => controller.enqueue(encoder.encode(value));
+        try {
+          write('\uFEFF# tasks\n');
+          write(taskHeaders);
+          for (let offset = 0; ; offset += batchSize) {
+            const { rows } = await pool.query<DataRow>(`
+              SELECT task_name, project_number, product_category, product, product_model, project_type, project_phase, organizer, status, created_at
+              FROM experience_tasks
+              ORDER BY created_at DESC
+              LIMIT $1 OFFSET $2
+            `, [batchSize, offset]);
+            if (rows.length === 0) break;
+            for (const t of rows) {
+              write([
+                t.task_name,
+                t.project_number,
+                t.product_category,
+                t.product,
+                t.product_model,
+                t.project_type,
+                t.project_phase,
+                t.organizer,
+                t.status,
+                t.created_at,
+              ].map(csvEscape).join(',') + '\n');
+            }
+          }
+
+          write('\n# issues\n');
+          write(issueHeaders);
+          for (let offset = 0; ; offset += batchSize) {
+            const { rows } = await pool.query<DataRow>(`
+              SELECT title, level, status, source_type, product_model, improve_plan, responsible_person, created_at
+              FROM issues
+              WHERE COALESCE(source_type, '') NOT LIKE '%_old'
+              ORDER BY created_at DESC
+              LIMIT $1 OFFSET $2
+            `, [batchSize, offset]);
+            if (rows.length === 0) break;
+            for (const i of rows) {
+              write([
+                i.title,
+                i.level,
+                i.status,
+                i.source_type,
+                i.product_model,
+                i.improve_plan,
+                i.responsible_person,
+                i.created_at,
+              ].map(csvEscape).join(',') + '\n');
+            }
+          }
+          controller.close();
+        } catch (error) {
+          controller.error(error);
+        }
+      },
+    });
+
+    finishTimer({ format, taskCount, issueCount });
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': 'attachment; filename="analysis-export.csv"',
+        'Cache-Control': 'no-store',
+      },
     });
   }
 
-  return NextResponse.json({ code: 0, data: { tasks, issues } });
+  return NextResponse.json({ code: 1, message: 'Unsupported export format' }, { status: 400 });
 }
