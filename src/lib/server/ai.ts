@@ -222,7 +222,7 @@ export async function presignMaterialUrls(
   try {
     const presignedResults = await Promise.allSettled(
       toPresign.map(async (path) => {
-        const url = await generatePresignedUrl({ key: path, expireTime: 86400 });
+        const url = await generatePresignedUrl({ key: path, expireTime: 86400, absoluteUrl: true });
         return { path, url };
       }),
     );

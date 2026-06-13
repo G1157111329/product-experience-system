@@ -109,12 +109,16 @@ function resolveLocalFilePath(key: string): string {
   return target;
 }
 
-function localPublicUrl(key: string): string {
+function withPublicMediaBase(relativeUrl: string, absoluteUrl?: boolean) {
+  if (!absoluteUrl || !PUBLIC_MEDIA_BASE_URL) return relativeUrl;
+  return `${PUBLIC_MEDIA_BASE_URL}${relativeUrl}`;
+}
+
+function localPublicUrl(key: string, absoluteUrl?: boolean): string {
   const safeKey = normalizeObjectKey(key);
   const encodedKey = safeKey.split('/').map(encodeURIComponent).join('/');
   const relativeUrl = `${LOCAL_PUBLIC_BASE_PATH}/${encodedKey}`;
-  if (!PUBLIC_MEDIA_BASE_URL) return relativeUrl;
-  return `${PUBLIC_MEDIA_BASE_URL}${relativeUrl}`;
+  return withPublicMediaBase(relativeUrl, absoluteUrl);
 }
 
 function getLocalMediaSigningSecret() {
@@ -133,14 +137,13 @@ function signLocalMediaToken(key: string, expiresAt: number) {
     .digest('base64url');
 }
 
-function localProtectedUrl(key: string, expireTime?: number): string {
+function localProtectedUrl(key: string, expireTime?: number, absoluteUrl?: boolean): string {
   const safeKey = normalizeObjectKey(key);
   const encodedKey = safeKey.split('/').map(encodeURIComponent).join('/');
   const expiresAt = Math.floor(Date.now() / 1000) + (expireTime || 30 * 60);
   const token = signLocalMediaToken(safeKey, expiresAt);
   const relativeUrl = `${LOCAL_PROTECTED_BASE_PATH}/${encodedKey}?exp=${expiresAt}&token=${encodeURIComponent(token)}`;
-  if (!PUBLIC_MEDIA_BASE_URL) return relativeUrl;
-  return `${PUBLIC_MEDIA_BASE_URL}${relativeUrl}`;
+  return withPublicMediaBase(relativeUrl, absoluteUrl);
 }
 
 export function verifyLocalMediaToken(key: string, token: string | null, expiresAtText: string | null) {
@@ -203,6 +206,7 @@ export async function uploadFile(params: {
 export async function generatePresignedUrl(params: {
   key: string;
   expireTime?: number;
+  absoluteUrl?: boolean;
 }): Promise<string> {
   if (params.key.startsWith('http')) return params.key;
 
@@ -212,8 +216,8 @@ export async function generatePresignedUrl(params: {
     } catch {
       return MISSING_MEDIA_DATA_URL;
     }
-    if (isLocalUploadPublicAccess()) return localPublicUrl(params.key);
-    return localProtectedUrl(params.key, params.expireTime);
+    if (isLocalUploadPublicAccess()) return localPublicUrl(params.key, params.absoluteUrl);
+    return localProtectedUrl(params.key, params.expireTime, params.absoluteUrl);
   }
 
   const client = getS3Client();
