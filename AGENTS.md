@@ -240,6 +240,8 @@ pnpm build
 pnpm start
 ```
 
+`pnpm dev` 仅用于本地开发。移动端或验收环境若出现左下角黑色 Next.js “N” 浮层，属于开发模式 Dev Indicator 暴露；应视为部署/环境问题处理。生产/验收必须先 `pnpm build`，再以 `NODE_ENV=production PORT=5000 pnpm start` 启动。`next.config.ts` 已设置 `devIndicators: false` 隐藏开发期指示器，但不能替代生产构建。
+
 ### 服务器生产部署流程
 
 > 实际上线不要求使用 Docker。推荐服务器上使用 Node.js + PostgreSQL + Nginx/Caddy 反向代理，Docker 只作为本地模拟生产环境。
@@ -450,6 +452,7 @@ INITIAL_ADMIN_PASSWORD=<strong-password>
 | 重新生成报告产生重复 | POST /api/reports 始终 insert 新报告 | 生成前先删除同 task_id 的旧报告和旧问题 |
 | 报告合并了不应合并的类型 | 合并逻辑未检查候选报告的 project_type | 添加 `rProjectType` 过滤，仅合并"自研"/"改型降本优化" |
 | 移动端长字段穿透屏幕 | flex-1 无 min-w-0、Badge 无 max-w | body 加 `overflow-x-hidden`，flex-1 加 `min-w-0`，长文本用 `break-all`，Badge 用 `max-w-[Npx] truncate` |
+| 手机左下角出现黑色 Next.js “N” 浮层 | 访问了 Next.js 开发模式 Dev Indicator，常见于误用 `pnpm dev` 或非生产构建 | 生产/验收环境必须 `pnpm build` 后以 `NODE_ENV=production PORT=5000 pnpm start` 启动；保留 `next.config.ts` 的 `devIndicators: false` 作为开发期隐藏兜底 |
 | 视频素材不显示缩略图 | 五感体验和PDF附录过滤了 video 类型 | 移除 `material_type === 'image'` 过滤，视频用 `<video preload="metadata">` + 播放图标 |
 | 转移功能提示目标用户异常 | 前端候选用户与任务当前归属判断不一致，或后端仅凭前端身份参数判断 | 用户列表和转移接口统一基于当前登录会话鉴权，前端按任务 `created_by` 排除当前归属用户 |
 | 问题点偶发重复 | 报告生成并发或双击导致重复创建 | DB 唯一约束 `UNIQUE(title, source_type, task_id)`，insert 失败静默跳过 |

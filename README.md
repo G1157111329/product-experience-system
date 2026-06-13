@@ -136,6 +136,8 @@ AI_ALLOW_PRIVATE_ENDPOINTS=true
 | `pnpm build` | 构建 Next.js 和自定义 Node server |
 | `pnpm start` | 启动 `dist/server.js` 生产服务 |
 
+`pnpm dev` 仅用于本地开发。手机端或验收环境如果出现左下角黑色 Next.js “N” 浮层，说明当前访问的是开发模式指示器；生产/验收环境必须使用 `pnpm build` 后的 `pnpm start` 启动。项目已在 `next.config.ts` 设置 `devIndicators: false`，用于隐藏开发期指示器，但不能替代生产构建。
+
 生产启动示例：
 
 ```bash
@@ -219,6 +221,7 @@ docker compose -f docker-compose.local.yml down -v
 - S3 模式下 MinIO bucket 已创建，且 `.env.local` 中的 S3 配置一致。
 - `pnpm ts-check` 通过。
 - `pnpm build` 通过。
+- 手机端访问验收/生产地址时，左下角不应出现黑色 Next.js “N” 浮层；如出现，优先检查是否误用 `pnpm dev` 或未以 `NODE_ENV=production pnpm start` 运行生产构建。
 - 生产发布前使用官方 npm registry 执行依赖审计：`pnpm audit --audit-level moderate --registry https://registry.npmjs.org`。
 - 本地开发访问 `http://localhost:5000`；首次管理员需通过 `INITIAL_ADMIN_ACCOUNT` 和 `INITIAL_ADMIN_PASSWORD` 显式引导创建，或使用数据库中已有的已审核管理员账号。
 - 在“AI Agent / Prompt 模板”中确认当前启用的 AI 配置可访问。
