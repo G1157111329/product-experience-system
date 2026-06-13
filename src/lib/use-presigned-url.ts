@@ -15,6 +15,14 @@ const pendingMediaDataUrl =
     '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="180" viewBox="0 0 240 180"><rect width="240" height="180" rx="10" fill="#f7f2e9"/><text x="120" y="94" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#8a735c">正在加载素材</text></svg>',
   )}`;
 
+function areUrlMapsEqual(a: Map<string, string>, b: Map<string, string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [key, value] of a) {
+    if (b.get(key) !== value) return false;
+  }
+  return true;
+}
+
 function isDataUrl(value: string): boolean {
   return value.startsWith('data:');
 }
@@ -219,17 +227,21 @@ export function usePresignedUrls<T extends { id: string; file_url?: string | nul
 ): Map<string, string> {
   const [urlMap, setUrlMap] = useState<Map<string, string>>(new Map());
   const mountedRef = useRef(true);
+  const runIdRef = useRef(0);
   const materialSignature = materials
     .map((m) => `${m.id}:${m.file_path ?? ''}:${m.file_url ?? ''}`)
     .join('|');
 
   useEffect(() => {
     mountedRef.current = true;
+    const runId = runIdRef.current + 1;
+    runIdRef.current = runId;
+    const materialSnapshot = materials;
 
     const result = new Map<string, string>();
     const toRequest: string[] = [];
 
-    for (const m of materials) {
+    for (const m of materialSnapshot) {
       const filePath = getStorageKey(m);
       const fileUrl = m.file_url;
 
@@ -257,13 +269,15 @@ export function usePresignedUrls<T extends { id: string; file_url?: string | nul
       }
     }
 
-    setUrlMap(new Map(result));
+    setUrlMap((previous) => (
+      areUrlMapsEqual(previous, result) ? previous : new Map(result)
+    ));
 
     // 批量请求签名 URL
     if (toRequest.length > 0) {
       requestPresignedUrls(toRequest).then((urls) => {
-        if (!mountedRef.current) return;
-        for (const m of materials) {
+        if (!mountedRef.current || runIdRef.current !== runId) return;
+        for (const m of materialSnapshot) {
           const filePath = getStorageKey(m);
           if (filePath && toRequest.includes(filePath)) {
             const signedUrl = urls.get(filePath);
@@ -272,7 +286,9 @@ export function usePresignedUrls<T extends { id: string; file_url?: string | nul
             }
           }
         }
-        setUrlMap(new Map(result));
+        setUrlMap((previous) => (
+          areUrlMapsEqual(previous, result) ? previous : new Map(result)
+        ));
       });
     }
 
