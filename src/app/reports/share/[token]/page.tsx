@@ -130,6 +130,19 @@ function getBoundMaterials(materials: Material[] | undefined, ids: string[] | un
   return materials.filter((material) => idSet.has(material.id));
 }
 
+function getStepProblemPoints(step: RecipeStep): ProblemPoint[] {
+  if (step.problem_points && step.problem_points.length > 0) {
+    return step.problem_points.filter((point) => point.text && point.text.trim());
+  }
+  return step.problem_point ? [{ text: step.problem_point }] : [];
+}
+
+function getUnboundStepMaterials(materials: Material[] | undefined, problemPoints: ProblemPoint[]): Material[] {
+  if (!materials?.length) return [];
+  const boundIds = new Set(problemPoints.flatMap((point) => point.material_ids || []));
+  return materials.filter((material) => !boundIds.has(material.id));
+}
+
 function SharedAiSummary({ summary }: { summary?: AiSummaryLike | null }) {
   if (!summary || (!summary.summary && !summary.tag && !summary.historical_position)) return null;
   return (
@@ -534,6 +547,8 @@ export default function ShareReportPage() {
                         </div>
                         {recipe.recipe_steps?.map(step => {
                           const stepMats = step.materials || [];
+                          const problemPoints = getStepProblemPoints(step);
+                          const stepLevelMats = getUnboundStepMaterials(stepMats, problemPoints);
                           return (
                             <div key={step.id} className="ml-1 sm:ml-2 py-1.5 border-t last:border-0">
                               <div className="flex items-start gap-2 min-w-0">
@@ -541,19 +556,25 @@ export default function ShareReportPage() {
                                 <span className="text-sm break-all min-w-0">{step.operation}</span>
                               </div>
                               {(() => {
-                                const pps = step.problem_points?.length ? step.problem_points.filter(p => p.text?.trim()) : step.problem_point ? [{ text: step.problem_point }] : [];
+                                const pps = problemPoints;
                                 if (!pps.length) return null;
                                 return (
-                                  <div className="ml-7 mt-1">
-                                    {pps.map((pp, i) => (
-                                      <div key={i} className="text-xs text-amber-600 break-all">
+                                  <div className="ml-7 mt-1 space-y-2">
+                                    {pps.map((pp, i) => {
+                                      const pointMaterials = getBoundMaterials(stepMats, pp.material_ids);
+                                      return (
+                                      <div key={`${pp.text}-${i}`} className="space-y-1.5">
+                                      <div className="text-xs text-amber-600 break-all">
                                         {pps.length > 1 && <span className="font-semibold">问题{i + 1}: </span>}{pp.text}
                                       </div>
-                                    ))}
+                                      <MediaGallery materials={pointMaterials} responsive columns={{ mobile: 2, sm: 3, lg: 4 }} onPreview={openPreview} />
+                                      </div>
+                                      );
+                                    })}
                                   </div>
                                 );
                               })()}
-                              <MediaGallery materials={stepMats} responsive columns={{ mobile: 2, sm: 3, lg: 4 }} className="ml-7 mt-1.5" onPreview={openPreview} />
+                              <MediaGallery materials={stepLevelMats} responsive columns={{ mobile: 2, sm: 3, lg: 4 }} className="ml-7 mt-1.5" onPreview={openPreview} />
                             </div>
                           );
                         })}

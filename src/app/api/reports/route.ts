@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { getDb } from '@/storage/database/pg-db';
 import { canAccessTask, isAuthResponse, requireUser } from '@/lib/server/auth';
@@ -48,6 +48,40 @@ function groupRowsByField(rows: Array<Record<string, unknown>>, field: string) {
     grouped.set(key, bucket);
   }
   return grouped;
+}
+
+function collectProblemPointMaterialIds(value: unknown): string[] {
+  if (!value) return [];
+  try {
+    const parsed: unknown = typeof value === 'string' ? JSON.parse(value) : value;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((item) => {
+      if (!item || typeof item !== 'object') return [];
+      const materialIds = (item as Record<string, unknown>).material_ids;
+      return Array.isArray(materialIds)
+        ? materialIds.filter((id): id is string => typeof id === 'string' && id.trim() !== '')
+        : [];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function mergeMaterialsById(
+  primary: Array<Record<string, unknown>>,
+  materialById: Map<string, Record<string, unknown>>,
+  ids: string[],
+) {
+  const merged = new Map<string, Record<string, unknown>>();
+  for (const material of primary) {
+    const id = String(material.id || '');
+    if (id) merged.set(id, material);
+  }
+  for (const id of ids) {
+    const material = materialById.get(id);
+    if (material) merged.set(id, material);
+  }
+  return Array.from(merged.values());
 }
 
 export async function GET(request: NextRequest) {
@@ -208,6 +242,11 @@ export async function POST(request: NextRequest) {
   const materialsByRecordId = groupRowsByField(allMaterials, 'record_id');
   const materialsByRecipeStepId = groupRowsByField(allMaterials, 'recipe_step_id');
   const materialsByRecipeId = groupRowsByField(allMaterials, 'recipe_id');
+  const materialById = new Map<string, Record<string, unknown>>();
+  for (const material of allMaterials) {
+    const id = String(material.id || '');
+    if (id) materialById.set(id, material);
+  }
 
   const recordsWithMaterials = ((rawRecords || []) as Array<Record<string, unknown>>).map((record) => ({
     ...record,
@@ -228,10 +267,15 @@ export async function POST(request: NextRequest) {
       ...step,
       materials: materialsByRecipeStepId.get(String(step.id || '')) || [],
     }));
+    const effectMaterials = mergeMaterialsById(
+      materialsByRecipeId.get(String(recipe.id || '')) || [],
+      materialById,
+      collectProblemPointMaterialIds(recipe.effect_problem_point),
+    );
     return {
       ...recipe,
       recipe_steps: stepsWithMaterials,
-      effect_materials: materialsByRecipeId.get(String(recipe.id || '')) || [],
+      effect_materials: effectMaterials,
     };
   });
 
@@ -299,16 +343,7 @@ export async function POST(request: NextRequest) {
       .where(eq(reportsTable.taskId, body.task_id));
 
     if (previousReportIds.length > 0) {
-      await tx.update(issuesTable)
-        .set({
-          status: '历史归档',
-          sourceType: sql<string>`CASE
-            WHEN ${issuesTable.sourceType} = 'record_fail' THEN 'record_fail_old'
-            WHEN ${issuesTable.sourceType} = 'recipe_problem' THEN 'recipe_problem_old'
-            ELSE ${issuesTable.sourceType}
-          END`,
-          updatedAt: new Date().toISOString(),
-        })
+      await tx.delete(issuesTable)
         .where(and(
           eq(issuesTable.taskId, body.task_id),
           inArray(issuesTable.sourceReportId, previousReportIds),

@@ -192,6 +192,19 @@ function getBoundMaterials(materials: Material[] | undefined, ids: string[] | un
   return materials.filter((material) => idSet.has(material.id));
 }
 
+function getStepProblemPoints(step: RecipeStep): ProblemPoint[] {
+  if (step.problem_points && step.problem_points.length > 0) {
+    return step.problem_points.filter((point) => point.text && point.text.trim());
+  }
+  return step.problem_point ? [{ text: step.problem_point }] : [];
+}
+
+function getUnboundStepMaterials(materials: Material[] | undefined, problemPoints: ProblemPoint[]): Material[] {
+  if (!materials?.length) return [];
+  const boundIds = new Set(problemPoints.flatMap((point) => point.material_ids || []));
+  return materials.filter((material) => !boundIds.has(material.id));
+}
+
 function PrintMediaStrip({ materials, indent = 0 }: { materials?: Material[]; indent?: number }) {
   if (!materials?.length) return null;
   const images = materials.filter(m => m.material_type === 'image');
@@ -448,6 +461,8 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
               </div>
               {recipe.recipe_steps?.map(step => {
                 const stepMats = step.materials || [];
+                const problemPoints = getStepProblemPoints(step);
+                const stepLevelMats = getUnboundStepMaterials(stepMats, problemPoints);
                 return (
                   <div key={step.id} style={{ padding: '6px', margin: '3px 0', background: '#f9fafb', borderRadius: '3px' }}>
                     <div>
@@ -455,22 +470,26 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
                       <span style={{ fontSize: '12px' }}>{step.operation}</span>
                     </div>
                     {(() => {
-                      const pps = step.problem_points && step.problem_points.length > 0
-                        ? step.problem_points.filter((p: { text: string }) => p.text && p.text.trim())
-                        : step.problem_point ? [{ text: step.problem_point }] : [];
+                      const pps = problemPoints;
                       if (pps.length === 0) return null;
                       return (
-                        <div style={{ marginLeft: '24px' }}>
-                          {pps.map((pp: { text: string }, ppIdx: number) => (
-                            <div key={ppIdx} style={{ color: '#d97706', fontSize: '11px' }}>
+                          <div style={{ marginLeft: '24px' }}>
+                          {pps.map((pp: ProblemPoint, ppIdx: number) => {
+                            const pointMaterials = getBoundMaterials(stepMats, pp.material_ids);
+                            return (
+                            <div key={ppIdx}>
+                            <div style={{ color: '#d97706', fontSize: '11px' }}>
                               {pps.length > 1 && <span style={{ fontWeight: 600 }}>问题{ppIdx + 1}: </span>}
                               {pp.text}
                             </div>
-                          ))}
+                            <PrintMediaStrip materials={pointMaterials} />
+                            </div>
+                            );
+                          })}
                         </div>
                       );
                     })()}
-                    <PrintMediaStrip materials={stepMats} indent={24} />
+                    <PrintMediaStrip materials={stepLevelMats} indent={24} />
                   </div>
                 );
               })}

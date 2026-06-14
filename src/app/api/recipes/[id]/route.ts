@@ -2,6 +2,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessRecipe, isAuthResponse, requireUser } from '@/lib/server/auth';
 
+function collectProblemPointMaterialIds(value: unknown): string[] {
+  if (!value) return [];
+  try {
+    const parsed: unknown = typeof value === 'string' ? JSON.parse(value) : value;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((item) => {
+      if (!item || typeof item !== 'object') return [];
+      const materialIds = (item as Record<string, unknown>).material_ids;
+      return Array.isArray(materialIds)
+        ? materialIds.filter((id): id is string => typeof id === 'string' && id.trim() !== '')
+        : [];
+    });
+  } catch {
+    return [];
+  }
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
@@ -64,12 +81,18 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
   // Handle effect material linking/unlinking
   if (body.effect_material_ids !== undefined) {
+    const effectMaterialIds = Array.isArray(body.effect_material_ids)
+      ? body.effect_material_ids.filter((matId: unknown): matId is string => typeof matId === 'string' && matId.trim() !== '')
+      : [];
+    const problemPointMaterialIds = collectProblemPointMaterialIds(body.effect_problem_point);
+    const materialIdsToLink = [...new Set([...effectMaterialIds, ...problemPointMaterialIds])];
+
     // First, unlink all current effect materials for this recipe
     await client.from('materials').update({ recipe_id: null }).eq('recipe_id', id);
 
     // Then link the new ones
-    if (body.effect_material_ids.length > 0) {
-      for (const matId of body.effect_material_ids) {
+    if (materialIdsToLink.length > 0) {
+      for (const matId of materialIdsToLink) {
         await client.from('materials').update({ recipe_id: id }).eq('id', matId);
       }
     }

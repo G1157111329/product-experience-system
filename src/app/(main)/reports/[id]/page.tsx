@@ -160,6 +160,19 @@ function getBoundMaterials(materials: Material[] | undefined, ids: string[] | un
   return materials.filter((material) => idSet.has(material.id));
 }
 
+function getStepProblemPoints(step: RecipeStep): ProblemPoint[] {
+  if (step.problem_points && step.problem_points.length > 0) {
+    return step.problem_points.filter((point) => point.text && point.text.trim());
+  }
+  return step.problem_point ? [{ text: step.problem_point }] : [];
+}
+
+function getUnboundStepMaterials(materials: Material[] | undefined, problemPoints: ProblemPoint[]): Material[] {
+  if (!materials?.length) return [];
+  const boundIds = new Set(problemPoints.flatMap((point) => point.material_ids || []));
+  return materials.filter((material) => !boundIds.has(material.id));
+}
+
 function ReportPaperSection({
   index,
   title,
@@ -423,31 +436,40 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
                 <span className="text-xs font-medium flex-1 min-w-0 truncate">{recipe.name}</span>
                 <span className="text-[10px] text-muted-foreground">{recipe.problem_count || 0} 问题</span>
               </div>
-              {recipe.recipe_steps?.map((step) => (
+              {recipe.recipe_steps?.map((step) => {
+                const problemPoints = getStepProblemPoints(step);
+                const stepMaterials = step.materials || [];
+                const stepLevelMaterials = getUnboundStepMaterials(stepMaterials, problemPoints);
+                return (
                 <div key={step.id} className="p-2.5 rounded-lg border bg-muted/10 space-y-1.5">
                   <div className="flex items-center gap-1.5">
                     <span className="w-4 h-4 rounded-full bg-primary/10 text-primary text-[9px] flex items-center justify-center font-medium shrink-0">{step.step_number}</span>
                     <span className="text-xs break-all">{step.operation}</span>
                   </div>
                   {(() => {
-                    const pps = step.problem_points && step.problem_points.length > 0
-                      ? step.problem_points.filter(p => p.text && p.text.trim())
-                      : step.problem_point ? [{ text: step.problem_point }] : [];
+                    const pps = problemPoints;
                     if (pps.length === 0) return null;
                     return (
-                      <div className="ml-5 space-y-0.5">
-                        {pps.map((pp, ppIdx) => (
-                          <p key={ppIdx} className="text-[10px] text-amber-600 break-all">
+                      <div className="ml-5 space-y-2">
+                        {pps.map((pp, ppIdx) => {
+                          const pointMaterials = getBoundMaterials(stepMaterials, pp.material_ids);
+                          return (
+                          <div key={`${pp.text}-${ppIdx}`} className="space-y-1.5">
+                          <p className="text-[10px] text-amber-600 break-all">
                             {pps.length > 1 && <span className="font-medium">问题{ppIdx + 1}: </span>}
                             {pp.text}
                           </p>
-                        ))}
+                          <MediaGallery materials={pointMaterials} responsive columns={{ mobile: 2, sm: 3, lg: 4 }} onPreview={onPreview} />
+                          </div>
+                          );
+                        })}
                       </div>
                     );
                   })()}
-                  <MediaGallery materials={step.materials || []} responsive columns={{ mobile: 2, sm: 3, lg: 4 }} className="ml-5" onPreview={onPreview} />
+                  <MediaGallery materials={stepLevelMaterials} responsive columns={{ mobile: 2, sm: 3, lg: 4 }} className="ml-5" onPreview={onPreview} />
                 </div>
-              ))}
+                );
+              })}
               {/* Effect Evaluation */}
               {(recipe.effect_description || recipe.effect_problem_point || recipe.effect_score || recipe.effect_ai_result || (recipe.effect_materials && recipe.effect_materials.length > 0)) && (
                 <div className="mt-2 p-2.5 rounded-lg border bg-background space-y-1.5">

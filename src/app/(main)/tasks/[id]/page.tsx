@@ -2606,7 +2606,9 @@ function FunctionsTab({
       const desc = effectDesc[recipe.id] ?? recipe.effect_description ?? '';
       const pps = effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? [];
       const ppJson = JSON.stringify(pps.filter(p => p.text.trim()));
-      const matIds = effectMaterialIds[recipe.id] ?? (recipe.effect_materials || []).map(m => m.id);
+      const effectMats = effectMaterialIds[recipe.id] ?? (recipe.effect_materials || []).map(m => m.id);
+      const problemPointMats = pps.flatMap(p => p.material_ids || []);
+      const matIds = [...new Set([...effectMats, ...problemPointMats])];
       const res = await fetch(`/api/recipes/${recipe.id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
