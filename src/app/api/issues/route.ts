@@ -19,7 +19,9 @@ export async function GET(request: NextRequest) {
   const offset = Math.max(0, parseInt(searchParams.get('offset') || '0', 10) || 0);
 
   let query = client.from('issues').select('*', { count: 'exact' });
-  if (!include_archived && !source_report_id) query = query.not('source_type', 'like', '%_old');
+  if (!include_archived && !source_report_id) {
+    query = query.or('source_type.is.null,source_type.not.like.%_old');
+  }
   if (task_id) query = query.eq('task_id', task_id);
   if (source_report_id) {
     if (!(await canReadReport(client, user, source_report_id))) return forbidden();

@@ -91,6 +91,7 @@ type DbError = { message: string; code?: string };
 type QueryResult = { data: unknown; error: DbError | null; count?: number | null };
 type EqCondition = { field: string; value: unknown };
 type CompareCondition = { field: string; value: unknown };
+type NotCondition = { field: string; operator: string; value: unknown };
 type OrderCondition = { field: string; order?: 'asc' | 'desc'; referencedTable?: string };
 type QueryHelpers = Awaited<ReturnType<typeof loadQueryHelpers>>;
 type RelationConfig = {
@@ -101,8 +102,8 @@ type RelationConfig = {
 };
 
 async function loadQueryHelpers() {
-  const { and, or, eq, ne, gte, lte, ilike, inArray, isNull, asc, desc, count } = await import('drizzle-orm');
-  return { and, or, eq, ne, gte, lte, ilike, inArray, isNull, asc, desc, count };
+  const { and, or, eq, ne, gte, lte, ilike, like, not, inArray, isNull, asc, desc, count } = await import('drizzle-orm');
+  return { and, or, eq, ne, gte, lte, ilike, like, not, inArray, isNull, asc, desc, count };
 }
 
 function toCamelCase(value: string) {
@@ -176,6 +177,7 @@ class QueryBuilder {
   private gteConditions: CompareCondition[] = [];
   private lteConditions: CompareCondition[] = [];
   private ilikeConditions: CompareCondition[] = [];
+  private notConditions: NotCondition[] = [];
   private isConditions: EqCondition[] = [];
   private inConditions: { field: string; values: unknown[] }[] = [];
   private orExpressions: string[] = [];
@@ -252,6 +254,11 @@ class QueryBuilder {
     return this;
   }
 
+  not(field: string, operator: string, value: unknown): QueryBuilder {
+    this.notConditions.push({ field, operator, value });
+    return this;
+  }
+
   is(field: string, value: unknown): QueryBuilder {
     this.isConditions.push({ field, value });
     return this;
@@ -323,13 +330,26 @@ class QueryBuilder {
   }
 
   private buildWhereClause(helpers: QueryHelpers) {
-    const { and, or, eq, ne, gte, lte, ilike, inArray, isNull } = helpers;
+    const { and, or, eq, ne, gte, lte, ilike, like, not: notOp, inArray, isNull } = helpers;
+    const buildNotCondition = (condition: NotCondition) => {
+      const column = resolveColumn(this.schema, condition.field);
+      if (!column) return null;
+
+      if (condition.operator === 'like') return notOp(like(column, String(condition.value)));
+      if (condition.operator === 'ilike') return notOp(ilike(column, String(condition.value)));
+      if (condition.operator === 'eq') return ne(column, condition.value);
+      if (condition.operator === 'neq') return eq(column, condition.value);
+      if (condition.operator === 'is' && condition.value === null) return notOp(isNull(column));
+      return null;
+    };
+
     const allConditions: any[] = [
       ...this.eqConditions.map((c) => eq(resolveColumn(this.schema, c.field), c.value)),
       ...this.neqConditions.map((c) => ne(resolveColumn(this.schema, c.field), c.value)),
       ...this.gteConditions.map((c) => gte(resolveColumn(this.schema, c.field), c.value)),
       ...this.lteConditions.map((c) => lte(resolveColumn(this.schema, c.field), c.value)),
       ...this.ilikeConditions.map((c) => ilike(resolveColumn(this.schema, c.field), String(c.value))),
+      ...this.notConditions.map(buildNotCondition).filter(Boolean),
       ...this.isConditions.map((c) =>
         c.value === null ? isNull(resolveColumn(this.schema, c.field)) : eq(resolveColumn(this.schema, c.field), c.value)
       ),
@@ -348,6 +368,16 @@ class QueryBuilder {
               if (!column) return null;
               if (operator === 'eq') return eq(column, decodeFilterValue(value));
               if (operator === 'ilike') return ilike(column, decodeFilterValue(value));
+              if (operator === 'like') return like(column, decodeFilterValue(value));
+              if (operator === 'not') {
+                const [notOperator, ...notValueParts] = valueParts;
+                const notValue = notValueParts.join('.');
+                return buildNotCondition({
+                  field,
+                  operator: notOperator,
+                  value: decodeFilterValue(notValue),
+                });
+              }
               if (operator === 'is' && value === 'null') return isNull(column);
               return null;
             })
