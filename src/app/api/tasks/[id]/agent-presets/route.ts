@@ -306,7 +306,6 @@ function dedupeSuggestions(input: NormalizedPresetSuggestions): NormalizedPreset
 
 async function acceptStandardSuggestions(client: ReturnType<typeof getSupabaseClient>, taskId: string, standards: Array<Record<string, unknown>>) {
   const ids = standards.map((item) => String(item.standard_item_id || item.standardItemId || '')).filter(Boolean);
-  const generatedSuggestions = standards.filter((item) => !String(item.standard_item_id || item.standardItemId || '').trim());
 
   const { data: existingRecords } = await client.from('check_records').select('id').eq('task_id', taskId);
   let nextSort = existingRecords?.length || 0;
@@ -316,6 +315,11 @@ async function acceptStandardSuggestions(client: ReturnType<typeof getSupabaseCl
     ? await client.from('standard_items').select('*').in('id', ids)
     : { data: [] };
   const itemRows = items || [];
+  const foundItemIds = new Set(itemRows.map((item: Record<string, unknown>) => String(item.id || '')).filter(Boolean));
+  const generatedSuggestions = standards.filter((item) => {
+    const suggestedId = String(item.standard_item_id || item.standardItemId || '').trim();
+    return !suggestedId || !foundItemIds.has(suggestedId);
+  });
   const standardIds = [...new Set(itemRows.map((item: Record<string, unknown>) => String(item.standard_id || '')).filter(Boolean))];
   const { data: standardRows } = standardIds.length > 0
     ? await client.from('standards').select('id, category').in('id', standardIds)
@@ -358,7 +362,7 @@ async function acceptStandardSuggestions(client: ReturnType<typeof getSupabaseCl
       return {
         task_id: taskId,
         standard_item_id: null,
-        standard_category: String(item.standard_category || item.standardCategory || 'AI预设'),
+        standard_category: '非标准',
         check_item: title.substring(0, 200),
         check_requirement: reason || null,
         evaluation_result: '待定',
