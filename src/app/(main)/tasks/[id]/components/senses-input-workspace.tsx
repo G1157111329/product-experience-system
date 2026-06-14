@@ -23,11 +23,11 @@ function getRecordTitle(record: CheckRecord) {
 }
 
 function isPassed(record: CheckRecord) {
-  return record.evaluation_result === '合格' || record.evaluation_result === '鍚堟牸';
+  return record.evaluation_result === '合格';
 }
 
 function isFailed(record: CheckRecord) {
-  return record.evaluation_result === '不合格' || record.evaluation_result === '涓嶅悎鏍?';
+  return record.evaluation_result === '不合格';
 }
 
 export function SensesInputWorkspace({
@@ -84,7 +84,7 @@ export function SensesInputWorkspace({
                   type="button"
                   onClick={() => selectRecord(record)}
                   className={cn(
-                    'w-full rounded-md border p-3 text-left transition-colors hover:bg-muted/50',
+                    'w-full rounded-md border p-3 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     selectedRecord?.id === record.id ? 'border-primary bg-primary/5' : 'bg-background'
                   )}
                 >

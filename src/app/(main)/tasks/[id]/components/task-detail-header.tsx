@@ -25,7 +25,7 @@ export function TaskDetailHeader({
   onBack, onOpenAiSummary, onGenerateAiSummary, onTransfer, onGenerateReport,
 }: TaskDetailHeaderProps) {
   const actions = (
-    <div className="grid grid-cols-2 gap-2 sm:flex sm:w-auto sm:justify-end">
+    <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:justify-end">
       <Button variant="outline" size="sm" className="min-w-0 sm:flex-none" onClick={aiSummary ? onOpenAiSummary : onGenerateAiSummary} disabled={aiSummarizing}>
         <Sparkles className="h-4 w-4 mr-1.5" /> {aiSummarizing ? '总结中...' : aiSummary ? 'AI总结' : '生成AI总结'}
       </Button>
@@ -58,7 +58,7 @@ export function TaskDetailHeader({
         <button
           type="button"
           onClick={onOpenAiSummary}
-          className="w-full text-left rounded-lg border bg-primary/5 border-primary/20 p-3 shadow-sm transition-colors hover:bg-primary/10"
+          className="w-full text-left rounded-lg border bg-primary/5 border-primary/20 p-3 shadow-sm transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <div className="flex flex-wrap items-center gap-2 min-w-0">
             <Badge className="shrink-0 text-[10px]">{aiSummary.tag || 'AI总结'}</Badge>

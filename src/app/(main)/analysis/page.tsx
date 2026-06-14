@@ -28,7 +28,7 @@ interface FilterOptions {
 interface BreakdownItem { tasks: number; completedTasks: number; issues: number; rectifiedIssues: number }
 
 const STATUS_COLORS: Record<string, string> = {
-  '待执行': 'bg-slate-400', '进行中': 'bg-primary', '待审核': 'bg-amber-400',
+  '待执行': 'bg-slate-400', '进行中': 'bg-blue-500', '待审核': 'bg-violet-500',
   '已完成': 'bg-emerald-500', '已驳回': 'bg-destructive',
 };
 const LEVEL_COLORS: Record<string, string> = {
@@ -145,6 +145,16 @@ export default function AnalysisPage() {
     setFProduct('all'); // Reset product when category changes
   };
 
+  const activeFilterCount = [
+    fCategory !== 'all',
+    fProduct !== 'all',
+    fProjectType !== 'all',
+    fOrganizer !== 'all',
+    fIssueLevel !== 'all',
+    Boolean(fDateFrom),
+    Boolean(fDateTo),
+  ].filter(Boolean).length;
+
   if (loading && !metrics) {
     return (
       <PageShell className="space-y-6">
@@ -176,6 +186,7 @@ export default function AnalysisPage() {
           <div className="flex items-center gap-2 mb-3">
             <Filter className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm font-medium">筛选条件</span>
+            {activeFilterCount > 0 && <Badge variant="secondary" className="text-[10px]">已启用 {activeFilterCount} 项</Badge>}
             <Button variant="ghost" size="sm" className={cn(pageActionButtonClass, 'ml-auto')} onClick={resetFilters}>重置</Button>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7">

@@ -139,8 +139,8 @@ function ExperienceStandardsSection({ categories, isAdmin, onSelectedCountChange
               {isAdmin && (
                 <Checkbox checked={selectedIds.has(std.id)} onCheckedChange={() => toggleSelect(std.id)} className="h-4 w-4 shrink-0" />
               )}
-              <Link href={`/standards/${std.id}`} className="flex-1 min-w-0">
-                <div className={cn('rounded-lg border bg-card', pageListCardClass)}>
+              <Link href={`/standards/${std.id}`} className="group flex-1 min-w-0 rounded-lg focus-visible:outline-none">
+                <div className={cn('rounded-lg border bg-card group-focus-visible:border-ring group-focus-visible:ring-2 group-focus-visible:ring-ring/30', pageListCardClass)}>
                   <div className={pageListContentClass}>
                     <div className={pageListBodyClass}>
                       <StatusBadge kind="standard" value={std.category} className="mt-0.5 shrink-0 text-[9px]" />

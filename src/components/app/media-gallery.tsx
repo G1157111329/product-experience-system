@@ -1,5 +1,6 @@
 'use client';
 
+import type { KeyboardEvent } from 'react';
 import { useImagePreview } from '@/components/image-preview';
 import { usePresignedUrls } from '@/lib/use-presigned-url';
 import { cn } from '@/lib/utils';
@@ -65,14 +66,35 @@ function MediaThumbnail({
 
   const isImagePlaceholder = url.startsWith('data:image/');
 
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!onClick) return;
+    if (event.key === 'Enter') {
+      onClick();
+      return;
+    }
+    if (event.key === ' ') {
+      event.preventDefault();
+    }
+  };
+
+  const handleKeyUp = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!onClick || event.key !== ' ') return;
+    onClick();
+  };
+
   return (
     <div
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
       className={cn(
-        'relative cursor-pointer overflow-hidden rounded border bg-muted',
+        'relative overflow-hidden rounded border bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        onClick && 'cursor-pointer',
         !responsive && sizeClass,
         responsive && 'aspect-square w-full',
       )}
       onClick={onClick}
+      onKeyDown={handleKeyDown}
+      onKeyUp={handleKeyUp}
     >
       {type === 'video' && !isImagePlaceholder ? (
         <>

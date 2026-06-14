@@ -258,7 +258,7 @@ export default function TasksPage() {
                 <Plus className="h-4 w-4" /> 新建任务
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto">
+            <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>创建体验任务</DialogTitle>
                 <DialogDescription>填写任务基本信息后进入任务详情继续添加素材、问题点和功能效果。</DialogDescription>
@@ -341,7 +341,7 @@ export default function TasksPage() {
                           })
                         }
                         className={cn(
-                          'min-h-10 rounded-lg border px-2 py-2 text-xs font-medium transition-colors',
+                          'min-h-10 rounded-lg border px-2 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                           form.project_type === type
                             ? 'border-primary bg-primary text-primary-foreground'
                             : 'border-border bg-background hover:bg-muted/50'
@@ -362,7 +362,7 @@ export default function TasksPage() {
                           type="button"
                           onClick={() => setForm({ ...form, project_phase: phase })}
                           className={cn(
-                            'min-h-10 rounded-lg border px-2 py-2 text-xs font-medium transition-colors',
+                            'min-h-10 rounded-lg border px-2 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                             form.project_phase === phase
                               ? 'border-primary bg-primary text-primary-foreground'
                               : 'border-border bg-background hover:bg-muted/50'
@@ -421,13 +421,16 @@ export default function TasksPage() {
       />
 
       <FilterBar>
-        <div className="flex gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+        <div className="flex gap-1.5 overflow-x-auto pb-1 sm:pb-0" role="tablist" aria-label="体验计划状态筛选">
           {STATUS_TABS.map((tab) => (
             <button
               key={tab}
+              type="button"
+              role="tab"
+              aria-selected={filterStatus === tab}
               onClick={() => setFilterStatus(tab)}
               className={cn(
-                'min-h-10 whitespace-nowrap rounded-lg px-3 text-xs font-medium transition-colors',
+                'min-h-10 whitespace-nowrap rounded-lg px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 filterStatus === tab
                   ? 'bg-primary text-primary-foreground'
                   : 'bg-muted text-muted-foreground hover:bg-muted/80'
@@ -443,6 +446,12 @@ export default function TasksPage() {
           onChange={(event) => setKeyword(event.target.value)}
         />
       </FilterBar>
+
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <span>当前显示 {loading ? '-' : tasks.length} 条</span>
+        {filterStatus !== 'all' && <Badge variant="outline" className="text-[10px]">状态：{filterStatus}</Badge>}
+        {keyword.trim() && <Badge variant="outline" className="max-w-full text-[10px]">关键词：{keyword.trim()}</Badge>}
+      </div>
 
       {loading ? (
         <SkeletonList rows={3} />

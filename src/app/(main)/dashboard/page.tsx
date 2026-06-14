@@ -169,6 +169,30 @@ export default function DashboardPage() {
         }
       />
 
+      {pendingCount > 0 && (
+        <Card className="border-primary/30 bg-primary/5 shadow-sm">
+          <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
+            <div className="flex min-w-0 items-start gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                <Shield className="h-4 w-4" />
+              </span>
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-foreground">
+                  {isAdmin ? '有待审核请求需要处理' : '有待申请事项等待审核'}
+                </div>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  {isAdmin ? `当前共有 ${pendingCount} 条注册或账号变更请求。` : `当前共有 ${pendingCount} 条账号申请正在处理中。`}
+                </p>
+              </div>
+            </div>
+            <Button size="sm" className="w-full gap-1.5 sm:w-auto" onClick={() => setAuditDialogOpen(true)}>
+              <Shield className="h-3.5 w-3.5" />
+              {isAdmin ? '处理审核' : '查看申请'}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
         <MetricCard label="体验计划" value={data.totalTasks} icon={ClipboardList} />
         <MetricCard label="完成率" value={`${completionRate}%`} icon={CheckCircle2} tone="success" />

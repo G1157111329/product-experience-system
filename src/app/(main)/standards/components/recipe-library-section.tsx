@@ -246,7 +246,12 @@ function RecipeLibrarySection({ categories, isAdmin }, ref) {
               <div className={pageListContentClass}>
                 <div className={pageListBodyClass}>
                   <StatusBadge kind="recipe" value={recipe.recipe_type} className="mt-0.5 shrink-0 text-[9px]" />
-                  <div className="min-w-0 flex-1 cursor-pointer" onClick={() => handleExpand(recipe)}>
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 cursor-pointer rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-expanded={expandedId === recipe.id}
+                    onClick={() => handleExpand(recipe)}
+                  >
                     <div className={pageListTitleClass}>{recipe.name}</div>
                     <div className={pageListDescriptionClass}>
                       {recipe.product_category || '通用'}{recipe.product ? ` - ${recipe.product}` : ''}
@@ -259,7 +264,7 @@ function RecipeLibrarySection({ categories, isAdmin }, ref) {
                         </span>
                       )}
                     </div>
-                  </div>
+                  </button>
                   <div className="flex items-center gap-1 shrink-0">
                     {isAdmin && (
                       <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="编辑食谱" onClick={(e) => { e.stopPropagation(); handleOpenEdit(recipe); }}>

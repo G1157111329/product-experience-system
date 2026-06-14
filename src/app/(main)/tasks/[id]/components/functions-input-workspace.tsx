@@ -114,7 +114,7 @@ export function FunctionsInputWorkspace({
             <div
               key={recipe.id}
               className={cn(
-                'w-full rounded-md border p-3 text-left transition-all group',
+                'w-full rounded-md border p-3 text-left transition-all group focus-within:ring-2 focus-within:ring-ring/30',
                 selectedRecipe?.id === recipe.id ? 'border-primary bg-primary/5' : 'bg-background hover:bg-muted/50',
                 dragRecipeIdx === recipeIdx && 'opacity-50 scale-95',
                 dragRecipeOverIdx === recipeIdx && 'border-primary border-2',
@@ -126,7 +126,10 @@ export function FunctionsInputWorkspace({
               <div className="flex items-start gap-2">
                 {/* Drag handle */}
                 <div
-                  className="cursor-grab active:cursor-grabbing mt-0.5 shrink-0 text-muted-foreground/40 hover:text-muted-foreground"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`拖拽排序 ${recipe.name}`}
+                  className="cursor-grab active:cursor-grabbing mt-0.5 shrink-0 rounded text-muted-foreground/40 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   draggable
                   onDragStart={() => setDragRecipeIdx(recipeIdx)}
                   onDragEnd={() => {
@@ -217,7 +220,10 @@ export function FunctionsInputWorkspace({
                     <div className="flex items-center gap-3">
                       {/* Step drag handle */}
                       <div
-                        className="cursor-grab active:cursor-grabbing shrink-0 text-muted-foreground/40 hover:text-muted-foreground"
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`拖拽排序步骤 ${step.step_number}`}
+                        className="cursor-grab active:cursor-grabbing shrink-0 rounded text-muted-foreground/40 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         draggable
                         onDragStart={() => setDragStepIdx(stepIdx)}
                         onDragEnd={() => handleStepDragEnd(selectedRecipe)}
@@ -228,13 +234,17 @@ export function FunctionsInputWorkspace({
                       <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
                         {step.step_number}
                       </div>
-                      <div className="min-w-0 flex-1" onClick={() => onBindingTargetChange({ type: 'recipe_step', id: step.id, label: `步骤 ${step.step_number}` })}>
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={() => onBindingTargetChange({ type: 'recipe_step', id: step.id, label: `步骤 ${step.step_number}` })}
+                      >
                         <div className="text-sm cursor-pointer">{step.operation || '暂无操作说明'}</div>
                         <div className="mt-1 flex flex-wrap gap-1">
                           <Badge variant="outline" className="text-[10px]">{step.materials?.length || 0} 个素材</Badge>
                           {step.problem_point && <Badge variant="destructive" className="text-[10px]">有问题点</Badge>}
                         </div>
-                      </div>
+                      </button>
                       <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover/step:opacity-100 transition-opacity">
                         <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => onEditStep(step, selectedRecipe)}>
                           <Pencil className="h-3 w-3 text-muted-foreground" />
@@ -257,7 +267,7 @@ export function FunctionsInputWorkspace({
               <button
                 type="button"
                 onClick={() => onBindingTargetChange({ type: 'recipe_effect', id: selectedRecipe.id, label: '当前效果评价' })}
-                className="w-full rounded-md border bg-background p-3 text-left hover:bg-muted/50"
+                className="w-full rounded-md border bg-background p-3 text-left hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <div className="whitespace-pre-wrap text-sm">{selectedRecipe.effect_description || '暂无效果描述'}</div>
                 <div className="mt-3 flex flex-wrap gap-2">

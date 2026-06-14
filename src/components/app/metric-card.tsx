@@ -23,7 +23,7 @@ const toneClass = {
 
 export function MetricCard({ label, value, icon: Icon, helper, tone = 'primary', className }: MetricCardProps) {
   return (
-    <Card className={cn('min-w-0', className)}>
+    <Card className={cn('min-w-0 transition-colors hover:border-primary/30', className)}>
       <CardContent className="p-3 sm:p-4">
         <div className="flex min-w-0 items-center gap-3">
           {Icon && (
@@ -31,7 +31,7 @@ export function MetricCard({ label, value, icon: Icon, helper, tone = 'primary',
               <Icon className="h-5 w-5" />
             </div>
           )}
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="truncate text-2xl font-semibold leading-tight tabular-nums">{value}</div>
             <div className="truncate text-xs text-muted-foreground">{label}</div>
             {helper && <div className="mt-1 truncate text-xs text-muted-foreground">{helper}</div>}

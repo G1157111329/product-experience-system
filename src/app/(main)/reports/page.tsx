@@ -320,9 +320,11 @@ export default function ReportsPage() {
       />
 
       <FilterBar>
-        <div className="flex w-full rounded-lg border bg-background p-1 sm:w-auto">
+        <div className="flex w-full rounded-lg border bg-background p-1 sm:w-auto" role="tablist" aria-label="报告范围">
           <Button
             type="button"
+            role="tab"
+            aria-selected={reportScope === 'all'}
             size="sm"
             variant={reportScope === 'all' ? 'default' : 'ghost'}
             className="h-8 flex-1 px-3 text-xs sm:flex-none"
@@ -332,6 +334,8 @@ export default function ReportsPage() {
           </Button>
           <Button
             type="button"
+            role="tab"
+            aria-selected={reportScope === 'mine'}
             size="sm"
             variant={reportScope === 'mine' ? 'default' : 'ghost'}
             className="h-8 flex-1 px-3 text-xs sm:flex-none"
@@ -357,6 +361,13 @@ export default function ReportsPage() {
           </SelectContent>
         </Select>
       </FilterBar>
+
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <span>当前显示 {loading ? '-' : visibleReports.length} 份报告</span>
+        {categoryFilter !== 'all' && <Badge variant="outline" className="text-[10px]">品类：{categoryFilter}</Badge>}
+        {keyword.trim() && <Badge variant="outline" className="max-w-full text-[10px]">关键词：{keyword.trim()}</Badge>}
+        {compareIds.length > 0 && <Badge variant="secondary" className="text-[10px]">已选择 {compareIds.length}/2 份用于对比</Badge>}
+      </div>
 
       {/* Content */}
       {loading ? (

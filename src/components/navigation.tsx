@@ -6,8 +6,9 @@ import { useState, useEffect, useCallback, useMemo, type MouseEvent } from 'reac
 import {
   LayoutDashboard, BookOpen, ClipboardList, AlertTriangle, FileText,
   BarChart3, Menu, ChevronRight, User, LogOut, Key, Pencil,
-  Settings, Plus, Minus, Trash2, Sparkles,
+  Settings, Plus, Minus, Trash2, Sparkles, Monitor, Moon, Sun,
 } from 'lucide-react';
+import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -22,6 +23,12 @@ import { useAuth } from '@/lib/auth-context';
 import { BrandLogo } from '@/components/brand-logo';
 import { AiAgentSettings } from '@/components/settings/ai-agent-settings';
 import { toast } from 'sonner';
+
+const themeOptions = [
+  { value: 'light', label: '明亮', icon: Sun },
+  { value: 'dark', label: '深色', icon: Moon },
+  { value: 'system', label: '跟随系统', icon: Monitor },
+] as const;
 
 interface CategoryWithProducts {
   id: string; name: string; sort_order: number;
@@ -594,6 +601,52 @@ function StandardOptionsSettings({ open, onOpenChange }: { open: boolean; onOpen
   );
 }
 
+function ThemeModeControl({ className }: { className?: string }) {
+  const { theme, setTheme, resolvedTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const activeTheme = mounted ? theme || 'system' : 'system';
+  const resolvedLabel = resolvedTheme === 'dark' ? '当前为深色界面' : '当前为明亮界面';
+
+  return (
+    <div className={cn('rounded-lg border bg-card p-3', className)}>
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="text-sm font-medium text-foreground">界面主题</div>
+          <div className="text-xs text-muted-foreground">全局生效，刷新后保留。{mounted ? resolvedLabel : ''}</div>
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        {themeOptions.map((option) => {
+          const isActive = activeTheme === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              disabled={!mounted}
+              aria-pressed={isActive}
+              onClick={() => setTheme(option.value)}
+              className={cn(
+                'flex min-h-10 items-center justify-center gap-1.5 rounded-md border px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60',
+                isActive
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground'
+              )}
+            >
+              <option.icon className="h-3.5 w-3.5" />
+              <span>{option.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function PlatformSettingsDialog({
   open,
   onOpenChange,
@@ -644,6 +697,7 @@ function PlatformSettingsDialog({
             统一管理基础资料、标准字段和 AI Prompt 配置。
           </DialogDescription>
         </DialogHeader>
+        <ThemeModeControl />
         <div className="grid gap-3 py-2 sm:grid-cols-3">
           {settingItems.map((item) => (
             <button
@@ -821,6 +875,10 @@ function UserSection() {
 
             <Separator />
 
+            <ThemeModeControl />
+
+            <Separator />
+
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label className="text-xs text-muted-foreground">平台设置</Label>
@@ -946,6 +1004,8 @@ function MobileUserIcon() {
             <div><span className="text-xs text-muted-foreground">账号：</span><span className="text-sm">{user.account}</span></div>
             <div><span className="text-xs text-muted-foreground">名称：</span><span className="text-sm">{user.name}</span></div>
             <div><span className="text-xs text-muted-foreground">角色：</span><Badge variant={isAdmin ? 'default' : 'secondary'} className="text-xs">{isAdmin ? '管理账号' : '使用账号'}</Badge></div>
+            <Separator />
+            <ThemeModeControl />
             <Separator />
             <div className="flex items-center justify-between">
               <span className="text-xs text-muted-foreground">平台设置</span>

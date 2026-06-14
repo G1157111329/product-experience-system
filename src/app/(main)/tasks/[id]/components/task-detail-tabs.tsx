@@ -19,13 +19,20 @@ type TaskDetailTabsProps = {
 
 export function TaskDetailTabs({ activeTab, onTabChange }: TaskDetailTabsProps) {
   return (
-    <div className="sticky top-14 z-20 -mx-3 flex gap-2 overflow-x-auto border-y bg-background/95 px-3 py-2 backdrop-blur scrollbar-none sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0">
+    <div
+      className="sticky top-14 z-20 -mx-3 flex gap-2 overflow-x-auto border-y bg-background/95 px-3 py-2 backdrop-blur scrollbar-none sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0"
+      role="tablist"
+      aria-label="任务详情模块"
+    >
       {tabs.map((tab) => (
         <button
           key={tab.key}
+          type="button"
+          role="tab"
+          aria-selected={activeTab === tab.key}
           onClick={() => onTabChange(tab.key)}
           className={cn(
-            'flex min-w-[5.6rem] flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors sm:flex-none sm:px-4 sm:py-2',
+            'flex min-w-[5.6rem] flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex-none sm:px-4 sm:py-2',
             activeTab === tab.key
               ? 'bg-primary text-primary-foreground shadow-sm'
               : 'bg-muted text-muted-foreground hover:bg-muted/80'

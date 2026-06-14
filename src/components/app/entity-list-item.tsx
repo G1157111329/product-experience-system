@@ -36,7 +36,7 @@ export function EntityListItem({
   onClick,
 }: EntityListItemProps) {
   const content = (
-    <Card className={cn(pageListCardClass, className)}>
+    <Card className={cn(pageListCardClass, 'group-focus-visible:border-ring group-focus-visible:ring-2 group-focus-visible:ring-ring/30', className)}>
       <CardContent className={pageListContentClass}>
         <div className={pageListBodyClass}>
           {leading && <div className="shrink-0">{leading}</div>}
@@ -58,7 +58,7 @@ export function EntityListItem({
 
   if (href && !actions) {
     return (
-      <Link href={href} className="block min-w-0" onClick={onClick}>
+      <Link href={href} className="group block min-w-0 rounded-lg focus-visible:outline-none" onClick={onClick}>
         {content}
       </Link>
     );
@@ -68,7 +68,10 @@ export function EntityListItem({
     <div
       role={onClick || href ? 'button' : undefined}
       tabIndex={onClick || href ? 0 : undefined}
-      className={cn('block w-full min-w-0 text-left', (onClick || href) && 'cursor-pointer')}
+      className={cn(
+        'group block w-full min-w-0 rounded-lg text-left focus-visible:outline-none',
+        (onClick || href) && 'cursor-pointer'
+      )}
       onClick={() => {
         if (href) {
           window.location.href = href;
@@ -77,8 +80,19 @@ export function EntityListItem({
         onClick?.();
       }}
       onKeyDown={(event) => {
-        if (event.key !== 'Enter' && event.key !== ' ') return;
-        event.preventDefault();
+        if (event.key === ' ') {
+          event.preventDefault();
+          return;
+        }
+        if (event.key !== 'Enter') return;
+        if (href) {
+          window.location.href = href;
+          return;
+        }
+        onClick?.();
+      }}
+      onKeyUp={(event) => {
+        if (event.key !== ' ') return;
         if (href) {
           window.location.href = href;
           return;

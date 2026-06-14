@@ -64,12 +64,15 @@ export default function StandardsPage() {
       />
 
       {/* Section Tabs */}
-      <div className="inline-flex w-full gap-1 rounded-lg border bg-card p-1 shadow-sm sm:w-auto">
+      <div className="inline-flex w-full gap-1 rounded-lg border bg-card p-1 shadow-sm sm:w-auto" role="tablist" aria-label="标准管理板块">
         <button
           data-testid="standards-section-tab"
+          type="button"
+          role="tab"
+          aria-selected={activeSection === 'standards'}
           onClick={() => setActiveSection('standards')}
           className={cn(
-            'flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium transition-colors sm:flex-none',
+            'flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex-none',
             activeSection === 'standards' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'
           )}
         >
@@ -77,9 +80,12 @@ export default function StandardsPage() {
         </button>
         <button
           data-testid="recipe-library-section-tab"
+          type="button"
+          role="tab"
+          aria-selected={activeSection === 'recipes'}
           onClick={() => setActiveSection('recipes')}
           className={cn(
-            'flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium transition-colors sm:flex-none',
+            'flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex-none',
             activeSection === 'recipes' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'
           )}
         >
