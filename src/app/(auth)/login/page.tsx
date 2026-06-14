@@ -243,7 +243,7 @@ export default function LoginPage() {
                 />
               </div>
             </div>
-            <DialogFooter className="gap-2 sm:gap-0">
+            <DialogFooter className="gap-3 sm:gap-3">
               <Button variant="outline" onClick={() => setFpDialogOpen(false)}>取消</Button>
               <Button onClick={handleForgotPassword} disabled={fpLoading}>{fpLoading ? '提交中...' : '提交审核'}</Button>
             </DialogFooter>
