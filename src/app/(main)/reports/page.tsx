@@ -540,7 +540,7 @@ export default function ReportsPage() {
       <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
         <DialogContent>
           <DialogHeader><DialogTitle>确认删除</DialogTitle><DialogDescription>删除后不可恢复，确定要删除该报告吗？</DialogDescription></DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-0">
+          <DialogFooter className="gap-3 sm:gap-3">
             <Button variant="outline" onClick={() => setDeleteId(null)}>取消</Button>
             <Button variant="destructive" onClick={handleDelete}>确认删除</Button>
           </DialogFooter>

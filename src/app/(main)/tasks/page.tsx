@@ -528,7 +528,7 @@ export default function TasksPage() {
               删除后该任务及其所有关联数据将无法恢复，确认删除「{deletingTask?.task_name}」？
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-0">
+          <DialogFooter className="gap-3 sm:gap-3">
             <Button
               variant="outline"
               onClick={() => {

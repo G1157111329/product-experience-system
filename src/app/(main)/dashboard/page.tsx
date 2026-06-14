@@ -342,7 +342,7 @@ export default function DashboardPage() {
             <DialogTitle>确认取消</DialogTitle>
             <DialogDescription>确定要取消该申请吗？</DialogDescription>
           </DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-0">
+          <DialogFooter className="gap-3 sm:gap-3">
             <Button variant="outline" onClick={() => setCancelId(null)}>
               返回
             </Button>

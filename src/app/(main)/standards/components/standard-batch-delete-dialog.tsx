@@ -32,7 +32,7 @@ export function StandardBatchDeleteDialog({ open, onOpenChange, selectedCount, s
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader><DialogTitle>确认删除</DialogTitle><DialogDescription>确定要删除选中的 {selectedCount} 项标准吗？此操作不可撤销。</DialogDescription></DialogHeader>
-        <div className="flex justify-end gap-2 mt-4">
+        <div className="mt-4 flex justify-end gap-3">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={deleting}>取消</Button>
           <Button variant="destructive" onClick={handleBatchDelete} disabled={deleting}>
             {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Trash2 className="h-4 w-4 mr-1" />}确认删除
