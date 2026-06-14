@@ -54,3 +54,19 @@ assert.equal(normalized.recipes.length, 1);
 assert.equal(normalized.recipes[0].name, '快速豆浆');
 assert.equal(normalized.recipes[0].steps.length, 1);
 assert.equal(normalized.recipes[0].steps[0].operation, '加入食材');
+
+const nonstandard = normalizePresetSuggestions({
+  standards: [
+    {
+      standard_item_id: '',
+      standard_category: '非标准',
+      reason: '模型补充的体验风险',
+      focus: '蒸汽喷溅风险',
+    },
+  ],
+});
+
+assert.equal(nonstandard.standards.length, 1);
+assert.equal(nonstandard.standards[0].standardItemId, '');
+assert.equal(nonstandard.standards[0].standardCategory, '非标准');
+assert.equal(nonstandard.standards[0].focus, '蒸汽喷溅风险');

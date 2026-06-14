@@ -80,12 +80,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         task_snapshot: taskSnapshot,
         hotspot_summary: body.hotspot_summary || '',
       });
+      const systemPrompt = appendRuntimePresetRules(skillKey, String(active.version.system_prompt || ''));
       const rawContent = await invokeConfiguredAI({
         client,
         defaultTemperature: 0.3,
         maxTokens: 2400,
         messages: [
-          { role: 'system', content: String(active.version.system_prompt || '') },
+          { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
       });
@@ -281,9 +282,20 @@ function buildTaskSnapshot(
     `测试方法:${task.test_method || '-'}`,
     `结构化意图:${JSON.stringify(intent)}`,
     `热点摘要:${hotspotSummary || '暂无'}`,
-    `候选标准:\n${standards || '暂无'}`,
+    includeStandards
+      ? '五感建议规则: 优先引用高度匹配的候选标准ID；候选标准不是强制全集。若候选标准不足以覆盖关键体验风险，请输出 standard_category=非标准 且 standard_item_id 留空，禁止强行匹配弱相关标准。'
+      : '',
+    `候选标准库（优先参考，非强制全集）:\n${standards || '暂无'}`,
     `候选食谱库:\n${recipes || '暂无'}`,
   ].join('\n');
+}
+
+function appendRuntimePresetRules(skillKey: AgentSkillKey, systemPrompt: string) {
+  if (skillKey !== 'senses_standard_preset') return systemPrompt;
+  return [
+    systemPrompt,
+    '运行时规则: 五感体验建议优先引用高度匹配的候选标准ID；候选标准库不是强制全集。如果候选标准没有覆盖必要体验风险，必须输出 standard_category=非标准 且 standard_item_id 留空。禁止为了凑ID强行匹配弱相关标准。',
+  ].filter(Boolean).join('\n\n');
 }
 
 function dedupeSuggestions(input: NormalizedPresetSuggestions): NormalizedPresetSuggestions {

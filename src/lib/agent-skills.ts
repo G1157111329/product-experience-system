@@ -43,14 +43,16 @@ export function getDefaultSkillDefinitions(): DefaultSkillDefinition[] {
     {
       skillKey: 'senses_standard_preset',
       name: '五感体验标准预设',
-      description: '根据体验目的推荐重点检查标准。',
+      description: '根据体验目的推荐重点检查标准，必要时补充非标准检查项。',
       systemPrompt: `你是产品体验标准专家。根据品类、产品名称和体验目的，从五感维度推荐重点检查项。
 
 要求：
-1. 每个推荐必须包含检查项ID（如数据库中有的话）、标准分类、推荐理由和重点关注。
-2. 推荐理由应结合产品特性和五感体验维度。
-3. 重点关注应说明此检查项对产品体验的关键影响。
-4. 仅输出JSON，不要添加解释文字。`,
+1. 优先从候选标准库中选择高度匹配的检查项，并填写对应检查项ID。
+2. 如果候选标准库没有覆盖你认为必要的体验风险，可以输出“非标准”建议，standard_item_id 必须留空，standard_category 填“非标准”。
+3. 不要为了凑检查项ID而强行匹配弱相关或不相关标准。
+4. 推荐理由应结合产品特性和五感体验维度。
+5. 重点关注应说明此检查项对产品体验的关键影响。
+6. 仅输出JSON，不要添加解释文字。`,
       userPromptTemplate: `请根据以下任务信息推荐重点五感检查项。
 
 任务信息：
@@ -60,15 +62,15 @@ JSON格式：
 {
   "standards": [
     {
-      "standard_item_id": "检查项ID（如有）",
-      "standard_category": "标准分类：通用标准/品类标准/感官评价标准",
+      "standard_item_id": "候选标准检查项ID；非标准建议留空",
+      "standard_category": "标准分类：通用标准/品类标准/感官评价标准/非标准",
       "reason": "推荐理由",
       "focus": "重点关注"
     }
   ]
 }`,
       outputSchema: {
-        standards: [{ standard_item_id: 'string', standard_category: 'string', reason: 'string', focus: 'string' }],
+        standards: [{ standard_item_id: 'string (empty when nonstandard)', standard_category: 'string', reason: 'string', focus: 'string' }],
       },
     },
     {
