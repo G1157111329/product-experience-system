@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import { PageShell, pageActionButtonClass, pageFilterSelectClass } from '@/components/app';
 import { MaterialPicker, type Material } from '@/components/material-picker';
+import { fetchJson, getErrorMessage } from '@/lib/http';
 import { toast } from 'sonner';
 
 interface Issue {
@@ -95,14 +96,14 @@ export default function IssuesPage() {
   // Fetch current user's task IDs (for non-admin filtering)
   useEffect(() => {
     if (user?.id && !isAdmin) {
-      fetch('/api/tasks?pageSize=200')
-        .then(r => r.json())
+      fetchJson<{ code: number; data?: { list?: Array<{ id: string }> } }>('/api/tasks?pageSize=200')
         .then(data => {
           if (data.code === 0) {
             const taskIds = (data.data?.list || []).map((t: { id: string }) => t.id);
             setUserTaskIds(taskIds);
           }
-        });
+        })
+        .catch(() => setUserTaskIds([]));
     }
   }, [user?.id, isAdmin]);
 
@@ -116,20 +117,26 @@ export default function IssuesPage() {
       setIssues([]);
       return;
     }
-    const res = await fetch(`/api/issues?${params}`);
-    const data = await res.json();
-    if (data.code === 0) {
-      const raw = data.data;
-      setIssues(Array.isArray(raw) ? raw : (raw?.list || []));
+    try {
+      const data = await fetchJson<{ code: number; data?: Issue[] | { list?: Issue[] }; message?: string }>(`/api/issues?${params}`);
+      if (data.code === 0) {
+        const raw = data.data;
+        setIssues(Array.isArray(raw) ? raw : (raw?.list || []));
+      }
+    } catch (error) {
+      toast.error(getErrorMessage(error, '问题列表加载失败'));
     }
   }, [isAdmin, userTaskIds]);
 
   const fetchReports = useCallback(async () => {
-    const reportsRes = await fetch('/api/reports?limit=200');
-    const data = await reportsRes.json();
-    if (data.code === 0) {
-      const raw = data.data;
-      setReports(Array.isArray(raw) ? raw : (raw?.list || []));
+    try {
+      const data = await fetchJson<{ code: number; data?: Array<{ id: string; title: string; task_id: string; created_at: string; content: Record<string, unknown> }> | { list?: Array<{ id: string; title: string; task_id: string; created_at: string; content: Record<string, unknown> }> }; message?: string }>('/api/reports?limit=200');
+      if (data.code === 0) {
+        const raw = data.data;
+        setReports(Array.isArray(raw) ? raw : (raw?.list || []));
+      }
+    } catch (error) {
+      toast.error(getErrorMessage(error, '报告列表加载失败'));
     }
   }, []);
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { readJsonResponse } from '@/lib/http';
 
 /** 签名 URL 全局缓存（避免重复请求） */
 const globalCache = new Map<string, { url: string; expireAt: number }>();
@@ -69,7 +70,7 @@ async function requestPresignedUrls(filePaths: string[]): Promise<Map<string, st
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ paths: filePaths, share_token: getShareTokenFromLocation() }),
     });
-    const json = await res.json();
+    const json = await readJsonResponse<{ code: number; data?: Record<string, string> }>(res);
     if (json.code === 0 && json.data) {
       // 后端返回 { "path1": "url1", "path2": "url2" } 对象格式
       for (const [path, url] of Object.entries(json.data)) {
