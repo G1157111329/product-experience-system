@@ -26,6 +26,7 @@ interface InvokeOptions {
   defaultModel?: string;
   defaultTemperature?: number;
   maxTokens?: number;
+  timeoutMs?: number;
 }
 
 export interface ResolvedAIConfig {
@@ -114,6 +115,7 @@ export async function invokeConfiguredAI({
   defaultModel = DEFAULT_MODEL,
   defaultTemperature = 0.5,
   maxTokens = 2400,
+  timeoutMs = 60000,
 }: InvokeOptions): Promise<string> {
   const aiConfig = await resolveAIConfig(client, { defaultModel, defaultTemperature, maxTokens });
   const model = aiConfig.model;
@@ -132,7 +134,7 @@ export async function invokeConfiguredAI({
   try {
     response = await fetch(apiUrl, {
       method: 'POST',
-      signal: AbortSignal.timeout(60000),
+      signal: AbortSignal.timeout(timeoutMs),
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,

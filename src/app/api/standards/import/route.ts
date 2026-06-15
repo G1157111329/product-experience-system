@@ -8,6 +8,8 @@ import { checkSharedRateLimit } from '@/lib/server/rate-limit';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
 import ExcelJS from 'exceljs';
 
+export const maxDuration = 300;
+
 // Unified extracted item that covers all standard categories
 interface ExtractedItem {
   sensory_dimension: string | null;
@@ -30,13 +32,36 @@ interface ExtractedItem {
 
 async function parsePdfWithLLM(pdfBuffer: Buffer, category: string): Promise<ExtractedItem[]> {
   // Extract text from PDF using pdf-parse
-  const pdfParse = (await import('pdf-parse')).default;
-  const pdfData = await pdfParse(pdfBuffer);
-  const textContent = pdfData.text;
+  let textContent: string;
+  try {
+    const pdfParse = (await import('pdf-parse')).default;
+    const pdfData = await pdfParse(pdfBuffer);
+    textContent = pdfData.text;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[PDF解析] pdf-parse提取失败:', msg);
+    throw new Error(`PDF文本提取失败：${msg.includes('password') ? '文件可能已加密' : '文件格式异常'}，请尝试用Excel格式导入`);
+  }
 
   if (!textContent || textContent.length < 50) {
-    throw new Error('PDF内容为空或过短，无法提取标准项');
+    throw new Error('PDF内容为空或过短，无法提取标准项。建议将内容整理为Excel格式后重新导入');
   }
+
+  // Preprocess: normalize whitespace, remove page numbers, fix common extraction artifacts
+  const preprocessText = (raw: string): string => {
+    let text = raw
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .replace(/\f/g, '\n')          // form feed between pages
+      .replace(/\t+/g, '  ')          // tabs to spaces
+      .replace(/ +/g, ' ')            // collapse multiple spaces
+      .replace(/\n{3,}/g, '\n\n')     // collapse excessive newlines
+      .replace(/^\s*\d+\s*$/gm, '')   // remove standalone page numbers
+      .trim();
+    return text;
+  };
+
+  const cleanText = preprocessText(textContent);
 
   // Build category-specific system prompt
   let systemPrompt = `你是中国产品体验标准解析专家。你从标准文档文本中提取检查项，所有输出必须使用中文。
@@ -83,61 +108,107 @@ async function parsePdfWithLLM(pdfBuffer: Buffer, category: string): Promise<Ext
 [{"sensory_dimension":"味觉","evaluation_prep":"常温25°C，无异味环境，评价前清水漱口","subjective_score":1,"subjective_rating":"1分-十分不满意-豆浆口感差，存在较多细小颗粒，入口明显粗糙，顺滑度严重不足，吞咽时伴有明显粘喉感，饮用体验不佳","test_phase":null,"experience_flow":null,"touch_point":null,"check_dimension":null,"sub_check_dimension":null,"check_item":"味觉评价","check_requirement":null,"experience_standard":null,"check_standard":null,"measurement_position":null,"check_tool":null,"problem_level":null}]`;
   }
 
-  const maxLen = 8000;
-  const textChunk = textContent.substring(0, maxLen);
+  const client = getSupabaseClient();
 
-  const userPrompt = `请从以下中文标准文档文本中提取所有检查项。这是一份${category}文档，可能包含表格。每行/每条对应一个检查项。请仔细识别每个检查项的各个字段，确保所有内容都用中文填写。check_item字段不能为空。
+  // Parse LLM JSON response with repair for truncated output
+  const parseItemsFromLLMContent = (content: string): ExtractedItem[] => {
+    const cleanedContent = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+
+    let jsonStr: string | null = null;
+    if (cleanedContent.startsWith('[')) {
+      jsonStr = cleanedContent;
+    } else {
+      const match = cleanedContent.match(/\[[\s\S]*\]/);
+      if (match) {
+        jsonStr = match[0];
+      }
+    }
+
+    if (!jsonStr) {
+      throw new Error('LLM返回格式异常，无法解析标准项');
+    }
+
+    try {
+      const items = JSON.parse(jsonStr) as ExtractedItem[];
+      return items.filter(item => item.check_item && typeof item.check_item === 'string' && item.check_item.trim().length > 0);
+    } catch {
+      // JSON may be truncated. Try to repair by finding last complete object
+      try {
+        const lastBrace = jsonStr.lastIndexOf('}');
+        if (lastBrace > 0) {
+          const repaired = jsonStr.substring(0, lastBrace + 1) + ']';
+          const items = JSON.parse(repaired) as ExtractedItem[];
+          return items.filter(item => item.check_item && typeof item.check_item === 'string' && item.check_item.trim().length > 0);
+        }
+      } catch {
+        // fallback
+      }
+      console.error('[PDF解析] JSON解析失败, 内容前300字:', jsonStr.substring(0, 300));
+      throw new Error('LLM返回的JSON解析失败，请重试');
+    }
+  };
+
+  // For short texts, process in one call
+  const CHUNK_SIZE = 6000;
+  if (cleanText.length <= CHUNK_SIZE) {
+    const userPrompt = `请从以下中文标准文档文本中提取所有检查项。这是一份${category}文档，可能包含表格。每行/每条对应一个检查项。请仔细识别每个检查项的各个字段，确保所有内容都用中文填写。check_item字段不能为空。
 
 文本内容：
-${textChunk}`;
+${cleanText}`;
 
-  const messages = [
-    { role: 'system' as const, content: systemPrompt },
-    { role: 'user' as const, content: userPrompt },
-  ];
+    const messages = [
+      { role: 'system' as const, content: systemPrompt },
+      { role: 'user' as const, content: userPrompt },
+    ];
 
-  const client = getSupabaseClient();
-  const content = (await invokeConfiguredAI({
-    client,
-    messages,
-    defaultTemperature: 0.05,
-    maxTokens: 2400,
-  })).trim();
+    const content = (await invokeConfiguredAI({
+      client,
+      messages,
+      defaultTemperature: 0.05,
+      maxTokens: 4096,
+      timeoutMs: 120000,
+    })).trim();
 
-  let jsonStr: string | null = null;
-  const cleanedContent = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-
-  if (cleanedContent.startsWith('[')) {
-    jsonStr = cleanedContent;
-  } else {
-    const match = cleanedContent.match(/\[[\s\S]*\]/);
-    if (match) {
-      jsonStr = match[0];
-    }
+    return parseItemsFromLLMContent(content);
   }
 
-  if (!jsonStr) {
-    throw new Error('LLM返回格式异常，无法解析标准项');
+  // For long texts, process in chunks and merge results
+  console.log(`[PDF解析] 文本较长(${cleanText.length}字)，将分块处理`);
+  const chunks: string[] = [];
+  for (let i = 0; i < cleanText.length; i += CHUNK_SIZE) {
+    chunks.push(cleanText.substring(i, i + CHUNK_SIZE));
   }
 
-  try {
-    const items = JSON.parse(jsonStr) as ExtractedItem[];
-    return items.filter(item => item.check_item && typeof item.check_item === 'string' && item.check_item.trim().length > 0);
-  } catch {
-    // JSON may be truncated. Try to repair by finding last complete object
-    try {
-      const lastBrace = jsonStr.lastIndexOf('}');
-      if (lastBrace > 0) {
-        const repaired = jsonStr.substring(0, lastBrace + 1) + ']';
-        const items = JSON.parse(repaired) as ExtractedItem[];
-        return items.filter(item => item.check_item && typeof item.check_item === 'string' && item.check_item.trim().length > 0);
-      }
-    } catch {
-      // fallback
-    }
-    console.error('JSON parse error, content:', jsonStr.substring(0, 300));
-    throw new Error('LLM返回的JSON解析失败，请重试');
+  const allItems: ExtractedItem[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    console.log(`[PDF解析] 处理第 ${i + 1}/${chunks.length} 块`);
+    const userPrompt = `请从以下中文标准文档文本中提取所有检查项。这是一份${category}文档的第${i + 1}/${chunks.length}部分。每行/每条对应一个检查项。请仔细识别每个检查项的各个字段，确保所有内容都用中文填写。check_item字段不能为空。
+
+文本内容：
+${chunks[i]}`;
+
+    const messages = [
+      { role: 'system' as const, content: systemPrompt },
+      { role: 'user' as const, content: userPrompt },
+    ];
+
+    const content = (await invokeConfiguredAI({
+      client,
+      messages,
+      defaultTemperature: 0.05,
+      maxTokens: 4096,
+      timeoutMs: 120000,
+    })).trim();
+
+    const chunkItems = parseItemsFromLLMContent(content);
+    allItems.push(...chunkItems);
   }
+
+  if (allItems.length === 0) {
+    throw new Error('未能从PDF中提取到标准检查项，建议将内容整理为Excel格式后重新导入');
+  }
+
+  return allItems;
 }
 
 function cellToText(value: unknown) {
@@ -199,23 +270,40 @@ function csvBufferToRows(buffer: Buffer) {
 async function parseExcel(buffer: Buffer, preloadedRows?: Array<Record<string, string>>): Promise<ExtractedItem[]> {
   let rows = preloadedRows;
   if (!rows) {
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
-    const sheet = workbook.worksheets[0];
-    if (!sheet) return [];
-    const headers: string[] = [];
-    sheet.getRow(1).eachCell({ includeEmpty: true }, (cell, columnNumber) => {
-      headers[columnNumber - 1] = cellToText(cell.value);
-    });
-    rows = [];
-    sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-      if (rowNumber === 1) return;
-      const item: Record<string, string> = {};
-      headers.forEach((header, index) => {
-        if (header) item[header] = cellToText(row.getCell(index + 1).value);
+    try {
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
+      const sheet = workbook.worksheets[0];
+      if (!sheet) {
+        throw new Error('Excel文件中没有找到工作表，请确认文件格式正确');
+      }
+      const headers: string[] = [];
+      sheet.getRow(1).eachCell({ includeEmpty: true }, (cell, columnNumber) => {
+        headers[columnNumber - 1] = cellToText(cell.value);
       });
-      if (Object.values(item).some(Boolean)) rows?.push(item);
-    });
+
+      if (headers.every(h => !h.trim())) {
+        throw new Error('Excel文件第一行（表头）为空，请确认文件内容格式正确');
+      }
+
+      rows = [];
+      sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+        if (rowNumber === 1) return;
+        const item: Record<string, string> = {};
+        headers.forEach((header, index) => {
+          if (header) item[header] = cellToText(row.getCell(index + 1).value);
+        });
+        if (Object.values(item).some(Boolean)) rows?.push(item);
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Re-throw our own error messages as-is
+      if (msg.includes('工作表') || msg.includes('表头')) {
+        throw err;
+      }
+      console.error('[Excel解析] 解析失败:', msg);
+      throw new Error(`Excel文件解析失败：${msg.includes('password') ? '文件可能已加密' : '文件格式异常'}，请确认文件为有效的.xlsx格式`);
+    }
   }
 
   const columnMap: Record<string, string[]> = {
@@ -248,6 +336,14 @@ async function parseExcel(buffer: Buffer, preloadedRows?: Array<Record<string, s
           fieldMapping[field] = matchedHeader;
           break;
         }
+      }
+    }
+
+    // Warn if critical field check_item is not mapped
+    if (!fieldMapping['check_item']) {
+      const knownHeaders = Object.values(fieldMapping);
+      if (knownHeaders.length === 0) {
+        throw new Error(`无法匹配Excel列名。请确认表头包含以下关键字之一：检查条目、具体检查条目、检查项、检查内容。当前表头为：${headers.join('、')}`);
       }
     }
   }
@@ -411,7 +507,17 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : '导入失败';
-    console.error('Import error:', message);
+    console.error('[标准导入] 失败:', message);
+    // Distinguish error types for better user feedback
+    if (message.includes('AI') || message.includes('超时') || message.includes('timeout') || message.includes('连接失败')) {
+      return NextResponse.json({ code: 1, message: `AI解析服务异常：${message}。建议将内容整理为Excel格式后重新导入` }, { status: 500 });
+    }
+    if (message.includes('PDF') || message.includes('pdf')) {
+      return NextResponse.json({ code: 1, message }, { status: 400 });
+    }
+    if (message.includes('Excel') || message.includes('xlsx') || message.includes('表头') || message.includes('工作表')) {
+      return NextResponse.json({ code: 1, message }, { status: 400 });
+    }
     return NextResponse.json({ code: 1, message }, { status: 500 });
   }
 }
