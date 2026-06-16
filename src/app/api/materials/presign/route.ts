@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generatePresignedUrl } from '@/lib/server/storage';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { getCurrentUser } from '@/lib/server/auth';
+import { canAccessTask, canReadReport, getCurrentUser } from '@/lib/server/auth';
 
 async function resolveSharedTaskId(client: ReturnType<typeof getSupabaseClient>, shareToken: string | null | undefined) {
   if (!shareToken) return null;
@@ -17,6 +17,21 @@ async function resolveSharedTaskId(client: ReturnType<typeof getSupabaseClient>,
     .from('reports')
     .select('id, task_id, content')
     .eq('id', share.report_id)
+    .maybeSingle();
+  if (!report) return null;
+  return String(report.task_id || report.content?.task?.id || '');
+}
+
+async function resolveReadableReportTaskId(
+  client: ReturnType<typeof getSupabaseClient>,
+  user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>,
+  reportId: string | null | undefined,
+) {
+  if (!reportId || !(await canReadReport(client, user, reportId))) return null;
+  const { data: report } = await client
+    .from('reports')
+    .select('id, task_id, content')
+    .eq('id', reportId)
     .maybeSingle();
   if (!report) return null;
   return String(report.task_id || report.content?.task?.id || '');
@@ -44,13 +59,15 @@ export async function POST(request: NextRequest) {
     const user = await getCurrentUser(request, client);
 
     const body = await request.json();
-    const { paths, file_paths, share_token } = body as {
+    const { paths, file_paths, report_id, share_token } = body as {
       paths?: string[];
       file_paths?: string[];
+      report_id?: string;
       share_token?: string;
     };
     const requestedPaths = Array.isArray(paths) ? paths : file_paths;
     const sharedTaskId = user ? null : await resolveSharedTaskId(client, share_token);
+    const readableReportTaskId = user ? await resolveReadableReportTaskId(client, user, report_id) : null;
     if (!user && !sharedTaskId) {
       return NextResponse.json({ code: 1, message: '未登录' }, { status: 401 });
     }
@@ -68,7 +85,8 @@ export async function POST(request: NextRequest) {
 
       const canAccess = user
         ? user.role === 'admin'
-          || Boolean(material.task_id)
+          || Boolean(material.task_id && await canAccessTask(client, user, String(material.task_id)))
+          || Boolean(readableReportTaskId && material.task_id && String(material.task_id) === readableReportTaskId)
         : Boolean(sharedTaskId && material.task_id && String(material.task_id) === sharedTaskId);
       if (!canAccess) continue;
 

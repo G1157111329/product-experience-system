@@ -6,7 +6,7 @@
 
 | 模块 | 技术 |
 | --- | --- |
-| Web | Next.js 16 App Router, React 19, TypeScript 5 |
+| Web | Next.js 15.5.19 App Router, React 19, TypeScript 5 |
 | UI | shadcn/ui, Radix UI, Tailwind CSS 4 |
 | 数据库 | PostgreSQL + Drizzle ORM，本地模式通过 Supabase 兼容层复用 API 写法 |
 | 文件存储 | **默认 local 模式写入 `public/uploads`**；可切换 S3 兼容对象存储（MinIO / AWS S3 / 火山引擎 TOS） |
@@ -16,7 +16,7 @@
 
 ## 本地环境要求
 
-- Node.js 24+
+- Node.js 18.20+
 - pnpm 9+
 - PostgreSQL 14+
 - 可选：Docker，用于启动 PostgreSQL，或在 S3 模式下启动 MinIO
@@ -136,7 +136,7 @@ AI_ALLOW_PRIVATE_ENDPOINTS=true
 | `pnpm build` | 构建 Next.js 和自定义 Node server |
 | `pnpm start` | 启动 `dist/server.js` 生产服务 |
 
-`pnpm dev` 仅用于本地开发。手机端或验收环境如果出现左下角黑色 Next.js “N” 浮层，说明当前访问的是开发模式指示器；生产/验收环境必须使用 `pnpm build` 后的 `pnpm start` 启动。项目已在 `next.config.ts` 设置 `devIndicators: false`，用于隐藏开发期指示器，但不能替代生产构建。
+`pnpm dev` 仅用于本地开发。手机端或验收环境如果出现左下角黑色 Next.js “N” 浮层，说明当前访问的是开发模式指示器；生产/验收环境必须使用 `pnpm build` 后的 `pnpm start` 启动。项目已在 `next.config.mjs` 设置 `devIndicators: false`，用于隐藏开发期指示器，但不能替代生产构建。
 
 生产启动示例：
 
@@ -149,7 +149,7 @@ NODE_ENV=production PORT=5000 pnpm start
 
 实际服务器上线不要求使用 Docker。推荐使用 Node.js + PostgreSQL + 反向代理部署，Docker 仅作为本地测试模拟环境。
 
-1. 安装 Node.js 24+、pnpm 9+、PostgreSQL 14+。
+1. 安装 Node.js 18.20+、pnpm 9+、PostgreSQL 14+。
 2. 拉取代码并执行 `pnpm install --frozen-lockfile`。
 3. 创建并保护 `.env.local`，按生产环境配置 `NODE_ENV=production`、`PORT=5000`、`DATABASE_ACCESS_MODE`、`DATABASE_URL`、`AUTH_SESSION_SECRET`、`AI_CONFIG_ENCRYPTION_KEY`、存储模式和 AI 配置。
 4. 在目标数据库执行 `database-schema.sql` 和 `scripts/verify-security-schema.sql`，留存执行结果。
@@ -380,5 +380,5 @@ LOCAL_MEDIA_SIGNING_SECRET=<long-random-local-media-signing-secret>
 - 标准管理和报告中心是平台共享数据。
 - 体验计划和问题管理按 `created_by` 做用户隔离，管理员可查看全部。
 - 报告生成会重新汇总五感体验问题和功能效果问题，并自动创建问题记录。
-- 自研和改型/降本/优化类型报告会按 `product_model` 做列表和详情合并展示。
+- 前期研究、自研和改型/降本/优化类型报告会按 `product_model` 做列表、详情、打印页和分享页合并展示。
 - AI Agent 的五感体验预设只使用标准候选上下文；功能效果/食谱预设只使用食谱库上下文，避免两类建议相互污染。

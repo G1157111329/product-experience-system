@@ -1,16 +1,11 @@
-import type { NextConfig } from 'next';
-
 const imageRemoteHosts = (process.env.NEXT_IMAGE_REMOTE_HOSTS || '')
   .split(',')
   .map((host) => host.trim())
   .filter(Boolean);
 
-const nextConfig: NextConfig = {
+const nextConfig = {
   // outputFileTracingRoot: path.resolve(__dirname, '../../'),  // Uncomment and add 'import path from "path"' if needed
   devIndicators: false,
-  experimental: {
-    proxyClientMaxBodySize: '100mb',
-  },
   async headers() {
     const isProduction = process.env.NODE_ENV === 'production';
     const securityHeaders = [

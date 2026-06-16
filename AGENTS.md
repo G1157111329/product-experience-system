@@ -6,7 +6,7 @@
 
 ## 技术栈
 
-- **Framework**: Next.js 16 (App Router)
+- **Framework**: Next.js 15.5.19 (App Router)
 - **Core**: React 19
 - **Language**: TypeScript 5
 - **UI 组件**: shadcn/ui (基于 Radix UI)
@@ -182,7 +182,7 @@
 ## 构建与运行
 
 ### 环境要求
-- **Node.js**: 24+（本地/服务器环境需安装 Node.js 24）
+- **Node.js**: 18.20+（本地/服务器环境需安装 Node.js 18.20+）
 - **包管理器**: pnpm (禁止 npm / yarn)
 - **数据库**: PostgreSQL 14+（本地 Docker 使用 postgres:16-alpine）
 - **端口**: 5000（开发与生产统一读取 `PORT`，未设置时默认 5000）
@@ -240,7 +240,7 @@ pnpm build
 pnpm start
 ```
 
-`pnpm dev` 仅用于本地开发。移动端或验收环境若出现左下角黑色 Next.js “N” 浮层，属于开发模式 Dev Indicator 暴露；应视为部署/环境问题处理。生产/验收必须先 `pnpm build`，再以 `NODE_ENV=production PORT=5000 pnpm start` 启动。`next.config.ts` 已设置 `devIndicators: false` 隐藏开发期指示器，但不能替代生产构建。
+`pnpm dev` 仅用于本地开发。移动端或验收环境若出现左下角黑色 Next.js “N” 浮层，属于开发模式 Dev Indicator 暴露；应视为部署/环境问题处理。生产/验收必须先 `pnpm build`，再以 `NODE_ENV=production PORT=5000 pnpm start` 启动。`next.config.mjs` 已设置 `devIndicators: false` 隐藏开发期指示器，但不能替代生产构建。
 
 ### 服务器生产部署流程
 
@@ -331,8 +331,8 @@ INITIAL_ADMIN_PASSWORD=<strong-password>
 11. **五感体验-新增问题点重构**: 移除"从标准库引用"栏目，改为选择"标准类型"后按类型展示不同筛选/输入字段；通用标准选择产品使用阶段→体验流程→感官维度后自动带出触点和检验范围及具体要求
 12. **权限控制**: 服务端以 `requireUser`、`requireAdmin` 和资源级 `canAccess*` 为可信边界；管理账号(admin)可编辑标准、导入、删除和管理账号；使用账号(user)可执行自身任务相关操作
 13. **问题管理重构**: 问题点来源从手动创建改为自动从报告汇总（不合格检查项+食谱功能问题），按报告名称分组；等级合并为一类/二类/三类；状态可切换（待整改/整改中/已验证/不整改）
-14. **报告中心重构**: 移除"生成报告"按钮，新增"报告对比"功能；自研/改型降本优化报告按product_model在列表页分组，详情页/打印页内容级合并
-15. **报告内容级合并**: 自研和改型/降本/优化类型的报告，在报告详情页和打印页中，同product_model的所有报告按时间排序合并展示，每份报告连续完整，用分割线和阶段/时间标注区分
+14. **报告中心重构**: 移除"生成报告"按钮，新增"报告对比"功能；前期研究/自研/改型降本优化报告按product_model在列表页分组，详情页/打印页/分享页内容级合并
+15. **报告内容级合并**: 前期研究、自研和改型/降本/优化类型的报告，在报告详情页、打印页和分享页中，同product_model的所有报告按时间排序合并展示，每份报告连续完整，用分割线和阶段/时间标注区分
 16. **体验计划项目类型**: 新建时选择项目类型（ODM/OEM/竞品研究/自研/前期研究/改型降本优化/海外产品），自研可选项目阶段（手板研究/试制阶段/试产阶段/量产阶段）
 17. **检查记录编辑重构**: 点击问题点用现有记录数据预填充表单，复用新增问题点对话框（标准类型选择+级联字段+检查结果+素材管理），保存调用 PUT /api/records/[id]；编辑模式切换标准类型时自动从记录预填充共享字段（sensory_dimension/problem_description/evaluationResult等）
 18. **数据隔离**: 体验计划和问题管理按用户隔离（experience_tasks.created_by字段），工作台数据按用户过滤；标准管理和报告中心保持平台共享（因同型号不同阶段可能不同账号承接）；报告中心支持“全部报告/个人报告”，普通登录用户可读取内部报告，编辑/分享按归属或管理员权限控制
@@ -341,7 +341,7 @@ INITIAL_ADMIN_PASSWORD=<strong-password>
 21. **报告分享**: 报告中心和报告详情页可生成分享链接，设置有效期（7天/30天/永久）；公开页面 `/reports/share/[token]` 无需登录，只读查看，支持导出PDF、图片放大、视频播放；分享创建、访问、撤销写入安全审计
 22. **报告重新生成**: 同一任务重新生成报告时，先删除旧报告和旧问题，再创建新报告和新问题，确保每个任务始终只有一份最新报告
 23. **问题自动创建**: 问题在报告生成时由后端自动创建（非前端同步），使用 `createdKeys` Set 去重确保每个唯一问题（按 title+source_type）只创建一条，与素材数量无关；前端仅做只读查询
-24. **报告合并类型检查**: 报告详情页合并同型号报告时，仅合并"自研"和"改型/降本/优化"类型的报告，其他类型（如"海外产品"）的同型号报告不参与合并
+24. **报告合并类型检查**: 报告详情页合并同型号报告时，仅合并"前期研究"、"自研"和"改型/降本/优化"类型的报告，其他类型（如"海外产品"）的同型号报告不参与合并
 25. **视频素材缩略图**: 五感体验已选素材列表和PDF导出附录中，视频素材使用 `<video preload="metadata">` 显示首帧缩略图，覆盖半透明播放图标区分图片
 26. **管理员删除账号**: 管理员可在账号权限管理中删除用户（不可删除自己和最后一个管理员）；删除时级联清理 `report_shares.created_by`（设null）和 `platform_audit_requests`；报告中的 organizer 名称字符串不受影响
 27. **审核参数规范**: 前端审核请求统一使用 `request_id` 字段（非 `audit_id`），与后端 PUT /api/auth/audit 接口参数名保持一致
@@ -450,9 +450,9 @@ INITIAL_ADMIN_PASSWORD=<strong-password>
 | 审核请求点击通过报"参数不完整" | 前端发送 `audit_id`，后端期望 `request_id` | `dashboard/page.tsx` 中 `audit_id` 改为 `request_id` |
 | 问题列表出现重复 | 前端 `syncReportIssues` 并发竞态 + 多素材每个生成一个issue | 移除前端同步，问题创建移至后端报告生成时，`createdKeys` Set 去重 |
 | 重新生成报告产生重复 | POST /api/reports 始终 insert 新报告 | 生成前先删除同 task_id 的旧报告和旧问题 |
-| 报告合并了不应合并的类型 | 合并逻辑未检查候选报告的 project_type | 添加 `rProjectType` 过滤，仅合并"自研"/"改型降本优化" |
+| 报告合并了不应合并的类型 | 合并逻辑未检查候选报告的 project_type | 添加 `rProjectType` 过滤，仅合并"前期研究"/"自研"/"改型降本优化" |
 | 移动端长字段穿透屏幕 | flex-1 无 min-w-0、Badge 无 max-w | body 加 `overflow-x-hidden`，flex-1 加 `min-w-0`，长文本用 `break-all`，Badge 用 `max-w-[Npx] truncate` |
-| 手机左下角出现黑色 Next.js “N” 浮层 | 访问了 Next.js 开发模式 Dev Indicator，常见于误用 `pnpm dev` 或非生产构建 | 生产/验收环境必须 `pnpm build` 后以 `NODE_ENV=production PORT=5000 pnpm start` 启动；保留 `next.config.ts` 的 `devIndicators: false` 作为开发期隐藏兜底 |
+| 手机左下角出现黑色 Next.js “N” 浮层 | 访问了 Next.js 开发模式 Dev Indicator，常见于误用 `pnpm dev` 或非生产构建 | 生产/验收环境必须 `pnpm build` 后以 `NODE_ENV=production PORT=5000 pnpm start` 启动；保留 `next.config.mjs` 的 `devIndicators: false` 作为开发期隐藏兜底 |
 | 视频素材不显示缩略图 | 五感体验和PDF附录过滤了 video 类型 | 移除 `material_type === 'image'` 过滤，视频用 `<video preload="metadata">` + 播放图标 |
 | 转移功能提示目标用户异常 | 前端候选用户与任务当前归属判断不一致，或后端仅凭前端身份参数判断 | 用户列表和转移接口统一基于当前登录会话鉴权，前端按任务 `created_by` 排除当前归属用户 |
 | 问题点偶发重复 | 报告生成并发或双击导致重复创建 | DB 唯一约束 `UNIQUE(title, source_type, task_id)`，insert 失败静默跳过 |

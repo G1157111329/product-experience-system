@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-ARG NODE_IMAGE=node:24-bookworm-slim
+ARG NODE_IMAGE=node:18-bookworm-slim
 
 FROM ${NODE_IMAGE} AS base
 WORKDIR /app
@@ -41,8 +41,7 @@ COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/next.config.ts ./next.config.ts
-COPY --from=builder /app/.babelrc ./.babelrc
+COPY --from=builder /app/next.config.mjs ./next.config.mjs
 
 RUN mkdir -p /app/public/uploads
 

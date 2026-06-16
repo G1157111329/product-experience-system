@@ -1,6 +1,7 @@
-import nextTs from 'eslint-config-next/typescript';
-import nextVitals from 'eslint-config-next/core-web-vitals';
+import { FlatCompat } from '@eslint/eslintrc';
 import { defineConfig, globalIgnores } from 'eslint/config';
+
+const compat = new FlatCompat({ baseDirectory: import.meta.dirname });
 
 const syntaxRules = [
   {
@@ -11,8 +12,7 @@ const syntaxRules = [
 ];
 
 const eslintConfig = defineConfig([
-  ...nextVitals,
-  ...nextTs,
+  ...compat.extends('next/core-web-vitals', 'next/typescript'),
   {
     rules: {
       'react-hooks/set-state-in-effect': 'off',

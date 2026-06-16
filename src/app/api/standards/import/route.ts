@@ -49,7 +49,7 @@ async function parsePdfWithLLM(pdfBuffer: Buffer, category: string): Promise<Ext
 
   // Preprocess: normalize whitespace, remove page numbers, fix common extraction artifacts
   const preprocessText = (raw: string): string => {
-    let text = raw
+    const text = raw
       .replace(/\r\n/g, '\n')
       .replace(/\r/g, '\n')
       .replace(/\f/g, '\n')          // form feed between pages

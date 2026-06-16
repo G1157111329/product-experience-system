@@ -56,6 +56,18 @@ function getShareTokenFromLocation(): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+function getReportIdFromLocation(): string | null {
+  if (typeof window === 'undefined') return null;
+  const detailMatch = window.location.pathname.match(/^\/reports\/([^/]+)/);
+  if (detailMatch && detailMatch[1] !== 'share' && detailMatch[1] !== 'print') {
+    return decodeURIComponent(detailMatch[1]);
+  }
+  if (window.location.pathname === '/reports/print') {
+    return new URLSearchParams(window.location.search).get('id');
+  }
+  return null;
+}
+
 /**
  * 批量请求签名 URL
  * 将短时间内的多次调用合并为一次 API 请求
@@ -68,7 +80,11 @@ async function requestPresignedUrls(filePaths: string[]): Promise<Map<string, st
     const res = await fetch('/api/materials/presign', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths: filePaths, share_token: getShareTokenFromLocation() }),
+      body: JSON.stringify({
+        paths: filePaths,
+        report_id: getReportIdFromLocation(),
+        share_token: getShareTokenFromLocation(),
+      }),
     });
     const json = await readJsonResponse<{ code: number; data?: Record<string, string> }>(res);
     if (json.code === 0 && json.data) {

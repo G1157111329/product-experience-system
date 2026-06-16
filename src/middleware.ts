@@ -21,23 +21,23 @@ function sameOrigin(request: NextRequest, value: string | null) {
   }
 }
 
-export function proxy(request: NextRequest) {
+export function middleware(request: NextRequest) {
   if (
     process.env.NODE_ENV === 'production'
     && process.env.LOCAL_UPLOAD_PUBLIC_ACCESS === 'protected'
     && isProtectedLocalUploadPath(request)
   ) {
-    return NextResponse.json({ code: 1, message: '素材静态直连已关闭' }, { status: 404 });
+    return NextResponse.json({ code: 1, message: 'Static upload access is disabled' }, { status: 404 });
   }
 
   if (
-    request.nextUrl.pathname.startsWith('/api/') &&
-    STATE_CHANGING_METHODS.has(request.method)
+    request.nextUrl.pathname.startsWith('/api/')
+    && STATE_CHANGING_METHODS.has(request.method)
   ) {
     const origin = request.headers.get('origin');
     const referer = request.headers.get('referer');
     if (!sameOrigin(request, origin) || !sameOrigin(request, referer)) {
-      return NextResponse.json({ code: 1, message: '跨站请求已被拒绝' }, { status: 403 });
+      return NextResponse.json({ code: 1, message: 'Cross-site request rejected' }, { status: 403 });
     }
   }
 

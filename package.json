@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "pnpm next build && pnpm tsup src/server.ts --format cjs --platform node --target node20 --outDir dist --no-splitting --no-minify",
+    "build": "pnpm next build && pnpm tsup src/server.ts --format cjs --platform node --target node18 --outDir dist --no-splitting --no-minify",
     "dev": "tsx watch src/server.ts",
     "audit:materials": "tsx scripts/audit-orphan-materials.ts",
     "smoke:e2e": "playwright test",
@@ -56,7 +56,7 @@
     "exceljs": "^4.4.0",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.468.0",
-    "next": "16.2.9",
+    "next": "15.5.19",
     "next-themes": "^0.4.6",
     "pdf-parse": "^1.1.1",
     "pg": "^8.17.2",
@@ -76,15 +76,15 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
-    "@tailwindcss/postcss": "^4",
+    "@tailwindcss/postcss": "4.1.17",
     "@types/node": "^20",
     "@types/pg": "^8.16.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.9",
+    "eslint-config-next": "15.5.19",
     "only-allow": "^1.2.2",
-    "tailwindcss": "^4",
+    "tailwindcss": "4.1.17",
     "tsup": "^8.3.5",
     "tsx": "^4.19.2",
     "typescript": "^5"
@@ -95,7 +95,11 @@
   },
   "pnpm": {
     "overrides": {
-      "@esbuild-kit/core-utils>esbuild": "^0.25.12",
+      "@esbuild-kit/core-utils>esbuild": "^0.28.1",
+      "@tailwindcss/oxide": "4.1.17",
+      "esbuild": "^0.28.1",
+      "js-yaml": "^4.2.0",
+      "tailwindcss": "4.1.17",
       "next>postcss": "^8.5.12",
       "exceljs>uuid": "^11.1.1"
     }

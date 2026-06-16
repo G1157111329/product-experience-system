@@ -15,6 +15,7 @@ import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
+import { getReportMergeModel, isMergeableReportProjectType, sortReportsByCreatedAtDesc } from '@/lib/report-merge';
 import {
   ActionDock,
   EmptyState,
@@ -58,8 +59,6 @@ interface CompareResult {
   risks: string[];
   recommendation: string;
 }
-
-const MERGED_TYPES = ['自研', '改型/降本/优化'];
 
 function formatBeijingTime(isoStr: string | null | undefined): string {
   if (!isoStr) return '-';
@@ -270,24 +269,27 @@ export default function ReportsPage() {
     }
   };
 
-  // Group by product_model for merged types
-  const grouped: Array<{ key: string; model: string; project_type: string; reports: Report[] }> = [];
-  const modelMap = new Map<string, { model: string; project_type: string; reports: Report[] }>();
+  // Group self-developed and cost-optimization reports by product model.
+  const grouped: Array<{ key: string; model: string; projectTypes: string[]; reports: Report[] }> = [];
+  const modelMap = new Map<string, { model: string; projectTypes: string[]; reports: Report[] }>();
   const ungrouped: Report[] = [];
 
   for (const r of visibleReports) {
     const pt = r.project_type || '';
-    if (MERGED_TYPES.includes(pt) && r.product_model) {
-      const key = `${r.product_model}__${pt}`;
+    const model = getReportMergeModel(r.product_model);
+    if (isMergeableReportProjectType(pt) && model) {
+      const key = model;
       if (!modelMap.has(key)) {
-        modelMap.set(key, { model: r.product_model, project_type: pt, reports: [] });
+        modelMap.set(key, { model, projectTypes: [], reports: [] });
       }
-      modelMap.get(key)!.reports.push(r);
+      const group = modelMap.get(key)!;
+      if (pt && !group.projectTypes.includes(pt)) group.projectTypes.push(pt);
+      group.reports.push(r);
     } else {
       ungrouped.push(r);
     }
   }
-  modelMap.forEach((v) => grouped.push({ key: `${v.model}__${v.project_type}`, ...v }));
+  modelMap.forEach((v) => grouped.push({ key: v.model, ...v, reports: sortReportsByCreatedAtDesc(v.reports) }));
 
   const toggleCompare = (id: string) => {
     setCompareResult(null);
@@ -397,7 +399,9 @@ export default function ReportsPage() {
                     <div className="min-w-0 flex-1">
                       <CardTitle className="text-base sm:text-lg truncate">{group.model}</CardTitle>
                       <div className="flex gap-1 mt-1.5 flex-wrap">
-                        {group.project_type && <Badge variant="outline" className="text-[10px]">{group.project_type}</Badge>}
+                        {group.projectTypes.map(projectType => (
+                          <Badge key={projectType} variant="outline" className="text-[10px]">{projectType}</Badge>
+                        ))}
                         {latestReport.product_category && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{latestReport.product_category}</Badge>}
                         {latestReport.product && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{latestReport.product}</Badge>}
                         <Badge variant="secondary" className="text-[10px]">{group.reports.length} 份报告</Badge>

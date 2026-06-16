@@ -5,6 +5,12 @@ import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { buildDisplayReportContent, type AiSummaryLike, type ReportContentWithReview, type ReportReviewOverrides } from '@/lib/report-review-overrides';
 import { mapWithConcurrency, normalizePrintMode, uniqueUrls, type PrintMode } from '@/lib/print-assets';
+import {
+  getReportMergeModel,
+  isMergeableReportProjectType,
+  normalizeReportProjectType,
+  sortReportsByCreatedAtAsc,
+} from '@/lib/report-merge';
 
 interface Material {
   id: string; material_type: string; file_name: string; file_url: string; file_size: number; file_path?: string;
@@ -137,7 +143,7 @@ async function imageUrlToPrintableDataUrl(url: string, mode: PrintMode): Promise
   }
 }
 
-async function batchPresignUrls(paths: string[]): Promise<Record<string, string>> {
+async function batchPresignUrls(paths: string[], reportId?: string | null): Promise<Record<string, string>> {
   const objectKeys = paths.filter((path) => !isDirectPrintableUrl(path));
   const directUrls = paths.filter(isDirectPrintableUrl);
   const directMap = Object.fromEntries(directUrls.map((url) => [url, url]));
@@ -146,7 +152,7 @@ async function batchPresignUrls(paths: string[]): Promise<Record<string, string>
     const res = await fetch('/api/materials/presign', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths: objectKeys }),
+      body: JSON.stringify({ paths: objectKeys, report_id: reportId || undefined }),
     });
     if (!res.ok) return directMap;
     const data = await res.json();
@@ -586,18 +592,21 @@ function ReportPrintContent() {
       if (res.code === 0) {
         const rpt = res.data as ReportData;
         setReport(rpt);
+        setSiblingReports([]);
         // Fetch sibling reports for merging
-        if (rpt.product_model) {
+        const mergeModel = getReportMergeModel(rpt.product_model);
+        if (mergeModel) {
           const allRes = await fetch('/api/reports?limit=200');
           const allData = await allRes.json();
           const allReports: ReportData[] = Array.isArray(allData.data) ? allData.data : (allData.data?.list || []);
           const projectType = (rpt.content?.task as Record<string, unknown>)?.project_type as string;
-          const shouldMerge = projectType === '自研' || projectType === '改型/降本/优化';
-          if (shouldMerge) {
+          if (isMergeableReportProjectType(projectType)) {
             // Deduplicate: for each task_id, only keep the latest report
             const byTaskId: Record<string, ReportData> = {};
             for (const r of allReports) {
-              if (r.product_model !== rpt.product_model) continue;
+              if (getReportMergeModel(r.product_model) !== mergeModel) continue;
+              const rProjectType = normalizeReportProjectType((r as unknown as Record<string, unknown>).project_type as string || (r.content?.task as Record<string, unknown>)?.project_type as string);
+              if (!isMergeableReportProjectType(rProjectType)) continue;
               const existing = byTaskId[r.task_id];
               if (!existing || r.created_at > existing.created_at) {
                 byTaskId[r.task_id] = r;
@@ -605,10 +614,15 @@ function ReportPrintContent() {
             }
             // Current report's task_id should use current report
             byTaskId[rpt.task_id] = rpt;
-            const siblings = Object.values(byTaskId)
+            const siblingSummaries = sortReportsByCreatedAtAsc(Object.values(byTaskId))
               .filter((r: ReportData) => r.id !== rpt.id)
-              .sort((a: ReportData, b: ReportData) => a.created_at.localeCompare(b.created_at));
-            setSiblingReports(siblings);
+              .filter((r: ReportData) => Boolean(r.id));
+            const siblings = await Promise.all(siblingSummaries.map(async (summary) => {
+              const detailRes = await fetch(`/api/reports/${summary.id}`);
+              const detailData = await detailRes.json();
+              return detailData.code === 0 ? detailData.data as ReportData : null;
+            }));
+            setSiblingReports(siblings.filter((item): item is ReportData => Boolean(item?.content)));
           }
         }
         // Fetch live issues
@@ -644,13 +658,15 @@ function ReportPrintContent() {
   // Fetch live issues for sibling reports
   useEffect(() => {
     if (siblingReports.length === 0) return;
-    fetch(`/api/issues?source_report_id=${reportId}&limit=500`).then(r => r.json()).then(async data => {
+    Promise.all(siblingReports.map(async (rpt) => {
+      const res = await fetch(`/api/issues?source_report_id=${rpt.id}&limit=500`);
+      const data = await res.json();
       const raw = data.data;
       const allIssues: IssueItem[] = Array.isArray(raw) ? raw : (raw?.list || []);
+      return { reportId: rpt.id, issues: allIssues.filter((i: IssueItem) => i.source_report_id === rpt.id) };
+    })).then(async results => {
       const map: Record<string, IssueItem[]> = {};
-      siblingReports.forEach(rpt => {
-        map[rpt.id] = allIssues.filter((i: IssueItem) => i.source_report_id === rpt.id);
-      });
+      results.forEach(result => { map[result.reportId] = result.issues; });
       // Fetch re-evaluations for recipe_problem issues
       const allRecipeIssues = Object.values(map).flat().filter((i: IssueItem) => i.source_type === 'recipe_problem');
       if (allRecipeIssues.length > 0) {
@@ -672,7 +688,7 @@ function ReportPrintContent() {
       }
       setLiveIssuesMap(prev => ({ ...prev, ...map }));
     });
-  }, [siblingReports, reportId]);
+  }, [siblingReports]);
 
   // Presign all file_url values before rendering/converting
   const presignReportUrls = useCallback(async (rpt: ReportData): Promise<ReportData> => {
@@ -696,7 +712,7 @@ function ReportPrintContent() {
       const res = await fetch('/api/materials/presign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_paths: [...new Set(filePaths)] }),
+        body: JSON.stringify({ file_paths: [...new Set(filePaths)], report_id: rpt.id }),
       });
       const data = await res.json();
       if (data.code === 0 && data.data) {
@@ -776,7 +792,7 @@ function ReportPrintContent() {
 
       // Presign all file paths to get valid URLs
       const filePaths = uniqueUrls(allFilePaths);
-      const presignedMap = await batchPresignUrls(filePaths);
+      const presignedMap = await batchPresignUrls(filePaths, reportId);
 
       // Step 1: Update DOM img/video src from S3 key to presigned URL
       for (const [fp, presignedUrl] of Object.entries(presignedMap)) {
@@ -800,7 +816,7 @@ function ReportPrintContent() {
     };
     const timer = setTimeout(convertImages, 500);
     return () => clearTimeout(timer);
-  }, [report, siblingReports, printMode, liveIssuesMap]);
+  }, [report, siblingReports, printMode, liveIssuesMap, reportId]);
 
   useEffect(() => {
     if (report && imagesLoaded) {

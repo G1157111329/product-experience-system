@@ -145,7 +145,7 @@ export async function GET(request: NextRequest) {
   // Enrich with task info for grouping
   const taskIds = [...new Set<string>(reports.map((r: Record<string, unknown>) => String(r.task_id || '')).filter(Boolean))];
   const { data: tasks } = taskIds.length > 0
-    ? await client.from('experience_tasks').select('id, task_name, product_category, product, project_type, project_phase, created_by').in('id', taskIds)
+    ? await client.from('experience_tasks').select('id, task_name, product_category, product, product_model, project_type, project_phase, created_by').in('id', taskIds)
     : { data: [] };
   const taskMap: Record<string, Record<string, unknown>> = Object.fromEntries((tasks || []).map((t: Record<string, unknown>) => [t.id as string, t]));
 
@@ -187,6 +187,7 @@ export async function GET(request: NextRequest) {
     const taskInfo = taskMap[r.task_id as string] || {};
     return {
       ...r,
+      product_model: r.product_model || taskInfo.product_model || null,
       content: null,
       summary_stats: statsByTask.get(String(r.task_id || '')) || { records: 0, failedRecords: 0, recipes: 0, recipeProblems: 0, media: 0 },
       task_name: taskInfo.task_name || '',

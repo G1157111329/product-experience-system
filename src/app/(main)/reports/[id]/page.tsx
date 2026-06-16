@@ -16,6 +16,12 @@ import { toast } from 'sonner';
 import { PageShell } from '@/components/app';
 import { MediaGallery } from '@/components/app/media-gallery';
 import { buildDisplayReportContent, type AiSummaryLike, type ReportContentWithReview, type ReportReviewOverrides } from '@/lib/report-review-overrides';
+import {
+  getReportMergeModel,
+  isMergeableReportProjectType,
+  normalizeReportProjectType,
+  sortReportsByCreatedAtAsc,
+} from '@/lib/report-merge';
 
 interface Material {
   id: string; material_type: string; file_name: string; file_url: string; file_path?: string; file_size: number;
@@ -591,30 +597,36 @@ export default function ReportDetailPage() {
       if (data.code === 0) {
         const rpt = data.data as ReportDetail;
         setReport(rpt);
+        setSiblingReports([]);
         // Fetch sibling reports
-        if (rpt.product_model) {
+        const mergeModel = getReportMergeModel(rpt.product_model);
+        if (mergeModel) {
           const allRes = await fetch('/api/reports?limit=200');
           const allData = await allRes.json();
           const allReports: ReportDetail[] = Array.isArray(allData.data) ? allData.data : (allData.data?.list || []);
           const projectType = (rpt.content?.task as Record<string, unknown>)?.project_type as string;
-          const shouldMerge = projectType === '自研' || projectType === '改型/降本/优化';
-          if (shouldMerge) {
+          if (isMergeableReportProjectType(projectType)) {
             const byTaskId: Record<string, ReportDetail> = {};
             for (const r of allReports) {
-              if (r.product_model !== rpt.product_model) continue;
+              if (getReportMergeModel(r.product_model) !== mergeModel) continue;
               // Only merge reports of the same merge-eligible project type
-              const rProjectType = (r as unknown as Record<string, unknown>).project_type as string || (r.content?.task as Record<string, unknown>)?.project_type as string;
-              if (rProjectType !== '自研' && rProjectType !== '改型/降本/优化') continue;
+              const rProjectType = normalizeReportProjectType((r as unknown as Record<string, unknown>).project_type as string || (r.content?.task as Record<string, unknown>)?.project_type as string);
+              if (!isMergeableReportProjectType(rProjectType)) continue;
               const existing = byTaskId[r.task_id];
               if (!existing || r.created_at > existing.created_at) {
                 byTaskId[r.task_id] = r;
               }
             }
             byTaskId[rpt.task_id] = rpt;
-            const siblings = Object.values(byTaskId)
+            const siblingSummaries = sortReportsByCreatedAtAsc(Object.values(byTaskId))
               .filter((r: ReportDetail) => r.id !== rpt.id)
-              .sort((a: ReportDetail, b: ReportDetail) => a.created_at.localeCompare(b.created_at));
-            setSiblingReports(siblings);
+              .filter((r: ReportDetail) => Boolean(r.id));
+            const siblings = await Promise.all(siblingSummaries.map(async (summary) => {
+              const detailRes = await fetch(`/api/reports/${summary.id}`);
+              const detailData = await detailRes.json();
+              return detailData.code === 0 ? detailData.data as ReportDetail : null;
+            }));
+            setSiblingReports(siblings.filter((item): item is ReportDetail => Boolean(item?.content)));
           }
         }
         // Fetch live issues for this report
