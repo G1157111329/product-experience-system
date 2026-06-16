@@ -313,6 +313,44 @@ psql "$DATABASE_URL" -f scripts/verify-security-schema.sql
 SECURITY_SCHEMA_VERIFIED=true
 ```
 
+### Nginx 反向代理与静态文件优化
+
+生产环境建议使用 Nginx/Caddy 反向代理。默认情况下 Node.js 通过 `fs.createReadStream` 直接发送 `/uploads/*` 下的静态文件，在大文件和高并发场景下会占用 Node 进程 I/O。
+
+设置 `NGINX_UPLOADS_INTERNAL` 后，Node.js 改为返回 `X-Accel-Redirect` 头，由 Nginx 直接用 sendfile 发送文件体，Node 进程立即释放：
+
+```bash
+NGINX_UPLOADS_INTERNAL=/internal-uploads
+```
+
+对应 Nginx 配置片段：
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /internal-uploads/ {
+        internal;                          # 仅接受 X-Accel-Redirect 内部请求
+        alias /app/public/uploads/;        # 对应 LOCAL_UPLOAD_DIR
+    }
+}
+```
+
+该机制同时作用于：
+- `server.ts` 中的公共 `/uploads/*` 静态文件服务
+- `/api/materials/file/[...key]` 受保护签名 URL 文件服务
+
+不设置 `NGINX_UPLOADS_INTERNAL` 时行为完全不变，向后兼容。
+
 ### local 文件存储与访问控制
 
 文件存储模式仍然默认是 local，上传文件仍写入 `public/uploads`，不改变本地或内网部署方式。为保证历史报告、导出页面、分享页面和长期留存材料不裂图，默认保留 `/uploads/*` 静态直连：
