@@ -6,7 +6,9 @@ import {
   createLocalFileReadStream,
   getLocalContentType,
   isLocalUploadPublicAccess,
+  isNginxAccelRedirect,
   LOCAL_PUBLIC_BASE_PATH,
+  NGINX_UPLOADS_INTERNAL,
   statLocalFile,
   STORAGE_DRIVER,
 } from './lib/server/storage';
@@ -49,6 +51,17 @@ async function tryServeLocalUpload(req: IncomingMessage, res: ServerResponse) {
   try {
     const fileStat = await statLocalFile(key);
     const contentType = getLocalContentType(key);
+
+    if (isNginxAccelRedirect()) {
+      const internalPath = `${NGINX_UPLOADS_INTERNAL}/${key}`;
+      res.statusCode = 200;
+      res.setHeader('X-Accel-Redirect', internalPath);
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      res.end();
+      return true;
+    }
+
     const range = req.headers.range;
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Content-Type', contentType);

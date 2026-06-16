@@ -4,6 +4,8 @@ import { canAccessTask, getCurrentUser } from '@/lib/server/auth';
 import {
   createLocalFileReadStream,
   getLocalContentType,
+  isNginxAccelRedirect,
+  NGINX_UPLOADS_INTERNAL,
   STORAGE_DRIVER,
   verifyLocalMediaToken,
 } from '@/lib/server/storage';
@@ -52,6 +54,19 @@ export async function GET(
   }
 
   try {
+    if (isNginxAccelRedirect()) {
+      const internalPath = `${NGINX_UPLOADS_INTERNAL}/${fileKey}`;
+      return new NextResponse(null, {
+        status: 200,
+        headers: {
+          'X-Accel-Redirect': internalPath,
+          'Content-Type': getLocalContentType(fileKey),
+          'Cache-Control': hasValidToken ? 'private, max-age=300' : 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
+
     const body = Readable.toWeb(createLocalFileReadStream(fileKey)) as ReadableStream<Uint8Array>;
     return new NextResponse(body, {
       headers: {

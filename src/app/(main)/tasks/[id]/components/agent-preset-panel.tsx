@@ -56,6 +56,10 @@ export function AgentPresetPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ skill_keys: skillKeys }),
       });
+      if (!res.ok) {
+        toast.error('AI体验方案生成请求失败，请检查网络或稍后重试');
+        return;
+      }
       const data = await res.json();
       if (data.code !== 0) {
         toast.error(data.message || 'AI体验方案生成失败');
@@ -71,6 +75,8 @@ export function AgentPresetPanel({
         setExpandedRecipes([]);
         toast.success(warnings?.length ? `已生成，但有部分失败: ${warnings.join('; ')}` : '食谱功能探索已生成');
       }
+    } catch {
+      toast.error('网络请求失败，请检查网络连接后重试');
     } finally {
       setRunningMode(null);
     }
@@ -102,6 +108,10 @@ export function AgentPresetPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'accept_suggestion', standards, recipes }),
       });
+      if (!res.ok) {
+        toast.error('写入草稿请求失败，请检查网络或稍后重试');
+        return;
+      }
       const data = await res.json();
       if (data.code !== 0) {
         toast.error(data.message || '写入草稿失败');
@@ -111,6 +121,8 @@ export function AgentPresetPanel({
       if (mode === 'senses') setStandardSuggestions([]);
       else setRecipeSuggestions([]);
       onAccepted(mode);
+    } catch {
+      toast.error('网络请求失败，请检查网络连接后重试');
     } finally {
       setAcceptingMode(null);
     }

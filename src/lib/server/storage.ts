@@ -270,4 +270,10 @@ export function getLocalContentType(key: string) {
   return 'application/octet-stream';
 }
 
+export const NGINX_UPLOADS_INTERNAL = (process.env.NGINX_UPLOADS_INTERNAL || '').replace(/\/+$/, '');
+
+export function isNginxAccelRedirect(): boolean {
+  return NGINX_UPLOADS_INTERNAL.length > 0;
+}
+
 export { LOCAL_PUBLIC_BASE_PATH, LOCAL_PROTECTED_BASE_PATH, LOCAL_UPLOAD_DIR, S3_BUCKET, STORAGE_DRIVER };

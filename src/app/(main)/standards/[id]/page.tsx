@@ -287,7 +287,7 @@ export default function StandardDetailPage() {
   };
 
   const renderEditRow = (item: StandardItem) => (
-    <div className="flex-1 space-y-3 p-3 rounded-lg bg-primary/5 border border-primary/20">
+    <div key={item.id} className="flex-1 space-y-3 p-3 rounded-lg bg-primary/5 border border-primary/20">
       {category === '通用标准' && (
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
