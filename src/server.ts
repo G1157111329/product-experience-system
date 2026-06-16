@@ -53,7 +53,8 @@ async function tryServeLocalUpload(req: IncomingMessage, res: ServerResponse) {
     const contentType = getLocalContentType(key);
 
     if (isNginxAccelRedirect()) {
-      const internalPath = `${NGINX_UPLOADS_INTERNAL}/${key}`;
+      const encodedKey = key.split('/').map(encodeURIComponent).join('/');
+      const internalPath = `${NGINX_UPLOADS_INTERNAL}/${encodedKey}`;
       res.statusCode = 200;
       res.setHeader('X-Accel-Redirect', internalPath);
       res.setHeader('Content-Type', contentType);

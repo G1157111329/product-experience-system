@@ -329,6 +329,7 @@ NGINX_UPLOADS_INTERNAL=/internal-uploads
 server {
     listen 80;
     server_name your-domain.com;
+    charset utf-8;                         # 支持中文文件名
 
     location / {
         proxy_pass http://127.0.0.1:5000;

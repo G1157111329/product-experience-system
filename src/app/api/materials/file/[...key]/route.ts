@@ -55,7 +55,8 @@ export async function GET(
 
   try {
     if (isNginxAccelRedirect()) {
-      const internalPath = `${NGINX_UPLOADS_INTERNAL}/${fileKey}`;
+      const encodedKey = fileKey.split('/').map(encodeURIComponent).join('/');
+      const internalPath = `${NGINX_UPLOADS_INTERNAL}/${encodedKey}`;
       return new NextResponse(null, {
         status: 200,
         headers: {
