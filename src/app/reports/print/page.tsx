@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useState, useCallback, type CSSProperties } from 'react';
+import { Suspense, useEffect, useState, type CSSProperties } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { buildDisplayReportContent, type AiSummaryLike, type ReportContentWithReview, type ReportReviewOverrides } from '@/lib/report-review-overrides';
@@ -164,6 +164,56 @@ async function batchPresignUrls(paths: string[], reportId?: string | null): Prom
 
 function isDirectPrintableUrl(value: string): boolean {
   return value.startsWith('http') || value.startsWith('/uploads/') || value.startsWith('/media/') || value.startsWith('data:');
+}
+
+async function presignReportUrls(rpt: ReportData): Promise<ReportData> {
+  const filePaths: string[] = [];
+  const collectPaths = (obj: unknown) => {
+    if (!obj || typeof obj !== 'object') return;
+    const record = obj as Record<string, unknown>;
+    for (const [key, val] of Object.entries(record)) {
+      if ((key === 'file_url' || key === 'file_path') && typeof val === 'string' && val && !isDirectPrintableUrl(val)) {
+        filePaths.push(val);
+      } else if (Array.isArray(val)) {
+        val.forEach(item => collectPaths(item));
+      } else if (typeof val === 'object' && val !== null) {
+        collectPaths(val);
+      }
+    }
+  };
+  collectPaths(rpt);
+  if (filePaths.length === 0) return rpt;
+
+  try {
+    const res = await fetch('/api/materials/presign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_paths: [...new Set(filePaths)], report_id: rpt.id }),
+    });
+    const data = await res.json();
+    if (data.code === 0 && data.data) {
+      const urlMap = data.data as Record<string, string>;
+      const replacePaths = (obj: unknown): unknown => {
+        if (!obj || typeof obj !== 'object') return obj;
+        if (Array.isArray(obj)) return obj.map(item => replacePaths(item));
+        const record = obj as Record<string, unknown>;
+        const result: Record<string, unknown> = {};
+        for (const [key, val] of Object.entries(record)) {
+          if ((key === 'file_url' || key === 'file_path') && typeof val === 'string' && urlMap[val]) {
+            result[key] = urlMap[val];
+          } else if (typeof val === 'object' && val !== null) {
+            result[key] = replacePaths(val);
+          } else {
+            result[key] = val;
+          }
+        }
+        return result;
+      };
+      return replacePaths(rpt) as ReportData;
+    }
+  } catch { /* ignore */ }
+
+  return rpt;
 }
 
 function parseProblemPoints(value?: string | null): ProblemPoint[] {
@@ -590,7 +640,7 @@ function ReportPrintContent() {
     if (!reportId) return;
     fetch(`/api/reports/${reportId}`).then(r => r.json()).then(async (res) => {
       if (res.code === 0) {
-        const rpt = res.data as ReportData;
+        const rpt = await presignReportUrls(res.data as ReportData);
         setReport(rpt);
         setSiblingReports([]);
         // Fetch sibling reports for merging
@@ -620,7 +670,7 @@ function ReportPrintContent() {
             const siblings = await Promise.all(siblingSummaries.map(async (summary) => {
               const detailRes = await fetch(`/api/reports/${summary.id}`);
               const detailData = await detailRes.json();
-              return detailData.code === 0 ? detailData.data as ReportData : null;
+              return detailData.code === 0 ? await presignReportUrls(detailData.data as ReportData) : null;
             }));
             setSiblingReports(siblings.filter((item): item is ReportData => Boolean(item?.content)));
           }
@@ -690,60 +740,6 @@ function ReportPrintContent() {
     });
   }, [siblingReports]);
 
-  // Presign all file_url values before rendering/converting
-  const presignReportUrls = useCallback(async (rpt: ReportData): Promise<ReportData> => {
-    const filePaths: string[] = [];
-    const collectPaths = (obj: unknown) => {
-      if (!obj || typeof obj !== 'object') return;
-      const record = obj as Record<string, unknown>;
-      for (const [key, val] of Object.entries(record)) {
-        if ((key === 'file_url' || key === 'file_path') && typeof val === 'string' && val && !isDirectPrintableUrl(val)) {
-          filePaths.push(val);
-        } else if (Array.isArray(val)) {
-          val.forEach(item => collectPaths(item));
-        } else if (typeof val === 'object' && val !== null) {
-          collectPaths(val);
-        }
-      }
-    };
-    collectPaths(rpt);
-    if (filePaths.length === 0) return rpt;
-    try {
-      const res = await fetch('/api/materials/presign', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_paths: [...new Set(filePaths)], report_id: rpt.id }),
-      });
-      const data = await res.json();
-      if (data.code === 0 && data.data) {
-        const urlMap = data.data as Record<string, string>;
-        const replacePaths = (obj: unknown): unknown => {
-          if (!obj || typeof obj !== 'object') return obj;
-          if (Array.isArray(obj)) return obj.map(item => replacePaths(item));
-          const record = obj as Record<string, unknown>;
-          const result: Record<string, unknown> = {};
-          for (const [key, val] of Object.entries(record)) {
-            if ((key === 'file_url' || key === 'file_path') && typeof val === 'string' && urlMap[val]) {
-              result[key] = urlMap[val];
-            } else if (typeof val === 'object' && val !== null) {
-              result[key] = replacePaths(val);
-            } else {
-              result[key] = val;
-            }
-          }
-          return result;
-        };
-        return replacePaths(rpt) as ReportData;
-      }
-    } catch { /* ignore */ }
-    return rpt;
-  }, []);
-
-  useEffect(() => {
-    if (!report) return;
-    presignReportUrls(report).then(rpt => setReport(rpt));
-  }, [report, presignReportUrls]);
-
   // Convert images for printing. Fast mode dedupes and compresses; high mode keeps originals.
   useEffect(() => {
     if (!report) return;
@@ -796,8 +792,12 @@ function ReportPrintContent() {
 
       // Step 1: Update DOM img/video src from S3 key to presigned URL
       for (const [fp, presignedUrl] of Object.entries(presignedMap)) {
-        document.querySelectorAll(`img[src="${fp}"]`).forEach(img => { (img as HTMLImageElement).src = presignedUrl; });
-        document.querySelectorAll(`video[src="${fp}"]`).forEach(vid => { (vid as HTMLVideoElement).src = presignedUrl; });
+        document.querySelectorAll('img').forEach((img) => {
+          if (img.getAttribute('src') === fp) (img as HTMLImageElement).src = presignedUrl;
+        });
+        document.querySelectorAll('video').forEach((vid) => {
+          if (vid.getAttribute('src') === fp) (vid as HTMLVideoElement).src = presignedUrl;
+        });
       }
 
       // Step 2: Convert presigned URLs to base64 for print
@@ -807,8 +807,11 @@ function ReportPrintContent() {
       await mapWithConcurrency(imageUrls, printMode === 'high' ? 3 : 5, async (url) => {
         try {
           const base64 = await imageUrlToPrintableDataUrl(url, printMode);
-          const imgs = document.querySelectorAll(`img[src="${url}"]`);
-          imgs.forEach(img => { (img as HTMLImageElement).src = base64; });
+          document.querySelectorAll('img').forEach((img) => {
+            if (img.getAttribute('src') === url || (img as HTMLImageElement).src === url) {
+              (img as HTMLImageElement).src = base64;
+            }
+          });
         } catch { /* ignore */ }
         setImageProgress((current) => ({ total: current.total, done: current.done + 1 }));
       });
