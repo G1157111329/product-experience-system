@@ -6,6 +6,9 @@ const imageRemoteHosts = (process.env.NEXT_IMAGE_REMOTE_HOSTS || '')
 const nextConfig = {
   // outputFileTracingRoot: path.resolve(__dirname, '../../'),  // Uncomment and add 'import path from "path"' if needed
   devIndicators: false,
+  experimental: {
+    middlewareClientMaxBodySize: '110mb',
+  },
   async headers() {
     const isProduction = process.env.NODE_ENV === 'production';
     const securityHeaders = [
