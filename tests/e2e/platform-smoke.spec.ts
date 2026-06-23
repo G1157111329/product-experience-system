@@ -75,6 +75,36 @@ test('detail pages keep sidebar navigation clickable', async ({ page }) => {
   await expect(page).toHaveURL(/\/tasks/);
   await expectAppLoaded(page);
 });
+test('comparison authoring saves inline cell text in an existing task', async ({ page }) => {
+  const assemblyResponse = await page.request.get('/api/tasks/golden-task-comparison/comparison/init');
+  expect(assemblyResponse.ok(), 'comparison assembly API should return 2xx').toBeTruthy();
+  const assemblyPayload = await assemblyResponse.json();
+  expect(assemblyPayload.code, assemblyPayload.message || 'comparison assembly API should succeed').toBe(0);
+  const assemblyId = assemblyPayload.data?.id;
+  expect(assemblyId, 'Golden comparison task should expose an assembly').toBeTruthy();
+
+  const matrixResponse = await page.request.get(`/api/comparison-matrix?assembly_id=${assemblyId}`);
+  expect(matrixResponse.ok(), 'comparison matrix API should return 2xx').toBeTruthy();
+  const matrixPayload = await matrixResponse.json();
+  expect(matrixPayload.code, matrixPayload.message || 'comparison matrix API should succeed').toBe(0);
+  const targetCell = matrixPayload.data?.cells?.[0];
+  expect(targetCell?.id, 'Golden comparison matrix should include cells').toBeTruthy();
+
+  await page.goto('/tasks/golden-task-comparison?tab=comparison');
+  await expect(page.locator('textarea').first(), 'inline matrix cell editor should be visible').toBeVisible();
+  await expect(page.locator('button:has(svg.lucide-save)').first(), 'inline matrix save button should be visible').toBeVisible();
+
+  const marker = `E2E inline effect ${Date.now()}`;
+  await page.locator('textarea').first().fill(marker);
+  await page.locator('button:has(svg.lucide-save)').first().click();
+
+  await expect.poll(async () => {
+    const updatedMatrixResponse = await page.request.get(`/api/comparison-matrix?assembly_id=${assemblyId}`);
+    const updatedMatrixPayload = await updatedMatrixResponse.json();
+    const updatedCell = updatedMatrixPayload.data?.cells?.find((cell: { id?: string }) => cell.id === targetCell.id);
+    return updatedCell?.effect_summary || '';
+  }, { message: 'inline cell text should persist through the matrix API' }).toBe(marker);
+});
 
 test('report detail renders v2 section canvas contract', async ({ page }) => {
   const reportsResponse = await page.request.get('/api/reports?limit=50');
@@ -114,7 +144,7 @@ test('report detail renders v2 section canvas contract', async ({ page }) => {
   await expectAppLoaded(page);
 
   await page.goto('/reports/golden-report-comparison');
-  await expect(page.getByTestId('report-section-block').filter({ hasText: 'Comparison matrix' })).toBeVisible();
+  await expect(page.getByTestId('report-section-block').filter({ hasText: 'Comparison matrix' }).first()).toBeVisible();
   await expect(page.getByTestId('report-section-block').filter({ hasText: 'Cell evidence' })).toBeVisible();
   await expect(page.getByTestId('report-inline-media-item').first()).toBeVisible();
 

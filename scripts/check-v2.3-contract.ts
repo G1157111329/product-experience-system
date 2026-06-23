@@ -14,6 +14,13 @@ function assertIncludes(file: string, expected: string) {
   }
 }
 
+function assertNotIncludes(file: string, unexpected: string) {
+  const content = read(file);
+  if (content.includes(unexpected)) {
+    throw new Error(`${file} still contains obsolete contract token: ${unexpected}`);
+  }
+}
+
 function assertTableIncludes(file: string, tableName: string, expected: string) {
   const content = read(file);
   const match = content.match(new RegExp(`CREATE TABLE IF NOT EXISTS ${tableName} \\([\\s\\S]*?\\n\\);`));
@@ -27,6 +34,8 @@ function assertExists(relativePath: string) {
     throw new Error(`${relativePath} does not exist`);
   }
 }
+
+const comparisonWorkspace = 'src/app/(main)/tasks/[id]/components/comparison-workspace.tsx';
 
 for (const file of [
   'database-schema.sql',
@@ -51,22 +60,35 @@ assertIncludes('src/app/api/comparison-cells/[id]/media/route.ts', 'cell_seconda
 assertIncludes('src/app/api/comparison-cells/[id]/media/route.ts', 'appendix');
 assertIncludes('src/app/api/materials/upload/route.ts', 'comparison_cell_id');
 assertIncludes('src/app/api/materials/route.ts', 'comparison_cell_id');
-assertExists('src/app/(main)/tasks/[id]/components/comparison-workspace.tsx');
+
+assertExists(comparisonWorkspace);
 assertIncludes('src/lib/server/comparison-assembly.ts', 'findAssemblyForTask');
 assertIncludes('src/app/api/tasks/[id]/comparison/init/route.ts', 'findAssemblyForTask');
 assertIncludes('src/app/api/tasks/route.ts', 'createAssemblyFromComparisonTask');
 assertIncludes('src/app/api/tasks/route.ts', 'comparison_assembly_id');
-assertIncludes('src/app/(main)/tasks/[id]/components/comparison-workspace.tsx', 'autoInitializeAssembly');
-assertIncludes('src/app/(main)/tasks/[id]/components/comparison-workspace.tsx', 'syncMatrixCells');
-assertIncludes('src/app/(main)/tasks/[id]/components/comparison-workspace.tsx', 'params_text');
-assertIncludes('src/app/(main)/tasks/[id]/components/comparison-workspace.tsx', 'process_notes_text');
-assertIncludes('src/app/(main)/tasks/[id]/components/comparison-workspace.tsx', 'problem_points_text');
-assertIncludes('src/app/(main)/tasks/[id]/components/comparison-workspace.tsx', 'cellSaveStatus');
-assertIncludes('src/app/(main)/tasks/[id]/components/comparison-workspace.tsx', '/media');
-assertIncludes('src/app/(main)/tasks/[id]/components/comparison-workspace.tsx', 'inline_media');
-assertIncludes('src/app/(main)/tasks/[id]/components/comparison-workspace.tsx', 'appendix_media');
-assertIncludes('src/app/(main)/tasks/[id]/components/comparison-workspace.tsx', 'comparisonCellId');
+
+assertIncludes(comparisonWorkspace, 'initializeAssembly');
+assertIncludes(comparisonWorkspace, 'completeMatrixCells');
+assertIncludes(comparisonWorkspace, 'renderCellEditor');
+assertIncludes(comparisonWorkspace, '<MaterialPicker');
+assertIncludes(comparisonWorkspace, '<Textarea');
+assertIncludes(comparisonWorkspace, 'effect_summary');
+assertIncludes(comparisonWorkspace, 'process_notes_text');
+assertIncludes(comparisonWorkspace, 'problem_points_text');
+assertIncludes(comparisonWorkspace, 'manual_score');
+assertIncludes(comparisonWorkspace, 'conclusion_tag');
+assertIncludes(comparisonWorkspace, 'saveCell');
+assertIncludes(comparisonWorkspace, 'syncCellMedia');
+assertIncludes(comparisonWorkspace, 'dropMaterialToCell');
+assertIncludes(comparisonWorkspace, 'comparisonCellId');
+assertIncludes(comparisonWorkspace, '/media');
+assertIncludes(comparisonWorkspace, 'inline_media');
+assertIncludes(comparisonWorkspace, 'appendix_media');
+assertIncludes(comparisonWorkspace, 'OBJECT_COLUMN_WIDTH');
+assertIncludes(comparisonWorkspace, 'LEFT_COLUMN_WIDTH');
+assertIncludes(comparisonWorkspace, 'tableMinWidth');
 assertIncludes('src/components/material-picker.tsx', 'comparisonCellId');
+
 assertIncludes('src/lib/server/comparison-assembly.ts', 'buildComparisonReportSnapshot');
 assertIncludes('src/lib/server/comparison-assembly.ts', 'inline_media');
 assertIncludes('src/lib/server/comparison-assembly.ts', 'appendix_media');
@@ -74,20 +96,18 @@ assertExists('src/app/api/report-snapshots/route.ts');
 assertIncludes('src/app/api/report-snapshots/route.ts', 'comparison_report');
 assertIncludes('src/app/api/report-snapshots/route.ts', 'report_snapshots');
 assertIncludes('src/app/api/report-snapshots/route.ts', 'snapshot_json');
+
 assertExists('src/app/api/comparison-cells/[id]/ai/route.ts');
 assertExists('src/app/api/comparison-ai-results/[id]/route.ts');
 assertIncludes('src/app/api/comparison-cells/[id]/ai/route.ts', 'comparison_cell_ai');
 assertIncludes('src/app/api/comparison-ai-results/[id]/route.ts', 'confirmed');
 assertIncludes('src/app/api/comparison-ai-results/[id]/route.ts', 'rejected');
-assertIncludes('src/app/(main)/tasks/[id]/components/comparison-workspace.tsx', 'generateCellAi');
-assertIncludes('src/app/(main)/tasks/[id]/components/comparison-workspace.tsx', 'confirmCellAiResult');
+
 assertIncludes('src/app/(main)/tasks/[id]/page.tsx', "activeTab === 'comparison'");
 assertIncludes('src/app/(main)/tasks/[id]/components/report-authoring-shell.tsx', "key: 'comparison'");
-assertIncludes('src/app/(main)/tasks/page.tsx', "task_mode: 'single'");
-assertIncludes('src/app/(main)/tasks/page.tsx', "task_mode: 'comparison'");
-assertIncludes('src/app/(main)/tasks/page.tsx', 'comparison_layout_type');
-assertIncludes('src/app/(main)/tasks/page.tsx', 'tab=comparison');
 assertIncludes('src/app/(main)/tasks/page.tsx', 'creating ||');
+assertIncludes('src/app/(main)/tasks/[id]/page.tsx', 'initialLayoutType={task.comparison_layout_type}');
+
 assertExists('src/lib/server/report-snapshots.ts');
 assertIncludes('src/lib/server/report-snapshots.ts', 'attachLatestSnapshotForComparisonReport');
 assertIncludes('src/app/api/reports/[id]/route.ts', 'attachLatestSnapshotForComparisonReport');
@@ -98,6 +118,7 @@ assertIncludes('src/app/(main)/reports/[id]/page.tsx', 'ComparisonReportView');
 assertIncludes('src/app/(main)/reports/[id]/page.tsx', "report_type === 'comparison_report'");
 assertIncludes('src/app/reports/share/[token]/page.tsx', 'ComparisonReportView');
 assertIncludes('src/app/reports/share/[token]/page.tsx', "report_type === 'comparison_report'");
+
 assertExists('src/lib/server/comparison-pdf.ts');
 assertIncludes('src/lib/server/comparison-pdf.ts', 'comparison_image_matrix_a3_landscape');
 assertIncludes('src/lib/server/comparison-pdf.ts', 'buildComparisonPdfPreflight');
@@ -112,14 +133,10 @@ assertIncludes('src/app/reports/share/[token]/page.tsx', `/api/reports/${'${repo
 assertIncludes('Dockerfile', 'mcr.microsoft.com/playwright:v1.60.0-noble');
 assertIncludes('Dockerfile', 'PLAYWRIGHT_BROWSERS_PATH=/ms-playwright');
 assertIncludes('package.json', '"playwright": "1.60.0"');
-assertIncludes('src/app/(main)/tasks/[id]/components/comparison-workspace.tsx', 'INITIAL_VISIBLE_NODE_LIMIT');
-assertIncludes('src/app/(main)/tasks/[id]/components/comparison-workspace.tsx', '横向滑动录入');
-assertIncludes('src/app/(main)/tasks/[id]/components/comparison-workspace.tsx', 'matrixTableMinWidth');
-assertIncludes('src/app/(main)/tasks/[id]/components/comparison-workspace.tsx', '加载更多项目');
-assertIncludes('src/app/(main)/tasks/[id]/components/comparison-workspace.tsx', '图片矩阵型');
-assertIncludes('src/app/(main)/tasks/[id]/components/comparison-workspace.tsx', '指标表格型');
-assertIncludes('src/app/(main)/tasks/[id]/components/comparison-workspace.tsx', 'changeLayoutType');
-assertIncludes('src/app/(main)/tasks/[id]/components/comparison-workspace.tsx', 'layout_type: normalizeLayoutType(initialLayoutType)');
-assertIncludes('src/app/(main)/tasks/[id]/page.tsx', 'initialLayoutType={task.comparison_layout_type}');
 
-console.log('V2.3 contract check passed');
+assertNotIncludes(comparisonWorkspace, 'autoInitializeAssembly');
+assertNotIncludes(comparisonWorkspace, 'cellSaveStatus');
+assertNotIncludes(comparisonWorkspace, 'changeLayoutType');
+assertNotIncludes(comparisonWorkspace, 'DialogContent');
+
+console.log('Comparison report asset contract check passed');
