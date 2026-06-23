@@ -1,23 +1,35 @@
 'use client';
 
-import type { ComponentType, ReactNode } from 'react';
-import { Eye, FileText, Sparkles, WandSparkles, Wrench } from 'lucide-react';
+import { useState, type ComponentType, type ReactNode } from 'react';
+import {
+  Eye,
+  FileText,
+  GitCompareArrows,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Sparkles,
+  WandSparkles,
+  Wrench,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { AgentAssistPanel } from './agent-assist-panel';
 
-type TaskTabKey = 'agent' | 'info' | 'materials' | 'senses' | 'functions';
+type TaskTabKey = 'agent' | 'info' | 'materials' | 'senses' | 'functions' | 'comparison';
 
 type ReportAuthoringShellProps = {
   taskId: string;
   activeTab: TaskTabKey;
   agentOpen: boolean;
+  isComparisonTask?: boolean;
   onTabChange: (tab: TaskTabKey) => void;
   onAgentOpenChange: (open: boolean) => void;
+  materialRail?: ReactNode;
   children: ReactNode;
 };
 
-const navItems: Array<{ key: TaskTabKey; label: string; icon: ComponentType<{ className?: string }> | null }> = [
+const baseNavItems: Array<{ key: TaskTabKey; label: string; icon: ComponentType<{ className?: string }> | null }> = [
   { key: 'agent', label: 'AI体验方案', icon: WandSparkles },
   { key: 'senses', label: '五感体验', icon: Eye },
   { key: 'functions', label: '功能效果', icon: Wrench },
@@ -28,33 +40,53 @@ export function ReportAuthoringShell({
   taskId,
   activeTab,
   agentOpen,
+  isComparisonTask = true,
   onTabChange,
   onAgentOpenChange,
+  materialRail,
   children,
 }: ReportAuthoringShellProps) {
+  const [navCollapsed, setNavCollapsed] = useState(false);
+  const navItems = isComparisonTask
+    ? [
+      baseNavItems[0],
+      { key: 'comparison' as const, label: '对比矩阵', icon: GitCompareArrows },
+      ...baseNavItems.slice(1),
+    ]
+    : baseNavItems;
+
   return (
     <div
       className={cn(
         'grid gap-4 lg:items-start',
-        agentOpen
-          ? 'lg:grid-cols-[220px_minmax(0,1fr)] 2xl:grid-cols-[220px_minmax(0,1fr)_300px]'
-          : 'lg:grid-cols-[220px_minmax(0,1fr)]'
+        navCollapsed ? 'lg:grid-cols-[64px_minmax(0,1fr)]' : 'lg:grid-cols-[300px_minmax(0,1fr)]',
       )}
     >
       <aside className="rounded-lg border bg-card p-3 shadow-sm lg:sticky lg:top-4">
         <div className="mb-3 flex items-center justify-between gap-2">
-          <div>
+          <div className={cn(navCollapsed && 'sr-only')}>
             <h2 className="text-sm font-semibold">录入目录</h2>
           </div>
           <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 shrink-0"
+            onClick={() => setNavCollapsed((current) => !current)}
+            aria-label={navCollapsed ? '展开录入目录' : '隐藏录入目录'}
+            title={navCollapsed ? '展开录入目录' : '隐藏录入目录'}
+          >
+            {navCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+          </Button>
+          <Button
             variant={agentOpen ? 'default' : 'outline'}
-            size="sm"
-            className="h-9 gap-1.5 px-2.5"
+            size={navCollapsed ? 'icon' : 'sm'}
+            className={cn('h-9 shrink-0', !navCollapsed && 'gap-1.5 px-2.5')}
             onClick={() => onAgentOpenChange(!agentOpen)}
-            aria-label={agentOpen ? '关闭 AI助手' : '唤醒 AI助手'}
+            aria-label={agentOpen ? '关闭 AI辅助' : '打开 AI辅助'}
+            title="AI辅助"
           >
             <Sparkles className="h-4 w-4" />
-            <span className="text-xs">AI辅助</span>
+            {!navCollapsed && <span className="text-xs">AI辅助</span>}
           </Button>
         </div>
 
@@ -65,27 +97,38 @@ export function ReportAuthoringShell({
               type="button"
               onClick={() => onTabChange(item.key)}
               className={cn(
-                'flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors',
-                activeTab === item.key ? 'bg-primary text-primary-foreground shadow-sm' : 'bg-muted/40 hover:bg-muted'
+                'flex items-center rounded-md px-3 py-2 text-left text-sm transition-colors',
+                navCollapsed ? 'justify-center px-2' : 'gap-2',
+                activeTab === item.key ? 'bg-primary text-primary-foreground shadow-sm' : 'bg-muted/40 hover:bg-muted',
               )}
+              title={item.label}
             >
               {item.icon && <item.icon className="h-4 w-4 shrink-0" />}
-              <span className="min-w-0 truncate">{item.label}</span>
+              {!navCollapsed && <span className="min-w-0 truncate">{item.label}</span>}
             </button>
           ))}
         </nav>
+
+        {!navCollapsed && materialRail && (
+          <div className="mt-3 border-t pt-3">
+            {materialRail}
+          </div>
+        )}
       </aside>
 
       <div className="min-w-0 space-y-4">{children}</div>
 
-      {agentOpen && (
-        <div className="min-w-0 lg:col-start-2 2xl:col-start-3 2xl:row-start-1">
+      <Dialog open={agentOpen} onOpenChange={onAgentOpenChange}>
+        <DialogContent className="max-h-[90dvh] max-w-3xl overflow-hidden p-0">
+          <DialogHeader className="sr-only">
+            <DialogTitle>AI辅助</DialogTitle>
+          </DialogHeader>
           <AgentAssistPanel
             taskId={taskId}
             onClose={() => onAgentOpenChange(false)}
           />
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

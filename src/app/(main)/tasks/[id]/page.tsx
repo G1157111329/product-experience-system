@@ -29,6 +29,7 @@ import { MaterialEvidenceRail } from './components/material-evidence-rail';
 import { ReportAuthoringShell } from './components/report-authoring-shell';
 import { SensesInputWorkspace } from './components/senses-input-workspace';
 import { FunctionsInputWorkspace } from './components/functions-input-workspace';
+import { ComparisonWorkspace } from './components/comparison-workspace';
 import type { EvidenceBindingTarget } from './types';
 
 /* ─── Types ─── */
@@ -47,6 +48,7 @@ interface TaskDetail {
   id: string; task_name: string; product_category: string; product: string | null; product_model: string; project_number: string | null;
   project_type: string | null; project_phase: string | null; test_date: string | null; organizer: string | null;
   target_user: string | null; test_purpose: string | null; test_method: string | null;
+  task_mode?: 'single' | 'comparison' | string | null; comparison_intent?: string | null; comparison_layout_type?: string | null;
   status: string; assigned_to: string | null; created_by: string | null; created_at: string;
   records: CheckRecord[]; issues: Issue[];
 }
@@ -158,7 +160,7 @@ export default function TaskDetailPage() {
   const id = params.id as string;
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'agent' | 'info' | 'materials' | 'senses' | 'functions'>('agent');
+  const [activeTab, setActiveTab] = useState<'agent' | 'info' | 'materials' | 'senses' | 'functions' | 'comparison'>('agent');
   const [evidenceBindingTarget, setEvidenceBindingTarget] = useState<EvidenceBindingTarget | null>(null);
   const [agentAssistOpen, setAgentAssistOpen] = useState(false);
   const [generateConfirmOpen, setGenerateConfirmOpen] = useState(false);
@@ -219,7 +221,7 @@ export default function TaskDetailPage() {
   }, [activeTab, fetchReportRecipes]);
   useEffect(() => {
     const tab = searchParams.get('tab');
-    if (tab === 'agent' || tab === 'info' || tab === 'materials' || tab === 'senses' || tab === 'functions') {
+    if (tab === 'agent' || tab === 'info' || tab === 'materials' || tab === 'senses' || tab === 'functions' || tab === 'comparison') {
       setActiveTab(tab);
     }
   }, [searchParams]);
@@ -409,14 +411,15 @@ export default function TaskDetailPage() {
         agentOpen={agentAssistOpen}
         onTabChange={setActiveTab}
         onAgentOpenChange={setAgentAssistOpen}
+        materialRail={(activeTab === 'senses' || activeTab === 'functions' || activeTab === 'comparison') ? (
+          <MaterialEvidenceRail
+            taskId={id}
+            bindingTarget={evidenceBindingTarget}
+            onMaterialsChange={handleMaterialsChanged}
+            embedded
+          />
+        ) : null}
       >
-      {(activeTab === 'senses' || activeTab === 'functions') && (
-        <MaterialEvidenceRail
-          taskId={id}
-          bindingTarget={evidenceBindingTarget}
-          onMaterialsChange={handleMaterialsChanged}
-        />
-      )}
 
       {/* Tab Content */}
       {activeTab === 'agent' && (
@@ -436,6 +439,9 @@ export default function TaskDetailPage() {
         </div>
       )}
       {activeTab === 'materials' && <MaterialsTab taskId={id} />}
+        {activeTab === 'comparison' && (
+          <ComparisonWorkspace taskId={id} taskName={task.task_name} initialLayoutType={task.comparison_layout_type} />
+        )}
         {activeTab === 'senses' && <SensesTab taskId={id} records={task.records || []} taskProductCategory={task.product_category} taskProduct={task.product} onRefresh={fetchTask} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onBindingTargetChange={setEvidenceBindingTarget} />}
         {activeTab === 'functions' && <FunctionsTab taskId={id} initialRecipes={reportRecipes} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onRecipesChange={setReportRecipes} onBindingTargetChange={setEvidenceBindingTarget} />}
       </ReportAuthoringShell>
@@ -2091,6 +2097,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
         onDeleteRecord={handleDeleteRecord}
         onPreview={open}
         onBindingTargetChange={(target) => onBindingTargetChange?.(target)}
+        onMaterialsChange={onRefresh}
       />
 
       <div className="hidden">

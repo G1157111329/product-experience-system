@@ -9,6 +9,9 @@ import {
   pickLatestReportPerTask,
   sortReportsByCreatedAtAsc,
 } from '@/lib/report-merge';
+import { attachLatestSnapshotForComparisonReport } from '@/lib/server/report-snapshots';
+import { loadLatestReportSnapshot } from '@/lib/server/report-snapshots';
+import { buildReportDetailModel } from '@/lib/server/report-detail';
 
 type IssueRow = Record<string, unknown> & { id: string };
 type ReportRow = Record<string, unknown> & {
@@ -18,6 +21,48 @@ type ReportRow = Record<string, unknown> & {
   created_at: string;
   content?: { task?: Record<string, unknown> } | null;
 };
+
+async function loadRows(
+  query: PromiseLike<{ data: Array<Record<string, unknown>> | null; error?: { message?: string } | null }>,
+) {
+  const { data } = await query;
+  return Array.isArray(data) ? data : [];
+}
+
+async function buildPublicDetailModel(client: ReturnType<typeof getSupabaseClient>, report: ReportRow) {
+  const reportId = String(report.id || '');
+  const taskId = String(report.task_id || '');
+  const [snapshot, sourceIssues, taskIssues, materials, pdfJobs] = await Promise.all([
+    reportId ? loadLatestReportSnapshot(client, reportId) : Promise.resolve(null),
+    reportId
+      ? loadRows(client.from('issues').select('*').eq('source_report_id', reportId) as unknown as PromiseLike<{ data: Array<Record<string, unknown>> | null }>)
+      : Promise.resolve([]),
+    taskId
+      ? loadRows(client.from('issues').select('*').eq('task_id', taskId) as unknown as PromiseLike<{ data: Array<Record<string, unknown>> | null }>)
+      : Promise.resolve([]),
+    taskId
+      ? loadRows(client.from('materials').select('*').eq('task_id', taskId).order('media_display_order', { ascending: true }) as unknown as PromiseLike<{ data: Array<Record<string, unknown>> | null }>)
+      : Promise.resolve([]),
+    reportId
+      ? loadRows(client.from('pdf_generation_jobs').select('*').eq('report_id', reportId).order('created_at', { ascending: false }) as unknown as PromiseLike<{ data: Array<Record<string, unknown>> | null }>)
+      : Promise.resolve([]),
+  ]);
+
+  const issueMap = new Map([...sourceIssues, ...taskIssues].map((issue) => [String(issue.id || ''), issue]));
+  const issueRows = Array.from(issueMap.values()) as IssueRow[];
+  const reEvaluationsMap = await loadReEvaluationsMap(client, issueRows);
+  const issuesWithReEvaluations = issueRows.map((issue) => ({
+    ...issue,
+    _reEvaluations: reEvaluationsMap[issue.id] || [],
+  }));
+  return buildReportDetailModel({
+    report,
+    snapshot,
+    issues: issuesWithReEvaluations,
+    materials,
+    pdfJobs,
+  });
+}
 
 async function loadReEvaluationsMap(client: ReturnType<typeof getSupabaseClient>, issues: IssueRow[]) {
   const reEvaluationsMap: Record<string, unknown[]> = {};
@@ -193,14 +238,23 @@ export async function GET(request: NextRequest) {
     metadata: { shareId: share.id },
   });
 
+  const reportWithSnapshot = await attachLatestSnapshotForComparisonReport(client, report as Record<string, unknown>);
+  const detailModel = await buildPublicDetailModel(client, reportWithSnapshot as ReportRow);
+  const siblingDetailModels: Record<string, unknown> = {};
+  await Promise.all(siblingReports.map(async (sibling) => {
+    siblingDetailModels[sibling.id] = await buildPublicDetailModel(client, sibling);
+  }));
+
   return NextResponse.json({
     code: 0,
     message: 'success',
     data: {
-      report,
+      report: reportWithSnapshot,
+      detailModel,
       liveIssues,
       reEvaluationsMap,
       siblingReports,
+      siblingDetailModels,
       siblingIssuesMap,
       siblingReEvaluationsMap,
       shareInfo: {

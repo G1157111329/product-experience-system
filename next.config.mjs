@@ -4,6 +4,7 @@ const imageRemoteHosts = (process.env.NEXT_IMAGE_REMOTE_HOSTS || '')
   .filter(Boolean);
 
 const nextConfig = {
+  compress: false,
   // outputFileTracingRoot: path.resolve(__dirname, '../../'),  // Uncomment and add 'import path from "path"' if needed
   devIndicators: false,
   experimental: {

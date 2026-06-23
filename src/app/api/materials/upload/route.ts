@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generatePresignedUrl, uploadFile } from '@/lib/server/storage';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { canAccessTask, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
+import { canAccessAssembly, canAccessTask, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { checkSharedRateLimit } from '@/lib/server/rate-limit';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
+import { allocateEditedCopyFileName, allocateMaterialFileName } from '@/lib/material-naming';
 import { Readable } from 'stream';
 import type { ReadableStream as NodeReadableStream } from 'stream/web';
 
 export const maxDuration = 120;
 export const dynamic = 'force-dynamic';
+
+const MAX_INLINE_MEDIA = 5;
 
 const ALLOWED_UPLOAD_TYPES: Record<string, { materialType: 'image' | 'video'; mimeTypes: string[] }> = {
   jpg: { materialType: 'image', mimeTypes: ['image/jpeg', 'image/jpg'] },
@@ -65,9 +68,30 @@ async function getRelatedTaskIds(client: ReturnType<typeof getSupabaseClient>, i
   return [...taskIds];
 }
 
+async function getAssemblyIdForComparisonCell(client: ReturnType<typeof getSupabaseClient>, comparisonCellId: string) {
+  const { data } = await client
+    .from('comparison_matrix_cells')
+    .select('assembly_id')
+    .eq('id', comparisonCellId)
+    .maybeSingle();
+  return data?.assembly_id ? String(data.assembly_id) : null;
+}
+
+function roleForIndex(index: number) {
+  if (index === 0) return 'cell_primary';
+  if (index < MAX_INLINE_MEDIA) return 'cell_secondary';
+  return 'appendix';
+}
+
 function getFileExtension(fileName: string) {
   const match = fileName.toLowerCase().match(/\.([a-z0-9]+)$/);
   return match?.[1] || '';
+}
+
+function replaceFileExtension(fileName: string, extension: string) {
+  const normalizedExtension = extension.replace(/^\.+/, '').toLowerCase();
+  const base = fileName.replace(/\.[^.]+$/, '');
+  return `${base}.${normalizedExtension}`;
 }
 
 function isIsoBaseMediaFile(buffer: Buffer) {
@@ -158,12 +182,14 @@ export async function POST(request: NextRequest) {
     const recipe_id = formData.get('recipe_id') as string | null;
     const issue_id = formData.get('issue_id') as string | null;
     const re_evaluation_id = formData.get('re_evaluation_id') as string | null;
+    const comparison_cell_id = formData.get('comparison_cell_id') as string | null;
+    const copy_source_file_name = formData.get('copy_source_file_name') as string | null;
 
     if (!file) {
       return NextResponse.json({ code: 1, message: '缺少文件' }, { status: 400 });
     }
 
-    if (!task_id && !recipe_library_step_id && !issue_id && !re_evaluation_id) {
+    if (!task_id && !recipe_library_step_id && !issue_id && !re_evaluation_id && !comparison_cell_id) {
       return NextResponse.json({ code: 1, message: '缺少必要关联参数' }, { status: 400 });
     }
 
@@ -177,9 +203,23 @@ export async function POST(request: NextRequest) {
       issue_id,
       re_evaluation_id,
     });
-    if (!recipe_library_step_id && relatedTaskIds.length === 0) return forbidden();
+    if (!recipe_library_step_id && !comparison_cell_id && relatedTaskIds.length === 0) return forbidden();
     for (const relatedTaskId of relatedTaskIds) {
       if (!(await canAccessTask(client, user, relatedTaskId))) return forbidden();
+    }
+
+    let comparisonAssemblyId: string | null = null;
+    let mediaDisplayOrder = 0;
+    let mediaRole: string | null = null;
+    if (comparison_cell_id) {
+      comparisonAssemblyId = await getAssemblyIdForComparisonCell(client, comparison_cell_id);
+      if (!comparisonAssemblyId || !(await canAccessAssembly(client, user, comparisonAssemblyId))) return forbidden();
+      const { data: existingCellMaterials } = await client
+        .from('materials')
+        .select('id')
+        .eq('comparison_cell_id', comparison_cell_id);
+      mediaDisplayOrder = Array.isArray(existingCellMaterials) ? existingCellMaterials.length : 0;
+      mediaRole = roleForIndex(mediaDisplayOrder);
     }
 
     const MAX_SIZE = 100 * 1024 * 1024;
@@ -207,9 +247,26 @@ export async function POST(request: NextRequest) {
     }
     const materialType = uploadType.materialType;
 
-    const timestamp = Date.now();
-    const folderId = recipe_library_step_id || issue_id || task_id || 'unknown';
-    const fileName = `experience-media/${folderId}/${materialType}/${timestamp}_${file.name}`;
+    const { data: existingNamedMaterials } = await client
+      .from('materials')
+      .select('file_name')
+      .order('created_at', { ascending: false })
+      .limit(5000);
+    const existingFileNames = (existingNamedMaterials || [])
+      .map((material: { file_name?: unknown }) => material.file_name)
+      .filter((name: unknown): name is string => typeof name === 'string' && name.length > 0);
+    const generatedFileName = copy_source_file_name
+      ? allocateEditedCopyFileName({
+        originalFileName: replaceFileExtension(copy_source_file_name, uploadType.extension),
+        existingFileNames,
+      })
+      : allocateMaterialFileName({
+        now: new Date(),
+        extension: uploadType.extension,
+        existingFileNames,
+      });
+    const folderId = recipe_library_step_id || issue_id || task_id || comparison_cell_id || 'unknown';
+    const storageFileName = `experience-media/${folderId}/${materialType}/${generatedFileName}`;
 
     let fileKey: string | undefined;
     const maxRetries = isLargeFile ? 2 : 0;
@@ -217,7 +274,7 @@ export async function POST(request: NextRequest) {
       try {
         fileKey = await uploadFile({
           fileContent: Readable.fromWeb(file.stream() as unknown as NodeReadableStream<Uint8Array>),
-          fileName,
+          fileName: storageFileName,
           contentType: file.type,
         });
         break;
@@ -245,8 +302,12 @@ export async function POST(request: NextRequest) {
       recipe_id: recipe_id || null,
       issue_id: issue_id || null,
       re_evaluation_id: re_evaluation_id || null,
+      comparison_cell_id: comparison_cell_id || null,
+      comparison_assembly_id: comparisonAssemblyId,
+      media_display_order: mediaDisplayOrder,
+      media_role: mediaRole,
       material_type: materialType,
-      file_name: file.name,
+      file_name: generatedFileName,
       file_path: fileKey,
       file_size: file.size,
       file_url: fileKey,

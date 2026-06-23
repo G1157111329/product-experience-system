@@ -11,6 +11,7 @@ import {
   reports as reportsTable,
 } from '@/storage/database/shared/schema';
 import { preserveReviewOverrides, type ReportContentWithReview } from '@/lib/report-review-overrides';
+import { buildComparisonReportSnapshot, findAssemblyForTask } from '@/lib/server/comparison-assembly';
 
 function parsePositiveInt(value: string | null, fallback: number, max: number) {
   const num = Number(value);
@@ -82,6 +83,41 @@ function mergeMaterialsById(
     if (material) merged.set(id, material);
   }
   return Array.from(merged.values());
+}
+
+function hasMeaningfulComparisonCell(cell: Record<string, unknown>) {
+  const textFields = ['effect_summary', 'manual_score', 'ai_score', 'conclusion_tag'];
+  if (textFields.some((field) => String(cell[field] || '').trim())) return true;
+
+  const objectFields = ['params', 'metric_values', 'media_display_config'];
+  if (objectFields.some((field) => {
+    const value = cell[field];
+    return value && typeof value === 'object' && Object.keys(value as Record<string, unknown>).length > 0;
+  })) return true;
+
+  const listFields = ['process_notes', 'problem_points'];
+  return listFields.some((field) => Array.isArray(cell[field]) && (cell[field] as unknown[]).length > 0);
+}
+
+async function loadTaskComparisonReportSource(client: ReturnType<typeof getSupabaseClient>, taskId: string) {
+  const assembly = await findAssemblyForTask(client, taskId);
+  if (!assembly?.id) return null;
+
+  const [objectsResult, nodesResult, cellsResult, materialsResult] = await Promise.all([
+    client.from('comparison_objects').select('id').eq('assembly_id', assembly.id).limit(1),
+    client.from('comparison_item_nodes').select('id,node_type').eq('assembly_id', assembly.id).neq('node_type', 'section').limit(1),
+    client.from('comparison_matrix_cells').select('*').eq('assembly_id', assembly.id),
+    client.from('materials').select('id').eq('comparison_assembly_id', assembly.id).limit(1),
+  ]);
+
+  const hasObject = (objectsResult.data || []).length > 0;
+  const hasNode = (nodesResult.data || []).length > 0;
+  const cells = (cellsResult.data || []) as Array<Record<string, unknown>>;
+  const hasCellContent = cells.some(hasMeaningfulComparisonCell);
+  const hasCellMedia = (materialsResult.data || []).length > 0;
+  if (!hasObject || !hasNode || (!hasCellContent && !hasCellMedia)) return null;
+
+  return { assemblyId: assembly.id };
 }
 
 export async function GET(request: NextRequest) {
@@ -231,6 +267,71 @@ export async function POST(request: NextRequest) {
 
   // 自动生成报告 - 从任务和记录中填充内容
   const { data: task } = await client.from('experience_tasks').select('*').eq('id', body.task_id).single();
+  const comparisonSource = await loadTaskComparisonReportSource(client, body.task_id);
+  if (comparisonSource) {
+    const snapshot = await buildComparisonReportSnapshot(client, comparisonSource.assemblyId, { snapshotStatus: 'published' }) as Record<string, unknown>;
+    const reportTitle = body.title || `${task?.task_name || '体验'}报告`;
+
+    if (previousReportIds.length > 0) {
+      await client.from('issues').delete().eq('task_id', body.task_id).in('source_report_id', previousReportIds);
+    }
+    await client
+      .from('reports')
+      .update({ status: 'archived', updated_at: new Date().toISOString() })
+      .eq('task_id', body.task_id);
+
+    const { data: report, error: reportError } = await client
+      .from('reports')
+      .insert({
+        task_id: body.task_id,
+        template_id: body.template_id || null,
+        title: reportTitle,
+        product_model: task?.product_model || null,
+        content: null,
+        version: nextVersion,
+        status: '已完成',
+        report_type: 'comparison_report',
+        source_task_ids: snapshot.source_task_ids || [body.task_id],
+        source_report_ids: snapshot.source_report_ids || [],
+        assembly_id: comparisonSource.assemblyId,
+        layout_profile: snapshot.layout_profile || 'comparison_image_matrix_a3_landscape',
+        ai_confirmation_status: 'pending',
+      })
+      .select()
+      .single();
+    if (reportError || !report) {
+      return NextResponse.json({ code: 1, message: reportError?.message || '对比报告创建失败' }, { status: 500 });
+    }
+
+    const { data: savedSnapshot, error: snapshotError } = await client
+      .from('report_snapshots')
+      .insert({
+        report_id: report.id,
+        report_type: 'comparison_report',
+        version: 1,
+        snapshot_json: snapshot,
+        layout_profile: snapshot.layout_profile || 'comparison_image_matrix_a3_landscape',
+        created_by: user.id,
+      })
+      .select()
+      .single();
+    if (snapshotError || !savedSnapshot) {
+      return NextResponse.json({ code: 1, message: snapshotError?.message || '对比报告快照创建失败' }, { status: 500 });
+    }
+
+    const { data: updatedReport } = await client
+      .from('reports')
+      .update({ snapshot_id: savedSnapshot.id, updated_at: new Date().toISOString() })
+      .eq('id', report.id)
+      .select()
+      .single();
+
+    return NextResponse.json({
+      code: 0,
+      message: '对比矩阵报告生成成功',
+      data: updatedReport || report,
+    });
+  }
   const { data: rawRecords } = await client.from('check_records').select('*').eq('task_id', body.task_id);
   const { data: materials } = await client.from('materials').select('*').eq('task_id', body.task_id);
   const { data: aiSummaryData } = await client

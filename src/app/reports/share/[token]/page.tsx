@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { Download, Loader2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -9,7 +9,10 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useImagePreview } from '@/components/image-preview';
 import { MediaGallery } from '@/components/app/media-gallery';
+import { ComparisonReportView, type ComparisonSnapshot } from '@/components/reports/comparison-report-view';
+import { ReportSectionBlockStack } from '@/components/reports/report-section-block-renderer';
 import { buildDisplayReportContent, type AiSummaryLike, type ReportContentWithReview, type ReportReviewOverrides } from '@/lib/report-review-overrides';
+import type { ReportDetailModel } from '@/lib/server/report-detail';
 
 interface Material {
   id: string; material_type: string; file_name: string; file_url: string; file_path?: string; file_size: number;
@@ -74,6 +77,13 @@ interface AiTaskSummary {
 interface ReportData {
   id: string; task_id: string; title: string; product_model: string | null;
   status: string; version: number; content: ReportContent | null; created_at: string;
+  report_type?: string | null;
+  snapshot?: {
+    id: string;
+    version: number;
+    snapshot_json: ComparisonSnapshot;
+    created_at: string;
+  } | null;
 }
 
 const taskFieldLabels: Record<string, string> = {
@@ -219,15 +229,18 @@ function SharedAiSummary({ summary }: { summary?: AiSummaryLike | null }) {
 
 export default function ShareReportPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const token = params.token as string;
   const [report, setReport] = useState<ReportData | null>(null);
   const [siblingReports, setSiblingReports] = useState<ReportData[]>([]);
+  const [detailModelsMap, setDetailModelsMap] = useState<Record<string, ReportDetailModel>>({});
   const [liveIssuesMap, setLiveIssuesMap] = useState<Record<string, IssueItem[]>>({});
   const [reEvaluationsMap, setReEvaluationsMap] = useState<Record<string, ReEvaluation[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expired, setExpired] = useState(false);
   const { open: openPreview, PreviewComponent } = useImagePreview();
+  const shareParityMode = searchParams.get('parity') === '1' || searchParams.get('debug') === 'legacy';
 
   useEffect(() => {
     if (!token) return;
@@ -237,6 +250,10 @@ export default function ShareReportPage() {
         if (data.code === 0) {
           setReport(data.data.report);
           setSiblingReports(data.data.siblingReports || []);
+          setDetailModelsMap({
+            ...(data.data.detailModel ? { [data.data.report.id]: data.data.detailModel as ReportDetailModel } : {}),
+            ...(data.data.siblingDetailModels || {}),
+          });
           const issuesMap: Record<string, IssueItem[]> = {};
           issuesMap[data.data.report.id] = data.data.liveIssues || [];
           if (data.data.siblingIssuesMap) {
@@ -264,6 +281,10 @@ export default function ShareReportPage() {
 
   const handleExportPDF = () => {
     if (!report) return;
+    if (report.report_type === 'comparison_report') {
+      window.open(`/api/reports/${report.id}/pdf?share_token=${token}`, '_blank');
+      return;
+    }
     window.open(`/reports/print?id=${report.id}&mode=fast`, '_blank');
   };
 
@@ -286,7 +307,7 @@ export default function ShareReportPage() {
     );
   }
 
-  if (error || !report?.content) {
+  if (error || !report || (!report.content && report.report_type !== 'comparison_report')) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-4 p-4">
         <AlertCircle className="h-12 w-12 text-muted-foreground" />
@@ -296,11 +317,57 @@ export default function ShareReportPage() {
     );
   }
 
-  const task = report.content.task as Record<string, unknown> | undefined;
+  const isComparisonReport = report.report_type === 'comparison_report';
+  const comparisonSnapshot = report.snapshot?.snapshot_json;
+  const comparisonDetailModel = detailModelsMap[report.id];
+
+  if (isComparisonReport) {
+    return (
+      <div className="min-h-screen overflow-x-hidden bg-background">
+        <div className="sticky top-0 z-10 border-b bg-background/80 px-3 py-3 backdrop-blur-sm sm:px-4">
+          <div className="mx-auto flex max-w-6xl items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate text-base font-semibold sm:text-lg">{report.title}</h1>
+              <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                <Badge variant="secondary" className="shrink-0 text-[10px]">{report.status}</Badge>
+                <Badge variant="outline" className="shrink-0 text-[10px]">comparison_report</Badge>
+              </div>
+            </div>
+            <Button size="sm" onClick={handleExportPDF} className="h-8 shrink-0 text-xs">
+              <Download className="mr-1 h-3.5 w-3.5" /> <span className="hidden sm:inline">导出PDF</span><span className="sm:hidden">PDF</span>
+            </Button>
+          </div>
+        </div>
+        <div className="mx-auto max-w-6xl px-3 py-4 sm:px-4 sm:py-6">
+          {comparisonSnapshot ? (
+            <ComparisonReportView snapshot={comparisonSnapshot} title={report.title} compact onPreview={openPreview} />
+          ) : (
+            <Card>
+              <CardContent className="p-6 text-sm text-muted-foreground">
+                该对比报告还没有可渲染的快照。
+              </CardContent>
+            </Card>
+          )}
+          {comparisonDetailModel && (
+            <Card data-testid="share-section-block-card" className="mt-4">
+              <CardContent className="p-3 sm:p-4">
+                <ReportSectionBlockStack sections={comparisonDetailModel.sections} compact />
+              </CardContent>
+            </Card>
+          )}
+        </div>
+        <PreviewComponent />
+      </div>
+    );
+  }
+
+  const legacyReport = report as ReportData & { content: ReportContent };
+  const legacySiblingReports = siblingReports.filter((item): item is ReportData & { content: ReportContent } => Boolean(item.content));
+  const task = legacyReport.content.task as Record<string, unknown> | undefined;
   const projectType = task?.project_type as string | undefined;
   const taskPhase = task?.project_phase as string | undefined;
-  const isMerged = siblingReports.length > 0;
-  const allReports = isMerged ? [report, ...siblingReports] : [report];
+  const isMerged = legacySiblingReports.length > 0;
+  const allReports = isMerged ? [legacyReport, ...legacySiblingReports] : [legacyReport];
 
   const totalRecords = allReports.flatMap(r => r.content?.records || []);
   const allLiveIssues = allReports.flatMap(r => liveIssuesMap[r.id] || []);
@@ -309,8 +376,8 @@ export default function ShareReportPage() {
   const totalFail = totalRecords.filter(r => r.evaluation_result === '不合格').length;
   const totalRecipePC = totalRecipes.reduce((s, r) => s + (r.problem_count || 0), 0);
   const displayReport = buildDisplayReportContent({
-    title: report.title,
-    content: report.content as unknown as ReportContentWithReview,
+    title: legacyReport.title,
+    content: legacyReport.content as unknown as ReportContentWithReview,
   });
 
   return (
@@ -364,6 +431,8 @@ export default function ShareReportPage() {
           const rptTask = content.task as Record<string, unknown> | undefined;
           const rptPhase = rptTask?.project_phase as string | undefined;
           const rptDate = rptTask?.test_date as string | undefined;
+          const detailModel = detailModelsMap[rpt.id];
+          const showLegacyContent = !detailModel || shareParityMode;
           const displayContent = buildDisplayReportContent({
             title: rpt.title,
             content: content as unknown as ReportContentWithReview,
@@ -387,6 +456,16 @@ export default function ShareReportPage() {
                 <h2 className="text-lg font-semibold">{rpt.title}</h2>
               )}
 
+              {detailModel && (
+                <Card data-testid="share-section-block-card">
+                  <CardContent className="p-3 sm:p-4">
+                    <ReportSectionBlockStack sections={detailModel.sections} compact />
+                  </CardContent>
+                </Card>
+              )}
+
+              {showLegacyContent && (
+                <div data-testid="share-legacy-content" data-display-weight={detailModel ? 'parity' : 'fallback'} className="space-y-4">
               {/* Task Info */}
               {rptTask && (
                 <Card>
@@ -633,6 +712,9 @@ export default function ShareReportPage() {
                     ))}
                   </CardContent>
                 </Card>
+              )}
+
+                </div>
               )}
 
             </div>

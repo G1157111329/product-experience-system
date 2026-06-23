@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 ARG NODE_IMAGE=node:18-bookworm-slim
+ARG PLAYWRIGHT_IMAGE=mcr.microsoft.com/playwright:v1.60.0-noble
 
 FROM ${NODE_IMAGE} AS base
 WORKDIR /app
@@ -31,10 +32,11 @@ ENV DEPLOYMENT_NETWORK=intranet
 ENV AI_ALLOW_PRIVATE_ENDPOINTS=true
 RUN pnpm build
 
-FROM ${NODE_IMAGE} AS runner
+FROM ${PLAYWRIGHT_IMAGE} AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next

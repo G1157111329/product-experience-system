@@ -69,7 +69,7 @@ NODE_ENV=development
 先创建数据库和用户，再执行根目录的初始化脚本：
 
 ```bash
-psql -U xp_admin -d xp_experience -f database-schema.sql
+psql "postgresql://xp_user:xp_password_local_only@127.0.0.1:5433/xp_experience" -f database-schema.sql
 ```
 
 初始化脚本会创建业务表、索引、默认品类/产品、默认平台设置、安全审计表和共享限速表。初始管理员不由 SQL 固定写入，也不再使用硬编码默认凭证自动创建；本地或生产首次引导管理员时，都应显式配置 `INITIAL_ADMIN_ACCOUNT` 和 `INITIAL_ADMIN_PASSWORD`，初始化后移除相关环境变量。
@@ -134,6 +134,7 @@ AI_ALLOW_PRIVATE_ENDPOINTS=true
 | `pnpm ts-check` | TypeScript 类型检查 |
 | `pnpm lint` | ESLint 检查 |
 | `pnpm build` | 构建 Next.js 和自定义 Node server |
+| `pnpm clean:next` | 清理 `.next` 缓存；从 `pnpm build` 切回 `pnpm dev` 前建议执行 |
 | `pnpm start` | 启动 `dist/server.js` 生产服务 |
 
 `pnpm dev` 仅用于本地开发。手机端或验收环境如果出现左下角黑色 Next.js “N” 浮层，说明当前访问的是开发模式指示器；生产/验收环境必须使用 `pnpm build` 后的 `pnpm start` 启动。项目已在 `next.config.mjs` 设置 `devIndicators: false`，用于隐藏开发期指示器，但不能替代生产构建。

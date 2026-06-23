@@ -19,6 +19,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/lib/auth-context';
+import { getErrorMessage, readJsonResponse } from '@/lib/http';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import {
@@ -106,6 +107,7 @@ export default function TasksPage() {
   const [transferring, setTransferring] = useState(false);
   const [categories, setCategories] = useState<CategoryWithProducts[]>([]);
   const [form, setForm] = useState(emptyForm);
+  const [creating, setCreating] = useState(false);
 
   const fetchCategories = useCallback(async () => {
     const res = await fetch('/api/categories');
@@ -169,25 +171,34 @@ export default function TasksPage() {
   };
 
   const handleCreate = async () => {
+    if (creating) return;
     let taskName = form.task_name.trim();
     if (!taskName) {
       const now = new Date();
       const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
       taskName = `${form.product_category || ''}${form.product || ''}${form.product_model || ''}${form.project_type || ''}${dateStr}${form.organizer ? '-' + form.organizer : ''}` || '未命名任务';
     }
-    const res = await fetch('/api/tasks', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, task_name: taskName }),
-    });
-    const data = await res.json();
-    if (data.code === 0) {
-      setDialogOpen(false);
-      setForm(emptyForm);
-      fetchTasks();
-      toast.success('体验计划已创建');
-    } else {
-      toast.error(data.message || '创建失败');
+    setCreating(true);
+    try {
+      const res = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...form, task_name: taskName }),
+      });
+      const data = await readJsonResponse<{ code: number; message?: string }>(res);
+      if (data.code === 0) {
+        setDialogOpen(false);
+        setForm(emptyForm);
+        fetchTasks();
+        toast.success('体验计划已创建');
+      } else {
+        toast.error(data.message || '创建失败');
+      }
+    } catch (error) {
+      const message = getErrorMessage(error, '创建失败');
+      toast.error(message === 'Failed to fetch' ? '创建失败：无法连接服务器，请确认当前页面访问的是正在运行的服务端口。' : message);
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -405,6 +416,7 @@ export default function TasksPage() {
                   onClick={handleCreate}
                   className="w-full"
                   disabled={
+                    creating ||
                     !form.task_name ||
                     !form.product_category ||
                     !form.product ||
@@ -412,7 +424,7 @@ export default function TasksPage() {
                     (productModelRequired && !form.product_model)
                   }
                 >
-                  创建任务
+                  {creating ? '创建中...' : '创建任务'}
                 </Button>
               </div>
             </DialogContent>
@@ -592,4 +604,3 @@ export default function TasksPage() {
     </PageShell>
   );
 }
-

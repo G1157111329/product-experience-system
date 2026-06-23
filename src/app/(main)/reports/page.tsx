@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { copyToClipboard } from '@/lib/clipboard';
-import { FileText, Printer, BarChart3, ChevronRight, Trash2, Share2, Copy, X, Sparkles, Loader2 } from 'lucide-react';
+import { BarChart3, ChevronRight, Copy, FileText, Loader2, Printer, Share2, Sparkles, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';

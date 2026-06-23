@@ -47,7 +47,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     .from('standard_items')
         .select('id, standard_id, sensory_dimension, test_phase, experience_flow, touch_point, check_dimension, sub_check_dimension, check_item, check_requirement, check_standard, experience_standard, check_tool, problem_level')
         .in('standard_id', Array.from(eligibleStandardIds))
-        .limit(120)
+        .limit(60)
     : { data: [] };
   const standardItems = (rawStandardItems || []).map((item: Record<string, unknown>) => ({
     ...item,
@@ -240,6 +240,12 @@ function isStandardEligibleForTask(standard: Record<string, unknown>, task: Reco
   return Boolean(standardCategory || standardProduct);
 }
 
+function promptText(value: unknown, maxLength = 120) {
+  const text = String(value || '-').replace(/\s+/g, ' ').trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}...`;
+}
+
 function buildTaskSnapshot(
   task: Record<string, unknown>,
   intent: Record<string, unknown>,
@@ -250,9 +256,9 @@ function buildTaskSnapshot(
 ) {
   const includeStandards = options.includeStandards !== false;
   const includeRecipes = options.includeRecipes !== false;
-  const standards = includeStandards ? standardItems.slice(0, 80).map((item) => {
+  const standards = includeStandards ? standardItems.slice(0, 40).map((item) => {
     const stdRef = item.standards as Record<string, unknown> | null;
-    const category = stdRef?.category || item.standard_category || '-';
+    const category = promptText(stdRef?.category || item.standard_category || '-', 32);
     return [
       `ID:${item.id}`,
       `类型:${category}`,

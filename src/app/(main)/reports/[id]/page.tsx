@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState, useCallback, type ReactNode } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Download, Share2, Copy, X, Loader2, Star, Sparkles } from 'lucide-react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { Share2, Copy, X, Loader2, Star, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -15,7 +15,10 @@ import { useImagePreview } from '@/components/image-preview';
 import { toast } from 'sonner';
 import { PageShell } from '@/components/app';
 import { MediaGallery } from '@/components/app/media-gallery';
+import { ComparisonReportView, type ComparisonSnapshot } from '@/components/reports/comparison-report-view';
+import { ReportDetailShell } from '@/components/reports/report-detail-shell';
 import { buildDisplayReportContent, type AiSummaryLike, type ReportContentWithReview, type ReportReviewOverrides } from '@/lib/report-review-overrides';
+import type { ReportDetailModel } from '@/lib/server/report-detail';
 import {
   getReportMergeModel,
   isMergeableReportProjectType,
@@ -97,6 +100,13 @@ interface ReportDetail {
   status: string;
   version: number;
   content: ReportContent | null;
+  report_type?: string | null;
+  snapshot?: {
+    id: string;
+    version: number;
+    snapshot_json: ComparisonSnapshot;
+    created_at: string;
+  } | null;
   created_at: string;
   updated_at: string;
 }
@@ -541,8 +551,11 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
 export default function ReportDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const id = params.id as string;
+  const debugLegacyBody = searchParams.get('debug') === 'legacy' || searchParams.get('parity') === '1';
   const [report, setReport] = useState<ReportDetail | null>(null);
+  const [detailModel, setDetailModel] = useState<ReportDetailModel | null>(null);
   const [siblingReports, setSiblingReports] = useState<ReportDetail[]>([]);
   const [liveIssuesMap, setLiveIssuesMap] = useState<Record<string, IssueItem[]>>({});
   const [loading, setLoading] = useState(true);
@@ -590,13 +603,19 @@ export default function ReportDetailPage() {
 
   const fetchReport = useCallback(async () => {
     setLoading(true);
+    setDetailModel(null);
     setLoadError(null);
     try {
-      const res = await fetch(`/api/reports/${id}`);
+      const [res, detailRes] = await Promise.all([
+        fetch(`/api/reports/${id}`),
+        fetch(`/api/reports/${id}/detail`),
+      ]);
       const data = await res.json();
+      const detailData = await detailRes.json().catch(() => null);
       if (data.code === 0) {
         const rpt = data.data as ReportDetail;
         setReport(rpt);
+        if (detailData?.code === 0) setDetailModel(detailData.data as ReportDetailModel);
         setSiblingReports([]);
         // Fetch sibling reports
         const mergeModel = getReportMergeModel(rpt.product_model);
@@ -687,6 +706,10 @@ export default function ReportDetailPage() {
   };
 
   const handleExportPDF = () => {
+    if (report?.report_type === 'comparison_report') {
+      window.open(`/api/reports/${id}/pdf`, '_blank');
+      return;
+    }
     window.open(`/reports/print?id=${id}&mode=fast`, '_blank');
   };
 
@@ -745,9 +768,8 @@ export default function ReportDetailPage() {
     </div>
   );
 
-  const task = report.content?.task as Record<string, unknown> | undefined;
-  const projectType = task?.project_type as string | undefined;
-  const taskPhase = task?.project_phase as string | undefined;
+  const isComparisonReport = report.report_type === 'comparison_report';
+  const comparisonSnapshot = report.snapshot?.snapshot_json;
   const isMerged = siblingReports.length > 0;
   const allReports = isMerged ? [report, ...siblingReports] : [report];
 
@@ -766,28 +788,30 @@ export default function ReportDetailPage() {
   return (
     <PageShell size="wide" className="space-y-5">
       <PreviewComponent />
-      <div className="mx-auto flex max-w-6xl flex-col gap-3 rounded-xl border bg-background p-4 shadow-sm lg:flex-row lg:items-start">
-        <Button variant="ghost" size="icon" className="h-10 w-10 shrink-0" onClick={() => router.back()}>
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div className="flex-1 min-w-0">
-          <h1 className="text-xl font-semibold leading-tight break-words lg:text-2xl">{report.product_model || displayReport.title} {isMerged && <Badge variant="secondary" className="text-[10px] ml-1 align-middle">合并 {allReports.length} 份报告</Badge>}</h1>
-          <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground flex-wrap">
-            <Badge variant="secondary" className="text-[10px]">{report.status}</Badge>
-            {projectType && <span>{projectType}</span>}
-            {taskPhase && <span>{taskPhase}</span>}
-          </div>
+      <ReportDetailShell
+        model={detailModel}
+        fallbackTitle={report.product_model || displayReport.title}
+        fallbackStatus={report.status}
+        mergedCount={isMerged ? allReports.length : undefined}
+        onBack={() => router.back()}
+        onExportPdf={handleExportPDF}
+        onShare={openShareDialog}
+        debugLegacyBody={debugLegacyBody}
+      >
+      {isComparisonReport ? (
+        <div className="mx-auto max-w-6xl">
+          {comparisonSnapshot ? (
+            <ComparisonReportView snapshot={comparisonSnapshot} title={report.title} onPreview={open} />
+          ) : (
+            <Card className="border bg-background shadow-sm">
+              <CardContent className="p-6 text-sm text-muted-foreground">
+                该对比报告还没有可渲染的快照，请先在对比任务中生成 comparison_report 快照。
+              </CardContent>
+            </Card>
+          )}
         </div>
-        <div className="grid grid-cols-2 gap-2 shrink-0 sm:flex lg:ml-auto">
-          <Button size="sm" onClick={handleExportPDF}>
-            <Download className="h-4 w-4 mr-1.5" /> 导出PDF
-          </Button>
-          <Button size="sm" variant="outline" onClick={openShareDialog}>
-            <Share2 className="h-4 w-4 mr-1.5" /> 分享
-          </Button>
-        </div>
-      </div>
-
+      ) : (
+        <>
       {/* Summary Stats */}
       <div className="mx-auto grid max-w-6xl grid-cols-3 gap-2 sm:grid-cols-5 lg:gap-3">
         {[
@@ -872,6 +896,9 @@ export default function ReportDetailPage() {
           </Card>
         );
       })}
+        </>
+      )}
+      </ReportDetailShell>
 
       {/* Issue Status Quick Edit Dialog */}
       <Dialog open={statusDialogOpen} onOpenChange={(v) => { if (!v) { setStatusDialogOpen(false); setEditingIssue(null); } else setStatusDialogOpen(v); }}>

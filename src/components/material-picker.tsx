@@ -22,6 +22,10 @@ export interface Material {
   recipe_id: string | null;
   issue_id: string | null;
   re_evaluation_id: string | null;
+  comparison_cell_id?: string | null;
+  comparison_assembly_id?: string | null;
+  media_display_order?: number | null;
+  media_role?: string | null;
 }
 
 interface MaterialPickerProps {
@@ -34,6 +38,7 @@ interface MaterialPickerProps {
   recipeId?: string;
   issueId?: string;
   reEvaluationId?: string;
+  comparisonCellId?: string;
   selectedIds?: string[];
   initialMaterials?: Material[];
   onSelectionChange?: (ids: string[], materials: Material[]) => void;
@@ -53,6 +58,7 @@ export function MaterialPicker({
   recipeId,
   issueId,
   reEvaluationId,
+  comparisonCellId,
   selectedIds,
   initialMaterials,
   onSelectionChange,
@@ -193,6 +199,7 @@ export function MaterialPicker({
         if (recipeId) formData.append('recipe_id', recipeId);
         if (issueId) formData.append('issue_id', issueId);
         if (reEvaluationId) formData.append('re_evaluation_id', reEvaluationId);
+        if (comparisonCellId) formData.append('comparison_cell_id', comparisonCellId);
 
         const res = await fetch('/api/materials/upload', { method: 'POST', body: formData });
         const data = await res.json();

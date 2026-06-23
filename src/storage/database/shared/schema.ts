@@ -1,5 +1,6 @@
 ﻿import { pgTable, serial, timestamp, varchar, jsonb, boolean, index, foreignKey, integer, text, unique, date } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
+import type { AnyPgColumn } from "drizzle-orm/pg-core"
 
 
 export const healthCheck = pgTable("health_check", {
@@ -29,12 +30,22 @@ export const reports = pgTable("reports", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 	productModel: varchar("product_model", { length: 50 }),
+	// V2.3 统一报告资产字段（向下兼容，旧报告默认 single_report）
+	reportType: varchar("report_type", { length: 40 }).default('single_report').notNull(),
+	sourceTaskIds: jsonb("source_task_ids").default([]),
+	sourceReportIds: jsonb("source_report_ids").default([]),
+	assemblyId: varchar("assembly_id", { length: 36 }),
+	snapshotId: varchar("snapshot_id", { length: 36 }),
+	layoutProfile: varchar("layout_profile", { length: 80 }),
+	aiConfirmationStatus: varchar("ai_confirmation_status", { length: 20 }).default('pending'),
 }, (table) => [
 	index("reports_created_at_idx").using("btree", table.createdAt.asc().nullsLast().op("timestamptz_ops")),
 	index("reports_product_model_idx").using("btree", table.productModel.asc().nullsLast().op("text_ops")),
 	index("reports_product_model_created_at_idx").using("btree", table.productModel.asc().nullsLast().op("text_ops"), table.createdAt.asc().nullsLast().op("timestamptz_ops")),
 	index("reports_status_created_at_idx").using("btree", table.status.asc().nullsLast().op("text_ops"), table.createdAt.asc().nullsLast().op("timestamptz_ops")),
 	index("reports_task_id_idx").using("btree", table.taskId.asc().nullsLast().op("text_ops")),
+	index("reports_report_type_idx").using("btree", table.reportType.asc().nullsLast().op("text_ops")),
+	index("reports_assembly_id_idx").using("btree", table.assemblyId.asc().nullsLast().op("text_ops")),
 	foreignKey({
 			columns: [table.taskId],
 			foreignColumns: [experienceTasks.id],
@@ -242,10 +253,16 @@ export const experienceTasks = pgTable("experience_tasks", {
 	projectType: varchar("project_type", { length: 50 }),
 	createdBy: varchar("created_by", { length: 36 }),
 	product: varchar({ length: 200 }),
+	// V2.3 对比组装字段（向下兼容，旧任务默认 single）
+	taskMode: varchar("task_mode", { length: 20 }).default('single').notNull(),
+	comparisonIntent: text("comparison_intent"),
+	comparisonLayoutType: varchar("comparison_layout_type", { length: 40 }),
+	comparisonSource: varchar("comparison_source", { length: 40 }),
 }, (table) => [
 	index("experience_tasks_created_at_idx").using("btree", table.createdAt.asc().nullsLast().op("timestamptz_ops")),
 	index("experience_tasks_product_category_idx").using("btree", table.productCategory.asc().nullsLast().op("text_ops")),
 	index("experience_tasks_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
+	index("experience_tasks_task_mode_idx").using("btree", table.taskMode.asc().nullsLast().op("text_ops")),
 ]);
 
 export const platformUsers = pgTable("platform_users", {
@@ -370,6 +387,13 @@ export const materials = pgTable("materials", {
 	recipeId: varchar("recipe_id", { length: 36 }),
 	issueId: varchar("issue_id", { length: 36 }),
 	reEvaluationId: varchar("re_evaluation_id", { length: 36 }),
+	// V2.3 对比组装与媒体标准化字段（向下兼容）
+	comparisonCellId: varchar("comparison_cell_id", { length: 36 }),
+	comparisonAssemblyId: varchar("comparison_assembly_id", { length: 36 }),
+	normalizedThumbPath: text("normalized_thumb_path"),
+	videoCoverPath: text("video_cover_path"),
+	mediaDisplayOrder: integer("media_display_order").default(0),
+	mediaRole: varchar("media_role", { length: 40 }),
 }, (table) => [
 	index("materials_recipe_step_id_idx").using("btree", table.recipeStepId.asc().nullsLast().op("text_ops")),
 	index("materials_record_id_idx").using("btree", table.recordId.asc().nullsLast().op("text_ops")),
@@ -377,6 +401,8 @@ export const materials = pgTable("materials", {
 	index("materials_type_idx").using("btree", table.materialType.asc().nullsLast().op("text_ops")),
 	index("materials_issue_id_idx").using("btree", table.issueId.asc().nullsLast().op("text_ops")),
 		index("materials_re_evaluation_id_idx").using("btree", table.reEvaluationId.asc().nullsLast().op("text_ops")),
+	index("materials_comparison_cell_id_idx").using("btree", table.comparisonCellId.asc().nullsLast().op("text_ops")),
+	index("materials_comparison_assembly_id_idx").using("btree", table.comparisonAssemblyId.asc().nullsLast().op("text_ops")),
 	foreignKey({
 			columns: [table.recordId],
 			foreignColumns: [checkRecords.id],
@@ -563,5 +589,380 @@ export const agentSkillAuditLogs = pgTable("agent_skill_audit_logs", {
 		columns: [table.taskId],
 		foreignColumns: [experienceTasks.id],
 		name: "agent_skill_audit_logs_task_id_fkey"
+	}).onDelete("set null"),
+]);
+
+// ============================================================
+// V2.3 对比组装与统一报告体系
+// 详见 docs/PRD-v2.3-dev-roadmap.md 与 docs/product_experience_platform_technical_plan_v2_3_fused_comparison_group.md
+// ============================================================
+
+// 对比组装：底层组装对象，承接多对象对比任务/事后聚合/型号自动归集/自定义合并
+export const comparisonAssemblies = pgTable("comparison_assemblies", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	name: varchar("name", { length: 200 }).notNull(),
+	assemblyType: varchar("assembly_type", { length: 40 }).notNull(), // task_comparison | post_report_assembly | model_auto_group | custom_merge
+	sourceType: varchar("source_type", { length: 40 }).notNull(), // manual | excel_import | report_center_selection | model_auto_detection
+	productCategory: varchar("product_category", { length: 100 }),
+	product: varchar("product", { length: 100 }),
+	comparisonIntent: text("comparison_intent"),
+	layoutType: varchar("layout_type", { length: 40 }).default('image_matrix').notNull(), // image_matrix | metric_table | mixed
+	status: varchar("status", { length: 30 }).default('draft').notNull(), // draft | ready | published | archived
+	sourceTaskIds: jsonb("source_task_ids").default([]),
+	sourceReportIds: jsonb("source_report_ids").default([]),
+	createdBy: varchar("created_by", { length: 36 }).notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("comparison_assemblies_created_by_idx").using("btree", table.createdBy.asc().nullsLast().op("text_ops")),
+	index("comparison_assemblies_assembly_type_idx").using("btree", table.assemblyType.asc().nullsLast().op("text_ops")),
+	index("comparison_assemblies_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
+	foreignKey({
+		columns: [table.createdBy],
+		foreignColumns: [platformUsers.id],
+		name: "comparison_assemblies_created_by_fkey"
+	}).onDelete("set null"),
+]);
+
+// 对比对象：被比较的实体（型号/品牌/批次/阶段/部件/配置等），可绑定任务或报告，但不强制
+export const comparisonObjects = pgTable("comparison_objects", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	assemblyId: varchar("assembly_id", { length: 36 }).notNull(),
+	taskId: varchar("task_id", { length: 36 }),
+	reportId: varchar("report_id", { length: 36 }),
+	objectName: varchar("object_name", { length: 200 }).notNull(),
+	objectType: varchar("object_type", { length: 60 }).notNull(),
+	comparisonFactor: varchar("comparison_factor", { length: 100 }),
+	brand: varchar("brand", { length: 100 }),
+	model: varchar("model", { length: 100 }),
+	specification: varchar("specification", { length: 200 }),
+	materialStructure: varchar("material_structure", { length: 200 }),
+	projectStage: varchar("project_stage", { length: 100 }),
+	sampleBatch: varchar("sample_batch", { length: 100 }),
+	objectSourceType: varchar("object_source_type", { length: 100 }),
+	isCompetitor: boolean("is_competitor").default(false),
+	parentProduct: varchar("parent_product", { length: 200 }),
+	coverMaterialId: varchar("cover_material_id", { length: 36 }),
+	customFields: jsonb("custom_fields").default({}),
+	sortOrder: integer("sort_order").default(0).notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("comparison_objects_assembly_id_idx").using("btree", table.assemblyId.asc().nullsLast().op("text_ops")),
+	index("comparison_objects_sort_order_idx").using("btree", table.assemblyId.asc().nullsLast().op("text_ops"), table.sortOrder.asc().nullsLast().op("int4_ops")),
+	foreignKey({
+		columns: [table.assemblyId],
+		foreignColumns: [comparisonAssemblies.id],
+		name: "comparison_objects_assembly_id_fkey"
+	}).onDelete("cascade"),
+	foreignKey({
+		columns: [table.taskId],
+		foreignColumns: [experienceTasks.id],
+		name: "comparison_objects_task_id_fkey"
+	}).onDelete("set null"),
+	foreignKey({
+		columns: [table.reportId],
+		foreignColumns: [reports.id],
+		name: "comparison_objects_report_id_fkey"
+	}).onDelete("set null"),
+]);
+
+// 对比项目树：可变层级结构（section/item/condition/process_node/metric/summary/issue_group）
+// 自引用外键使用 .references() 字段级声明以避免 TypeScript 自身类型递归推导
+export const comparisonItemNodes = pgTable("comparison_item_nodes", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	assemblyId: varchar("assembly_id", { length: 36 }).notNull(),
+	parentId: varchar("parent_id", { length: 36 }).references((): AnyPgColumn => comparisonItemNodes.id, { onDelete: "cascade" }),
+	nodeType: varchar("node_type", { length: 40 }).notNull(),
+	nodeLabel: varchar("node_label", { length: 200 }).notNull(),
+	sharedRecipe: jsonb("shared_recipe").default({}),
+	config: jsonb("config").default({}),
+	sortOrder: integer("sort_order").default(0).notNull(),
+	depth: integer().default(0).notNull(),
+	isCollapsed: boolean("is_collapsed").default(false),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("comparison_item_nodes_assembly_id_idx").using("btree", table.assemblyId.asc().nullsLast().op("text_ops")),
+	index("comparison_item_nodes_parent_id_idx").using("btree", table.parentId.asc().nullsLast().op("text_ops")),
+	index("comparison_item_nodes_assembly_sort_idx").using("btree", table.assemblyId.asc().nullsLast().op("text_ops"), table.sortOrder.asc().nullsLast().op("int4_ops")),
+	foreignKey({
+		columns: [table.assemblyId],
+		foreignColumns: [comparisonAssemblies.id],
+		name: "comparison_item_nodes_assembly_id_fkey"
+	}).onDelete("cascade"),
+]);
+
+// 矩阵单元格：对比项目节点 × 对比对象的交叉数据单元
+export const comparisonMatrixCells = pgTable("comparison_matrix_cells", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	assemblyId: varchar("assembly_id", { length: 36 }).notNull(),
+	itemNodeId: varchar("item_node_id", { length: 36 }).notNull(),
+	objectId: varchar("object_id", { length: 36 }).notNull(),
+	params: jsonb("params").default({}),
+	processNotes: jsonb("process_notes").default([]),
+	effectSummary: text("effect_summary"),
+	problemPoints: jsonb("problem_points").default([]),
+	manualScore: varchar("manual_score", { length: 10 }),
+	aiScore: varchar("ai_score", { length: 10 }),
+	conclusionTag: varchar("conclusion_tag", { length: 40 }), // best | acceptable | average | risk | retest
+	metricValues: jsonb("metric_values").default({}),
+	mediaDisplayConfig: jsonb("media_display_config").default({}),
+	aiStatus: varchar("ai_status", { length: 20 }).default('pending'), // pending | generated | confirmed | rejected | published
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("comparison_matrix_cells_assembly_id_idx").using("btree", table.assemblyId.asc().nullsLast().op("text_ops")),
+	index("comparison_matrix_cells_item_node_id_idx").using("btree", table.itemNodeId.asc().nullsLast().op("text_ops")),
+	index("comparison_matrix_cells_object_id_idx").using("btree", table.objectId.asc().nullsLast().op("text_ops")),
+	unique("comparison_matrix_cells_item_object_key").on(table.itemNodeId, table.objectId),
+	foreignKey({
+		columns: [table.assemblyId],
+		foreignColumns: [comparisonAssemblies.id],
+		name: "comparison_matrix_cells_assembly_id_fkey"
+	}).onDelete("cascade"),
+	foreignKey({
+		columns: [table.itemNodeId],
+		foreignColumns: [comparisonItemNodes.id],
+		name: "comparison_matrix_cells_item_node_id_fkey"
+	}).onDelete("cascade"),
+	foreignKey({
+		columns: [table.objectId],
+		foreignColumns: [comparisonObjects.id],
+		name: "comparison_matrix_cells_object_id_fkey"
+	}).onDelete("cascade"),
+]);
+
+// 指标定义库：管理员配置的可复用指标（如出汁率/纯汁率/含渣率）
+export const metricDefinitions = pgTable("metric_definitions", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	productCategory: varchar("product_category", { length: 100 }),
+	product: varchar("product", { length: 100 }),
+	metricKey: varchar("metric_key", { length: 100 }).notNull(),
+	metricName: varchar("metric_name", { length: 100 }).notNull(),
+	metricType: varchar("metric_type", { length: 40 }).notNull(), // raw_value | calculated | text | duration | ratio | boolean
+	unit: varchar("unit", { length: 40 }),
+	defaultFormula: text("default_formula"),
+	displayOrder: integer("display_order").default(0),
+	isActive: boolean("is_active").default(true),
+	createdBy: varchar("created_by", { length: 36 }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("metric_definitions_key_idx").using("btree", table.metricKey.asc().nullsLast().op("text_ops")),
+	index("metric_definitions_product_idx").using("btree", table.productCategory.asc().nullsLast().op("text_ops"), table.product.asc().nullsLast().op("text_ops")),
+	unique("metric_definitions_key_product_key").on(table.metricKey, table.productCategory, table.product),
+	foreignKey({
+		columns: [table.createdBy],
+		foreignColumns: [platformUsers.id],
+		name: "metric_definitions_created_by_fkey"
+	}).onDelete("set null"),
+]);
+
+// 指标公式版本：已发布报告固定使用发布时公式版本
+export const metricFormulaVersions = pgTable("metric_formula_versions", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	metricDefinitionId: varchar("metric_definition_id", { length: 36 }).notNull(),
+	formula: text().notNull(),
+	formulaVersion: varchar("formula_version", { length: 40 }).notNull(),
+	description: text(),
+	createdBy: varchar("created_by", { length: 36 }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	isActive: boolean("is_active").default(true),
+}, (table) => [
+	index("metric_formula_versions_definition_id_idx").using("btree", table.metricDefinitionId.asc().nullsLast().op("text_ops")),
+	unique("metric_formula_versions_def_version_key").on(table.metricDefinitionId, table.formulaVersion),
+	foreignKey({
+		columns: [table.metricDefinitionId],
+		foreignColumns: [metricDefinitions.id],
+		name: "metric_formula_versions_definition_id_fkey"
+	}).onDelete("cascade"),
+]);
+
+// 阈值规则：≥/≤/=/区间/文本判断，支持 assembly 或 item_node 级
+export const metricThresholdRules = pgTable("metric_threshold_rules", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	assemblyId: varchar("assembly_id", { length: 36 }),
+	itemNodeId: varchar("item_node_id", { length: 36 }),
+	metricKey: varchar("metric_key", { length: 100 }).notNull(),
+	operator: varchar("operator", { length: 20 }).notNull(), // >= | <= | = | between | text_match
+	targetValue: varchar("target_value", { length: 100 }),
+	targetText: text("target_text"),
+	unit: varchar("unit", { length: 40 }),
+	severity: varchar("severity", { length: 20 }).default('warning'), // pass | warning | fail | not_applicable
+	sourceText: text("source_text"),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("metric_threshold_rules_assembly_idx").using("btree", table.assemblyId.asc().nullsLast().op("text_ops")),
+	index("metric_threshold_rules_item_node_idx").using("btree", table.itemNodeId.asc().nullsLast().op("text_ops")),
+	foreignKey({
+		columns: [table.assemblyId],
+		foreignColumns: [comparisonAssemblies.id],
+		name: "metric_threshold_rules_assembly_id_fkey"
+	}).onDelete("cascade"),
+	foreignKey({
+		columns: [table.itemNodeId],
+		foreignColumns: [comparisonItemNodes.id],
+		name: "metric_threshold_rules_item_node_id_fkey"
+	}).onDelete("cascade"),
+]);
+
+// 指标计算结果：单元格 × 指标键 的唯一计算结果
+export const metricEvaluations = pgTable("metric_evaluations", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	cellId: varchar("cell_id", { length: 36 }).notNull(),
+	metricKey: varchar("metric_key", { length: 100 }).notNull(),
+	rawValue: jsonb("raw_value"),
+	calculatedValue: varchar("calculated_value", { length: 100 }),
+	displayValue: varchar("display_value", { length: 200 }),
+	formulaVersionId: varchar("formula_version_id", { length: 36 }),
+	thresholdRuleId: varchar("threshold_rule_id", { length: 36 }),
+	passFailStatus: varchar("pass_fail_status", { length: 30 }), // pass | warning | fail | not_applicable
+	evaluationNote: text("evaluation_note"),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	unique("metric_evaluations_cell_metric_key").on(table.cellId, table.metricKey),
+	index("metric_evaluations_cell_id_idx").using("btree", table.cellId.asc().nullsLast().op("text_ops")),
+	foreignKey({
+		columns: [table.cellId],
+		foreignColumns: [comparisonMatrixCells.id],
+		name: "metric_evaluations_cell_id_fkey"
+	}).onDelete("cascade"),
+	foreignKey({
+		columns: [table.formulaVersionId],
+		foreignColumns: [metricFormulaVersions.id],
+		name: "metric_evaluations_formula_version_id_fkey"
+	}).onDelete("set null"),
+	foreignKey({
+		columns: [table.thresholdRuleId],
+		foreignColumns: [metricThresholdRules.id],
+		name: "metric_evaluations_threshold_rule_id_fkey"
+	}).onDelete("set null"),
+]);
+
+// 三层 AI 结果：cell/row/report 三层
+export const comparisonAiResults = pgTable("comparison_ai_results", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	assemblyId: varchar("assembly_id", { length: 36 }).notNull(),
+	level: varchar("level", { length: 20 }).notNull(), // cell | row | report
+	targetId: varchar("target_id", { length: 36 }).notNull(), // cell_id | item_node_id | assembly_id
+	skillKey: varchar("skill_key", { length: 100 }).notNull(),
+	inputSnapshot: jsonb("input_snapshot").notNull(),
+	output: jsonb("output").notNull(),
+	status: varchar("status", { length: 20 }).default('generated').notNull(), // generated | confirmed | rejected | published
+	confirmedBy: varchar("confirmed_by", { length: 36 }),
+	confirmedAt: timestamp("confirmed_at", { withTimezone: true, mode: 'string' }),
+	rejectedReason: text("rejected_reason"),
+	modelConfigId: varchar("model_config_id", { length: 36 }),
+	createdBy: varchar("created_by", { length: 36 }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("comparison_ai_results_assembly_id_idx").using("btree", table.assemblyId.asc().nullsLast().op("text_ops")),
+	index("comparison_ai_results_level_target_idx").using("btree", table.level.asc().nullsLast().op("text_ops"), table.targetId.asc().nullsLast().op("text_ops")),
+	index("comparison_ai_results_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
+	foreignKey({
+		columns: [table.assemblyId],
+		foreignColumns: [comparisonAssemblies.id],
+		name: "comparison_ai_results_assembly_id_fkey"
+	}).onDelete("cascade"),
+	foreignKey({
+		columns: [table.confirmedBy],
+		foreignColumns: [platformUsers.id],
+		name: "comparison_ai_results_confirmed_by_fkey"
+	}).onDelete("set null"),
+]);
+
+// 报告快照：发布后内容冻结，分享页/PDF基于快照渲染
+export const reportSnapshots = pgTable("report_snapshots", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	reportId: varchar("report_id", { length: 36 }).notNull(),
+	reportType: varchar("report_type", { length: 40 }).notNull(),
+	version: integer().notNull(),
+	snapshotJson: jsonb("snapshot_json").notNull(),
+	layoutProfile: varchar("layout_profile", { length: 80 }).notNull(),
+	createdBy: varchar("created_by", { length: 36 }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	unique("report_snapshots_report_version_key").on(table.reportId, table.version),
+	index("report_snapshots_report_id_idx").using("btree", table.reportId.asc().nullsLast().op("text_ops")),
+	foreignKey({
+		columns: [table.reportId],
+		foreignColumns: [reports.id],
+		name: "report_snapshots_report_id_fkey"
+	}).onDelete("cascade"),
+]);
+
+// PDF 生成任务：服务端 Playwright 渲染
+export const pdfGenerationJobs = pgTable("pdf_generation_jobs", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	reportId: varchar("report_id", { length: 36 }).notNull(),
+	snapshotId: varchar("snapshot_id", { length: 36 }).notNull(),
+	layoutProfile: varchar("layout_profile", { length: 80 }).notNull(),
+	status: varchar("status", { length: 30 }).default('queued').notNull(), // queued | rendering | completed | failed
+	preflightResult: jsonb("preflight_result").default({}),
+	filePath: text("file_path"),
+	fileSize: integer("file_size"),
+	errorMessage: text("error_message"),
+	createdBy: varchar("created_by", { length: 36 }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	startedAt: timestamp("started_at", { withTimezone: true, mode: 'string' }),
+	finishedAt: timestamp("finished_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+	index("pdf_generation_jobs_report_id_idx").using("btree", table.reportId.asc().nullsLast().op("text_ops")),
+	index("pdf_generation_jobs_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
+	foreignKey({
+		columns: [table.reportId],
+		foreignColumns: [reports.id],
+		name: "pdf_generation_jobs_report_id_fkey"
+	}).onDelete("cascade"),
+	foreignKey({
+		columns: [table.snapshotId],
+		foreignColumns: [reportSnapshots.id],
+		name: "pdf_generation_jobs_snapshot_id_fkey"
+	}).onDelete("cascade"),
+]);
+
+// Excel 导入任务：异步解析，分阶段结果
+export const excelImportJobs = pgTable("excel_import_jobs", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	fileName: varchar("file_name", { length: 300 }).notNull(),
+	filePath: text("file_path").notNull(),
+	parseStatus: varchar("parse_status", { length: 30 }).default('queued').notNull(), // queued | parsing | parsed | mapping_confirmed | draft_generated | failed
+	detectedTemplateId: varchar("detected_template_id", { length: 36 }),
+	detectedReportType: varchar("detected_report_type", { length: 60 }),
+	parsedStructure: jsonb("parsed_structure").default({}),
+	mappingResult: jsonb("mapping_result").default({}),
+	createdBy: varchar("created_by", { length: 36 }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	finishedAt: timestamp("finished_at", { withTimezone: true, mode: 'string' }),
+	errorMessage: text("error_message"),
+}, (table) => [
+	index("excel_import_jobs_created_by_idx").using("btree", table.createdBy.asc().nullsLast().op("text_ops")),
+	index("excel_import_jobs_parse_status_idx").using("btree", table.parseStatus.asc().nullsLast().op("text_ops")),
+	foreignKey({
+		columns: [table.createdBy],
+		foreignColumns: [platformUsers.id],
+		name: "excel_import_jobs_created_by_fkey"
+	}).onDelete("set null"),
+]);
+
+// Excel 导入模板：推荐/品类/个人自定义
+export const excelImportTemplates = pgTable("excel_import_templates", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	templateName: varchar("template_name", { length: 200 }).notNull(),
+	templateType: varchar("template_type", { length: 40 }).notNull(), // platform_recommended | category | personal | one_time
+	productCategory: varchar("product_category", { length: 100 }),
+	structureRules: jsonb("structure_rules").notNull(),
+	mappingRules: jsonb("mapping_rules").notNull(),
+	isRecommended: boolean("is_recommended").default(false),
+	createdBy: varchar("created_by", { length: 36 }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("excel_import_templates_type_idx").using("btree", table.templateType.asc().nullsLast().op("text_ops")),
+	index("excel_import_templates_recommended_idx").using("btree", table.isRecommended.asc().nullsLast().op("bool_ops")),
+	foreignKey({
+		columns: [table.createdBy],
+		foreignColumns: [platformUsers.id],
+		name: "excel_import_templates_created_by_fkey"
 	}).onDelete("set null"),
 ]);

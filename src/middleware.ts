@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const SENSITIVE_LOGIN_QUERY_KEYS = [
+  'login-account',
+  'login-password',
+  'account',
+  'username',
+  'user',
+  'password',
+  'pwd',
+];
 
 function isProtectedLocalUploadPath(request: NextRequest) {
   const publicBasePath = process.env.LOCAL_PUBLIC_BASE_PATH || '/uploads';
@@ -22,6 +31,22 @@ function sameOrigin(request: NextRequest, value: string | null) {
 }
 
 export function middleware(request: NextRequest) {
+  if (request.nextUrl.pathname === '/login') {
+    const cleanUrl = request.nextUrl.clone();
+    let hasSensitiveQuery = false;
+
+    for (const key of SENSITIVE_LOGIN_QUERY_KEYS) {
+      if (cleanUrl.searchParams.has(key)) {
+        cleanUrl.searchParams.delete(key);
+        hasSensitiveQuery = true;
+      }
+    }
+
+    if (hasSensitiveQuery) {
+      return NextResponse.redirect(cleanUrl);
+    }
+  }
+
   if (
     process.env.NODE_ENV === 'production'
     && process.env.LOCAL_UPLOAD_PUBLIC_ACCESS === 'protected'
@@ -45,5 +70,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/api/:path*', '/uploads/:path*'],
+  matcher: ['/login', '/api/:path*', '/uploads/:path*'],
 };

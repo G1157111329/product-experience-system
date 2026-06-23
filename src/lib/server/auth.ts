@@ -14,15 +14,35 @@ export interface AuthUser {
   role: AuthRole;
 }
 
-type ClientLike = {
+export type ClientLike = {
   from: (table: string) => {
-    select: (fields?: string) => {
-      eq: (field: string, value: unknown) => {
-        maybeSingle: () => Promise<{ data: Record<string, unknown> | null; error?: unknown }>;
-        single?: () => Promise<{ data: Record<string, unknown> | null; error?: unknown }>;
+    select: (fields?: string, options?: { count?: string }) => {
+      eq: (field: string, value: unknown) => QueryResultLike;
+      order: (field: string, options?: { ascending?: boolean }) => QueryResultLike;
+      maybeSingle: () => Promise<{ data: Record<string, unknown> | null; error?: { message?: string } | null }>;
+      single: () => Promise<{ data: Record<string, unknown> | null; error?: { message?: string } | null }>;
+    };
+    insert: (row: Record<string, unknown> | Record<string, unknown>[]) => {
+      select: (fields?: string) => {
+        single: () => Promise<{ data: Record<string, unknown> | null; error?: { message?: string } | null }>;
+        maybeSingle: () => Promise<{ data: Record<string, unknown> | null; error?: { message?: string } | null }>;
       };
     };
+    update: (row: Record<string, unknown>) => {
+      eq: (field: string, value: unknown) => unknown;
+    };
+    delete: () => {
+      eq: (field: string, value: unknown) => unknown;
+    };
   };
+};
+
+// 查询链式构建器：当被 await 时返回列表结果
+export type QueryResultLike = PromiseLike<{ data: Record<string, unknown>[] | null; error?: { message?: string } | null }> & {
+  eq: (field: string, value: unknown) => QueryResultLike;
+  order: (field: string, options?: { ascending?: boolean }) => QueryResultLike;
+  maybeSingle: () => Promise<{ data: Record<string, unknown> | null; error?: { message?: string } | null }>;
+  single: () => Promise<{ data: Record<string, unknown> | null; error?: { message?: string } | null }>;
 };
 
 interface TokenPayload {
@@ -339,6 +359,38 @@ export async function canAccessIssueReEvaluation(client: ClientLike, user: AuthU
     .maybeSingle();
   if (!reEvaluation?.issue_id) return false;
   return canAccessIssue(client, user, String(reEvaluation.issue_id));
+}
+
+// V2.3 对比组装权限：基于 created_by + source_task_ids + source_report_ids 推导
+// - 管理员始终可访问
+// - 创建者可访问
+// - 任意来源任务归属用户则可访问（多对象任务场景）
+// - 任意来源报告归属用户则可访问（自定义合并报告场景）
+export async function canAccessAssembly(client: ClientLike, user: AuthUser, assemblyId: string) {
+  if (user.role === 'admin') return true;
+  const { data: assembly } = await client
+    .from('comparison_assemblies')
+    .select('id, created_by, source_task_ids, source_report_ids')
+    .eq('id', assemblyId)
+    .maybeSingle();
+  if (!assembly) return false;
+  if (assembly.created_by === user.id) return true;
+  const sourceTaskIds = Array.isArray(assembly.source_task_ids) ? assembly.source_task_ids : [];
+  for (const taskId of sourceTaskIds) {
+    if (typeof taskId !== 'string') continue;
+    if (await canAccessTask(client, user, taskId)) return true;
+  }
+  const sourceReportIds = Array.isArray(assembly.source_report_ids) ? assembly.source_report_ids : [];
+  for (const reportId of sourceReportIds) {
+    if (typeof reportId !== 'string') continue;
+    if (await canAccessReport(client, user, reportId)) return true;
+  }
+  return false;
+}
+
+export async function canReadAssembly(client: ClientLike, user: AuthUser, assemblyId: string) {
+  if (user.role === 'admin') return true;
+  return canAccessAssembly(client, user, assemblyId);
 }
 
 export function isAuthResponse(value: unknown): value is NextResponse {

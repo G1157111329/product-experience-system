@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { canAccessTask, forbidden, isAuthResponse, requireUser, type AuthUser } from '@/lib/server/auth';
+import { canAccessAssembly, canAccessTask, forbidden, isAuthResponse, requireUser, type AuthUser } from '@/lib/server/auth';
 import { deleteFile, generatePresignedUrl } from '@/lib/server/storage';
 
 type MaterialScope = {
@@ -11,7 +11,17 @@ type MaterialScope = {
   recipe_id?: string | null;
   issue_id?: string | null;
   re_evaluation_id?: string | null;
+  comparison_cell_id?: string | null;
 };
+
+async function getAssemblyIdForComparisonCell(client: ReturnType<typeof getSupabaseClient>, comparisonCellId: string) {
+  const { data } = await client
+    .from('comparison_matrix_cells')
+    .select('assembly_id')
+    .eq('id', comparisonCellId)
+    .maybeSingle();
+  return data?.assembly_id ? String(data.assembly_id) : null;
+}
 
 async function getTaskIdForMaterialScope(client: ReturnType<typeof getSupabaseClient>, scope: MaterialScope) {
   if (scope.task_id) return scope.task_id;
@@ -43,6 +53,10 @@ async function getTaskIdForMaterialScope(client: ReturnType<typeof getSupabaseCl
 }
 
 async function canUseMaterialScope(client: ReturnType<typeof getSupabaseClient>, user: AuthUser, scope: MaterialScope) {
+  if (scope.comparison_cell_id) {
+    const assemblyId = await getAssemblyIdForComparisonCell(client, scope.comparison_cell_id);
+    return Boolean(assemblyId && await canAccessAssembly(client, user, assemblyId));
+  }
   if (scope.recipe_library_step_id) return user.role === 'admin';
   const taskId = await getTaskIdForMaterialScope(client, scope);
   return Boolean(taskId && await canAccessTask(client, user, taskId));
@@ -78,6 +92,7 @@ export async function GET(request: NextRequest) {
     recipe_library_step_id: searchParams.get('recipe_library_step_id'),
     recipe_id: searchParams.get('recipe_id'),
     issue_id: searchParams.get('issue_id'),
+    comparison_cell_id: searchParams.get('comparison_cell_id'),
   };
   const limit = Math.min(200, Math.max(1, parseInt(searchParams.get('limit') || '100', 10)));
 
@@ -90,8 +105,11 @@ export async function GET(request: NextRequest) {
   if (scope.recipe_library_step_id) query = query.eq('recipe_library_step_id', scope.recipe_library_step_id);
   if (scope.recipe_id) query = query.eq('recipe_id', scope.recipe_id);
   if (scope.issue_id) query = query.eq('issue_id', scope.issue_id);
+  if (scope.comparison_cell_id) query = query.eq('comparison_cell_id', scope.comparison_cell_id);
 
-  query = query.order('created_at', { ascending: false }).limit(limit);
+  query = scope.comparison_cell_id
+    ? query.order('media_display_order', { ascending: true }).limit(limit)
+    : query.order('created_at', { ascending: false }).limit(limit);
   const { data, error } = await query;
   if (error) return NextResponse.json({ code: 1, message: '查询失败' }, { status: 500 });
 
@@ -105,7 +123,7 @@ export async function PUT(request: NextRequest) {
   if (isAuthResponse(user)) return user;
 
   const body = await request.json();
-  const { id, file_name, record_id, recipe_step_id, recipe_id, issue_id, re_evaluation_id } = body;
+  const { id, file_name, record_id, recipe_step_id, recipe_id, issue_id, re_evaluation_id, comparison_cell_id } = body;
 
   if (!id) {
     return NextResponse.json({ code: 1, message: '缺少必要参数' }, { status: 400 });
@@ -113,13 +131,13 @@ export async function PUT(request: NextRequest) {
 
   const { data: material } = await client
     .from('materials')
-    .select('id, task_id, record_id, recipe_step_id, recipe_id, issue_id, re_evaluation_id, recipe_library_step_id')
+    .select('id, task_id, record_id, recipe_step_id, recipe_id, issue_id, re_evaluation_id, recipe_library_step_id, comparison_cell_id')
     .eq('id', id)
     .maybeSingle();
   if (!material) return NextResponse.json({ code: 1, message: '素材不存在' }, { status: 404 });
 
   if (!(await canUseMaterialScope(client, user, material))) return forbidden();
-  const targetScope = { record_id, recipe_step_id, recipe_id, issue_id, re_evaluation_id };
+  const targetScope = { record_id, recipe_step_id, recipe_id, issue_id, re_evaluation_id, comparison_cell_id };
   if (Object.values(targetScope).some((value) => value !== undefined && value !== null)) {
     if (!(await canUseMaterialScope(client, user, targetScope))) return forbidden();
   }
@@ -131,6 +149,7 @@ export async function PUT(request: NextRequest) {
   if (recipe_id !== undefined) updateData.recipe_id = recipe_id;
   if (issue_id !== undefined) updateData.issue_id = issue_id;
   if (re_evaluation_id !== undefined) updateData.re_evaluation_id = re_evaluation_id;
+  if (comparison_cell_id !== undefined) updateData.comparison_cell_id = comparison_cell_id;
 
   if (Object.keys(updateData).length === 0) {
     return NextResponse.json({ code: 1, message: '没有需要更新的字段' }, { status: 400 });
@@ -159,7 +178,7 @@ export async function DELETE(request: NextRequest) {
 
   const { data: material } = await client
     .from('materials')
-    .select('file_path, file_url, task_id, record_id, recipe_step_id, recipe_id, issue_id, re_evaluation_id, recipe_library_step_id')
+    .select('file_path, file_url, task_id, record_id, recipe_step_id, recipe_id, issue_id, re_evaluation_id, recipe_library_step_id, comparison_cell_id')
     .eq('id', id)
     .single();
 

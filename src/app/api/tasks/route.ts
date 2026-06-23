@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { isAuthResponse, requireUser } from '@/lib/server/auth';
+import { createAssemblyFromComparisonTask } from '@/lib/server/comparison-assembly';
 
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
@@ -74,8 +75,34 @@ export async function POST(request: NextRequest) {
     assigned_to: body.assigned_to || null,
     selected_standards: body.selected_standards || null,
     status: '待执行',
+    // V2.3 多对象对比任务字段
+    task_mode: body.task_mode || 'single',
+    comparison_intent: body.comparison_intent || null,
+    comparison_layout_type: body.comparison_layout_type || null,
+    comparison_source: body.comparison_source || null,
   }).select().single();
 
   if (error) return NextResponse.json({ code: 1, message: '创建失败' }, { status: 500 });
-  return NextResponse.json({ code: 0, message: '创建成功', data });
+
+  let responseData: Record<string, unknown> | null = data;
+  if (body.task_mode === 'comparison' && data?.id) {
+    try {
+      const assembly = await createAssemblyFromComparisonTask(client, String(data.id), {
+        name: `${taskName} - 对比矩阵`,
+        layoutType: body.comparison_layout_type || 'image_matrix',
+        comparisonIntent: body.comparison_intent || undefined,
+      });
+      responseData = {
+        ...(data as Record<string, unknown>),
+        comparison_assembly_id: assembly.id,
+      };
+    } catch (err) {
+      responseData = {
+        ...(data as Record<string, unknown>),
+        comparison_assembly_error: err instanceof Error ? err.message : '初始化对比组装失败',
+      };
+    }
+  }
+
+  return NextResponse.json({ code: 0, message: '创建成功', data: responseData });
 }

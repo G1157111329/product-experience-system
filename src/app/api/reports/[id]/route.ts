@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessReport, canReadReport, forbidden, isAuthResponse, requireAdmin, requireUser } from '@/lib/server/auth';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
+import { attachLatestSnapshotForComparisonReport } from '@/lib/server/report-snapshots';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -12,7 +13,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const { data, error } = await client.from('reports').select('*').eq('id', id).single();
   if (error) return NextResponse.json({ code: 1, message: '报告不存在' }, { status: 404 });
-  return NextResponse.json({ code: 0, message: 'success', data });
+  const report = await attachLatestSnapshotForComparisonReport(client, data as Record<string, unknown>);
+  return NextResponse.json({ code: 0, message: 'success', data: report });
 }
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {

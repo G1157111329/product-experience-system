@@ -1,4 +1,7 @@
+import { createReadStream } from 'fs';
+import { stat } from 'fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
+import { resolve, sep } from 'path';
 import { parse } from 'url';
 import next from 'next';
 import { validateProductionStartupSecurity } from './lib/server/startup-security';
@@ -22,6 +25,70 @@ validateProductionStartupSecurity();
 // Create Next.js app
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
+
+function getStaticContentType(pathname: string) {
+  if (pathname.endsWith('.js')) return 'application/javascript; charset=UTF-8';
+  if (pathname.endsWith('.css')) return 'text/css; charset=UTF-8';
+  if (pathname.endsWith('.json')) return 'application/json; charset=UTF-8';
+  if (pathname.endsWith('.svg')) return 'image/svg+xml';
+  if (pathname.endsWith('.png')) return 'image/png';
+  if (pathname.endsWith('.jpg') || pathname.endsWith('.jpeg')) return 'image/jpeg';
+  if (pathname.endsWith('.webp')) return 'image/webp';
+  if (pathname.endsWith('.woff')) return 'font/woff';
+  if (pathname.endsWith('.woff2')) return 'font/woff2';
+  return 'application/octet-stream';
+}
+
+async function tryServeNextStatic(req: IncomingMessage, res: ServerResponse) {
+  if (!req.url) return false;
+
+  const parsedUrl = parse(req.url);
+  const pathname = parsedUrl.pathname || '';
+  if (!pathname.startsWith('/_next/static/')) return false;
+
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.statusCode = 405;
+    res.setHeader('Allow', 'GET, HEAD');
+    res.end();
+    return true;
+  }
+
+  let decodedPathname: string;
+  try {
+    decodedPathname = decodeURIComponent(pathname);
+  } catch {
+    res.statusCode = 400;
+    res.end('Bad request');
+    return true;
+  }
+
+  const staticRoot = resolve(process.cwd(), '.next/static');
+  const relativePath = decodedPathname.slice('/_next/static/'.length);
+  const filePath = resolve(staticRoot, relativePath);
+  if (filePath !== staticRoot && !filePath.startsWith(`${staticRoot}${sep}`)) {
+    res.statusCode = 403;
+    res.end('Forbidden');
+    return true;
+  }
+
+  try {
+    const fileStat = await stat(filePath);
+    if (!fileStat.isFile()) return false;
+
+    res.shouldKeepAlive = false;
+    res.statusCode = 200;
+    res.setHeader('Connection', 'close');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.setHeader('Content-Type', getStaticContentType(filePath));
+    res.setHeader('Content-Length', fileStat.size);
+    if (req.method === 'HEAD') res.end();
+    else createReadStream(filePath).pipe(res);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function tryServeLocalUpload(req: IncomingMessage, res: ServerResponse) {
   if (STORAGE_DRIVER === 's3' || !isLocalUploadPublicAccess() || !req.url) return false;
@@ -108,6 +175,7 @@ async function tryServeLocalUpload(req: IncomingMessage, res: ServerResponse) {
 app.prepare().then(() => {
   const server = createServer(async (req, res) => {
     try {
+      if (await tryServeNextStatic(req, res)) return;
       if (await tryServeLocalUpload(req, res)) return;
       const parsedUrl = parse(req.url!, true);
       await handle(req, res, parsedUrl);

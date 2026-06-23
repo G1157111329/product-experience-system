@@ -18,6 +18,7 @@ type MaterialEvidenceRailProps = {
   taskId: string;
   bindingTarget: EvidenceBindingTarget | null;
   onMaterialsChange?: (materials: Material[]) => void;
+  embedded?: boolean;
 };
 
 const filters: Array<{ key: MaterialEvidenceFilter; label: string }> = [
@@ -47,7 +48,7 @@ function matchesFilter(material: Material, filter: MaterialEvidenceFilter) {
   return true;
 }
 
-export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange }: MaterialEvidenceRailProps) {
+export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange, embedded = false }: MaterialEvidenceRailProps) {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [filter, setFilter] = useState<MaterialEvidenceFilter>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -165,30 +166,29 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange 
   };
 
   return (
-    <section className="rounded-lg border bg-card p-3 shadow-sm">
+    <section className={cn(embedded ? 'space-y-3' : 'rounded-lg border bg-card p-3 shadow-sm')}>
       <PreviewComponent />
       <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-sm font-semibold">素材证据</h2>
+            <h2 className="whitespace-nowrap text-sm font-semibold">素材证据</h2>
             <Badge variant="secondary">{materials.length} 个素材</Badge>
             {unlinkedCount > 0 && <Badge variant="outline">{unlinkedCount} 个未关联</Badge>}
           </div>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">先整理手机拍摄的图片/视频，再绑定到五感记录、功能步骤或效果评价。</p>
         </div>
 
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 2xl:flex">
-          <Button variant="outline" size="sm" onClick={() => setCaptureMode('image')} disabled={uploading}>
+          <Button variant="outline" size="sm" onClick={() => setCaptureMode('image')} disabled={uploading} className="whitespace-nowrap">
             <Camera className="mr-1.5 h-4 w-4" />拍照
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setCaptureMode('video')} disabled={uploading}>
+          <Button variant="outline" size="sm" onClick={() => setCaptureMode('video')} disabled={uploading} className="whitespace-nowrap">
             <Video className="mr-1.5 h-4 w-4" />录像
           </Button>
-          <Button variant="outline" size="sm" onClick={() => imageInputRef.current?.click()} disabled={uploading}>
-            <ImageIcon className="mr-1.5 h-4 w-4" />图片
+          <Button variant="outline" size="sm" onClick={() => imageInputRef.current?.click()} disabled={uploading} className="whitespace-nowrap">
+            <ImageIcon className="mr-1.5 h-4 w-4" />相册图片
           </Button>
-          <Button variant="outline" size="sm" onClick={() => videoInputRef.current?.click()} disabled={uploading}>
-            <Film className="mr-1.5 h-4 w-4" />视频
+          <Button variant="outline" size="sm" onClick={() => videoInputRef.current?.click()} disabled={uploading} className="whitespace-nowrap">
+            <Film className="mr-1.5 h-4 w-4" />相册视频
           </Button>
         </div>
       </div>
@@ -200,14 +200,14 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange 
             type="button"
             onClick={() => setFilter(item.key)}
             className={cn(
-              'rounded-md border px-2.5 py-1.5 text-xs transition-colors',
+              'whitespace-nowrap rounded-md border px-2.5 py-1.5 text-xs transition-colors',
               filter === item.key ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'
             )}
           >
             {item.label}
           </button>
         ))}
-        <Button variant="ghost" size="sm" onClick={fetchMaterials} className="ml-auto">
+        <Button variant="ghost" size="sm" onClick={fetchMaterials} className="ml-auto whitespace-nowrap">
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />刷新
         </Button>
       </div>
@@ -228,6 +228,12 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange 
                 <button
                   key={material.id}
                   type="button"
+                  draggable
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData('application/x-material-id', material.id);
+                    event.dataTransfer.setData('text/plain', material.id);
+                    event.dataTransfer.effectAllowed = 'copy';
+                  }}
                   onClick={() => toggleSelected(material.id)}
                   onDoubleClick={() => open(resolvedUrl)}
                   className={cn(
@@ -260,16 +266,16 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange 
       </ScrollArea>
 
       {selectedIds.length > 0 && (
-        <div className="mt-3 flex flex-col gap-2 rounded-md border bg-muted/30 p-2 sm:flex-row sm:items-center">
-          <div className="text-sm text-muted-foreground">已选择 {selectedIds.length} 个素材</div>
-          <div className="flex gap-2 sm:ml-auto">
-            <Button variant="ghost" size="sm" onClick={() => setSelectedIds([])}>
+        <div className="mt-3 flex flex-col gap-2 rounded-md border bg-muted/30 p-2">
+          <div className="whitespace-nowrap text-sm text-muted-foreground">已选择 {selectedIds.length} 个素材</div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setSelectedIds([])} className="whitespace-nowrap">
               <X className="mr-1.5 h-4 w-4" />取消
             </Button>
-            <Button variant="destructive" size="sm" onClick={handleDeleteSelected}>
+            <Button variant="destructive" size="sm" onClick={handleDeleteSelected} className="whitespace-nowrap">
               <Trash2 className="mr-1.5 h-4 w-4" />删除素材
             </Button>
-            <Button size="sm" onClick={handleBindSelected} disabled={!bindingTarget}>
+            <Button size="sm" onClick={handleBindSelected} disabled={!bindingTarget} className="whitespace-nowrap">
               <Link2 className="mr-1.5 h-4 w-4" />
               {bindingTarget ? `绑定到${bindingTarget.label}` : '先选择记录/步骤'}
             </Button>

@@ -142,19 +142,19 @@ export function AgentPresetPanel({
   };
 
   return (
-    <div className="grid gap-4 xl:grid-cols-2">
+    <div className="grid gap-4 2xl:grid-cols-2">
       <section className="rounded-lg border bg-card shadow-sm">
-        <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-h-[76px] flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <WandSparkles className="h-4 w-4 text-primary" />
               <h2 className="text-base font-semibold">AI五感体验</h2>
             </div>
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            <p className="hidden">
               依据体验目标、用户痛点和五感标准，生成本次重点检查指标。
             </p>
           </div>
-          <div className="flex shrink-0 gap-2">
+          <div className="grid shrink-0 grid-cols-2 gap-2 sm:flex">
             <Button variant="outline" size="sm" onClick={() => runAgent('senses')} disabled={runningMode !== null}>
               {runningMode === 'senses' ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <WandSparkles className="mr-1.5 h-4 w-4" />}
               AI五感体验
@@ -201,17 +201,17 @@ export function AgentPresetPanel({
       </section>
 
       <section className="rounded-lg border bg-card shadow-sm">
-        <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-h-[76px] flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <WandSparkles className="h-4 w-4 text-primary" />
               <h2 className="text-base font-semibold">食谱功能AI探索</h2>
             </div>
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            <p className="hidden">
               依据体验诉求、产品功能用途和趋势线索，生成可执行的功能/食谱草案。
             </p>
           </div>
-          <div className="flex shrink-0 gap-2">
+          <div className="grid shrink-0 grid-cols-2 gap-2 sm:flex">
             <Button variant="outline" size="sm" onClick={() => runAgent('recipes')} disabled={runningMode !== null}>
               {runningMode === 'recipes' ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <WandSparkles className="mr-1.5 h-4 w-4" />}
               食谱功能AI探索

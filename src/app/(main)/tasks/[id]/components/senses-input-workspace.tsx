@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { MediaGallery } from '@/components/app/media-gallery';
 import { cn } from '@/lib/utils';
 import type { CheckRecord, EvidenceBindingTarget, Material } from '../types';
+import { toast } from 'sonner';
 
 type SensesInputWorkspaceProps = {
   records: CheckRecord[];
@@ -16,6 +17,7 @@ type SensesInputWorkspaceProps = {
   onDeleteRecord: (record: CheckRecord) => void;
   onPreview: (url: string) => void;
   onBindingTargetChange: (target: EvidenceBindingTarget | null) => void;
+  onMaterialsChange?: () => void;
 };
 
 function getRecordTitle(record: CheckRecord) {
@@ -38,6 +40,7 @@ export function SensesInputWorkspace({
   onDeleteRecord,
   onPreview,
   onBindingTargetChange,
+  onMaterialsChange,
 }: SensesInputWorkspaceProps) {
   const [selectedId, setSelectedId] = useState(records[0]?.id || '');
   const selectedRecord = useMemo(
@@ -50,6 +53,27 @@ export function SensesInputWorkspace({
   const selectRecord = (record: CheckRecord) => {
     setSelectedId(record.id);
     onBindingTargetChange({ type: 'record', id: record.id, label: '当前五感记录' });
+  };
+
+  const bindDroppedMaterial = async (event: React.DragEvent<HTMLElement>, record: CheckRecord) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const materialId = event.dataTransfer.getData('application/x-material-id') || event.dataTransfer.getData('text/plain');
+    if (!materialId) return;
+
+    const response = await fetch('/api/materials', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: materialId, record_id: record.id, recipe_step_id: null, recipe_id: null }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (data.code === 0) {
+      selectRecord(record);
+      onMaterialsChange?.();
+      toast.success('素材已绑定到五感记录');
+    } else {
+      toast.error(data.message || '素材绑定失败');
+    }
   };
 
   return (
@@ -83,6 +107,8 @@ export function SensesInputWorkspace({
                   key={record.id}
                   type="button"
                   onClick={() => selectRecord(record)}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => void bindDroppedMaterial(event, record)}
                   className={cn(
                     'w-full rounded-md border p-3 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     selectedRecord?.id === record.id ? 'border-primary bg-primary/5' : 'bg-background'
@@ -150,7 +176,13 @@ export function SensesInputWorkspace({
 
             <div className="rounded-md border bg-background p-3">
               <div className="mb-2 text-xs font-medium text-muted-foreground">已绑定证据</div>
-              <MediaGallery materials={recordMaterials[selectedRecord.id] || []} responsive columns={{ mobile: 3, sm: 4 }} onPreview={onPreview} />
+              <div
+                className="rounded-md"
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => void bindDroppedMaterial(event, selectedRecord)}
+              >
+                <MediaGallery materials={recordMaterials[selectedRecord.id] || []} responsive columns={{ mobile: 3, sm: 4 }} onPreview={onPreview} />
+              </div>
             </div>
           </div>
         ) : (

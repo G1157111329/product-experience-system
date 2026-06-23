@@ -5,10 +5,13 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   ArrowUpRight, RotateCw, RotateCcw, Crop, Pencil, Type, Grid3x3,
-  Check, Undo2, Move, Minus
+  Check, Undo2, Move, Minus, FlipHorizontal, FlipVertical
 } from 'lucide-react';
 
 type Tool = 'move' | 'crop' | 'draw' | 'arrow' | 'mosaic' | 'text';
+type SaveMode = 'overwrite' | 'save_new';
+type OutputFormat = 'image/jpeg' | 'image/png' | 'image/webp';
+type FilterPreset = 'none' | 'vintage' | 'film' | 'food' | 'portrait';
 
 interface DrawPoint { x: number; y: number; }
 interface DrawAction {
@@ -28,11 +31,52 @@ interface ImageEditorDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   imageUrl: string;
-  onSave: (editedFile: File) => Promise<void> | void;
+  onSave: (editedFile: File, mode: SaveMode) => Promise<void> | void;
   fileName?: string;
 }
 
 const COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6', '#000000', '#ffffff'];
+const CROP_PRESETS = [
+  { label: '1:1', ratio: 1 },
+  { label: '16:9', ratio: 16 / 9 },
+  { label: '9:16', ratio: 9 / 16 },
+  { label: '4:3', ratio: 4 / 3 },
+];
+
+function extensionForFormat(format: OutputFormat) {
+  if (format === 'image/png') return 'png';
+  if (format === 'image/webp') return 'webp';
+  return 'jpg';
+}
+
+function filterString(settings: {
+  brightness: number;
+  contrast: number;
+  saturation: number;
+  highlights: number;
+  shadows: number;
+  temperature: number;
+  hue: number;
+  preset: FilterPreset;
+  intensity: number;
+}) {
+  const intensity = settings.intensity / 100;
+  const preset = {
+    none: { brightness: 0, contrast: 0, saturation: 0, sepia: 0, grayscale: 0, hue: 0 },
+    vintage: { brightness: -4, contrast: 8, saturation: -10, sepia: 42, grayscale: 0, hue: -8 },
+    film: { brightness: -3, contrast: 18, saturation: -6, sepia: 14, grayscale: 8, hue: 0 },
+    food: { brightness: 4, contrast: 8, saturation: 24, sepia: 0, grayscale: 0, hue: 4 },
+    portrait: { brightness: 6, contrast: -4, saturation: 8, sepia: 6, grayscale: 0, hue: -2 },
+  }[settings.preset];
+
+  const brightness = 100 + settings.brightness + settings.highlights * 0.25 + settings.shadows * 0.15 + preset.brightness * intensity;
+  const contrast = 100 + settings.contrast + preset.contrast * intensity;
+  const saturation = 100 + settings.saturation + preset.saturation * intensity;
+  const hue = settings.hue + settings.temperature * 0.25 + preset.hue * intensity;
+  const sepia = Math.max(0, preset.sepia * intensity + Math.max(0, settings.temperature) * 0.15);
+  const grayscale = Math.max(0, preset.grayscale * intensity);
+  return `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%) hue-rotate(${hue}deg) sepia(${sepia}%) grayscale(${grayscale}%)`;
+}
 
 function renderAction(ctx: CanvasRenderingContext2D, action: DrawAction, scale: number) {
   ctx.save();
@@ -101,6 +145,21 @@ export function ImageEditorDialog({
   const [saving, setSaving] = useState(false);
   const [cropRect, setCropRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [cropStart, setCropStart] = useState<DrawPoint | null>(null);
+  const [flipX, setFlipX] = useState(false);
+  const [flipY, setFlipY] = useState(false);
+  const [brightness, setBrightness] = useState(0);
+  const [contrast, setContrast] = useState(0);
+  const [saturation, setSaturation] = useState(0);
+  const [highlights, setHighlights] = useState(0);
+  const [shadows, setShadows] = useState(0);
+  const [temperature, setTemperature] = useState(0);
+  const [hue, setHue] = useState(0);
+  const [filterPreset, setFilterPreset] = useState<FilterPreset>('none');
+  const [filterIntensity, setFilterIntensity] = useState(60);
+  const [outputFormat, setOutputFormat] = useState<OutputFormat>('image/jpeg');
+  const [outputWidth, setOutputWidth] = useState<number | ''>('');
+  const [outputHeight, setOutputHeight] = useState<number | ''>('');
+  const [saveMode, setSaveMode] = useState<SaveMode>('save_new');
   const scaleRef = useRef(1);
 
   // Load image
@@ -112,8 +171,12 @@ export function ImageEditorDialog({
       imageRef.current = img;
       setImgSize({ w: img.width, h: img.height });
       setRotation(0);
+      setFlipX(false);
+      setFlipY(false);
       setActions([]);
       setCropRect(null);
+      setOutputWidth(img.width);
+      setOutputHeight(img.height);
     };
     img.src = imageUrl;
   }, [open, imageUrl]);
@@ -148,9 +211,12 @@ export function ImageEditorDialog({
     ctx.save();
     ctx.translate(canvas.width / 2, canvas.height / 2);
     ctx.rotate((rotation * Math.PI) / 180);
+    ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+    ctx.filter = filterString({ brightness, contrast, saturation, highlights, shadows, temperature, hue, preset: filterPreset, intensity: filterIntensity });
     const drawW = (isRotated ? imgSize.h : imgSize.w) * s;
     const drawH = (isRotated ? imgSize.w : imgSize.h) * s;
     ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+    ctx.filter = 'none';
     ctx.restore();
 
     // Draw all committed actions
@@ -170,7 +236,7 @@ export function ImageEditorDialog({
       ctx.strokeRect(cropRect.x * s, cropRect.y * s, cropRect.w * s, cropRect.h * s);
       ctx.setLineDash([]);
     }
-  }, [rotation, imgSize, actions, currentAction, tool, cropRect]);
+  }, [rotation, imgSize, actions, currentAction, tool, cropRect, flipX, flipY, brightness, contrast, saturation, highlights, shadows, temperature, hue, filterPreset, filterIntensity]);
 
   useEffect(() => { redraw(); }, [redraw]);
 
@@ -301,6 +367,26 @@ export function ImageEditorDialog({
     setRotation(prev => (prev + deg + 360) % 360);
   };
 
+  const applyCropPreset = (ratio: number) => {
+    const isRotated = rotation % 180 !== 0;
+    const w = isRotated ? imgSize.h : imgSize.w;
+    const h = isRotated ? imgSize.w : imgSize.h;
+    if (!w || !h) return;
+    let cropW = w * 0.82;
+    let cropH = cropW / ratio;
+    if (cropH > h * 0.82) {
+      cropH = h * 0.82;
+      cropW = cropH * ratio;
+    }
+    setTool('crop');
+    setCropRect({
+      x: Math.max(0, (w - cropW) / 2),
+      y: Math.max(0, (h - cropH) / 2),
+      w: cropW,
+      h: cropH,
+    });
+  };
+
   const applyCrop = async () => {
     if (!cropRect || !imageRef.current) return;
     const { x, y, w, h } = cropRect;
@@ -315,9 +401,12 @@ export function ImageEditorDialog({
     const tempCtx = tempCanvas.getContext('2d')!;
     tempCtx.translate(dw / 2, dh / 2);
     tempCtx.rotate((rotation * Math.PI) / 180);
+    tempCtx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+    tempCtx.filter = filterString({ brightness, contrast, saturation, highlights, shadows, temperature, hue, preset: filterPreset, intensity: filterIntensity });
     const drawW = isRotated ? imgSize.h : imgSize.w;
     const drawH = isRotated ? imgSize.w : imgSize.h;
     tempCtx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+    tempCtx.filter = 'none';
     tempCtx.setTransform(1, 0, 0, 1, 0, 0);
 
     // Draw all actions on top at full resolution
@@ -339,9 +428,13 @@ export function ImageEditorDialog({
       imageRef.current = newImg;
       setImgSize({ w: newImg.width, h: newImg.height });
       setRotation(0);
+      setFlipX(false);
+      setFlipY(false);
       setActions([]);
       setCropRect(null);
       setTool('move');
+      setOutputWidth(newImg.width);
+      setOutputHeight(newImg.height);
     };
     newImg.src = url;
   };
@@ -354,23 +447,34 @@ export function ImageEditorDialog({
       const isRotated = rotation % 180 !== 0;
       const dw = isRotated ? imgSize.h : imgSize.w;
       const dh = isRotated ? imgSize.w : imgSize.h;
-      const canvas = document.createElement('canvas');
-      canvas.width = dw; canvas.height = dh;
-      const ctx = canvas.getContext('2d')!;
+      const workingCanvas = document.createElement('canvas');
+      workingCanvas.width = dw; workingCanvas.height = dh;
+      const ctx = workingCanvas.getContext('2d')!;
       ctx.translate(dw / 2, dh / 2);
       ctx.rotate((rotation * Math.PI) / 180);
+      ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+      ctx.filter = filterString({ brightness, contrast, saturation, highlights, shadows, temperature, hue, preset: filterPreset, intensity: filterIntensity });
       const drawW = isRotated ? imgSize.h : imgSize.w;
       const drawH = isRotated ? imgSize.w : imgSize.h;
       ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+      ctx.filter = 'none';
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       for (const action of actions) {
         renderAction(ctx, action, 1);
       }
+      const targetWidth = typeof outputWidth === 'number' && outputWidth > 0 ? Math.round(outputWidth) : workingCanvas.width;
+      const targetHeight = typeof outputHeight === 'number' && outputHeight > 0 ? Math.round(outputHeight) : workingCanvas.height;
+      const canvas = document.createElement('canvas');
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const outputCtx = canvas.getContext('2d')!;
+      outputCtx.drawImage(workingCanvas, 0, 0, targetWidth, targetHeight);
       const blob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/jpeg', 0.92);
+        canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), outputFormat, outputFormat === 'image/png' ? undefined : 0.92);
       });
-      const file = new File([blob], `${fileName}-${Date.now()}.jpg`, { type: 'image/jpeg' });
-      await onSave(file);
+      const safeBase = fileName.replace(/\.[^.]+$/, '') || 'edited-image';
+      const file = new File([blob], `${safeBase}.${extensionForFormat(outputFormat)}`, { type: outputFormat });
+      await onSave(file, saveMode);
       onOpenChange(false);
     } catch (err) {
       console.error('Save failed:', err);
@@ -395,7 +499,7 @@ export function ImageEditorDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl p-0 overflow-hidden">
+      <DialogContent className="max-h-[95vh] max-w-5xl overflow-y-auto p-0">
         <DialogHeader className="px-4 pt-4 pb-2">
           <DialogTitle className="text-base">编辑图片</DialogTitle>
         </DialogHeader>
@@ -416,10 +520,83 @@ export function ImageEditorDialog({
             <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => handleRotate(90)}>
               <RotateCw className="h-4 w-4" />
             </Button>
+            <Button variant={flipX ? 'secondary' : 'ghost'} size="sm" className="h-8 px-2" onClick={() => setFlipX((value) => !value)}>
+              <FlipHorizontal className="h-4 w-4" />
+            </Button>
+            <Button variant={flipY ? 'secondary' : 'ghost'} size="sm" className="h-8 px-2" onClick={() => setFlipY((value) => !value)}>
+              <FlipVertical className="h-4 w-4" />
+            </Button>
             <div className="w-px h-6 bg-border mx-1" />
             <Button variant="ghost" size="sm" className="h-8 px-2" onClick={handleUndo} disabled={actions.length === 0}>
               <Undo2 className="h-4 w-4" />
             </Button>
+          </div>
+
+          <div className="grid gap-3 rounded-md border bg-muted/20 p-3 text-xs lg:grid-cols-3">
+            <div className="space-y-2">
+              <p className="font-medium">裁剪比例</p>
+              <div className="flex flex-wrap gap-1.5">
+                {CROP_PRESETS.map((preset) => (
+                  <Button key={preset.label} type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => applyCropPreset(preset.ratio)}>
+                    {preset.label}
+                  </Button>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="space-y-1">
+                  <span className="text-muted-foreground">宽</span>
+                  <input className="h-8 w-full rounded-md border bg-background px-2" type="number" min={1} value={outputWidth} onChange={(event) => setOutputWidth(event.target.value ? Number(event.target.value) : '')} />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-muted-foreground">高</span>
+                  <input className="h-8 w-full rounded-md border bg-background px-2" type="number" min={1} value={outputHeight} onChange={(event) => setOutputHeight(event.target.value ? Number(event.target.value) : '')} />
+                </label>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="font-medium">调整参数</p>
+              {[
+                ['亮度', brightness, setBrightness, -60, 60],
+                ['对比度', contrast, setContrast, -60, 60],
+                ['饱和度', saturation, setSaturation, -60, 80],
+                ['高光', highlights, setHighlights, -60, 60],
+                ['阴影', shadows, setShadows, -60, 60],
+                ['色温', temperature, setTemperature, -60, 60],
+                ['色调', hue, setHue, -180, 180],
+              ].map(([label, value, setter, min, max]) => (
+                <label key={String(label)} className="grid grid-cols-[3.5rem_minmax(0,1fr)_2.5rem] items-center gap-2">
+                  <span className="text-muted-foreground">{String(label)}</span>
+                  <input type="range" min={Number(min)} max={Number(max)} value={Number(value)} onChange={(event) => (setter as (value: number) => void)(Number(event.target.value))} className="h-1 accent-primary" />
+                  <span className="text-right tabular-nums text-muted-foreground">{Number(value)}</span>
+                </label>
+              ))}
+            </div>
+
+            <div className="space-y-2">
+              <p className="font-medium">滤镜与输出</p>
+              <select className="h-8 w-full rounded-md border bg-background px-2" value={filterPreset} onChange={(event) => setFilterPreset(event.target.value as FilterPreset)}>
+                <option value="none">无滤镜</option>
+                <option value="vintage">复古</option>
+                <option value="film">胶片</option>
+                <option value="food">美食</option>
+                <option value="portrait">人像</option>
+              </select>
+              <label className="grid grid-cols-[3.5rem_minmax(0,1fr)_2.5rem] items-center gap-2">
+                <span className="text-muted-foreground">强度</span>
+                <input type="range" min={0} max={100} value={filterIntensity} onChange={(event) => setFilterIntensity(Number(event.target.value))} className="h-1 accent-primary" />
+                <span className="text-right tabular-nums text-muted-foreground">{filterIntensity}</span>
+              </label>
+              <select className="h-8 w-full rounded-md border bg-background px-2" value={outputFormat} onChange={(event) => setOutputFormat(event.target.value as OutputFormat)}>
+                <option value="image/jpeg">JPG</option>
+                <option value="image/png">PNG</option>
+                <option value="image/webp">WEBP</option>
+              </select>
+              <select className="h-8 w-full rounded-md border bg-background px-2" value={saveMode} onChange={(event) => setSaveMode(event.target.value as SaveMode)}>
+                <option value="save_new">另存为新图片</option>
+                <option value="overwrite">覆盖原图片</option>
+              </select>
+            </div>
           </div>
 
           {/* Color & Width (for draw/arrow/text) */}

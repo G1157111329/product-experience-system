@@ -18,7 +18,11 @@ export { platformUsers, platformAuditRequests, platformCategories, platformProdu
   standards, standardItems, experienceTasks, checkRecords, materials, recipes,
   recipeSteps, issues, reportTemplates, reports, reportShares, recipeLibrary,
   recipeLibrarySteps, platformSettings, aiModelConfigs, agentSkillTemplates,
-  agentSkillVersions, agentSkillAuditLogs, securityAuditLogs, securityRateLimits } from './shared/schema';
+  agentSkillVersions, agentSkillAuditLogs, securityAuditLogs, securityRateLimits,
+  comparisonAssemblies, comparisonObjects, comparisonItemNodes, comparisonMatrixCells,
+  metricDefinitions, metricFormulaVersions, metricThresholdRules, metricEvaluations,
+  comparisonAiResults, reportSnapshots, pdfGenerationJobs, excelImportJobs,
+  excelImportTemplates } from './shared/schema';
 
 function getSupabaseUrl(): string | undefined {
   return process.env.NEXT_PUBLIC_SUPABASE_URL;

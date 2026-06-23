@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { EvidenceBindingTarget, Recipe, RecipeStep } from '../types';
+import { toast } from 'sonner';
 
 type FunctionsInputWorkspaceProps = {
   recipes: Recipe[];
@@ -69,6 +70,34 @@ export function FunctionsInputWorkspace({
   const selectRecipe = (recipe: Recipe) => {
     setSelectedRecipeId(recipe.id);
     onBindingTargetChange({ type: 'recipe_effect', id: recipe.id, label: '当前效果评价' });
+  };
+
+  const bindDroppedMaterial = async (
+    event: React.DragEvent<HTMLElement>,
+    target: { recipe_step_id?: string | null; recipe_id?: string | null },
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const materialId = event.dataTransfer.getData('application/x-material-id') || event.dataTransfer.getData('text/plain');
+    if (!materialId) return;
+
+    const response = await fetch('/api/materials', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: materialId,
+        record_id: null,
+        recipe_step_id: target.recipe_step_id ?? null,
+        recipe_id: target.recipe_id ?? null,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (data.code === 0) {
+      onRefresh?.();
+      toast.success(target.recipe_step_id ? '素材已绑定到功能步骤' : '素材已绑定到效果评价');
+    } else {
+      toast.error(data.message || '素材绑定失败');
+    }
   };
 
   const handleStepDragEnd = (recipe: Recipe) => {
@@ -216,6 +245,7 @@ export function FunctionsInputWorkspace({
                     )}
                     onDragOver={(e) => { e.preventDefault(); setDragStepOverIdx(stepIdx); }}
                     onDragLeave={() => setDragStepOverIdx(null)}
+                    onDrop={(event) => void bindDroppedMaterial(event, { recipe_step_id: step.id })}
                   >
                     <div className="flex items-center gap-3">
                       {/* Step drag handle */}
@@ -267,6 +297,8 @@ export function FunctionsInputWorkspace({
               <button
                 type="button"
                 onClick={() => onBindingTargetChange({ type: 'recipe_effect', id: selectedRecipe.id, label: '当前效果评价' })}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => void bindDroppedMaterial(event, { recipe_id: selectedRecipe.id })}
                 className="w-full rounded-md border bg-background p-3 text-left hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <div className="whitespace-pre-wrap text-sm">{selectedRecipe.effect_description || '暂无效果描述'}</div>

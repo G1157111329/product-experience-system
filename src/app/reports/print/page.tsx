@@ -3,8 +3,10 @@
 import { Suspense, useEffect, useState, type CSSProperties } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
+import { ReportPrintSectionBlocks } from '@/components/reports/report-section-block-renderer';
 import { buildDisplayReportContent, type AiSummaryLike, type ReportContentWithReview, type ReportReviewOverrides } from '@/lib/report-review-overrides';
 import { mapWithConcurrency, normalizePrintMode, uniqueUrls, type PrintMode } from '@/lib/print-assets';
+import type { ReportDetailModel } from '@/lib/server/report-detail';
 import {
   getReportMergeModel,
   isMergeableReportProjectType,
@@ -214,6 +216,17 @@ async function presignReportUrls(rpt: ReportData): Promise<ReportData> {
   } catch { /* ignore */ }
 
   return rpt;
+}
+
+async function fetchReportDetailModel(reportId: string): Promise<ReportDetailModel | null> {
+  try {
+    const res = await fetch(`/api/reports/${reportId}/detail`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.code === 0 ? data.data as ReportDetailModel : null;
+  } catch {
+    return null;
+  }
 }
 
 function parseProblemPoints(value?: string | null): ProblemPoint[] {
@@ -629,8 +642,10 @@ function ReportPrintContent() {
   const searchParams = useSearchParams();
   const reportId = searchParams.get('id');
   const printMode = normalizePrintMode(searchParams.get('mode'));
+  const printParityMode = searchParams.get('parity') === '1' || searchParams.get('debug') === 'legacy';
   const [report, setReport] = useState<ReportData | null>(null);
   const [siblingReports, setSiblingReports] = useState<ReportData[]>([]);
+  const [detailModelsMap, setDetailModelsMap] = useState<Record<string, ReportDetailModel>>({});
   const [liveIssuesMap, setLiveIssuesMap] = useState<Record<string, IssueItem[]>>({});
   const [loading, setLoading] = useState(true);
   const [imagesLoaded, setImagesLoaded] = useState(false);
@@ -643,6 +658,8 @@ function ReportPrintContent() {
         const rpt = await presignReportUrls(res.data as ReportData);
         setReport(rpt);
         setSiblingReports([]);
+        const detailModel = await fetchReportDetailModel(rpt.id);
+        if (detailModel) setDetailModelsMap(prev => ({ ...prev, [rpt.id]: detailModel }));
         // Fetch sibling reports for merging
         const mergeModel = getReportMergeModel(rpt.product_model);
         if (mergeModel) {
@@ -670,7 +687,11 @@ function ReportPrintContent() {
             const siblings = await Promise.all(siblingSummaries.map(async (summary) => {
               const detailRes = await fetch(`/api/reports/${summary.id}`);
               const detailData = await detailRes.json();
-              return detailData.code === 0 ? await presignReportUrls(detailData.data as ReportData) : null;
+              if (detailData.code !== 0) return null;
+              const sibling = await presignReportUrls(detailData.data as ReportData);
+              const siblingDetailModel = await fetchReportDetailModel(sibling.id);
+              if (siblingDetailModel) setDetailModelsMap(prev => ({ ...prev, [sibling.id]: siblingDetailModel }));
+              return sibling;
             }));
             setSiblingReports(siblings.filter((item): item is ReportData => Boolean(item?.content)));
           }
@@ -857,6 +878,9 @@ function ReportPrintContent() {
     title: report.title,
     content: report.content as unknown as ReportContentWithReview,
   });
+  const primaryPrintDelivery = detailModelsMap[report.id]?.printDelivery;
+  const preflightErrors = primaryPrintDelivery?.preflight.errors || [];
+  const preflightWarnings = primaryPrintDelivery?.preflight.warnings || [];
 
   return (
     <>
@@ -875,6 +899,43 @@ function ReportPrintContent() {
         {projectType && <span>项目类型: {projectType} | </span>}
         版本 V{report.version} | 状态: {report.status} | 生成时间: {formatBeijingTime(report.content.generatedAt)}
       </div>
+
+      {primaryPrintDelivery && (
+        <section
+          data-testid="print-preflight-panel"
+          style={{ border: '1px solid #d1d5db', borderRadius: '8px', padding: '12px', margin: '16px 0', background: primaryPrintDelivery.preflight.ok ? '#f0fdf4' : '#fef2f2' }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: primaryPrintDelivery.preflight.ok ? '#166534' : '#991b1b' }}>
+                Print preflight: {primaryPrintDelivery.preflight.ok ? 'OK' : 'Blocked'}
+              </div>
+              <div data-testid="print-profile-label" style={{ fontSize: '12px', color: '#4b5563', marginTop: '2px' }}>
+                Profile {primaryPrintDelivery.profile.id} - {primaryPrintDelivery.profile.paper} {primaryPrintDelivery.profile.orientation} - {primaryPrintDelivery.preflight.counts.printBlocks} print blocks
+              </div>
+            </div>
+            {primaryPrintDelivery.latestPdfJob && (
+              <div data-testid="print-pdf-job-status" style={{ fontSize: '12px', color: '#4b5563' }}>
+                Latest PDF job: {primaryPrintDelivery.latestPdfJob.status}
+              </div>
+            )}
+          </div>
+          {(preflightErrors.length > 0 || preflightWarnings.length > 0) && (
+            <ul style={{ margin: '10px 0 0', padding: 0, listStyle: 'none', display: 'grid', gap: '6px' }}>
+              {[...preflightErrors, ...preflightWarnings].map((item) => (
+                <li
+                  key={item.code}
+                  data-testid="print-preflight-item"
+                  style={{ border: `1px solid ${item.severity === 'error' ? '#fecaca' : '#fde68a'}`, borderRadius: '6px', padding: '8px', background: '#fff', color: item.severity === 'error' ? '#991b1b' : '#92400e', fontSize: '12px' }}
+                >
+                  <strong>{item.code}</strong> - {item.message}
+                  <div style={{ color: '#6b7280', marginTop: '2px' }}>{item.action}</div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       {/* Overall Stats */}
       <h2 style={{ fontSize: '18px', margin: '24px 0 12px', color: '#0d9488', borderBottom: '2px solid #0d9488', paddingBottom: '4px' }}>概览统计</h2>
@@ -927,7 +988,14 @@ function ReportPrintContent() {
             {!isMerged && idx === 0 && (
               <h2 style={{ fontSize: '18px', margin: '24px 0 12px', color: '#0d9488', borderBottom: '2px solid #0d9488', paddingBottom: '4px' }}>{rpt.title}</h2>
             )}
-            <PrintReportSection report={rpt} liveIssues={liveIssuesMap[rpt.id] || []} />
+            {detailModelsMap[rpt.id] && (
+              <ReportPrintSectionBlocks sections={detailModelsMap[rpt.id].sections} />
+            )}
+            {(!detailModelsMap[rpt.id] || printParityMode) && (
+              <div data-testid="print-legacy-content" data-display-weight={detailModelsMap[rpt.id] ? 'parity' : 'fallback'}>
+                <PrintReportSection report={rpt} liveIssues={liveIssuesMap[rpt.id] || []} />
+              </div>
+            )}
           </div>
         );
       })}
