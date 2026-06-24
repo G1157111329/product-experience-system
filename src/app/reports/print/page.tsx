@@ -853,7 +853,7 @@ function ReportPrintContent() {
       }
 
       // Step 2: Convert presigned URLs to base64 for print
-      const imageUrls = filePaths.map(fp => presignedMap[fp] || fp);
+      const imageUrls = filePaths.map(fp => presignedMap[fp] || toPublicMediaUrl(fp) || fp);
       setImageProgress({ total: imageUrls.length, done: 0 });
 
       await mapWithConcurrency(imageUrls, printMode === 'high' ? 3 : 5, async (url) => {
