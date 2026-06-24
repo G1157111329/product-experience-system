@@ -23,3 +23,12 @@
 - 负向边界: 未审核账号 `acceptance0624` 提交时返回 `该账号尚未通过审核`，未生成密码重置审核。
 - 正向结果: 已审核账号 `admin` 提交时返回 `密码重置申请已提交，请等待管理员审核`。
 - 数据确认: `platform_audit_requests` 生成 `password_reset / admin / pending`。
+
+## L7 已审核用户登录
+
+- 状态: 已通过
+- 验收账号: `accept_user` / 普通用户 / approved
+- 登录结果: `/api/auth/login` 返回 `code=0`，用户角色为 `user`。
+- 跳转结果: 登录后进入 `/dashboard`。
+- 状态确认: `/api/auth/profile` 返回 `accept_user / 验收普通用户 / user / approved`。
+- 页面确认: 工作台显示普通用户导航、快捷新建项目入口、空态体验计划和问题点。
