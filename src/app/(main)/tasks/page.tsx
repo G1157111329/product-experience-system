@@ -185,11 +185,15 @@ export default function TasksPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...form, task_name: taskName }),
       });
-      const data = await readJsonResponse<{ code: number; message?: string }>(res);
+      const data = await readJsonResponse<{ code: number; message?: string; data?: { id?: string } }>(res);
       if (data.code === 0) {
         setDialogOpen(false);
         setForm(emptyForm);
-        fetchTasks();
+        if (data.data?.id) {
+          router.push(`/tasks/${data.data.id}`);
+        } else {
+          fetchTasks();
+        }
         toast.success('体验计划已创建');
       } else {
         toast.error(data.message || '创建失败');
