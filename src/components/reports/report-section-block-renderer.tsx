@@ -240,21 +240,21 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
   const hasItems = (block.items?.length ?? 0) > 0;
 
   return (
-    <div data-testid="report-section-block" className={cn('rounded-md border bg-background', compact ? 'p-2.5' : 'p-3')}>
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-xs font-medium">{block.title}</p>
-        <Badge variant="outline" className="text-[10px]">{block.type}</Badge>
+    <div data-testid="report-section-block" className={cn('min-w-0 overflow-hidden rounded-md border bg-background', compact ? 'p-2.5' : 'p-3')}>
+      <div className="mb-2 flex min-w-0 items-start justify-between gap-2">
+        <p className="min-w-0 break-words text-xs font-medium">{block.title}</p>
+        <Badge variant="outline" className="shrink-0 text-[10px]">{block.type}</Badge>
       </div>
 
       {block.description && (
-        <p className="text-sm leading-6 text-muted-foreground">{block.description}</p>
+        <p className="break-words text-sm leading-6 text-muted-foreground">{block.description}</p>
       )}
 
       {block.type === 'facts' && hasItems && (
         <div className="grid gap-2 sm:grid-cols-2">
           {block.items?.map((item, index) => (
-            <div key={`${item.label}-${index}`} data-testid="report-section-block-row" className={cn('rounded-md border px-3 py-2 text-xs', blockItemClass(item.status))}>
-              <p className="font-medium text-muted-foreground">{item.label}</p>
+            <div key={`${item.label}-${index}`} data-testid="report-section-block-row" className={cn('min-w-0 rounded-md border px-3 py-2 text-xs', blockItemClass(item.status))}>
+              <p className="break-words font-medium text-muted-foreground">{item.label}</p>
               <p className="mt-1 break-words text-sm text-foreground">{item.value}</p>
               {item.note && <p className="mt-1 text-[11px] text-muted-foreground">{item.note}</p>}
               <InlineMediaStrip media={item.media} />
@@ -266,10 +266,10 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
       {block.type === 'list' && hasItems && (
         <div className="space-y-2">
           {block.items?.map((item, index) => (
-            <div key={`${item.label}-${index}`} data-testid="report-section-block-row" className={cn('rounded-md border px-3 py-2 text-xs leading-5', blockItemClass(item.status))}>
+            <div key={`${item.label}-${index}`} data-testid="report-section-block-row" className={cn('min-w-0 rounded-md border px-3 py-2 text-xs leading-5', blockItemClass(item.status))}>
               <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-                <p className="font-medium">{item.label}</p>
-                {item.note && <span className="text-[11px] text-muted-foreground">{item.note}</span>}
+                <p className="min-w-0 break-words font-medium">{item.label}</p>
+                {item.note && <span className="break-words text-[11px] text-muted-foreground">{item.note}</span>}
               </div>
               <p className="mt-1 break-words text-muted-foreground">{item.value}</p>
               <InlineMediaStrip media={item.media} />
@@ -284,7 +284,7 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
             <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
               {block.collapsedLabel || '展开明细'}
             </summary>
-            <div className="mt-2 overflow-x-auto">
+            <div className="mt-2 max-w-full overflow-x-auto">
               <table className="w-full min-w-[36rem] border-collapse text-xs">
                 <thead>
                   <tr className="border-b bg-muted/30 text-left text-muted-foreground">
@@ -308,7 +308,7 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
             </div>
           </details>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="max-w-full overflow-x-auto">
             <table className="w-full min-w-[36rem] border-collapse text-xs">
               <thead>
                 <tr className="border-b bg-muted/30 text-left text-muted-foreground">
@@ -334,7 +334,7 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
       )}
 
       {block.type === 'matrix' && block.matrix && block.matrix.rows.length > 0 && (
-        <div className="overflow-x-auto">
+        <div className="max-w-full overflow-x-auto">
           <table data-testid="report-matrix-block" className="w-full min-w-[48rem] border-collapse text-xs">
             <thead>
               <tr className="border-b bg-muted/30 text-left text-muted-foreground">
@@ -431,7 +431,7 @@ export function ReportSectionBlockStack({ sections, compact = false }: { section
 
 export function ReportPrintSectionBlocks({ sections }: { sections: ReportDetailSection[] }) {
   return (
-    <div data-testid="print-section-block-stack" style={{ display: 'grid', gap: '14px', margin: '12px 0 18px' }}>
+    <div data-testid="print-section-block-stack" style={{ display: 'grid', gap: '14px', margin: '12px 0 18px', maxWidth: '100%', overflowWrap: 'anywhere' }}>
       {sections.map((section) => (
         <section key={section.key} data-testid="print-section-block-group" style={{ breakInside: 'avoid', pageBreakInside: 'avoid' }}>
           <h3 style={{ fontSize: '15px', margin: '14px 0 8px', color: '#111827', borderBottom: '1px solid #d1d5db', paddingBottom: '4px' }}>
@@ -469,14 +469,14 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
   const blockMedia = resolveMedia(block.media);
 
   return (
-    <div data-testid="print-section-block" style={{ border: '1px solid #e5e7eb', borderRadius: '6px', padding: '10px', background: '#fff', breakInside: 'avoid' }}>
+    <div data-testid="print-section-block" style={{ border: '1px solid #e5e7eb', borderRadius: '6px', padding: '10px', background: '#fff', breakInside: 'avoid', boxSizing: 'border-box', maxWidth: '100%', overflowWrap: 'anywhere' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
         <strong style={{ fontSize: '12px', color: '#111827' }}>{block.title}</strong>
         <span style={{ fontSize: '10px', color: '#6b7280' }}>{block.type}</span>
       </div>
       {block.description && <p style={{ fontSize: '12px', color: '#4b5563', lineHeight: 1.65, margin: 0 }}>{block.description}</p>}
       {(block.type === 'facts' || block.type === 'list') && hasItems && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '6px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '6px' }}>
           {block.items?.map((item, index) => (
             <div key={`${item.label}-${index}`} data-testid="print-section-block-row" style={{ border: '1px solid #e5e7eb', borderRadius: '4px', padding: '6px', fontSize: '11px' }}>
               <div style={{ color: '#6b7280', fontWeight: 600 }}>{item.label}</div>
@@ -488,7 +488,8 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
         </div>
       )}
       {block.type === 'table' && hasRows && (
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10px' }}>
+        <div style={{ maxWidth: '100%', overflowX: 'auto' }}>
+        <table style={{ width: '100%', minWidth: '520px', borderCollapse: 'collapse', fontSize: '10px', tableLayout: 'fixed' }}>
           <thead>
             <tr>
               {block.columns?.map((column) => (
@@ -508,9 +509,11 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
             ))}
           </tbody>
         </table>
+        </div>
       )}
       {block.type === 'matrix' && block.matrix && block.matrix.rows.length > 0 && (
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '9px', tableLayout: 'fixed' }}>
+        <div style={{ maxWidth: '100%', overflowX: 'auto' }}>
+        <table style={{ width: '100%', minWidth: '720px', borderCollapse: 'collapse', fontSize: '9px', tableLayout: 'fixed' }}>
           <thead>
             <tr>
               <th style={{ border: '1px solid #d1d5db', textAlign: 'left', padding: '5px', color: '#374151', width: '120px' }}>维度/项目</th>
@@ -554,9 +557,10 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
             ))}
           </tbody>
         </table>
+        </div>
       )}
       {block.type === 'media' && blockMedia.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '6px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '6px' }}>
           {blockMedia.slice(0, 12).map((item) => (
             <div key={`${item.id}-${item.url}`} data-testid="print-section-media-item" style={{ border: '1px solid #e5e7eb', borderRadius: '4px', padding: '6px', fontSize: '10px' }}>
               {isImageType(item.type) ? (

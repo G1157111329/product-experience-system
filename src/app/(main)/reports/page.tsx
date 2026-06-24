@@ -397,14 +397,14 @@ export default function ReportsPage() {
                 <CardHeader className="border-b bg-muted/20 pb-3">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <CardTitle className="text-base sm:text-lg truncate">{group.model}</CardTitle>
+                      <CardTitle className="break-words text-base leading-snug sm:text-lg">{group.model}</CardTitle>
                       <div className="flex gap-1 mt-1.5 flex-wrap">
                         {group.projectTypes.map(projectType => (
-                          <Badge key={projectType} variant="outline" className="text-[10px]">{projectType}</Badge>
+                          <Badge key={projectType} variant="outline" className="max-w-full whitespace-normal break-words text-left text-[10px]">{projectType}</Badge>
                         ))}
-                        {latestReport.product_category && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{latestReport.product_category}</Badge>}
-                        {latestReport.product && <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{latestReport.product}</Badge>}
-                        <Badge variant="secondary" className="text-[10px]">{group.reports.length} 份报告</Badge>
+                        {latestReport.product_category && <Badge variant="outline" className="max-w-full whitespace-normal break-words text-left text-[10px]">{latestReport.product_category}</Badge>}
+                        {latestReport.product && <Badge variant="outline" className="max-w-full whitespace-normal break-words text-left text-[10px]">{latestReport.product}</Badge>}
+                        <Badge variant="secondary" className="whitespace-normal text-[10px]">{group.reports.length} 份报告</Badge>
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
@@ -444,7 +444,7 @@ export default function ReportsPage() {
                           className="flex min-w-0 flex-1 items-center gap-2 text-left"
                           onClick={() => router.push(`/reports/${r.id}`)}
                         >
-                          <span className="flex-1 min-w-0 truncate">{r.title}</span>
+                          <span className="min-w-0 flex-1 break-words leading-snug">{r.title}</span>
                           <Badge variant="outline" className="text-[9px] shrink-0">{r.status === '草稿' ? '已完成' : r.status}</Badge>
                           <span className="text-[10px] text-muted-foreground shrink-0 hidden sm:inline">
                             {formatBeijingTime(r.created_at)}
@@ -468,13 +468,13 @@ export default function ReportsPage() {
                 <CardHeader className="border-b bg-muted/20 pb-3">
                   <div className="flex items-start justify-between gap-2">
                     <button type="button" className="min-w-0 flex-1 text-left" onClick={() => router.push(`/reports/${r.id}`)}>
-                      <CardTitle className="text-base sm:text-lg truncate">{displayTitle}</CardTitle>
+                      <CardTitle className="break-words text-base leading-snug sm:text-lg">{displayTitle}</CardTitle>
                       <div className="mt-1.5 flex flex-wrap gap-1">
-                        {r.project_type && <Badge variant="outline" className="text-[10px]">{r.project_type}</Badge>}
-                        {r.product_category && <Badge variant="outline" className="max-w-[120px] truncate text-[10px]">{r.product_category}</Badge>}
-                        {r.product && <Badge variant="outline" className="max-w-[120px] truncate text-[10px]">{r.product}</Badge>}
-                        {r.product_model && <Badge variant="outline" className="max-w-[120px] truncate text-[10px]">{r.product_model}</Badge>}
-                        <Badge variant="secondary" className="text-[10px]">1 份报告</Badge>
+                        {r.project_type && <Badge variant="outline" className="max-w-full whitespace-normal break-words text-left text-[10px]">{r.project_type}</Badge>}
+                        {r.product_category && <Badge variant="outline" className="max-w-full whitespace-normal break-words text-left text-[10px]">{r.product_category}</Badge>}
+                        {r.product && <Badge variant="outline" className="max-w-full whitespace-normal break-words text-left text-[10px]">{r.product}</Badge>}
+                        {r.product_model && <Badge variant="outline" className="max-w-full whitespace-normal break-words text-left text-[10px]">{r.product_model}</Badge>}
+                        <Badge variant="secondary" className="whitespace-normal text-[10px]">1 份报告</Badge>
                       </div>
                     </button>
                     <div className="flex shrink-0 items-center gap-1">
@@ -518,7 +518,7 @@ export default function ReportsPage() {
                         className="h-3.5 w-3.5 shrink-0 rounded border-border"
                       />
                       <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => router.push(`/reports/${r.id}`)}>
-                        <span className="min-w-0 flex-1 truncate">{r.title}</span>
+                        <span className="min-w-0 flex-1 break-words leading-snug">{r.title}</span>
                         <Badge variant="outline" className="shrink-0 text-[9px]">{getStatusLabel(r.status)}</Badge>
                         <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">{formatBeijingTime(r.created_at)}</span>
                         <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />

@@ -1043,6 +1043,13 @@ function ReportPrintContent() {
         .print-text-mode img, .print-text-mode video { display: none !important; }
         .print-container {
           background: #fff !important;
+          box-sizing: border-box !important;
+          overflow-wrap: anywhere !important;
+        }
+        .print-container *,
+        .print-container *::before,
+        .print-container *::after {
+          box-sizing: border-box !important;
         }
         .print-container h1,
         .print-container h2,
@@ -1067,6 +1074,17 @@ function ReportPrintContent() {
           width: 72px !important;
           height: 72px !important;
           border-radius: 6px !important;
+        }
+        @media screen and (max-width: 640px) {
+          .print-container {
+            width: 100% !important;
+            max-width: 100% !important;
+            padding: 20px !important;
+            overflow-x: hidden !important;
+          }
+          .print-container table {
+            max-width: none !important;
+          }
         }
         @page { size: A4; margin: 20mm; }
       `}</style>

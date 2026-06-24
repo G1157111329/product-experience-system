@@ -229,7 +229,7 @@ function ReportSectionCanvas({ model }: { model: ReportDetailModel }) {
             key={section.key}
             id={`report-section-${section.key}`}
             data-testid="report-detail-section"
-            className="scroll-mt-4 rounded-xl border bg-background p-4 shadow-sm"
+            className="min-w-0 scroll-mt-4 rounded-xl border bg-background p-4 shadow-sm"
           >
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div className="min-w-0 flex-1">
@@ -321,9 +321,9 @@ export function ReportDetailShell({
   const legacyBodyMode = legacyBodyOpen ? 'fallback' : debugLegacyBody ? 'parity' : 'hidden';
 
   return (
-    <div data-testid="report-detail-shell" className="mx-auto grid max-w-6xl gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
+    <div data-testid="report-detail-shell" className="mx-auto grid w-full min-w-0 max-w-6xl gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
       <div className="min-w-0 space-y-4">
-        <section className="rounded-xl border bg-background p-4 shadow-sm">
+        <section className="min-w-0 rounded-xl border bg-background p-4 shadow-sm">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
             <Button variant="ghost" size="icon" className="h-10 w-10 shrink-0" onClick={onBack} aria-label="返回">
               <ArrowLeft className="h-4 w-4" />
@@ -365,7 +365,7 @@ export function ReportDetailShell({
         </section>
 
         <section data-testid="report-conclusion-bar" className={cn(
-          'rounded-xl border p-4 shadow-sm',
+          'min-w-0 rounded-xl border p-4 shadow-sm',
           conclusion?.conclusionLevel === 'blocked' && 'border-red-200 bg-red-50/70',
           conclusion?.conclusionLevel === 'risk' && 'border-amber-200 bg-amber-50/70',
           (!conclusion || conclusion.conclusionLevel === 'neutral' || conclusion.conclusionLevel === 'positive') && 'bg-background',
@@ -404,7 +404,7 @@ export function ReportDetailShell({
           </div>
         </section>
 
-        <section data-testid="report-section-nav" className="rounded-xl border bg-background p-3 shadow-sm">
+        <section data-testid="report-section-nav" className="min-w-0 rounded-xl border bg-background p-3 shadow-sm">
           <div className="mb-3 flex items-center gap-2 px-1">
             <ListChecks className="h-4 w-4 text-muted-foreground" />
             <p className="text-sm font-medium">模块目录</p>
@@ -419,11 +419,11 @@ export function ReportDetailShell({
           </div>
         </section>
 
-        <div id="report-content-canvas" className="space-y-4 scroll-mt-4">
+        <div id="report-content-canvas" className="min-w-0 space-y-4 scroll-mt-4">
           {model ? (
             <ReportSectionCanvas model={model} />
           ) : (
-            <section className="rounded-xl border bg-background p-4 shadow-sm">
+            <section className="min-w-0 rounded-xl border bg-background p-4 shadow-sm">
               <SectionEmptyState section={{ key: 'loading', title: 'Detail model', status: 'warning', blockKeys: ['detail_model'], blocks: [] }} />
             </section>
           )}
@@ -432,7 +432,7 @@ export function ReportDetailShell({
               data-testid="report-legacy-content"
               data-display-weight={legacyBodyMode}
               open={legacyBodyOpen}
-              className="rounded-xl border bg-background p-4 shadow-sm"
+              className="min-w-0 rounded-xl border bg-background p-4 shadow-sm"
             >
               <summary data-testid="report-legacy-summary" className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
                 <span className="flex min-w-0 items-center gap-2">
