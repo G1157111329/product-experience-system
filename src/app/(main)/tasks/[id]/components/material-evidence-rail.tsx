@@ -177,7 +177,7 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 2xl:flex">
+        <div className="grid grid-cols-2 gap-2">
           <Button variant="outline" size="sm" onClick={() => setCaptureMode('image')} disabled={uploading} className="whitespace-nowrap">
             <Camera className="mr-1.5 h-4 w-4" />拍照
           </Button>
