@@ -884,11 +884,13 @@ function ReportPrintContent() {
     );
   }
 
-  if (!report || !report.content) {
+  const primaryDetailModel = report ? detailModelsMap[report.id] : null;
+
+  if (!report || (!report.content && !primaryDetailModel)) {
     return <div className="p-8 text-center text-muted-foreground">报告不存在或内容为空</div>;
   }
 
-  const task = report.content.task;
+  const task = report.content?.task || {};
   const projectType = task?.project_type as string | undefined;
   const isMerged = siblingReports.length > 0;
   const allReports = isMerged ? [report, ...siblingReports] : [report];
@@ -900,11 +902,13 @@ function ReportPrintContent() {
   const totalPass = totalRecords.filter(r => r.evaluation_result === '合格').length;
   const totalFail = totalRecords.filter(r => r.evaluation_result === '不合格').length;
   const totalRecipePC = totalRecipes.reduce((s, r) => s + (r.problem_count || 0), 0);
-  const displayReport = buildDisplayReportContent({
-    title: report.title,
-    content: report.content as unknown as ReportContentWithReview,
-  });
-  const primaryPrintDelivery = detailModelsMap[report.id]?.printDelivery;
+  const displayReport = report.content
+    ? buildDisplayReportContent({
+      title: report.title,
+      content: report.content as unknown as ReportContentWithReview,
+    })
+    : { title: report.title, ai_summary: null, review_note: null };
+  const primaryPrintDelivery = primaryDetailModel?.printDelivery;
   const preflightErrors = primaryPrintDelivery?.preflight.errors || [];
   const preflightWarnings = primaryPrintDelivery?.preflight.warnings || [];
 
@@ -923,7 +927,7 @@ function ReportPrintContent() {
       </h1>
       <div style={{ color: '#666', fontSize: '12px', marginBottom: '20px' }}>
         {projectType && <span>项目类型: {projectType} | </span>}
-        版本 V{report.version} | 状态: {report.status} | 生成时间: {formatBeijingTime(report.content.generatedAt)}
+        版本 V{report.version} | 状态: {report.status} | 生成时间: {formatBeijingTime(report.content?.generatedAt || report.created_at)}
       </div>
 
       {primaryPrintDelivery && (

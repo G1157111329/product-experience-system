@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { usePresignedUrls } from '@/lib/use-presigned-url';
 import { cn } from '@/lib/utils';
 import type { ReportDetailMediaItem, ReportDetailModel, ReportDetailSection, ReportDetailSectionBlock } from '@/lib/server/report-detail';
 
@@ -19,6 +20,62 @@ function isImageType(type: string) {
 
 function isVideoType(type: string) {
   return type.toLowerCase().includes('video');
+}
+
+function toRenderableMediaUrl(url: string) {
+  if (
+    url.startsWith('http')
+    || url.startsWith('/')
+    || url.startsWith('data:')
+  ) {
+    return url;
+  }
+  return `/uploads/${url}`;
+}
+
+function usableResolvedMediaUrl(originalUrl: string, resolvedUrl: string | undefined) {
+  if (resolvedUrl && !resolvedUrl.startsWith('data:image/')) return resolvedUrl;
+  return toRenderableMediaUrl(originalUrl);
+}
+
+function useResolvedReportMedia(media: ReportDetailMediaItem[] | undefined): ReportDetailMediaItem[] {
+  const mediaItems = media || [];
+  const presignedMap = usePresignedUrls(
+    mediaItems.map((item, index) => ({
+      id: `${item.id || 'media'}:${index}:${item.url}`,
+      file_url: item.url,
+      file_path: item.url,
+    })),
+  );
+
+  return mediaItems.map((item, index) => ({
+    ...item,
+    url: usableResolvedMediaUrl(
+      item.url,
+      presignedMap.get(`${item.id || 'media'}:${index}:${item.url}`),
+    ),
+  }));
+}
+
+function useResolvedReportMediaMap(mediaItems: ReportDetailMediaItem[]): Map<string, ReportDetailMediaItem> {
+  const presignedMap = usePresignedUrls(
+    mediaItems.map((item, index) => ({
+      id: `${item.id || 'media'}:${index}:${item.url}`,
+      file_url: item.url,
+      file_path: item.url,
+    })),
+  );
+
+  return new Map(mediaItems.map((item, index) => [
+    `${item.id || 'media'}:${index}:${item.url}`,
+    {
+      ...item,
+      url: usableResolvedMediaUrl(
+        item.url,
+        presignedMap.get(`${item.id || 'media'}:${index}:${item.url}`),
+      ),
+    },
+  ]));
 }
 
 function MediaPreviewDialog({
@@ -71,12 +128,13 @@ function InteractiveMediaStrip({
   testId?: string;
 }) {
   const [selected, setSelected] = useState<ReportDetailMediaItem | null>(null);
-  if (!media?.length) return null;
+  const resolvedMedia = useResolvedReportMedia(media);
+  if (!resolvedMedia.length) return null;
   return (
     <>
       {/* Golden contract token: data-testid="report-inline-media-item" */}
       <div data-testid="report-inline-media-strip" className="mt-2 flex gap-2 overflow-x-auto pb-1">
-      {media.slice(0, limit).map((item) => (
+      {resolvedMedia.slice(0, limit).map((item) => (
         <button
           type="button"
           key={`${item.id}-${item.url}`}
@@ -105,9 +163,9 @@ function InteractiveMediaStrip({
           )}
         </button>
       ))}
-      {media.length > limit && (
+      {resolvedMedia.length > limit && (
         <div className={cn('flex shrink-0 items-center justify-center rounded-md border bg-muted/20 text-[10px] text-muted-foreground', compact ? 'h-12 w-12' : 'h-16 w-16')}>
-          +{media.length - limit}
+          +{resolvedMedia.length - limit}
         </div>
       )}
       </div>
@@ -122,10 +180,11 @@ function InlineMediaStrip({ media }: { media?: ReportDetailSectionBlock['media']
 
 function InteractiveMediaCards({ media }: { media?: ReportDetailSectionBlock['media'] }) {
   const [selected, setSelected] = useState<ReportDetailMediaItem | null>(null);
-  if (!media?.length) return null;
+  const resolvedMedia = useResolvedReportMedia(media);
+  if (!resolvedMedia.length) return null;
   return (
     <>
-      {media.map((item) => (
+      {resolvedMedia.map((item) => (
         <button
           type="button"
           key={`${item.id}-${item.url}`}
@@ -393,6 +452,21 @@ export function ReportPrintSectionBlocks({ sections }: { sections: ReportDetailS
 function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
   const hasRows = (block.rows?.length ?? 0) > 0;
   const hasItems = (block.items?.length ?? 0) > 0;
+  const allMedia = [
+    ...(block.media || []),
+    ...(block.items || []).flatMap((item) => item.media || []),
+    ...(block.matrix?.rows || []).flatMap((row) =>
+      (block.matrix?.objects || []).flatMap((object) => row.cells[object.id]?.media || []),
+    ),
+  ];
+  const mediaMap = useResolvedReportMediaMap(allMedia);
+  const resolveMedia = (media: ReportDetailMediaItem[] | undefined) =>
+    (media || []).map((item) => {
+      const index = allMedia.indexOf(item);
+      const key = `${item.id || 'media'}:${index}:${item.url}`;
+      return mediaMap.get(key) || item;
+    });
+  const blockMedia = resolveMedia(block.media);
 
   return (
     <div data-testid="print-section-block" style={{ border: '1px solid #e5e7eb', borderRadius: '6px', padding: '10px', background: '#fff', breakInside: 'avoid' }}>
@@ -408,12 +482,7 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
               <div style={{ color: '#6b7280', fontWeight: 600 }}>{item.label}</div>
               <div style={{ color: '#111827', wordBreak: 'break-word' }}>{item.value}</div>
               {item.note && <div style={{ color: '#6b7280', marginTop: '2px' }}>{item.note}</div>}
-              {item.media?.length ? (
-                <div data-testid="print-inline-media-item" style={{ marginTop: '4px', color: '#0f766e' }}>
-                  Evidence: {item.media.slice(0, 4).map((media) => `${media.name} (${media.type})`).join('; ')}
-                  {item.media.length > 4 ? `; +${item.media.length - 4}` : ''}
-                </div>
-              ) : null}
+              <PrintMediaThumbs media={resolveMedia(item.media)} />
             </div>
           ))}
         </div>
@@ -465,6 +534,7 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
                 </td>
                 {block.matrix?.objects.map((object) => {
                   const cell = row.cells[object.id];
+                  const cellMedia = cell ? resolveMedia(cell.media) : [];
                   return (
                     <td key={object.id} style={{ border: '1px solid #e5e7eb', padding: '5px', color: '#4b5563', verticalAlign: 'top', wordBreak: 'break-word' }}>
                       {cell ? (
@@ -473,7 +543,7 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
                           {cell.value && cell.value !== cell.conclusion && <div>{cell.value}</div>}
                           {cell.score && <div>Score: {cell.score}</div>}
                           {cell.problems.length > 0 && <div style={{ color: '#991b1b' }}>{cell.problems.join('；')}</div>}
-                          {cell.media.length > 0 && <div style={{ color: '#0f766e' }}>Evidence: {cell.media.slice(0, 3).map((media) => media.name).join('; ')}</div>}
+                          <PrintMediaThumbs media={cellMedia.slice(0, 3)} />
                         </>
                       ) : '-'}
                     </td>
@@ -485,16 +555,41 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
           </tbody>
         </table>
       )}
-      {block.type === 'media' && (block.media?.length ?? 0) > 0 && (
+      {block.type === 'media' && blockMedia.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '6px' }}>
-          {block.media?.slice(0, 12).map((item) => (
+          {blockMedia.slice(0, 12).map((item) => (
             <div key={`${item.id}-${item.url}`} data-testid="print-section-media-item" style={{ border: '1px solid #e5e7eb', borderRadius: '4px', padding: '6px', fontSize: '10px' }}>
+              {isImageType(item.type) ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={item.url} alt={item.name} style={{ width: '100%', height: '72px', objectFit: 'cover', borderRadius: '3px', border: '1px solid #e5e7eb', marginBottom: '4px' }} />
+              ) : null}
               <div style={{ fontWeight: 600, color: '#111827', wordBreak: 'break-word' }}>{item.name}</div>
               <div style={{ color: '#6b7280' }}>{[item.type, item.role, item.owner].filter(Boolean).join(' / ')}</div>
             </div>
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function PrintMediaThumbs({ media }: { media?: ReportDetailMediaItem[] }) {
+  if (!media?.length) return null;
+  return (
+    <div data-testid="print-inline-media-item" style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '5px' }}>
+      {media.slice(0, 4).map((item) => (
+        <div key={`${item.id}-${item.url}`} style={{ width: '58px', fontSize: '8px', color: '#4b5563' }}>
+          {isImageType(item.type) ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={item.url} alt={item.name} style={{ width: '58px', height: '46px', objectFit: 'cover', borderRadius: '3px', border: '1px solid #e5e7eb' }} />
+          ) : (
+            <div style={{ width: '58px', height: '46px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '3px', border: '1px solid #e5e7eb', background: '#f3f4f6' }}>
+              {isVideoType(item.type) ? 'video' : 'media'}
+            </div>
+          )}
+        </div>
+      ))}
+      {media.length > 4 && <span style={{ alignSelf: 'center', fontSize: '9px', color: '#6b7280' }}>+{media.length - 4}</span>}
     </div>
   );
 }
