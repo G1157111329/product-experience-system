@@ -151,7 +151,7 @@ export default function LoginPage() {
                   id="account"
                   name="login-account"
                   placeholder="请输入账号"
-                  value={account}
+                  defaultValue={account}
                   onChange={(e) => setAccount(e.target.value)}
                   autoComplete="off"
                   data-1p-ignore
@@ -166,7 +166,7 @@ export default function LoginPage() {
                   name="login-password"
                   type="password"
                   placeholder="请输入密码"
-                  value={password}
+                  defaultValue={password}
                   onChange={(e) => setPassword(e.target.value)}
                   autoComplete="off"
                   data-1p-ignore
