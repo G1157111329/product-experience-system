@@ -1,5 +1,4 @@
-import { createReadStream } from 'fs';
-import { stat } from 'fs/promises';
+import { readFile, stat } from 'fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
 import { resolve, sep } from 'path';
 import { parse } from 'url';
@@ -75,15 +74,20 @@ async function tryServeNextStatic(req: IncomingMessage, res: ServerResponse) {
     const fileStat = await stat(filePath);
     if (!fileStat.isFile()) return false;
 
-    res.shouldKeepAlive = false;
     res.statusCode = 200;
-    res.setHeader('Connection', 'close');
     res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, no-transform');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.setHeader('Content-Type', getStaticContentType(filePath));
     res.setHeader('Content-Length', fileStat.size);
-    if (req.method === 'HEAD') res.end();
-    else createReadStream(filePath).pipe(res);
+    if (req.method === 'HEAD') {
+      res.end();
+      return true;
+    }
+
+    const body = await readFile(filePath);
+    res.end(body);
     return true;
   } catch {
     return false;
