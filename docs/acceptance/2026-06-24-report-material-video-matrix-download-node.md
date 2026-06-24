@@ -4,7 +4,7 @@
 
 - 服务器: `118.25.178.78`
 - 普通报告: `d579f3c2-40ab-4047-9bbe-8665a97f4857`
-- 对比矩阵报告: `954f4076-2436-4673-94de-daa99e9c804d`
+- 对比矩阵报告: `ef1bdbfc-d194-4abb-a216-b4132eb45d16`
 - 覆盖模块:
   - 五感体验: 记录素材图片 + 视频
   - 功能效果: 步骤素材图片 + 视频、效果评价素材图片 + 视频
@@ -16,8 +16,8 @@
 - 五感体验记录视频: `7ab8e52b-96f8-46e7-9576-1f49a756b2dd`
 - 功能步骤视频: `9405790a-0e02-4d21-a040-033d27fefed1`
 - 功能效果视频: `54ac0892-967a-4e19-9b3b-fc4fea075298`
-- 矩阵单元格视频: `6589f320-cc00-4dc8-a189-84f6d34316a3`
-- 矩阵单元格图片: `d3fd028a-babb-4027-8246-054497459c82`
+- 矩阵单元格视频: `ddc349f3-d8b7-43b7-b277-bdb64da018fd`
+- 矩阵单元格图片: `2ae9b26d-8d8f-4d1b-8ebd-7379623df923`
 
 ## 发现并修复
 
@@ -41,10 +41,10 @@
 
 ### 对比矩阵报告
 
-- 详情页: `imgCount=5`, `videoCount=3`, `loadedVideoCount=3`, `brokenImgCount=0`, `rawRelativeMediaCount=0`, `overflowX=false`, `videoPreview=true`, `consoleCount=0`
-- 公开分享页: `imgCount=4`, `videoCount=4`, `loadedVideoCount=4`, `brokenImgCount=0`, `rawRelativeMediaCount=0`, `overflowX=false`, `videoPreview=true`, `consoleCount=0`
+- 详情页: `imgCount=5`, `videoCount=3`, `loadedVideoCount=3`, `brokenImgCount=0`, `rawRelativeMediaCount=0`, `overflowX=false`, `videoPreview=true`, `consoleCount=0`, `hasQuestionRuns=false`
+- 公开分享页: `imgCount=4`, `videoCount=4`, `loadedVideoCount=4`, `brokenImgCount=0`, `rawRelativeMediaCount=0`, `overflowX=false`, `videoPreview=true`, `consoleCount=0`, `hasQuestionRuns=false`
 - 移动端公开页: `width=390`, `overflowX=false`
-- 打印页: `profile=comparison_image_matrix_a3_landscape`, `printInlineMedia=6`, `imgCount=3`, `loadedImgCount=3`, `brokenImgCount=0`, `rawRelativeMediaCount=0`, `browserPdf.bytes=105640`, `consoleCount=0`
+- 打印页: `profile=comparison_image_matrix_a3_landscape`, `printInlineMedia=6`, `imgCount=3`, `loadedImgCount=3`, `brokenImgCount=0`, `rawRelativeMediaCount=0`, `browserPdf.bytes=105130`, `consoleCount=0`, `hasQuestionRuns=false`
 
 ## 下载结论
 
@@ -61,8 +61,10 @@
 - `output/playwright/media-video-matrix-verification-after-fix.json`
 - `output/playwright/media-video-matrix-console-final.json`
 - `output/playwright/media-video-matrix-print-final.json`
+- `output/playwright/comparison-clean-final.json`
 - `output/playwright/normal-print-final.pdf`
 - `output/playwright/comparison-print-final.pdf`
+- `output/playwright/comparison-clean-print-final.pdf`
 - `output/playwright/normal-media-video-public-mobile-after-fix.png`
 - `output/playwright/comparison-matrix-media-public-mobile-after-fix.png`
 - `output/playwright/normal-print-final.png`
