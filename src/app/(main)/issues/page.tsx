@@ -571,13 +571,13 @@ export default function IssuesPage() {
           {selectedIssue && (
             <div className="space-y-4">
               {/* Level and Status - shared */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-3">
                 <div className="space-y-1.5">
                   <Label>问题点等级</Label>
                   <div className="flex gap-1">
                     {LEVEL_LIST.map(l => (
                       <button key={l} onClick={() => handleLevelChange(selectedIssue.id, l)}
-                        className={cn('flex-1 px-2 py-1.5 rounded text-xs font-medium border transition-colors',
+                        className={cn('flex-1 whitespace-nowrap px-2 py-1.5 rounded text-xs font-medium border transition-colors',
                           selectedIssue.level === l ? LEVEL_COLORS[l] + ' border-current' : 'bg-background border-border hover:bg-muted/50')}>
                         {l}
                       </button>
@@ -586,10 +586,10 @@ export default function IssuesPage() {
                 </div>
                 <div className="space-y-1.5">
                   <Label>整改状态</Label>
-                  <div className="grid grid-cols-2 gap-1 sm:grid-cols-4">
+                  <div className="grid grid-cols-4 gap-1">
                     {STATUS_LIST.map(s => (
                       <button key={s} onClick={() => handleStatusChange(selectedIssue.id, s)}
-                        className={cn('min-h-9 rounded border px-2 py-1.5 text-xs font-medium transition-colors',
+                        className={cn('min-h-9 whitespace-nowrap rounded border px-2 py-1.5 text-xs font-medium transition-colors',
                           selectedIssue.status === s ? STATUS_COLORS[s] + ' border-current' : 'bg-background border-border hover:bg-muted/50')}>
                         {s}
                       </button>

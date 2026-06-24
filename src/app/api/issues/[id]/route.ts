@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessTask, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
 
+const ISSUE_STATUSES = new Set(['待整改', '整改中', '已验证', '不整改']);
+const ISSUE_LEVELS = new Set(['一类', '二类', '三类']);
+
 async function requireIssueAccess(request: NextRequest, client: ReturnType<typeof getSupabaseClient>, id: string) {
   const user = await requireUser(request, client);
   if (isAuthResponse(user)) return user;
@@ -28,6 +31,14 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (isAuthResponse(auth)) return auth;
 
   const body = await request.json();
+
+  if (body.status !== undefined && !ISSUE_STATUSES.has(body.status)) {
+    return NextResponse.json({ code: 1, message: '无效的问题状态' }, { status: 400 });
+  }
+
+  if (body.level !== undefined && !ISSUE_LEVELS.has(body.level)) {
+    return NextResponse.json({ code: 1, message: '无效的问题等级' }, { status: 400 });
+  }
 
   const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
   const allowedFields = [
