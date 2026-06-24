@@ -92,3 +92,12 @@
 - 数据确认: 普通用户核心指标为 `totalTasks=3 / completedTasks=1 / totalIssues=1 / rectifiedIssues=0`；普通用户 POST `/api/analysis` 返回 `403`；管理员 POST `/api/analysis` 返回 `200`。
 - 发现并修复: 安全审计 append-only 触发器阻塞带审计日志用户删除；已允许仅外键 `actor_user_id` 置空的窄更新，普通审计日志 UPDATE 仍被拦截。临时管理员已物理删除。
 - 详情证据: `docs/acceptance/2026-06-24-analysis-export-node.md`
+
+## T10 报告中心：报告呈现、分享/下载节点
+
+- 状态: 已通过
+- 服务器报告: `58cb91ec-859b-410e-bedf-8b620dfd21b5`
+- 覆盖操作: 报告列表、报告详情、分享链接生成、公开分享页、公开页导出打印预览、移动端公开页、分享撤销。
+- 数据确认: `taskStatus=已完成`、`reportStatus=已完成`、`contentTaskStatus=已完成`；详情页和公开页均可读到 `QP-SENSE-569915` 与 `QP-RECIPE-569915`。
+- 发现并修复: 报告快照任务状态滞后为“进行中”；公开分享页导出未携带分享上下文；报告分享侧栏缺少 Radix description。均已部署服务器并复验。
+- 详情证据: `docs/acceptance/2026-06-24-report-center-share-download-node.md`

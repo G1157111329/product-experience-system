@@ -5,6 +5,7 @@ import { getDb } from '@/storage/database/pg-db';
 import { canAccessTask, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { createApiTimer } from '@/lib/server/api-performance';
 import {
+  experienceTasks,
   issues as issuesTable,
   recipeLibrary,
   recipeLibrarySteps,
@@ -326,6 +327,11 @@ export async function POST(request: NextRequest) {
       .select()
       .single();
 
+    await client
+      .from('experience_tasks')
+      .update({ status: '\u5df2\u5b8c\u6210', updated_at: new Date().toISOString() })
+      .eq('id', body.task_id);
+
     return NextResponse.json({
       code: 0,
       message: '对比矩阵报告生成成功',
@@ -424,8 +430,12 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  const completedTaskSnapshot = task
+    ? { ...(task as Record<string, unknown>), status: '\u5df2\u5b8c\u6210' }
+    : task;
+
   const reportContent = {
-    task: task,
+    task: completedTaskSnapshot,
     ai_summary: aiSummaryData?.value || null,
     records: recordsWithMaterials || [],
     recipes: recipesWithCount || [],
@@ -465,6 +475,10 @@ export async function POST(request: NextRequest) {
     if (!report) {
       throw new Error('报告创建失败');
     }
+
+    await tx.update(experienceTasks)
+      .set({ status: '\u5df2\u5b8c\u6210', updatedAt: new Date().toISOString() })
+      .where(eq(experienceTasks.id, body.task_id));
 
     const reportTitle = report.title || '报告';
     const records = (recordsWithMaterials || []) as Record<string, unknown>[];

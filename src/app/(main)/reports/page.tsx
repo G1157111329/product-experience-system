@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -707,9 +707,9 @@ export default function ReportsPage() {
               <Share2 className="h-4 w-4 text-primary" />
               分享报告
             </SheetTitle>
-            <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">
+            <SheetDescription className="line-clamp-2 text-xs leading-5 text-muted-foreground">
               {selectedShareReport?.title || '生成只读链接，适合发给外部评审或跨团队查看。'}
-            </p>
+            </SheetDescription>
           </SheetHeader>
           <div className="flex-1 overflow-y-auto px-5 py-5">
             {!shareLink ? (

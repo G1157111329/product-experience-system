@@ -6,8 +6,8 @@ import { Share2, Copy, X, Loader2, Star, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { copyToClipboard } from '@/lib/clipboard';
@@ -905,6 +905,7 @@ export default function ReportDetailPage() {
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="text-base">整改状态</DialogTitle>
+            <DialogDescription className="sr-only">调整该问题点的整改状态和问题等级。</DialogDescription>
           </DialogHeader>
           {editingIssue && (
             <div className="space-y-4">
@@ -960,6 +961,7 @@ export default function ReportDetailPage() {
         <SheetContent side="bottom" className="rounded-t-2xl max-h-[80vh] p-0">
           <SheetHeader className="px-5 pt-5 pb-2">
             <SheetTitle className="text-base">分享报告</SheetTitle>
+            <SheetDescription className="sr-only">生成只读分享链接，供未登录用户查看和导出该报告。</SheetDescription>
           </SheetHeader>
           <div className="px-5 pb-5 overflow-y-auto max-h-[calc(80vh-4rem)]">
             {!shareLink ? (

@@ -285,7 +285,7 @@ export default function ShareReportPage() {
       window.open(`/api/reports/${report.id}/pdf?share_token=${token}`, '_blank');
       return;
     }
-    window.open(`/reports/print?id=${report.id}&mode=fast`, '_blank');
+    window.open(`/reports/print?id=${report.id}&mode=fast&share_token=${token}`, '_blank');
   };
 
   if (loading) {

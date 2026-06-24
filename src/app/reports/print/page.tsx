@@ -145,7 +145,7 @@ async function imageUrlToPrintableDataUrl(url: string, mode: PrintMode): Promise
   }
 }
 
-async function batchPresignUrls(paths: string[], reportId?: string | null): Promise<Record<string, string>> {
+async function batchPresignUrls(paths: string[], reportId?: string | null, shareToken?: string | null): Promise<Record<string, string>> {
   const objectKeys = paths.filter((path) => !isDirectPrintableUrl(path));
   const directUrls = paths.filter(isDirectPrintableUrl);
   const directMap = Object.fromEntries(directUrls.map((url) => [url, url]));
@@ -154,7 +154,7 @@ async function batchPresignUrls(paths: string[], reportId?: string | null): Prom
     const res = await fetch('/api/materials/presign', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths: objectKeys, report_id: reportId || undefined }),
+      body: JSON.stringify({ paths: objectKeys, report_id: reportId || undefined, share_token: shareToken || undefined }),
     });
     if (!res.ok) return directMap;
     const data = await res.json();
@@ -168,7 +168,7 @@ function isDirectPrintableUrl(value: string): boolean {
   return value.startsWith('http') || value.startsWith('/uploads/') || value.startsWith('/media/') || value.startsWith('data:');
 }
 
-async function presignReportUrls(rpt: ReportData): Promise<ReportData> {
+async function presignReportUrls(rpt: ReportData, shareToken?: string | null): Promise<ReportData> {
   const filePaths: string[] = [];
   const collectPaths = (obj: unknown) => {
     if (!obj || typeof obj !== 'object') return;
@@ -190,7 +190,7 @@ async function presignReportUrls(rpt: ReportData): Promise<ReportData> {
     const res = await fetch('/api/materials/presign', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_paths: [...new Set(filePaths)], report_id: rpt.id }),
+      body: JSON.stringify({ file_paths: [...new Set(filePaths)], report_id: rpt.id, share_token: shareToken || undefined }),
     });
     const data = await res.json();
     if (data.code === 0 && data.data) {
@@ -641,6 +641,7 @@ export default function ReportPrintPage() {
 function ReportPrintContent() {
   const searchParams = useSearchParams();
   const reportId = searchParams.get('id');
+  const shareToken = searchParams.get('share_token');
   const printMode = normalizePrintMode(searchParams.get('mode'));
   const printParityMode = searchParams.get('parity') === '1' || searchParams.get('debug') === 'legacy';
   const [report, setReport] = useState<ReportData | null>(null);
@@ -653,6 +654,31 @@ function ReportPrintContent() {
 
   useEffect(() => {
     if (!reportId) return;
+    if (shareToken) {
+      fetch(`/api/reports/share?token=${encodeURIComponent(shareToken)}`).then(r => r.json()).then(async (res) => {
+        if (res.code !== 0 || !res.data?.report) return;
+
+        const currentReport = res.data.report as ReportData;
+        if (currentReport.id !== reportId) return;
+
+        const rpt = await presignReportUrls(currentReport, shareToken);
+        const siblings = await Promise.all(((res.data.siblingReports || []) as ReportData[])
+          .filter((item) => Boolean(item?.content))
+          .map((item) => presignReportUrls(item, shareToken)));
+        setReport(rpt);
+        setSiblingReports(siblings);
+        setDetailModelsMap({
+          ...(res.data.detailModel ? { [rpt.id]: res.data.detailModel as ReportDetailModel } : {}),
+          ...(res.data.siblingDetailModels || {}),
+        });
+        setLiveIssuesMap({
+          [rpt.id]: res.data.liveIssues || [],
+          ...(res.data.siblingIssuesMap || {}),
+        });
+      }).finally(() => setLoading(false));
+      return;
+    }
+
     fetch(`/api/reports/${reportId}`).then(r => r.json()).then(async (res) => {
       if (res.code === 0) {
         const rpt = await presignReportUrls(res.data as ReportData);
@@ -724,7 +750,7 @@ function ReportPrintContent() {
         setLiveIssuesMap({ [rpt.id]: reportIssues });
       }
     }).finally(() => setLoading(false));
-  }, [reportId]);
+  }, [reportId, shareToken]);
 
   // Fetch live issues for sibling reports
   useEffect(() => {
@@ -809,7 +835,7 @@ function ReportPrintContent() {
 
       // Presign all file paths to get valid URLs
       const filePaths = uniqueUrls(allFilePaths);
-      const presignedMap = await batchPresignUrls(filePaths, reportId);
+      const presignedMap = await batchPresignUrls(filePaths, reportId, shareToken);
 
       // Step 1: Update DOM img/video src from S3 key to presigned URL
       for (const [fp, presignedUrl] of Object.entries(presignedMap)) {
@@ -840,7 +866,7 @@ function ReportPrintContent() {
     };
     const timer = setTimeout(convertImages, 500);
     return () => clearTimeout(timer);
-  }, [report, siblingReports, printMode, liveIssuesMap, reportId]);
+  }, [report, siblingReports, printMode, liveIssuesMap, reportId, shareToken]);
 
   useEffect(() => {
     if (report && imagesLoaded) {
