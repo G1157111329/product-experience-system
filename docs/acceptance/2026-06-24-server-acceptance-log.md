@@ -82,3 +82,13 @@
 - 数据确认: 验收中可读回 `三类/已验证/整改方案/责任人/计划完成日期/验证说明`；节点结束前已恢复为 `二类/待整改`，并清空临时整改字段。
 - 发现并修复: 后端 `status/level` 缺少枚举校验；问题详情弹窗状态按钮存在换行风险。已部署到服务器并复验。
 - 详情证据: `docs/acceptance/2026-06-24-issues-management-node.md`
+
+## T9 数据分析与导出节点
+
+- 状态: 已通过
+- 普通用户: `accept_user`
+- 覆盖操作: 数据分析页浏览、核心指标展示、项目类型筛选、问题点分类筛选、普通用户导出权限拒绝、移动端布局。
+- 管理员路径: 临时管理员 `accept_tmp_admin_0624` 验证 `导出项目列表`，下载 `analysis-export.csv`，文件包含 `# tasks`、`# issues`、任务 `Server Acceptance Task 0624 Detail 093228` 和问题 `QP-SENSE-569915`。
+- 数据确认: 普通用户核心指标为 `totalTasks=3 / completedTasks=1 / totalIssues=1 / rectifiedIssues=0`；普通用户 POST `/api/analysis` 返回 `403`；管理员 POST `/api/analysis` 返回 `200`。
+- 发现并修复: 安全审计 append-only 触发器阻塞带审计日志用户删除；已允许仅外键 `actor_user_id` 置空的窄更新，普通审计日志 UPDATE 仍被拦截。临时管理员已物理删除。
+- 详情证据: `docs/acceptance/2026-06-24-analysis-export-node.md`

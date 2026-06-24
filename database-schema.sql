@@ -565,6 +565,24 @@ END $$;
 CREATE OR REPLACE FUNCTION prevent_security_audit_log_mutation()
 RETURNS trigger AS $$
 BEGIN
+  IF TG_OP = 'UPDATE'
+    AND OLD.actor_user_id IS NOT NULL
+    AND NEW.actor_user_id IS NULL
+    AND NEW.id IS NOT DISTINCT FROM OLD.id
+    AND NEW.action IS NOT DISTINCT FROM OLD.action
+    AND NEW.actor_account IS NOT DISTINCT FROM OLD.actor_account
+    AND NEW.target_type IS NOT DISTINCT FROM OLD.target_type
+    AND NEW.target_id IS NOT DISTINCT FROM OLD.target_id
+    AND NEW.outcome IS NOT DISTINCT FROM OLD.outcome
+    AND NEW.ip_address IS NOT DISTINCT FROM OLD.ip_address
+    AND NEW.user_agent IS NOT DISTINCT FROM OLD.user_agent
+    AND NEW.request_path IS NOT DISTINCT FROM OLD.request_path
+    AND NEW.request_method IS NOT DISTINCT FROM OLD.request_method
+    AND NEW.metadata IS NOT DISTINCT FROM OLD.metadata
+    AND NEW.created_at IS NOT DISTINCT FROM OLD.created_at THEN
+    RETURN NEW;
+  END IF;
+
   RAISE EXCEPTION 'security_audit_logs is append-only';
 END;
 $$ LANGUAGE plpgsql;
