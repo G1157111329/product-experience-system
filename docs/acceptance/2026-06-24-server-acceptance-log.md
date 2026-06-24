@@ -40,3 +40,12 @@
 - 点击结果: 从 `/dashboard` 跳转到 `/tasks`，并自动打开 `创建体验任务` 弹窗。
 - 接口确认: `/api/tasks` 返回空列表成功响应。
 - 页面确认: 弹窗展示任务名称、产品品类、产品、产品型号、项目单号、项目类型、体验时间、组织者和体验目的，组织者默认填入 `验收普通用户`。
+
+## T5 五感体验完整操作节点
+
+- 状态: 已通过
+- 服务器任务: `ef6811c9-cfb4-46c9-b83f-38ae3a80813e`
+- 覆盖操作: 拍照弹窗、录像弹窗、相册图片上传、非标准记录新增、素材绑定、完整编辑、素材选择器打开、素材删除、记录删除。
+- 接口确认: POST `/api/materials/upload`、POST `/api/records`、PUT `/api/materials`、PUT `/api/records/[id]`、DELETE `/api/materials`、DELETE `/api/records/[id]` 均返回成功。
+- 数据确认: 临时记录和测试素材均已清理；既有记录 `QP-SENSE-569915` 保持 `不合格 / 非标准`，且 `check_requirement` 未丢失。
+- 详情证据: `docs/acceptance/2026-06-24-senses-all-ops-node.md`
