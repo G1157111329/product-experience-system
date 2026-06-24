@@ -50,3 +50,14 @@
 - 数据确认: 临时记录和测试素材均已清理；既有记录 `QP-SENSE-569915` 保持 `不合格 / 非标准`，且 `check_requirement` 未丢失。
 - 发现并修复: 素材证据栏上传按钮在桌面窄栏被压缩，导致 `相册图片 / 相册视频` 图标与文字挤压；已调整为两列布局并部署到服务器。
 - 详情证据: `docs/acceptance/2026-06-24-senses-all-ops-node.md`
+
+## T6 功能效果完整操作节点
+
+- 状态: 已通过
+- 服务器任务: `ef6811c9-cfb4-46c9-b83f-38ae3a80813e`
+- 覆盖操作: 功能新增/编辑/删除、步骤新增/编辑/删除、功能排序、步骤排序、素材按钮绑定、素材拖拽绑定到效果评价、效果评价保存、效果问题点保存、素材选择器、AI总结评分、AI识别问题点。
+- 接口确认: POST `/api/recipes`、PUT `/api/recipes/[id]`、DELETE `/api/recipes/[id]`、POST/PUT/DELETE `/api/recipe-steps`、PUT/DELETE `/api/materials` 均返回成功。
+- AI状态: AI按钮请求均已触发，返回 `AI服务连接失败: fetch failed`，按当前验收规则归为外部 AI 网络失败。
+- 数据确认: 临时功能、临时步骤和测试素材均已清理；既有功能 `QP-RECIPE-569915` 保留 2 个原始步骤，任务素材数为 0。
+- 发现并修复: 移动端功能/步骤编辑删除入口依赖 hover 不可发现，拖拽手柄触控区过小；已改为移动端常显操作按钮并扩大触控区。
+- 详情证据: `docs/acceptance/2026-06-24-functions-full-ops-node.md`

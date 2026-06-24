@@ -158,7 +158,7 @@ export function FunctionsInputWorkspace({
                   role="button"
                   tabIndex={0}
                   aria-label={`拖拽排序 ${recipe.name}`}
-                  className="cursor-grab active:cursor-grabbing mt-0.5 shrink-0 rounded text-muted-foreground/40 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="mt-0.5 flex h-8 w-8 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground/40 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
                   draggable
                   onDragStart={() => setDragRecipeIdx(recipeIdx)}
                   onDragEnd={() => {
@@ -192,12 +192,12 @@ export function FunctionsInputWorkspace({
                 </div>
 
                 {/* Edit & Delete buttons */}
-                <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button variant="ghost" size="icon" className="h-6 w-6"
+                <div className="flex shrink-0 items-center gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+                  <Button variant="ghost" size="icon" className="h-8 w-8"
                     onClick={(e) => { e.stopPropagation(); onEditRecipe(recipe); }}>
                     <Pencil className="h-3 w-3 text-muted-foreground" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="h-6 w-6"
+                  <Button variant="ghost" size="icon" className="h-8 w-8"
                     onClick={(e) => { e.stopPropagation(); onDeleteRecipe(recipe); }}>
                     <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
                   </Button>
@@ -253,7 +253,7 @@ export function FunctionsInputWorkspace({
                         role="button"
                         tabIndex={0}
                         aria-label={`拖拽排序步骤 ${step.step_number}`}
-                        className="cursor-grab active:cursor-grabbing shrink-0 rounded text-muted-foreground/40 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="flex h-8 w-8 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground/40 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
                         draggable
                         onDragStart={() => setDragStepIdx(stepIdx)}
                         onDragEnd={() => handleStepDragEnd(selectedRecipe)}
@@ -275,11 +275,11 @@ export function FunctionsInputWorkspace({
                           {step.problem_point && <Badge variant="destructive" className="text-[10px]">有问题点</Badge>}
                         </div>
                       </button>
-                      <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover/step:opacity-100 transition-opacity">
-                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => onEditStep(step, selectedRecipe)}>
+                      <div className="flex shrink-0 items-center gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover/step:opacity-100">
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onEditStep(step, selectedRecipe)}>
                           <Pencil className="h-3 w-3 text-muted-foreground" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => onDeleteStep(step, selectedRecipe)}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onDeleteStep(step, selectedRecipe)}>
                           <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
                         </Button>
                       </div>
