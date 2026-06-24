@@ -1432,7 +1432,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
             check_item: nonStandardForm.description || rec?.check_item || '',
             problem_description: nonStandardForm.problem_description || rec?.problem_description || null,
             test_phase: null, experience_flow: null, sensory_dimension: null, touch_point: null,
-            check_requirement: null, experience_standard: null, check_dimension: null,
+            check_requirement: rec?.check_requirement || null, experience_standard: null, check_dimension: null,
             sub_check_dimension: null, check_standard: null,
           };
         }
@@ -2018,6 +2018,12 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
         <div className="p-3 rounded-lg bg-muted/30 border border-border">
           <p className="text-xs text-muted-foreground">非标准检查项无需关联产品使用阶段、体验流程、感官维度，仅需描述检查内容和结果</p>
         </div>
+        {editRecordData?.check_requirement && (
+          <div className="space-y-1.5 rounded-lg border border-border bg-muted/30 p-3">
+            <Label className="text-xs text-muted-foreground">当前检查要求</Label>
+            <p className="break-words text-xs leading-relaxed">{editRecordData.check_requirement}</p>
+          </div>
+        )}
         <div className="space-y-1.5">
           <Label>描述结果 *</Label>
           <Textarea placeholder="描述检查项内容" value={nonStandardForm.description}
