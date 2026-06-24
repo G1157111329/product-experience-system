@@ -1450,7 +1450,7 @@ function buildPrintDelivery(input: {
     errors.push(preflightIssue('ai_unconfirmed', 'error', 'AI conclusion is not manually confirmed.', 'Confirm or replace AI conclusions before formal PDF delivery.'));
   }
   if (videoWithoutCover.length > 0) {
-    errors.push(preflightIssue('video_cover_missing', 'error', `${videoWithoutCover.length} inline video evidence item(s) may not have a printable cover.`, 'Attach a cover image or move the video to appendix-only evidence.'));
+    warnings.push(preflightIssue('video_cover_missing', 'warning', `${videoWithoutCover.length} inline video evidence item(s) may not have a printable cover.`, 'Attach a cover image or move the video to appendix-only evidence.'));
   }
   if ((profile.paper === 'A3' && maxColumns > 9) || (profile.paper === 'A4' && maxColumns > 6)) {
     warnings.push(preflightIssue('matrix_over_wide', 'warning', `The widest print table has ${maxColumns} columns.`, 'Split wide matrices or verify the A3 landscape profile before delivery.'));
