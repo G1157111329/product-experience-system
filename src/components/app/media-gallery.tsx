@@ -2,7 +2,7 @@
 
 import type { KeyboardEvent } from 'react';
 import { useImagePreview } from '@/components/image-preview';
-import { usePresignedUrls } from '@/lib/use-presigned-url';
+import { toPublicMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import { cn } from '@/lib/utils';
 
 interface Material {
@@ -39,7 +39,7 @@ function isDirectMediaUrl(value: string | null | undefined): boolean {
 function getInitialMediaUrl(material: Material): string {
   if (isDirectMediaUrl(material.file_path)) return material.file_path as string;
   if (isDirectMediaUrl(material.file_url)) return material.file_url;
-  return missingMediaDataUrl;
+  return toPublicMediaUrl(material.file_path || material.file_url) || missingMediaDataUrl;
 }
 
 function MediaThumbnail({

@@ -13,6 +13,7 @@ import {
   normalizeReportProjectType,
   sortReportsByCreatedAtAsc,
 } from '@/lib/report-merge';
+import { toPublicMediaUrl } from '@/lib/use-presigned-url';
 
 interface Material {
   id: string; material_type: string; file_name: string; file_url: string; file_size: number; file_path?: string;
@@ -168,6 +169,10 @@ function isDirectPrintableUrl(value: string): boolean {
   return value.startsWith('http') || value.startsWith('/uploads/') || value.startsWith('/media/') || value.startsWith('data:');
 }
 
+function printableMediaUrl(material: { file_url?: string | null; file_path?: string | null }) {
+  return toPublicMediaUrl(material.file_url || material.file_path) || '';
+}
+
 async function presignReportUrls(rpt: ReportData, shareToken?: string | null): Promise<ReportData> {
   const filePaths: string[] = [];
   const collectPaths = (obj: unknown) => {
@@ -293,11 +298,11 @@ function PrintMediaStrip({ materials, indent = 0 }: { materials?: Material[]; in
     <div style={{ display: 'flex', gap: '8px', marginTop: '8px', marginLeft: indent, flexWrap: 'wrap' }}>
       {images.map(mat => (
         // eslint-disable-next-line @next/next/no-img-element
-        <img key={mat.id} src={mat.file_url} alt={mat.file_name} style={mediaBoxStyle} crossOrigin="anonymous" />
+        <img key={mat.id} src={printableMediaUrl(mat)} alt={mat.file_name} style={mediaBoxStyle} crossOrigin="anonymous" />
       ))}
       {videos.map(mat => (
         <div key={mat.id} style={{ ...mediaBoxStyle, overflow: 'hidden', position: 'relative' }}>
-          <video src={mat.file_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
+          <video src={printableMediaUrl(mat)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(17,24,39,0.28)' }}>
             <span style={{ color: 'white', fontSize: '16px' }}>&#9654;</span>
           </div>
@@ -472,7 +477,7 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
                           {reMats.filter(m => m.material_type === 'image').map((m, mi) => (
                             // eslint-disable-next-line @next/next/no-img-element
-                            <img key={mi} src={String(m.file_url)} alt={String(m.file_name)} style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '3px', border: '1px solid #e5e7eb' }} />
+                            <img key={mi} src={toPublicMediaUrl(String(m.file_url || m.file_path || '')) || ''} alt={String(m.file_name)} style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '3px', border: '1px solid #e5e7eb' }} />
                           ))}
                         </div>
                       )}
@@ -607,11 +612,11 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px', marginLeft: '20px' }}>
                       {recipe.effect_materials.filter(m => m.material_type === 'image').map(mat => (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img key={mat.id} src={mat.file_url} alt={mat.file_name} style={{ width: '50px', height: '50px', borderRadius: '3px', objectFit: 'cover', border: '1px solid #e5e7eb' }} crossOrigin="anonymous" />
+                        <img key={mat.id} src={printableMediaUrl(mat)} alt={mat.file_name} style={{ width: '50px', height: '50px', borderRadius: '3px', objectFit: 'cover', border: '1px solid #e5e7eb' }} crossOrigin="anonymous" />
                       ))}
                       {recipe.effect_materials.filter(m => m.material_type === 'video').map(mat => (
                         <div key={mat.id} style={{ width: '50px', height: '50px', borderRadius: '3px', overflow: 'hidden', border: '1px solid #e5e7eb', position: 'relative', background: '#e5e7eb' }}>
-                          <video src={mat.file_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
+                          <video src={printableMediaUrl(mat)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
                           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)' }}>
                             <span style={{ color: 'white', fontSize: '16px' }}>&#9654;</span>
                           </div>
@@ -1082,8 +1087,28 @@ function ReportPrintContent() {
             padding: 20px !important;
             overflow-x: hidden !important;
           }
+          .print-container > div,
+          .print-container section,
+          .print-container [data-testid="print-section-block-stack"],
+          .print-container [data-testid="print-section-block-group"],
+          .print-container [data-testid="print-section-block"] {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+          }
+          .print-container [style*="minmax(180px"] {
+            grid-template-columns: 1fr !important;
+          }
           .print-container table {
-            max-width: none !important;
+            width: 100% !important;
+            min-width: 100% !important;
+            max-width: 100% !important;
+            table-layout: fixed !important;
+          }
+          .print-container th,
+          .print-container td {
+            word-break: break-word !important;
+            overflow-wrap: anywhere !important;
           }
         }
         @page { size: A4; margin: 20mm; }

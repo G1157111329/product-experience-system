@@ -31,8 +31,15 @@ function isDataUrl(value: string): boolean {
 function isDirectMediaUrl(value: string): boolean {
   return value.startsWith('http')
     || value.startsWith('/api/materials/file/')
+    || value.startsWith('/uploads/')
     || value.startsWith('/media/')
     || isDataUrl(value);
+}
+
+export function toPublicMediaUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  if (isDirectMediaUrl(value)) return value;
+  return `/uploads/${value.replace(/^\/+/, '')}`;
 }
 
 function toStorageKey(value: string | null | undefined): string | null {
@@ -141,7 +148,7 @@ function scheduleBatch(filePath: string, resolve: (url: string) => void) {
         const urls = await requestPresignedUrls(toRequest);
         for (const item of items) {
           if (toRequest.includes(item.filePath)) {
-            item.resolve(urls.get(item.filePath) || item.filePath);
+            item.resolve(urls.get(item.filePath) || toPublicMediaUrl(item.filePath) || item.filePath);
           }
         }
       }
@@ -298,9 +305,7 @@ export function usePresignedUrls<T extends { id: string; file_url?: string | nul
           const filePath = getStorageKey(m);
           if (filePath && toRequest.includes(filePath)) {
             const signedUrl = urls.get(filePath);
-            if (signedUrl) {
-              result.set(m.id, signedUrl);
-            }
+            result.set(m.id, signedUrl || toPublicMediaUrl(filePath) || filePath);
           }
         }
         setUrlMap((previous) => (

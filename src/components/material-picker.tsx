@@ -8,6 +8,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { ImagePreview, MediaThumbnail } from './image-preview';
 import { MediaCaptureDialog } from './media-capture-dialog';
 import { cn } from '@/lib/utils';
+import { toPublicMediaUrl } from '@/lib/use-presigned-url';
 import { toast } from 'sonner';
 
 export interface Material {
@@ -87,6 +88,7 @@ export function MaterialPicker({
   const galleryVideoInputRef = useRef<HTMLInputElement>(null);
 
   const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const materialUrl = (material: Material) => toPublicMediaUrl(material.file_path || material.file_url) || material.file_url;
   const setIsOpen = onOpenChange || setInternalOpen;
 
   useEffect(() => {
@@ -296,14 +298,14 @@ export function MaterialPicker({
             <div key={id} className={cn('relative rounded-md overflow-hidden border border-border group cursor-pointer', wrapperClass)}
               onClick={(e) => {
                 e.stopPropagation();
-                const previewSrc = material.file_path || material.file_url;
+                const previewSrc = materialUrl(material);
                 if (onPreview) {
                   onPreview(previewSrc);
                 } else {
                   setPreviewUrl(previewSrc);
                 }
               }}>
-              <MediaThumbnail url={material.file_path || material.file_url} type={material.material_type as 'image' | 'video'} size={selectedPreviewSize} />
+              <MediaThumbnail url={materialUrl(material)} type={material.material_type as 'image' | 'video'} size={selectedPreviewSize} />
               <button
                 type="button"
                 className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center text-[8px] opacity-70 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
@@ -420,7 +422,7 @@ export function MaterialPicker({
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
             {filteredMaterials.map((material) => (
               <div key={material.id} className="relative cursor-pointer" onClick={() => handleSelect(material)}>
-                <MediaThumbnail url={material.file_path || material.file_url} type={material.material_type as 'image' | 'video'} responsive />
+                <MediaThumbnail url={materialUrl(material)} type={material.material_type as 'image' | 'video'} responsive />
                 <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate rounded-b-lg">
                   {material.material_type === 'video'
                     ? <Film className="h-2.5 w-2.5 inline mr-0.5" />
