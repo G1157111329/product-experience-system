@@ -27,13 +27,16 @@ async function ensureAdminAccount() {
   }
 }
 
-function loginSuccess(user: AuthUser) {
+function loginSuccess(user: AuthUser, rememberMe: boolean) {
   const response = NextResponse.json({
     code: 0,
     message: '登录成功',
     data: user,
+    session: {
+      persistent: rememberMe,
+    },
   });
-  setSessionCookie(response, user);
+  setSessionCookie(response, user, { persistent: rememberMe });
   return response;
 }
 
@@ -42,6 +45,7 @@ export async function POST(request: NextRequest) {
     const supabase = createClient();
     const body = await request.json();
     const { account, password } = body;
+    const rememberMe = body.remember_me === true || body.rememberMe === true;
     const limited = await checkSharedRateLimit(request, {
       scope: 'auth-login',
       subject: String(account || 'unknown'),
@@ -119,7 +123,7 @@ export async function POST(request: NextRequest) {
       actor: authUser,
     });
 
-    return loginSuccess(authUser);
+    return loginSuccess(authUser, rememberMe);
   } catch {
     return NextResponse.json({ code: 1, message: '登录失败' }, { status: 500 });
   }

@@ -4,6 +4,7 @@ import { useAuth } from '@/lib/auth-context';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AppSidebar, MobileNav, BottomNav } from '@/components/navigation';
+import { Button } from '@/components/ui/button';
 
 function hasOpenModalLayer() {
   return Boolean(
@@ -18,7 +19,7 @@ function hasOpenModalLayer() {
 }
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, authStatus, authError, refreshUser } = useAuth();
   const pathname = usePathname();
   const [checked, setChecked] = useState(false);
 
@@ -27,10 +28,10 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   }, []);
 
   useEffect(() => {
-    if (checked && !isLoading && !isAuthenticated) {
+    if (checked && !isLoading && authStatus === 'anonymous') {
       window.location.href = '/login';
     }
-  }, [checked, isAuthenticated, isLoading]);
+  }, [authStatus, checked, isLoading]);
 
   useEffect(() => {
     const releaseStaleInteractionLock = () => {
@@ -45,10 +46,25 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     return () => window.clearTimeout(timeout);
   }, [pathname]);
 
-  if (!checked || isLoading) {
+  if (!checked || isLoading || authStatus === 'loading') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (authStatus === 'unavailable') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <div className="w-full max-w-sm space-y-4 text-center">
+          <p className="text-sm text-muted-foreground">
+            {authError || '登录状态校验暂时不可用，请稍后重试'}
+          </p>
+          <Button type="button" onClick={() => void refreshUser()}>
+            重新校验
+          </Button>
+        </div>
       </div>
     );
   }

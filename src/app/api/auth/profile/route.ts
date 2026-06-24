@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient as createClient } from '@/storage/database/supabase-client';
-import { getCurrentUser, unauthorized } from '@/lib/server/auth';
+import { getCurrentUser, refreshSessionCookieIfNeeded, unauthorized } from '@/lib/server/auth';
 import { hashPassword, validatePasswordStrength } from '@/lib/server/password';
 
 export async function GET(request: NextRequest) {
@@ -22,7 +22,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ code: 1, message: '用户不存在' }, { status: 404 });
     }
 
-    return NextResponse.json({ code: 0, data: user });
+    const response = NextResponse.json({ code: 0, data: user });
+    response.headers.set('Cache-Control', 'no-store');
+    refreshSessionCookieIfNeeded(request, response, currentUser);
+    return response;
   } catch {
     return NextResponse.json({ code: 1, message: '获取用户信息失败' }, { status: 500 });
   }

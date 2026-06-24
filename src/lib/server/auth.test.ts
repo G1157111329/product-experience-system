@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import {
+  PERSISTENT_SESSION_MAX_AGE_SECONDS,
   SESSION_COOKIE_NAME,
   checkRateLimit,
   signSessionToken,
   verifySessionToken,
+  verifySessionTokenClaims,
   type AuthUser,
 } from './auth';
 import { hashPassword, passwordNeedsRehash, verifyPassword } from './password';
@@ -20,9 +22,21 @@ const now = new Date('2026-06-11T09:00:00.000Z').getTime();
 
 const token = signSessionToken(user, { secret, now, maxAgeSeconds: 60 });
 const verified = verifySessionToken(token, { secret, now: now + 1000 });
+const claims = verifySessionTokenClaims(token, { secret, now: now + 1000 });
+const persistentToken = signSessionToken(user, {
+  secret,
+  now,
+  maxAgeSeconds: PERSISTENT_SESSION_MAX_AGE_SECONDS,
+  persistent: true,
+});
+const persistentClaims = verifySessionTokenClaims(persistentToken, { secret, now: now + 1000 });
 
 assert.equal(SESSION_COOKIE_NAME, 'xp_session');
 assert.deepEqual(verified, user);
+assert.equal(claims?.expiresAt, Math.floor(now / 1000) + 60);
+assert.equal(claims?.persistent, false);
+assert.equal(persistentClaims?.expiresAt, Math.floor(now / 1000) + PERSISTENT_SESSION_MAX_AGE_SECONDS);
+assert.equal(persistentClaims?.persistent, true);
 assert.equal(verifySessionToken(`${token.slice(0, -1)}x`, { secret, now: now + 1000 }), null);
 assert.equal(verifySessionToken(token, { secret, now: now + 61_000 }), null);
 

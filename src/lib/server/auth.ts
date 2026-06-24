@@ -4,6 +4,8 @@ import { writeSecurityAudit } from './security-audit';
 
 export const SESSION_COOKIE_NAME = 'xp_session';
 export const SESSION_MAX_AGE_SECONDS = 8 * 60 * 60;
+export const PERSISTENT_SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+export const SESSION_REFRESH_THRESHOLD_SECONDS = 60 * 60;
 
 export type AuthRole = 'admin' | 'user';
 
@@ -53,12 +55,25 @@ interface TokenPayload {
   role: AuthRole;
   iat: number;
   exp: number;
+  persistent?: boolean;
 }
 
 interface TokenOptions {
   secret?: string;
   now?: number;
   maxAgeSeconds?: number;
+  persistent?: boolean;
+}
+
+interface SessionCookieOptions {
+  maxAgeSeconds?: number;
+  persistent?: boolean;
+}
+
+export interface SessionTokenClaims extends AuthUser {
+  issuedAt: number;
+  expiresAt: number;
+  persistent: boolean;
 }
 
 interface RateLimitOptions {
@@ -111,13 +126,14 @@ export function signSessionToken(user: AuthUser, options: TokenOptions = {}) {
     role: user.role,
     iat: Math.floor(now / 1000),
     exp: Math.floor(now / 1000) + maxAgeSeconds,
+    persistent: options.persistent === true,
   };
   const encodedPayload = toBase64Url(JSON.stringify(payload));
   const signature = signatureFor(encodedPayload, options.secret ?? getSessionSecret());
   return `${encodedPayload}.${signature}`;
 }
 
-export function verifySessionToken(token: string | undefined | null, options: TokenOptions = {}): AuthUser | null {
+export function verifySessionTokenClaims(token: string | undefined | null, options: TokenOptions = {}): SessionTokenClaims | null {
   if (!token) return null;
   const [encodedPayload, signature] = token.split('.');
   if (!encodedPayload || !signature) return null;
@@ -136,20 +152,54 @@ export function verifySessionToken(token: string | undefined | null, options: To
       account: payload.account,
       name: payload.name,
       role: payload.role,
+      issuedAt: Number(payload.iat || 0),
+      expiresAt: payload.exp,
+      persistent: payload.persistent === true,
     };
   } catch {
     return null;
   }
 }
 
-export function setSessionCookie(response: NextResponse, user: AuthUser) {
-  response.cookies.set(SESSION_COOKIE_NAME, signSessionToken(user), {
+export function verifySessionToken(token: string | undefined | null, options: TokenOptions = {}): AuthUser | null {
+  const claims = verifySessionTokenClaims(token, options);
+  if (!claims) return null;
+  return {
+    id: claims.id,
+    account: claims.account,
+    name: claims.name,
+    role: claims.role,
+  };
+}
+
+function getSessionMaxAgeSeconds(options: SessionCookieOptions = {}) {
+  if (options.maxAgeSeconds) return options.maxAgeSeconds;
+  return options.persistent ? PERSISTENT_SESSION_MAX_AGE_SECONDS : SESSION_MAX_AGE_SECONDS;
+}
+
+export function setSessionCookie(response: NextResponse, user: AuthUser, options: SessionCookieOptions = {}) {
+  const maxAgeSeconds = getSessionMaxAgeSeconds(options);
+  response.cookies.set(SESSION_COOKIE_NAME, signSessionToken(user, {
+    maxAgeSeconds,
+    persistent: options.persistent === true,
+  }), {
     httpOnly: true,
     secure: shouldUseSecureSessionCookie(),
     sameSite: 'lax',
     path: '/',
-    maxAge: SESSION_MAX_AGE_SECONDS,
+    maxAge: maxAgeSeconds,
   });
+}
+
+export function refreshSessionCookieIfNeeded(request: NextRequest, response: NextResponse, user: AuthUser) {
+  const claims = verifySessionTokenClaims(request.cookies.get(SESSION_COOKIE_NAME)?.value);
+  if (!claims) return false;
+
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (claims.expiresAt - nowSeconds > SESSION_REFRESH_THRESHOLD_SECONDS) return false;
+
+  setSessionCookie(response, user, { persistent: claims.persistent });
+  return true;
 }
 
 export function clearSessionCookie(response: NextResponse) {

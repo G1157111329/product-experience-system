@@ -1,18 +1,22 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { BrandLogo } from '@/components/brand-logo';
+import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 
 export default function LoginPage() {
   const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
+  const { isAuthenticated, isLoading } = useAuth();
 
   // Use refs to always read latest DOM values (prevents autofill desync)
   const accountRef = useRef<HTMLInputElement>(null);
@@ -27,6 +31,12 @@ export default function LoginPage() {
   const [fpDialogOpen, setFpDialogOpen] = useState(false);
   const [fpForm, setFpForm] = useState({ account: '', new_password: '' });
   const [fpLoading, setFpLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isLoading && isAuthenticated) {
+      window.location.replace('/dashboard');
+    }
+  }, [isAuthenticated, isLoading]);
 
   const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -49,7 +59,9 @@ export default function LoginPage() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ account: acc, password: pwd }),
+        credentials: 'same-origin',
+        cache: 'no-store',
+        body: JSON.stringify({ account: acc, password: pwd, remember_me: rememberMe }),
       });
       const data = await res.json();
       if (data.code === 0) {
@@ -160,6 +172,16 @@ export default function LoginPage() {
                   data-1p-ignore
                   data-lpignore="true"
                 />
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="remember-me"
+                  checked={rememberMe}
+                  onCheckedChange={(checked) => setRememberMe(checked === true)}
+                />
+                <Label htmlFor="remember-me" className="cursor-pointer text-xs font-normal text-muted-foreground">
+                  保持登录 30 天
+                </Label>
               </div>
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? '登录中...' : '登录'}
