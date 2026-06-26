@@ -100,13 +100,15 @@ function hasMeaningfulComparisonCell(cell: Record<string, unknown>) {
   return listFields.some((field) => Array.isArray(cell[field]) && (cell[field] as unknown[]).length > 0);
 }
 
+const COMPARISON_MATRIX_NODE_TYPES = ['item', 'condition', 'process_node', 'metric', 'issue_group'];
+
 async function loadTaskComparisonReportSource(client: ReturnType<typeof getSupabaseClient>, taskId: string) {
   const assembly = await findAssemblyForTask(client, taskId);
   if (!assembly?.id) return null;
 
   const [objectsResult, nodesResult, cellsResult, materialsResult] = await Promise.all([
     client.from('comparison_objects').select('id').eq('assembly_id', assembly.id).limit(1),
-    client.from('comparison_item_nodes').select('id,node_type').eq('assembly_id', assembly.id).neq('node_type', 'section').limit(1),
+    client.from('comparison_item_nodes').select('id,node_type').eq('assembly_id', assembly.id).in('node_type', COMPARISON_MATRIX_NODE_TYPES).limit(1),
     client.from('comparison_matrix_cells').select('*').eq('assembly_id', assembly.id),
     client.from('materials').select('id').eq('comparison_assembly_id', assembly.id).limit(1),
   ]);

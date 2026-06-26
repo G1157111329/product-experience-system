@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, Edit2, GitCompareArrows, Loader2, Plus, Save, Table2, Trash2, X } from 'lucide-react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Check, GitCompareArrows, Loader2, Plus, Save, Table2, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { MaterialPicker, type Material } from '@/components/material-picker';
 import { Badge } from '@/components/ui/badge';
@@ -30,6 +30,10 @@ type ComparisonItemNode = {
   id: string;
   node_label: string;
   node_type?: string | null;
+  parent_id?: string | null;
+  depth?: number | null;
+  sort_order?: number | null;
+  config?: Record<string, unknown> | null;
 };
 
 type ComparisonCell = {
@@ -75,8 +79,9 @@ type CellForm = {
 type CellDrafts = Record<string, CellForm>;
 type CellMediaMap = Record<string, Material[]>;
 
-const OBJECT_COLUMN_WIDTH = 260;
-const LEFT_COLUMN_WIDTH = 220;
+const OBJECT_COLUMN_WIDTH = 240;
+const LEFT_COLUMN_WIDTH = 140;
+const MATRIX_CELL_NODE_TYPES = new Set(['item', 'condition', 'process_node', 'metric', 'issue_group']);
 
 function cellKey(itemNodeId: string, objectId: string) {
   return `${itemNodeId}::${objectId}`;
@@ -117,6 +122,23 @@ function getDroppedMaterialId(event: React.DragEvent<HTMLElement>) {
   return event.dataTransfer.getData('application/x-material-id') || event.dataTransfer.getData('text/plain');
 }
 
+function isSectionNode(node: ComparisonItemNode) {
+  return node.node_type === 'section';
+}
+
+function isSummaryNode(node: ComparisonItemNode) {
+  return node.node_type === 'summary';
+}
+
+function isMatrixCellNode(node: ComparisonItemNode) {
+  return MATRIX_CELL_NODE_TYPES.has(node.node_type || 'item');
+}
+
+function summaryTextOf(node: ComparisonItemNode) {
+  const config = node.config || {};
+  return String(config.summary_text || config.summary || '').trim();
+}
+
 export function ComparisonWorkspace({
   taskId,
   taskName,
@@ -130,11 +152,11 @@ export function ComparisonWorkspace({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [newObjectName, setNewObjectName] = useState('');
-  const [newNodeLabel, setNewNodeLabel] = useState('');
   const [editingObjectId, setEditingObjectId] = useState('');
   const [editingObjectName, setEditingObjectName] = useState('');
   const [editingNodeId, setEditingNodeId] = useState('');
   const [editingNodeLabel, setEditingNodeLabel] = useState('');
+  const [summaryDrafts, setSummaryDrafts] = useState<Record<string, string>>({});
   const [cellDrafts, setCellDrafts] = useState<CellDrafts>({});
   const [cellMediaById, setCellMediaById] = useState<CellMediaMap>({});
   const [cellMediaSavingId, setCellMediaSavingId] = useState('');
@@ -145,6 +167,15 @@ export function ComparisonWorkspace({
     for (const cell of matrix?.cells || []) next.set(cellKey(cell.item_node_id, cell.object_id), cell);
     return next;
   }, [matrix?.cells]);
+
+  const nodeStats = useMemo(() => {
+    const nodes = matrix?.item_nodes || [];
+    return {
+      sections: nodes.filter(isSectionNode).length,
+      items: nodes.filter(isMatrixCellNode).length,
+      summaries: nodes.filter(isSummaryNode).length,
+    };
+  }, [matrix?.item_nodes]);
 
   const tableMinWidth = Math.max(720, LEFT_COLUMN_WIDTH + Math.max(1, matrix?.objects.length || 1) * OBJECT_COLUMN_WIDTH);
 
@@ -157,6 +188,13 @@ export function ComparisonWorkspace({
         const next: CellDrafts = {};
         for (const cell of data.data?.cells || []) {
           next[cell.id] = current[cell.id] || buildCellForm(cell);
+        }
+        return next;
+      });
+      setSummaryDrafts((current) => {
+        const next: Record<string, string> = {};
+        for (const node of data.data?.item_nodes || []) {
+          if (isSummaryNode(node)) next[node.id] = current[node.id] ?? summaryTextOf(node);
         }
         return next;
       });
@@ -239,21 +277,27 @@ export function ComparisonWorkspace({
     }
   };
 
-  const createNode = async () => {
-    if (!assembly?.id || !newNodeLabel.trim()) return;
+  const createNode = async (payload: {
+    node_label: string;
+    node_type: 'section' | 'item' | 'summary';
+    parent_id?: string | null;
+    config?: Record<string, unknown>;
+  }) => {
+    if (!assembly?.id || !payload.node_label.trim()) return;
     const res = await fetch('/api/comparison-item-nodes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         assembly_id: assembly.id,
-        node_label: newNodeLabel.trim(),
-        node_type: 'item',
+        node_label: payload.node_label.trim(),
+        node_type: payload.node_type,
+        parent_id: payload.parent_id || null,
+        config: payload.config || {},
         sort_order: matrix?.item_nodes.length || 0,
       }),
     });
     const data = await res.json() as ApiResponse<unknown>;
     if (data.code === 0) {
-      setNewNodeLabel('');
       await refreshMatrix();
     } else {
       toast.error(data.message || '新增对比项目失败');
@@ -308,6 +352,27 @@ export function ComparisonWorkspace({
       await refreshMatrix();
     } else {
       toast.error(data.message || '更新项目失败');
+    }
+  };
+
+  const saveSummaryNode = async (node: ComparisonItemNode) => {
+    const summaryText = (summaryDrafts[node.id] || '').trim();
+    const res = await fetch(`/api/comparison-item-nodes/${node.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        config: {
+          ...(node.config || {}),
+          summary_text: summaryText,
+        },
+      }),
+    });
+    const data = await res.json() as ApiResponse<unknown>;
+    if (data.code === 0) {
+      toast.success('大类小结已保存');
+      await refreshMatrix();
+    } else {
+      toast.error(data.message || '保存大类小结失败');
     }
   };
 
@@ -458,21 +523,6 @@ export function ComparisonWorkspace({
           />
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-2">
-          <Input
-            value={draft.manual_score}
-            onChange={(event) => updateCellDraft(cell.id, 'manual_score', event.target.value)}
-            placeholder="评分 0-10"
-            className="h-8 text-xs"
-          />
-          <Input
-            value={draft.conclusion_tag}
-            onChange={(event) => updateCellDraft(cell.id, 'conclusion_tag', event.target.value)}
-            placeholder="结论标签"
-            className="h-8 text-xs"
-          />
-        </div>
-
         <div className="flex justify-end">
           <Button size="sm" onClick={() => void saveCell(cell)} disabled={cellSaving} className="h-8 gap-1.5 whitespace-nowrap">
             {cellSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
@@ -482,6 +532,56 @@ export function ComparisonWorkspace({
       </div>
     );
   };
+
+  const renderAddSectionRow = () => (
+    <TableRow data-testid="comparison-add-section-row" className="bg-muted/10">
+      <TableCell colSpan={(matrix?.objects.length || 0) + 1} className="p-2">
+        <div className="flex justify-start">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-9 gap-1.5"
+            onClick={() => void createNode({ node_label: `大类${(nodeStats.sections || 0) + 1}`, node_type: 'section' })}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            新增大类
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+
+  const renderSummaryRow = (node: ComparisonItemNode) => (
+    <TableRow key={node.id} data-testid="comparison-summary-row" className="bg-amber-50/60">
+      <TableCell className="align-top">
+        <div className="space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <span className="text-sm font-semibold text-amber-950">{node.node_label || '本大类小结'}</span>
+            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => void deleteNode(node.id)}>
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+          <p className="text-[11px] leading-4 text-amber-900/80">报告中横跨全部对比对象展示</p>
+        </div>
+      </TableCell>
+      <TableCell colSpan={matrix?.objects.length || 1} className="p-2 align-top">
+        <div className="rounded-md border border-amber-200 bg-background p-2">
+          <Textarea
+            value={summaryDrafts[node.id] ?? summaryTextOf(node)}
+            onChange={(event) => setSummaryDrafts((current) => ({ ...current, [node.id]: event.target.value }))}
+            placeholder="输入针对该大类/食谱/项目的总结"
+            className="min-h-24 resize-y text-sm"
+          />
+          <div className="mt-2 flex justify-end">
+            <Button size="sm" onClick={() => void saveSummaryNode(node)} className="h-8 gap-1.5">
+              <Save className="h-3.5 w-3.5" />
+              保存小结
+            </Button>
+          </div>
+        </div>
+      </TableCell>
+    </TableRow>
+  );
 
   if (loading) {
     return (
@@ -525,7 +625,9 @@ export function ComparisonWorkspace({
             </CardTitle>
             <div className="flex flex-wrap gap-2">
               <Badge variant="secondary">{matrix?.objects.length || 0} 个对象</Badge>
-              <Badge variant="secondary">{matrix?.item_nodes.length || 0} 个项目</Badge>
+              <Badge variant="secondary">{nodeStats.sections} 个大类</Badge>
+              <Badge variant="secondary">{nodeStats.items} 个细项</Badge>
+              <Badge variant="secondary">{nodeStats.summaries} 个小结</Badge>
               <Badge variant={(matrix?.missing_cells.length || 0) > 0 ? 'outline' : 'secondary'}>
                 缺 {matrix?.missing_cells.length || 0} 格
               </Badge>
@@ -538,12 +640,6 @@ export function ComparisonWorkspace({
                 <Plus className="h-4 w-4" />
               </Button>
             </div>
-            <div className="flex gap-2">
-              <Input value={newNodeLabel} onChange={(event) => setNewNodeLabel(event.target.value)} placeholder="新增对比项目，如 出汁率 / 噪音 / 握持" />
-              <Button onClick={createNode} disabled={!newNodeLabel.trim()} className="shrink-0">
-                <Plus className="h-4 w-4" />
-              </Button>
-            </div>
           </div>
           {(matrix?.missing_cells.length || 0) > 0 && (
             <Button variant="outline" size="sm" onClick={completeMatrixCells} className="w-fit">
@@ -552,9 +648,9 @@ export function ComparisonWorkspace({
           )}
         </CardHeader>
         <CardContent className="space-y-4">
-          {!matrix?.objects.length || !matrix?.item_nodes.length ? (
+          {!matrix?.objects.length ? (
             <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-              先新增对比对象和对比项目，再补齐单元格开始录入。
+              先新增对比对象，再在矩阵第一行新增大类和细项。
             </div>
           ) : (
             <ScrollArea className="w-full">
@@ -563,7 +659,7 @@ export function ComparisonWorkspace({
                   <TableRow>
                     <TableHead style={{ width: LEFT_COLUMN_WIDTH }}>对比项目</TableHead>
                     {matrix.objects.map((object) => (
-                      <TableHead key={object.id} style={{ width: OBJECT_COLUMN_WIDTH }}>
+                      <TableHead key={object.id} style={{ width: OBJECT_COLUMN_WIDTH }} className="relative">
                         {editingObjectId === object.id ? (
                           <div className="flex gap-1">
                             <Input value={editingObjectName} onChange={(event) => setEditingObjectName(event.target.value)} className="h-8" />
@@ -571,48 +667,147 @@ export function ComparisonWorkspace({
                             <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setEditingObjectId('')}><X className="h-4 w-4" /></Button>
                           </div>
                         ) : (
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="truncate">{object.object_name}</span>
-                            <span className="flex shrink-0 gap-1">
-                              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setEditingObjectId(object.id); setEditingObjectName(object.object_name); }}><Edit2 className="h-3.5 w-3.5" /></Button>
-                              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => void deleteObject(object.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
-                            </span>
-                          </div>
+                          <>
+                            <div className="flex items-center justify-center">
+                              <button
+                                type="button"
+                                onClick={() => { setEditingObjectId(object.id); setEditingObjectName(object.object_name); }}
+                                className="truncate text-sm font-medium hover:text-primary"
+                                title="点击重命名"
+                              >
+                                {object.object_name}
+                              </button>
+                            </div>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="absolute right-1 top-1 h-7 w-7"
+                              onClick={() => void deleteObject(object.id)}
+                              aria-label="删除对象"
+                              title="删除对象"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </>
                         )}
                       </TableHead>
                     ))}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {matrix.item_nodes.map((node) => (
-                    <TableRow key={node.id}>
-                      <TableCell className="align-top">
-                        {editingNodeId === node.id ? (
-                          <div className="flex gap-1">
-                            <Input value={editingNodeLabel} onChange={(event) => setEditingNodeLabel(event.target.value)} className="h-8" />
-                            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => void updateNode(node.id)}><Check className="h-4 w-4" /></Button>
-                            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setEditingNodeId('')}><X className="h-4 w-4" /></Button>
-                          </div>
-                        ) : (
-                          <div className="flex items-start justify-between gap-2">
-                            <span className="text-sm font-medium">{node.node_label}</span>
-                            <span className="flex shrink-0 gap-1">
-                              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setEditingNodeId(node.id); setEditingNodeLabel(node.node_label); }}><Edit2 className="h-3.5 w-3.5" /></Button>
-                              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => void deleteNode(node.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
-                            </span>
-                          </div>
-                        )}
-                      </TableCell>
-                      {matrix.objects.map((object) => {
-                        const cell = cellsByKey.get(cellKey(node.id, object.id)) || null;
-                        return (
-                          <TableCell key={object.id} className="align-top p-2">
-                            {renderCellEditor(cell)}
-                          </TableCell>
-                        );
-                      })}
-                    </TableRow>
-                  ))}
+                  {renderAddSectionRow()}
+                  {matrix.item_nodes.map((node) => {
+                    if (isSectionNode(node)) {
+                      return (
+                        <Fragment key={node.id}>
+                          <TableRow data-testid="comparison-section-row" className="bg-muted/20">
+                            <TableCell colSpan={(matrix?.objects.length || 0) + 1} className="p-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                {editingNodeId === node.id ? (
+                                  <div className="flex min-w-0 gap-1">
+                                    <Input value={editingNodeLabel} onChange={(event) => setEditingNodeLabel(event.target.value)} className="h-8" />
+                                    <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => void updateNode(node.id)}><Check className="h-4 w-4" /></Button>
+                                    <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setEditingNodeId('')}><X className="h-4 w-4" /></Button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => { setEditingNodeId(node.id); setEditingNodeLabel(node.node_label); }}
+                                    className="min-w-0 truncate text-sm font-semibold text-foreground hover:text-primary"
+                                    title="点击重命名"
+                                  >
+                                    {node.node_label}
+                                  </button>
+                                )}
+                                <div className="flex shrink-0 flex-wrap gap-1">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 gap-1.5"
+                                    onClick={() => void createNode({
+                                      node_label: `细项${(nodeStats.items || 0) + 1}`,
+                                      node_type: 'item',
+                                      parent_id: node.id,
+                                    })}
+                                  >
+                                    <Plus className="h-3.5 w-3.5" />
+                                    细项
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 gap-1.5"
+                                    onClick={() => void createNode({
+                                      node_label: '本大类小结',
+                                      node_type: 'summary',
+                                      parent_id: node.id,
+                                      config: { summary_text: '' },
+                                    })}
+                                  >
+                                    <Plus className="h-3.5 w-3.5" />
+                                    小结
+                                  </Button>
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-8 w-8"
+                                    onClick={() => void deleteNode(node.id)}
+                                    aria-label="删除大类"
+                                    title="删除大类"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        </Fragment>
+                      );
+                    }
+                    if (isSummaryNode(node)) return renderSummaryRow(node);
+                    return (
+                      <TableRow key={node.id}>
+                        <TableCell className="relative align-top">
+                          {editingNodeId === node.id ? (
+                            <div className="flex gap-1">
+                              <Input value={editingNodeLabel} onChange={(event) => setEditingNodeLabel(event.target.value)} className="h-8" />
+                              <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => void updateNode(node.id)}><Check className="h-4 w-4" /></Button>
+                              <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setEditingNodeId('')}><X className="h-4 w-4" /></Button>
+                            </div>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => { setEditingNodeId(node.id); setEditingNodeLabel(node.node_label); }}
+                                className="block w-full truncate pr-6 text-left text-sm font-medium hover:text-primary"
+                                title="点击重命名"
+                              >
+                                {node.node_label}
+                              </button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="absolute right-1 top-1 h-6 w-6"
+                                onClick={() => void deleteNode(node.id)}
+                                aria-label="删除细项"
+                                title="删除细项"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </>
+                          )}
+                        </TableCell>
+                        {matrix.objects.map((object) => {
+                          const cell = isMatrixCellNode(node) ? cellsByKey.get(cellKey(node.id, object.id)) || null : null;
+                          return (
+                            <TableCell key={object.id} className="align-top p-2">
+                              {renderCellEditor(cell)}
+                            </TableCell>
+                          );
+                        })}
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
               <ScrollBar orientation="horizontal" />

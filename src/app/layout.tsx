@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Toaster } from '@/components/ui/sonner';
 import { AuthProvider } from '@/lib/auth-context';
 import { ThemeProvider } from '@/components/theme-provider';
@@ -11,6 +11,13 @@ export const metadata: Metadata = {
   },
   description: '覆盖体验计划、现场走查、报告输出、数据分析全流程的产品体验管理系统',
   keywords: ['产品体验', '体验管理', '走查', '质量'],
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
+  viewportFit: 'cover',
 };
 
 export default function RootLayout({

@@ -8,8 +8,10 @@ function asRows(value: unknown): MatrixRow[] {
   return Array.isArray(value) ? (value as MatrixRow[]) : [];
 }
 
+const MATRIX_CELL_NODE_TYPES = new Set(['item', 'condition', 'process_node', 'metric', 'issue_group']);
+
 function isMatrixNode(node: MatrixRow) {
-  return node.node_type !== 'section';
+  return MATRIX_CELL_NODE_TYPES.has(String(node.node_type || 'item'));
 }
 
 function cellKey(itemNodeId: unknown, objectId: unknown) {

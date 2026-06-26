@@ -16,9 +16,10 @@ type ChatMessage = {
 type AgentAssistPanelProps = {
   taskId: string;
   onClose: () => void;
+  embedded?: boolean;
 };
 
-export function AgentAssistPanel({ taskId, onClose }: AgentAssistPanelProps) {
+export function AgentAssistPanel({ taskId, onClose, embedded = false }: AgentAssistPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'assistant',
@@ -65,9 +66,11 @@ export function AgentAssistPanel({ taskId, onClose }: AgentAssistPanelProps) {
             <h2 className="text-sm font-semibold">AI辅助</h2>
           </div>
         </div>
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose} aria-label="关闭AI助手">
-          <X className="h-4 w-4" />
-        </Button>
+        {!embedded && (
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose} aria-label="关闭AI助手">
+            <X className="h-4 w-4" />
+          </Button>
+        )}
       </div>
 
       <div className="flex h-[min(620px,calc(100dvh-10rem))] flex-col">

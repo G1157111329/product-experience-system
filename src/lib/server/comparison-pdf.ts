@@ -62,8 +62,10 @@ function list(value: unknown): string[] {
   return value.map((item) => typeof item === 'string' ? item : JSON.stringify(item)).filter(Boolean);
 }
 
-function isSectionNode(node: Row) {
-  return node.node_type === 'section';
+const MATRIX_CELL_NODE_TYPES = new Set(['item', 'condition', 'process_node', 'metric', 'issue_group']);
+
+function isMatrixNode(node: Row) {
+  return MATRIX_CELL_NODE_TYPES.has(text(node.node_type, 'item'));
 }
 
 function cellKey(nodeId: unknown, objectId: unknown) {
@@ -81,7 +83,7 @@ export function buildComparisonPdfPreflight(input: {
   snapshot: Row;
 }): ComparisonPdfPreflight {
   const objects = rows(input.snapshot.objects);
-  const itemNodes = rows(input.snapshot.item_nodes).filter((node) => !isSectionNode(node));
+  const itemNodes = rows(input.snapshot.item_nodes).filter(isMatrixNode);
   const matrixCells = cells(input.snapshot.cells);
   const inlineCount = matrixCells.reduce((sum, cell) => sum + media(cell, 'inline_media').length, 0);
   const appendixCount = matrixCells.reduce((sum, cell) => sum + media(cell, 'appendix_media').length, 0);
@@ -167,7 +169,7 @@ export async function renderComparisonPdfHtml(input: {
   const snapshot = input.snapshot;
   const assembly = (snapshot.assembly || {}) as Row;
   const objects = rows(snapshot.objects);
-  const itemNodes = rows(snapshot.item_nodes).filter((node) => !isSectionNode(node));
+  const itemNodes = rows(snapshot.item_nodes).filter(isMatrixNode);
   const matrixCells = cells(snapshot.cells);
   const cellMap = new Map(matrixCells.map((cell) => [cellKey(cell.item_node_id, cell.object_id), cell]));
   const rowsHtml: string[] = [];

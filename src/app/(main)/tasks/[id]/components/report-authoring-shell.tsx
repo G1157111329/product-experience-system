@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ComponentType, type ReactNode } from 'react';
+import { cloneElement, isValidElement, useMemo, useState, type ComponentType, type ReactNode } from 'react';
 import {
   Eye,
   FileText,
@@ -55,39 +55,48 @@ export function ReportAuthoringShell({
     ]
     : baseNavItems;
 
+  const compactRail = useMemo(() => {
+    if (!materialRail || !isValidElement(materialRail)) return materialRail;
+    return cloneElement(materialRail, { compact: true } as { compact?: boolean });
+  }, [materialRail]);
+
   return (
     <div
       className={cn(
         'grid gap-4 lg:items-start',
-        navCollapsed ? 'lg:grid-cols-[64px_minmax(0,1fr)]' : 'lg:grid-cols-[300px_minmax(0,1fr)]',
+        navCollapsed ? 'lg:grid-cols-[56px_minmax(0,1fr)]' : 'lg:grid-cols-[240px_minmax(0,1fr)]',
       )}
     >
-      <aside className="rounded-lg border bg-card p-3 shadow-sm lg:sticky lg:top-4">
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <div className={cn(navCollapsed && 'sr-only')}>
-            <h2 className="text-sm font-semibold">录入目录</h2>
+      <aside className="rounded-lg border bg-card p-3 shadow-sm lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+        <div className={cn('mb-3 flex items-center gap-2', navCollapsed ? 'flex-col' : 'justify-between')}>
+          {!navCollapsed && (
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold">录入目录</h2>
+            </div>
+          )}
+          <div className={cn('flex shrink-0 gap-2', navCollapsed && 'w-full flex-col')}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 shrink-0"
+              onClick={() => setNavCollapsed((current) => !current)}
+              aria-label={navCollapsed ? '展开录入目录' : '隐藏录入目录'}
+              title={navCollapsed ? '展开录入目录' : '隐藏录入目录'}
+            >
+              {navCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+            </Button>
+            <Button
+              variant={agentOpen ? 'default' : 'outline'}
+              size={navCollapsed ? 'icon' : 'sm'}
+              className={cn('h-9 shrink-0', !navCollapsed && 'gap-1.5 px-2.5', navCollapsed && 'w-full')}
+              onClick={() => onAgentOpenChange(!agentOpen)}
+              aria-label={agentOpen ? '关闭 AI辅助' : '打开 AI辅助'}
+              title="AI辅助"
+            >
+              <Sparkles className="h-4 w-4" />
+              {!navCollapsed && <span className="text-xs">AI辅助</span>}
+            </Button>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9 shrink-0"
-            onClick={() => setNavCollapsed((current) => !current)}
-            aria-label={navCollapsed ? '展开录入目录' : '隐藏录入目录'}
-            title={navCollapsed ? '展开录入目录' : '隐藏录入目录'}
-          >
-            {navCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-          </Button>
-          <Button
-            variant={agentOpen ? 'default' : 'outline'}
-            size={navCollapsed ? 'icon' : 'sm'}
-            className={cn('h-9 shrink-0', !navCollapsed && 'gap-1.5 px-2.5')}
-            onClick={() => onAgentOpenChange(!agentOpen)}
-            aria-label={agentOpen ? '关闭 AI辅助' : '打开 AI辅助'}
-            title="AI辅助"
-          >
-            <Sparkles className="h-4 w-4" />
-            {!navCollapsed && <span className="text-xs">AI辅助</span>}
-          </Button>
         </div>
 
         <nav className="grid grid-cols-2 gap-2 lg:grid-cols-1">
@@ -116,7 +125,16 @@ export function ReportAuthoringShell({
         )}
       </aside>
 
-      <div className="min-w-0 space-y-4">{children}</div>
+      <div className="min-w-0 space-y-4">
+        {navCollapsed && materialRail && (
+          <div className="sticky top-0 z-30 bg-background/95 pb-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+            <div className="rounded-lg border bg-card p-3 shadow-sm">
+              {compactRail}
+            </div>
+          </div>
+        )}
+        {children}
+      </div>
 
       <Dialog open={agentOpen} onOpenChange={onAgentOpenChange}>
         <DialogContent className="max-h-[90dvh] max-w-3xl overflow-hidden p-0">
@@ -126,6 +144,7 @@ export function ReportAuthoringShell({
           <AgentAssistPanel
             taskId={taskId}
             onClose={() => onAgentOpenChange(false)}
+            embedded
           />
         </DialogContent>
       </Dialog>

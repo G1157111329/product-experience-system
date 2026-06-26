@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { usePresignedUrls } from '@/lib/use-presigned-url';
@@ -20,6 +20,61 @@ function isImageType(type: string) {
 
 function isVideoType(type: string) {
   return type.toLowerCase().includes('video');
+}
+
+function blockTypeLabel(type: string) {
+  const labels: Record<string, string> = {
+    summary: '摘要',
+    facts: '信息',
+    list: '清单',
+    table: '表格',
+    media: '素材',
+    matrix: '矩阵',
+  };
+  return labels[type] || type;
+}
+
+function sectionStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    ready: '已完成',
+    empty: '暂无内容',
+    warning: '待完善',
+    blocked: '需处理',
+  };
+  return labels[status] || status;
+}
+
+function mediaTypeLabel(type: string) {
+  if (isImageType(type)) return '图片';
+  if (isVideoType(type)) return '视频';
+  return type ? '文件' : '素材';
+}
+
+function mediaRoleLabel(role: string | undefined) {
+  if (!role) return '';
+  if (role.includes('cell')) return '矩阵单元格';
+  if (role.includes('effect')) return '效果评价';
+  if (role.includes('step')) return '步骤';
+  if (role.includes('issue')) return '问题点';
+  if (role.includes('archive')) return '归档素材';
+  if (role.includes('material')) return '素材';
+  return role;
+}
+
+function objectTypeLabel(type: string | undefined) {
+  if (!type) return '';
+  if (type === 'product_model') return '测试对象';
+  if (type === 'object') return '对象';
+  if (type === 'competitor') return '竞品对象';
+  return type;
+}
+
+function aiStatusLabel(status: string) {
+  if (status === 'confirmed') return '已确认';
+  if (status === 'rejected') return '已驳回';
+  if (status === 'generated') return '已生成待确认';
+  if (status === 'pending') return '待确认';
+  return status;
 }
 
 function toRenderableMediaUrl(url: string) {
@@ -91,7 +146,7 @@ function MediaPreviewDialog({
     <Dialog open={Boolean(item)} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl overflow-hidden p-0">
         <DialogHeader className="border-b px-4 py-3">
-          <DialogTitle className="truncate text-base">{item?.name || 'Media preview'}</DialogTitle>
+          <DialogTitle className="truncate text-base">{item?.name || '素材预览'}</DialogTitle>
           {context && <p className="truncate text-xs text-muted-foreground">{context}</p>}
         </DialogHeader>
         <div className="bg-muted/30 p-3">
@@ -103,8 +158,8 @@ function MediaPreviewDialog({
           ) : null}
           {item && (
             <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
-              <span>{item.type}</span>
-              {item.role && <span>{item.role}</span>}
+              <span>{mediaTypeLabel(item.type)}</span>
+              {item.role && <span>{mediaRoleLabel(item.role)}</span>}
               {item.owner && <span>{item.owner}</span>}
             </div>
           )}
@@ -116,14 +171,16 @@ function MediaPreviewDialog({
 
 function InteractiveMediaStrip({
   media,
-  limit = 6,
+  limit,
   compact = false,
+  featured = false,
   context,
   testId = 'report-inline-media-item',
 }: {
   media?: ReportDetailSectionBlock['media'];
   limit?: number;
   compact?: boolean;
+  featured?: boolean;
   context?: string;
   testId?: string;
 }) {
@@ -133,8 +190,8 @@ function InteractiveMediaStrip({
   return (
     <>
       {/* Golden contract token: data-testid="report-inline-media-item" */}
-      <div data-testid="report-inline-media-strip" className="mt-2 flex gap-2 overflow-x-auto pb-1">
-      {resolvedMedia.slice(0, limit).map((item) => (
+      <div data-testid="report-inline-media-strip" className="mt-2 flex flex-wrap gap-2 pb-1">
+      {resolvedMedia.slice(0, limit ?? resolvedMedia.length).map((item, index) => (
         <button
           type="button"
           key={`${item.id}-${item.url}`}
@@ -142,7 +199,7 @@ function InteractiveMediaStrip({
           onClick={() => setSelected(item)}
           className={cn(
             'group relative shrink-0 overflow-hidden rounded-md border bg-muted/30 text-left',
-            compact ? 'h-12 w-12' : 'h-16 w-16',
+            featured && index === 0 ? 'h-28 w-36' : featured ? 'h-16 w-16' : compact ? 'h-12 w-12' : 'h-16 w-16',
           )}
           title={item.name}
         >
@@ -153,18 +210,18 @@ function InteractiveMediaStrip({
             <video src={item.url} className="h-full w-full object-cover transition-transform group-hover:scale-105" muted preload="metadata" />
           ) : (
             <div className="flex h-full w-full items-center justify-center bg-muted text-[10px] font-medium uppercase text-muted-foreground">
-              {item.type || 'file'}
+              {mediaTypeLabel(item.type)}
             </div>
           )}
           {!isImageType(item.type) && (
             <span className="absolute inset-x-1 bottom-1 rounded bg-background/90 px-1 py-0.5 text-center text-[9px] text-foreground">
-              {isVideoType(item.type) ? 'play' : 'media'}
+              {isVideoType(item.type) ? '播放' : '素材'}
             </span>
           )}
         </button>
       ))}
-      {resolvedMedia.length > limit && (
-        <div className={cn('flex shrink-0 items-center justify-center rounded-md border bg-muted/20 text-[10px] text-muted-foreground', compact ? 'h-12 w-12' : 'h-16 w-16')}>
+      {typeof limit === 'number' && resolvedMedia.length > limit && (
+        <div className={cn('flex shrink-0 items-center justify-center rounded-md border bg-muted/20 text-[10px] text-muted-foreground', featured ? 'h-16 w-16' : compact ? 'h-12 w-12' : 'h-16 w-16')}>
           +{resolvedMedia.length - limit}
         </div>
       )}
@@ -176,6 +233,22 @@ function InteractiveMediaStrip({
 
 function InlineMediaStrip({ media }: { media?: ReportDetailSectionBlock['media'] }) {
   return <InteractiveMediaStrip media={media} />;
+}
+
+function isBlankMatrixText(value: string | undefined) {
+  const normalized = (value || '').trim();
+  return normalized === '' || normalized === '-' || normalized === '—' || normalized === '暂无' || normalized === '无';
+}
+
+function isMatrixCellEmpty(cell: NonNullable<NonNullable<ReportDetailSectionBlock['matrix']>['rows'][number]['cells'][string]> | undefined) {
+  if (!cell) return true;
+  return isBlankMatrixText(cell.value)
+    && isBlankMatrixText(cell.conclusion)
+    && isBlankMatrixText(cell.score)
+    && isBlankMatrixText(cell.anomaly)
+    && isBlankMatrixText(cell.conclusionTag)
+    && cell.problems.length === 0
+    && cell.media.length === 0;
 }
 
 function InteractiveMediaCards({ media }: { media?: ReportDetailSectionBlock['media'] }) {
@@ -198,21 +271,21 @@ function InteractiveMediaCards({ media }: { media?: ReportDetailSectionBlock['me
           ) : isVideoType(item.type) ? (
             <div className="relative h-28 w-full bg-muted">
               <video src={item.url} className="h-full w-full object-cover" muted preload="metadata" />
-              <span className="absolute inset-x-3 bottom-2 rounded bg-background/90 px-2 py-1 text-center text-[10px] text-foreground">play</span>
+              <span className="absolute inset-x-3 bottom-2 rounded bg-background/90 px-2 py-1 text-center text-[10px] text-foreground">播放</span>
             </div>
           ) : (
             <div className="flex h-28 w-full items-center justify-center bg-muted text-xs font-medium uppercase text-muted-foreground">
-              {item.type || 'media'}
+              {mediaTypeLabel(item.type)}
             </div>
           )}
           <div className="px-3 py-2">
             <div className="flex items-center justify-between gap-2">
               <span className="min-w-0 truncate font-medium">{item.name}</span>
-              <Badge variant="outline" className="shrink-0 text-[10px]">{item.type}</Badge>
+              <Badge variant="outline" className="shrink-0 text-[10px]">{mediaTypeLabel(item.type)}</Badge>
             </div>
             {(item.role || item.owner) && (
               <p className="mt-1 truncate text-[11px] text-muted-foreground">
-                {[item.role, item.owner].filter(Boolean).join(' / ')}
+                {[mediaRoleLabel(item.role), item.owner].filter(Boolean).join(' / ')}
               </p>
             )}
           </div>
@@ -243,7 +316,7 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
     <div data-testid="report-section-block" className={cn('min-w-0 overflow-hidden rounded-md border bg-background', compact ? 'p-2.5' : 'p-3')}>
       <div className="mb-2 flex min-w-0 items-start justify-between gap-2">
         <p className="min-w-0 break-words text-xs font-medium">{block.title}</p>
-        <Badge variant="outline" className="shrink-0 text-[10px]">{block.type}</Badge>
+        <Badge variant="outline" className="shrink-0 text-[10px]">{blockTypeLabel(block.type)}</Badge>
       </div>
 
       {block.description && (
@@ -335,56 +408,90 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
 
       {block.type === 'matrix' && block.matrix && block.matrix.rows.length > 0 && (
         <div className="max-w-full overflow-x-auto">
-          <table data-testid="report-matrix-block" className="w-full min-w-[48rem] border-collapse text-xs">
+          <table data-testid="report-matrix-block" className="w-full min-w-full border-collapse text-xs">
             <thead>
               <tr className="border-b bg-muted/30 text-left text-muted-foreground">
-                <th className="sticky left-0 z-10 w-48 bg-muted px-2 py-2 font-medium">维度/项目</th>
+                <th className="sticky left-0 z-10 w-40 bg-muted px-2 py-2 font-medium">维度/项目</th>
                 {block.matrix.objects.map((object) => (
-                  <th key={object.id} className="min-w-56 px-2 py-2 font-medium">
+                  <th key={object.id} className="min-w-48 px-2 py-2 font-medium">
                     <div className="flex flex-col gap-1">
                       <span className="text-foreground">{object.label}</span>
-                      <span className="font-normal text-muted-foreground">{[object.subtitle, object.objectType].filter(Boolean).join(' / ')}</span>
+                      <span className="font-normal text-muted-foreground">{[object.subtitle, objectTypeLabel(object.objectType)].filter(Boolean).join(' / ')}</span>
                     </div>
                   </th>
                 ))}
-                <th className="min-w-56 px-2 py-2 font-medium">本项结论</th>
               </tr>
             </thead>
             <tbody>
-              {block.matrix.rows.map((row) => (
-                <tr key={row.id} data-testid="report-section-block-row" className="border-b last:border-0">
+              {block.matrix.rows.map((row, rowIndex) => {
+                const showGroup = Boolean(row.group && block.matrix && block.matrix.rows[rowIndex - 1]?.group !== row.group);
+                if (row.rowKind === 'summary') {
+                  const summary = row.summaryText || row.rowConclusion;
+                  return (
+                    <Fragment key={row.id}>
+                      {showGroup && (
+                        <tr data-testid="report-matrix-group-row" className="border-b bg-muted/20">
+                          <td colSpan={(block.matrix?.objects.length || 0) + 1} className="px-2 py-2 text-xs font-semibold text-foreground">
+                            {row.group}
+                          </td>
+                        </tr>
+                      )}
+                      <tr data-testid="report-matrix-summary-row" className="border-b bg-amber-50/70">
+                        <td className="sticky left-0 z-10 bg-amber-50 px-2 py-3 align-top">
+                          <p className="font-medium text-amber-950">{row.label || '本大类小结'}</p>
+                        </td>
+                        <td colSpan={block.matrix?.objects.length || 1} className="px-2 py-3 align-top">
+                          <div className="rounded-md border border-amber-200 bg-background px-3 py-2 text-sm leading-6 text-amber-950">
+                            {summary || '本大类暂无小结。'}
+                          </div>
+                        </td>
+                      </tr>
+                    </Fragment>
+                  );
+                }
+                return (
+                <Fragment key={row.id}>
+                  {showGroup && (
+                    <tr data-testid="report-matrix-group-row" className="border-b bg-muted/20">
+                      <td colSpan={(block.matrix?.objects.length || 0) + 1} className="px-2 py-2 text-xs font-semibold text-foreground">
+                        {row.group}
+                      </td>
+                    </tr>
+                  )}
+                <tr data-testid="report-section-block-row" className="border-b last:border-0">
                   <td className="sticky left-0 z-10 bg-background px-2 py-2 align-top">
                     <p className="font-medium text-foreground">{row.label}</p>
-                    {row.group && <p className="mt-1 text-[11px] text-muted-foreground">{row.group}</p>}
                   </td>
                   {block.matrix?.objects.map((object) => {
                     const cell = row.cells[object.id];
+                    const isEmpty = isMatrixCellEmpty(cell);
                     const context = `${object.label} / ${row.label}`;
                     return (
-                      <td key={object.id} className="max-w-72 px-2 py-2 align-top text-muted-foreground">
-                        {cell ? (
-                          <div className={cn('rounded-md border px-2 py-2', blockItemClass(cell.conclusionTag === 'risk' || cell.problems.length > 0 ? 'risk' : undefined))}>
-                            <div className="flex items-start justify-between gap-2">
-                              <p className="break-words text-foreground">{cell.conclusion}</p>
-                              {cell.score && <Badge variant="outline" className="shrink-0 text-[10px]">{cell.score}</Badge>}
-                            </div>
-                            {cell.value && cell.value !== cell.conclusion && <p className="mt-1 break-words">{cell.value}</p>}
-                            {cell.problems.length > 0 && <p className="mt-1 break-words text-red-700">{cell.problems.join('；')}</p>}
-                            {cell.anomaly && <p className="mt-1 break-words text-amber-700">{cell.anomaly}</p>}
-                            {cell.aiStatus && <p className="mt-1 text-[11px]">AI: {cell.aiStatus}</p>}
-                            <InteractiveMediaStrip media={cell.media} limit={3} compact context={context} testId="report-matrix-media-item" />
+                      <td key={object.id} className="h-px max-w-72 px-2 py-2 align-top text-muted-foreground">
+                        {isEmpty ? (
+                          <div data-testid="report-matrix-empty-cell" className="flex h-full min-h-20 items-center justify-center rounded-md border border-dashed bg-muted/10 px-2 py-2 text-[11px] text-muted-foreground/60">
+                            -
                           </div>
-                        ) : (
-                          <span>-</span>
-                        )}
+                        ) : cell ? (
+                          <div data-testid="report-matrix-filled-cell" className={cn('flex h-full min-h-28 flex-col rounded-md border px-2 py-2', blockItemClass(cell.conclusionTag === 'risk' || cell.problems.length > 0 ? 'risk' : undefined))}>
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="break-words text-foreground">{isBlankMatrixText(cell.conclusion) ? cell.value : cell.conclusion}</p>
+                              {cell.score && !isBlankMatrixText(cell.score) && <Badge variant="outline" className="shrink-0 text-[10px]">{cell.score}</Badge>}
+                            </div>
+                            {cell.value && cell.value !== cell.conclusion && !isBlankMatrixText(cell.value) && <p className="mt-1 break-words">{cell.value}</p>}
+                            {cell.problems.length > 0 && <p className="mt-1 break-words text-red-700">{cell.problems.join('；')}</p>}
+                            {cell.anomaly && !isBlankMatrixText(cell.anomaly) && <p className="mt-1 break-words text-amber-700">{cell.anomaly}</p>}
+                            {cell.aiStatus && <p className="mt-1 text-[11px] text-muted-foreground">结论状态：{aiStatusLabel(cell.aiStatus)}</p>}
+                            <InteractiveMediaStrip media={cell.media} context={context} testId="report-matrix-media-item" />
+                          </div>
+                        ) : null}
                       </td>
                     );
                   })}
-                  <td className="px-2 py-2 align-top text-muted-foreground">
-                    {row.rowConclusion || '-'}
-                  </td>
                 </tr>
-              ))}
+                </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -395,27 +502,29 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
           <InteractiveMediaCards media={block.media?.slice(0, 12)} />
           {(block.media?.length ?? 0) > 12 && (
             <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-              +{(block.media?.length ?? 0) - 12} more media item(s)
+              还有 {(block.media?.length ?? 0) - 12} 个素材
             </div>
           )}
         </div>
       )}
 
       {!block.description && !hasItems && !hasRows && (block.media?.length ?? 0) === 0 && (
-        <p className="text-xs leading-5 text-muted-foreground">{block.emptyMessage || 'No structured content is available for this block.'}</p>
+        <p className="text-xs leading-5 text-muted-foreground">{block.emptyMessage || '当前模块暂无结构化内容。'}</p>
       )}
     </div>
   );
 }
 
 export function ReportSectionBlockStack({ sections, compact = false }: { sections: ReportDetailSection[]; compact?: boolean }) {
+  const visibleSections = sections.filter((section) => section.status !== 'empty');
+
   return (
     <div data-testid="report-section-block-stack" className="space-y-3">
-      {sections.map((section) => (
+      {visibleSections.map((section) => (
         <section key={section.key} data-testid="report-section-block-group" className="space-y-2">
           <div className="flex items-center justify-between gap-2">
             <h3 className={cn('font-semibold', compact ? 'text-sm' : 'text-base')}>{section.title}</h3>
-            <Badge variant="outline" className="text-[10px]">{section.status}</Badge>
+            <Badge variant="outline" className="text-[10px]">{sectionStatusLabel(section.status)}</Badge>
           </div>
           {section.summary && <p className="text-xs leading-5 text-muted-foreground">{section.summary}</p>}
           <div className="grid gap-2">
@@ -425,6 +534,11 @@ export function ReportSectionBlockStack({ sections, compact = false }: { section
           </div>
         </section>
       ))}
+      {visibleSections.length === 0 && (
+        <p className="rounded-md border bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
+          当前报告暂无可展示的结构化模块。
+        </p>
+      )}
     </div>
   );
 }
@@ -472,7 +586,7 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
     <div data-testid="print-section-block" style={{ border: '1px solid #e5e7eb', borderRadius: '6px', padding: '10px', background: '#fff', breakInside: 'avoid', boxSizing: 'border-box', maxWidth: '100%', overflowWrap: 'anywhere' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
         <strong style={{ fontSize: '12px', color: '#111827' }}>{block.title}</strong>
-        <span style={{ fontSize: '10px', color: '#6b7280' }}>{block.type}</span>
+        <span style={{ fontSize: '10px', color: '#6b7280' }}>{blockTypeLabel(block.type)}</span>
       </div>
       {block.description && <p style={{ fontSize: '12px', color: '#4b5563', lineHeight: 1.65, margin: 0 }}>{block.description}</p>}
       {(block.type === 'facts' || block.type === 'list') && hasItems && (
@@ -513,7 +627,7 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
       )}
       {block.type === 'matrix' && block.matrix && block.matrix.rows.length > 0 && (
         <div style={{ maxWidth: '100%', overflowX: 'auto' }}>
-        <table style={{ width: '100%', minWidth: '720px', borderCollapse: 'collapse', fontSize: '9px', tableLayout: 'fixed' }}>
+        <table style={{ width: '100%', minWidth: '100%', borderCollapse: 'collapse', fontSize: '9px', tableLayout: 'fixed' }}>
           <thead>
             <tr>
               <th style={{ border: '1px solid #d1d5db', textAlign: 'left', padding: '5px', color: '#374151', width: '120px' }}>维度/项目</th>
@@ -525,7 +639,6 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
                   )}
                 </th>
               ))}
-              <th style={{ border: '1px solid #d1d5db', textAlign: 'left', padding: '5px', color: '#374151', width: '140px' }}>本项结论</th>
             </tr>
           </thead>
           <tbody>
@@ -544,15 +657,14 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
                         <>
                           <div style={{ color: '#111827', fontWeight: 600 }}>{cell.conclusion}</div>
                           {cell.value && cell.value !== cell.conclusion && <div>{cell.value}</div>}
-                          {cell.score && <div>Score: {cell.score}</div>}
+                          {cell.score && <div>评分：{cell.score}</div>}
                           {cell.problems.length > 0 && <div style={{ color: '#991b1b' }}>{cell.problems.join('；')}</div>}
-                          <PrintMediaThumbs media={cellMedia.slice(0, 3)} />
+                          <PrintMediaThumbs media={cellMedia} />
                         </>
                       ) : '-'}
                     </td>
                   );
                 })}
-                <td style={{ border: '1px solid #e5e7eb', padding: '5px', color: '#4b5563', verticalAlign: 'top', wordBreak: 'break-word' }}>{row.rowConclusion}</td>
               </tr>
             ))}
           </tbody>
@@ -568,7 +680,7 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
                 <img src={item.url} alt={item.name} style={{ width: '100%', height: '72px', objectFit: 'cover', borderRadius: '3px', border: '1px solid #e5e7eb', marginBottom: '4px' }} />
               ) : null}
               <div style={{ fontWeight: 600, color: '#111827', wordBreak: 'break-word' }}>{item.name}</div>
-              <div style={{ color: '#6b7280' }}>{[item.type, item.role, item.owner].filter(Boolean).join(' / ')}</div>
+               <div style={{ color: '#6b7280' }}>{[mediaTypeLabel(item.type), mediaRoleLabel(item.role), item.owner].filter(Boolean).join(' / ')}</div>
             </div>
           ))}
         </div>
@@ -588,7 +700,7 @@ function PrintMediaThumbs({ media }: { media?: ReportDetailMediaItem[] }) {
             <img src={item.url} alt={item.name} style={{ width: '58px', height: '46px', objectFit: 'cover', borderRadius: '3px', border: '1px solid #e5e7eb' }} />
           ) : (
             <div style={{ width: '58px', height: '46px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '3px', border: '1px solid #e5e7eb', background: '#f3f4f6' }}>
-              {isVideoType(item.type) ? 'video' : 'media'}
+              {isVideoType(item.type) ? '视频' : '素材'}
             </div>
           )}
         </div>

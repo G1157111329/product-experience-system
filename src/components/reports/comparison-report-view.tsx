@@ -69,8 +69,10 @@ function cellKey(itemNodeId: unknown, objectId: unknown) {
   return `${String(itemNodeId || '')}::${String(objectId || '')}`;
 }
 
+const MATRIX_CELL_NODE_TYPES = new Set(['item', 'condition', 'process_node', 'metric', 'issue_group']);
+
 function isMatrixNode(node: Row) {
-  return node.node_type !== 'section';
+  return MATRIX_CELL_NODE_TYPES.has(text(node.node_type, 'item'));
 }
 
 function scoreLabel(cell: Row) {
@@ -107,7 +109,7 @@ function CellBody({
       <div className="flex flex-wrap items-center gap-1.5">
         {score && <Badge variant="secondary" className="text-[10px]">{score}</Badge>}
         {Boolean(cell.conclusion_tag) && <Badge variant="outline" className="text-[10px]">{text(cell.conclusion_tag)}</Badge>}
-        {Boolean(cell.ai_status) && <span className="text-[10px] text-muted-foreground">AI: {text(cell.ai_status)}</span>}
+        {Boolean(cell.ai_status) && <span className="text-[10px] text-muted-foreground">结论: {text(cell.ai_status)}</span>}
       </div>
       {Boolean(cell.effect_summary) && (
         <p className="whitespace-pre-wrap break-words text-xs leading-5 text-foreground">
@@ -182,7 +184,7 @@ export function ComparisonReportView({
     ['对比对象', objects.length],
     ['对比节点', itemNodes.length],
     ['单元格', cells.length],
-    ['已确认 AI', confirmedAi.length],
+    ['已确认结论', confirmedAi.length],
   ];
 
   return (

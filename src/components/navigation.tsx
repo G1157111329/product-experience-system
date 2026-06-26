@@ -6,7 +6,8 @@ import { useState, useEffect, useCallback, useMemo, type MouseEvent } from 'reac
 import {
   LayoutDashboard, BookOpen, ClipboardList, AlertTriangle, FileText,
   BarChart3, Menu, ChevronRight, User, LogOut, Key, Pencil,
-  Settings, Plus, Minus, Trash2, Sparkles, Monitor, Moon, Sun,
+  Settings, Plus, Minus, Trash2, Sparkles, Monitor, Moon, Sun, ShieldCheck,
+  PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
@@ -22,6 +23,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useAuth } from '@/lib/auth-context';
 import { BrandLogo } from '@/components/brand-logo';
 import { AiAgentSettings } from '@/components/settings/ai-agent-settings';
+import { AuditLogSettings } from '@/components/settings/audit-log-settings';
 import { toast } from 'sonner';
 
 const themeOptions = [
@@ -56,7 +58,15 @@ const navItems = [
   { href: '/analysis', label: '数据分析', icon: BarChart3 },
 ];
 
-function NavContent({ onNavigate }: { onNavigate?: () => void }) {
+function NavContent({
+  onNavigate,
+  collapsed = false,
+  onToggleCollapse,
+}: {
+  onNavigate?: () => void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const createNavigateHandler = useCallback((href: string) => {
@@ -86,33 +96,82 @@ function NavContent({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-4 py-5 border-b border-border">
-        <Link href="/dashboard" className="flex items-center gap-2.5" onClickCapture={createNavigateHandler('/dashboard')}>
-          <BrandLogo className="h-9 w-9 shrink-0" />
-          <div className="flex flex-col">
-            <span className="font-semibold text-sm leading-tight">产品体验</span>
-            <span className="text-xs text-muted-foreground leading-tight">管理平台</span>
-          </div>
-        </Link>
+      <div className={cn('border-b border-border', collapsed ? 'px-2 py-3' : 'px-4 py-5')}>
+        <div className={cn('flex items-center', collapsed ? 'flex-col gap-2' : 'justify-between gap-2.5')}>
+          {collapsed ? (
+            <Link
+              href="/dashboard"
+              onClickCapture={createNavigateHandler('/dashboard')}
+              className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-muted transition-colors"
+              aria-label="产品体验管理平台 - 工作台"
+              title="工作台"
+            >
+              <BrandLogo className="h-8 w-8 shrink-0" />
+            </Link>
+          ) : (
+            <Link href="/dashboard" className="flex items-center gap-2.5" onClickCapture={createNavigateHandler('/dashboard')}>
+              <BrandLogo className="h-9 w-9 shrink-0" />
+              <div className="flex flex-col">
+                <span className="font-semibold text-sm leading-tight">产品体验</span>
+                <span className="text-xs text-muted-foreground leading-tight">管理平台</span>
+              </div>
+            </Link>
+          )}
+          {onToggleCollapse && !collapsed && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={onToggleCollapse}
+              aria-label="折叠侧边栏"
+              title="折叠侧边栏"
+            >
+              <PanelLeftClose className="h-4 w-4" />
+            </Button>
+          )}
+          {onToggleCollapse && collapsed && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={onToggleCollapse}
+              aria-label="展开侧边栏"
+              title="展开侧边栏"
+            >
+              <PanelLeftOpen className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
       </div>
       <ScrollArea className="flex-1 py-3">
-        <nav className="px-2 space-y-0.5">
+        <nav className={cn('space-y-0.5', collapsed ? 'px-1.5' : 'px-2')}>
           {navItems.map((item) => {
             const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
             return (
-              <Link key={item.href} href={item.href} onClickCapture={createNavigateHandler(item.href)}
-                className={cn('flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors',
-                  isActive ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground')}>
+              <Link
+                key={item.href}
+                href={item.href}
+                onClickCapture={createNavigateHandler(item.href)}
+                title={collapsed ? item.label : undefined}
+                aria-label={collapsed ? item.label : undefined}
+                className={cn(
+                  'flex items-center rounded-lg text-sm transition-colors',
+                  collapsed ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2.5',
+                  isActive
+                    ? 'bg-primary/10 text-primary font-medium'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                )}
+              >
                 <item.icon className="h-4 w-4 shrink-0" />
-                <span>{item.label}</span>
-                {isActive && <ChevronRight className="h-3 w-3 ml-auto opacity-50" />}
+                {!collapsed && <span>{item.label}</span>}
+                {!collapsed && isActive && <ChevronRight className="h-3 w-3 ml-auto opacity-50" />}
               </Link>
             );
           })}
         </nav>
       </ScrollArea>
-      <div className="px-4 py-3 border-t border-border">
-        <UserSection />
+      <div className={cn('border-t border-border', collapsed ? 'px-2 py-2' : 'px-4 py-3')}>
+        <UserSection collapsed={collapsed} />
       </div>
     </div>
   );
@@ -653,12 +712,14 @@ function PlatformSettingsDialog({
   onOpenCategory,
   onOpenStandardOptions,
   onOpenAiAgent,
+  onOpenAuditLog,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onOpenCategory: () => void;
   onOpenStandardOptions: () => void;
   onOpenAiAgent: () => void;
+  onOpenAuditLog: () => void;
 }) {
   const openSetting = (handler: () => void) => {
     onOpenChange(false);
@@ -684,6 +745,12 @@ function PlatformSettingsDialog({
       icon: Sparkles,
       action: onOpenAiAgent,
     },
+    {
+      title: '日志管理',
+      description: '查看和导出账号、报告、AI、分享、导出等关键操作审计日志。',
+      icon: ShieldCheck,
+      action: onOpenAuditLog,
+    },
   ];
 
   return (
@@ -698,7 +765,7 @@ function PlatformSettingsDialog({
           </DialogDescription>
         </DialogHeader>
         <ThemeModeControl />
-        <div className="grid gap-3 py-2 sm:grid-cols-3">
+        <div className="grid gap-3 py-2 sm:grid-cols-2 lg:grid-cols-4">
           {settingItems.map((item) => (
             <button
               key={item.title}
@@ -722,7 +789,7 @@ function PlatformSettingsDialog({
   );
 }
 
-function UserSection() {
+function UserSection({ collapsed = false }: { collapsed?: boolean }) {
   const { user, isAdmin, logout } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
   const [editField, setEditField] = useState<'name' | 'password' | null>(null);
@@ -736,6 +803,7 @@ function UserSection() {
   const [standardOptionsOpen, setStandardOptionsOpen] = useState(false);
   // ── AI Agent settings (admin-only global, stored in DB) ──
   const [aiConfigOpen, setAiConfigOpen] = useState(false);
+  const [auditLogOpen, setAuditLogOpen] = useState(false);
 
   useEffect(() => {
     if (profileOpen && isAdmin && user?.id) {
@@ -798,29 +866,47 @@ function UserSection() {
 
   return (
     <>
-      <div className="flex items-center gap-2">
-        <button onClick={() => setProfileOpen(true)}
-          className="flex items-center gap-2 flex-1 min-w-0 text-left hover:bg-muted rounded-lg px-2 py-1.5 transition-colors">
+      <div className={cn('flex items-center', collapsed ? 'flex-col gap-1.5' : 'gap-2')}>
+        <button
+          onClick={() => setProfileOpen(true)}
+          className={cn(
+            'flex items-center hover:bg-muted rounded-lg transition-colors',
+            collapsed
+              ? 'h-9 w-9 justify-center'
+              : 'gap-2 flex-1 min-w-0 text-left px-2 py-1.5',
+          )}
+          aria-label={collapsed ? '个人信息' : undefined}
+          title={collapsed ? (user?.name || user?.account || '未登录') : undefined}
+        >
           <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
             <User className="h-3.5 w-3.5 text-primary" />
           </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-xs font-medium truncate">{user?.name || user?.account || '未登录'}</div>
-            <div className="text-[10px] text-muted-foreground flex items-center gap-1">
-              <span className="truncate">{user?.account}</span>
-              {isAdmin && <Badge variant="secondary" className="text-[9px] px-1 py-0 h-3.5">管理</Badge>}
+          {!collapsed && (
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-medium truncate">{user?.name || user?.account || '未登录'}</div>
+              <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                <span className="truncate">{user?.account}</span>
+                {isAdmin && <Badge variant="secondary" className="text-[9px] px-1 py-0 h-3.5">管理</Badge>}
+              </div>
             </div>
-          </div>
+          )}
         </button>
         {/* Admin: Settings icon directly in sidebar footer */}
-        {isAdmin && (
+        {isAdmin && !collapsed && (
           <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setPlatformSettingsOpen(true)} title="平台设置" aria-label="平台设置">
             <Settings className="h-3.5 w-3.5" />
           </Button>
         )}
-        <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={logout} aria-label="退出登录">
-          <LogOut className="h-3.5 w-3.5" />
-        </Button>
+        {!collapsed && (
+          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={logout} aria-label="退出登录">
+            <LogOut className="h-3.5 w-3.5" />
+          </Button>
+        )}
+        {collapsed && (
+          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={logout} aria-label="退出登录" title="退出登录">
+            <LogOut className="h-3.5 w-3.5" />
+          </Button>
+        )}
       </div>
 
       {/* Profile Dialog */}
@@ -942,18 +1028,60 @@ function UserSection() {
         onOpenCategory={() => setSettingsOpen(true)}
         onOpenStandardOptions={() => setStandardOptionsOpen(true)}
         onOpenAiAgent={() => setAiConfigOpen(true)}
+        onOpenAuditLog={() => setAuditLogOpen(true)}
       />
       <CategoryProductSettings open={settingsOpen} onOpenChange={setSettingsOpen} />
       <StandardOptionsSettings open={standardOptionsOpen} onOpenChange={setStandardOptionsOpen} />
       <AiAgentSettings open={aiConfigOpen} onOpenChange={setAiConfigOpen} />
+      <AuditLogSettings open={auditLogOpen} onOpenChange={setAuditLogOpen} />
     </>
   );
 }
 
+const SIDEBAR_COLLAPSED_KEY = 'app-sidebar-collapsed';
+
 export function AppSidebar() {
+  const [collapsed, setCollapsed] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+      if (stored === 'true') setCollapsed(true);
+    } catch {
+      /* ignore */
+    }
+    setReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    try {
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(collapsed));
+    } catch {
+      /* ignore */
+    }
+  }, [collapsed, ready]);
+
+  // When collapsed and hovered, expand inline (no overlay, no residual icon rail).
+  const showFull = !collapsed || hovered;
+
   return (
-    <aside className="hidden lg:flex lg:w-60 lg:flex-col lg:border-r border-border bg-card/95 backdrop-blur h-full shrink-0">
-      <NavContent />
+    <aside
+      className={cn(
+        'hidden lg:flex lg:flex-col lg:border-r border-border bg-card/95 backdrop-blur h-full shrink-0 transition-[width] duration-200',
+        showFull ? 'lg:w-60' : 'lg:w-16',
+      )}
+      onMouseEnter={() => {
+        if (collapsed) setHovered(true);
+      }}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <NavContent
+        collapsed={!showFull}
+        onToggleCollapse={() => setCollapsed((current) => !current)}
+      />
     </aside>
   );
 }
@@ -987,6 +1115,7 @@ function MobileUserIcon() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [standardOptionsOpen, setStandardOptionsOpen] = useState(false);
   const [aiConfigOpen, setAiConfigOpen] = useState(false);
+  const [auditLogOpen, setAuditLogOpen] = useState(false);
 
   if (!user) return null;
   return (
@@ -1034,10 +1163,12 @@ function MobileUserIcon() {
         onOpenCategory={() => setSettingsOpen(true)}
         onOpenStandardOptions={() => setStandardOptionsOpen(true)}
         onOpenAiAgent={() => setAiConfigOpen(true)}
+        onOpenAuditLog={() => setAuditLogOpen(true)}
       />
       <CategoryProductSettings open={settingsOpen} onOpenChange={setSettingsOpen} />
       <StandardOptionsSettings open={standardOptionsOpen} onOpenChange={setStandardOptionsOpen} />
       <AiAgentSettings open={aiConfigOpen} onOpenChange={setAiConfigOpen} />
+      <AuditLogSettings open={auditLogOpen} onOpenChange={setAuditLogOpen} />
     </>
   );
 }

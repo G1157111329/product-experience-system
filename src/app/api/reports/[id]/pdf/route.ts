@@ -174,7 +174,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ code: 0, message: 'success', data: delivery });
   }
   if (!delivery.preflight.ok) {
-    return NextResponse.json({ code: 1, message: 'PDF preflight failed', data: delivery }, { status: 400 });
+    return NextResponse.json({ code: 1, message: 'PDF导出预检未通过', data: delivery }, { status: 400 });
   }
 
   const job = await createPdfJob(client, reportId, snapshot, delivery.profile.id, delivery.preflight, access.user);

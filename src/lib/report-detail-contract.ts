@@ -80,7 +80,7 @@ export const V26_DETAIL_CONTRACT_INVENTORY: DetailContractInventoryItem[] = [
     field: 'ai_confirmation_status',
     disposition: 'required_now',
     currentCarrier: 'reports.ai_confirmation_status and comparison_ai_results.status',
-    note: 'Blocks formal publish/PDF when AI is unconfirmed.',
+    note: 'Shows AI confirmation as an admin diagnostic warning; draft PDF/share remains available unless hard preflight errors exist.',
   },
   {
     area: 'PDF',

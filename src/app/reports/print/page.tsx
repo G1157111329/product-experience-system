@@ -943,15 +943,15 @@ function ReportPrintContent() {
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
             <div>
               <div style={{ fontSize: '14px', fontWeight: 700, color: primaryPrintDelivery.preflight.ok ? '#166534' : '#991b1b' }}>
-                Print preflight: {primaryPrintDelivery.preflight.ok ? 'OK' : 'Blocked'}
+                打印预检：{primaryPrintDelivery.preflight.ok ? '可导出' : '需处理'}
               </div>
               <div data-testid="print-profile-label" style={{ fontSize: '12px', color: '#4b5563', marginTop: '2px' }}>
-                Profile {primaryPrintDelivery.profile.id} - {primaryPrintDelivery.profile.paper} {primaryPrintDelivery.profile.orientation} - {primaryPrintDelivery.preflight.counts.printBlocks} print blocks
+                版式 {primaryPrintDelivery.profile.paper} {primaryPrintDelivery.profile.orientation === 'landscape' ? '横向' : '纵向'} - {primaryPrintDelivery.preflight.counts.printBlocks} 个打印模块
               </div>
             </div>
             {primaryPrintDelivery.latestPdfJob && (
               <div data-testid="print-pdf-job-status" style={{ fontSize: '12px', color: '#4b5563' }}>
-                Latest PDF job: {primaryPrintDelivery.latestPdfJob.status}
+                最近PDF任务：{primaryPrintDelivery.latestPdfJob.status}
               </div>
             )}
           </div>

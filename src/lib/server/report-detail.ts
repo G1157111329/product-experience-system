@@ -4,6 +4,13 @@ export type ReportViewMode = 'read' | 'data' | 'evidence' | 'review' | 'print';
 export type ReportSectionStatus = 'ready' | 'empty' | 'warning' | 'blocked';
 export type ReportQualitySeverity = 'info' | 'warning' | 'error';
 export type ReportDetailSectionBlockType = 'summary' | 'facts' | 'list' | 'table' | 'media' | 'matrix';
+export type ReportDetailTemplateKey =
+  | 'single_report_narrative'
+  | 'comparison_image_matrix'
+  | 'comparison_metric_table'
+  | 'comparison_mixed_matrix'
+  | 'model_dossier_timeline'
+  | 'custom_merge_synthesis';
 export type ReportActionType =
   | 'confirm_ai'
   | 'publish'
@@ -27,6 +34,18 @@ export type ReportDetailHeader = {
   sourceTaskIds: string[];
   sourceReportIds: string[];
   templateVersion: string;
+  templateKey: ReportDetailTemplateKey;
+  templateName: string;
+};
+
+export type ReportDetailTemplateSelection = {
+  key: ReportDetailTemplateKey;
+  name: string;
+  reportType: string;
+  layoutProfile: string;
+  defaultViewMode: ReportViewMode;
+  sectionOrder: string[];
+  hideEmptyInReadMode: boolean;
 };
 
 export type ReportDetailConclusion = {
@@ -78,6 +97,8 @@ export type ReportDetailMatrixRow = {
   id: string;
   label: string;
   group?: string;
+  rowKind?: 'item' | 'summary';
+  summaryText?: string;
   rowConclusion: string;
   cells: Record<string, ReportDetailMatrixCell>;
 };
@@ -86,6 +107,10 @@ export type ReportDetailMatrix = {
   objects: ReportDetailMatrixObject[];
   rows: ReportDetailMatrixRow[];
   emptyMessage?: string;
+};
+
+type ReadableComparisonMatrix = ReportDetailMatrix & {
+  summaryText?: string;
 };
 
 export type ReportDetailSectionBlock = {
@@ -188,6 +213,7 @@ export type ReportPrintDelivery = {
 
 export type ReportDetailModel = {
   header: ReportDetailHeader;
+  template: ReportDetailTemplateSelection;
   conclusion: ReportDetailConclusion;
   sections: ReportDetailSection[];
   evidenceSlots: ReportEvidenceSlot[];
@@ -267,6 +293,74 @@ function defaultViewMode(layoutProfile: string): ReportViewMode {
   return layoutProfile.includes('metric') ? 'data' : 'read';
 }
 
+function templateSelectionFor(reportType: string, layoutProfile: string, sectionOrder: string[] = []): ReportDetailTemplateSelection {
+  const defaultMode = defaultViewMode(layoutProfile);
+  if (reportType === 'comparison_report') {
+    if (layoutProfile.includes('metric')) {
+      return {
+        key: 'comparison_metric_table',
+        name: '指标表对比模板',
+        reportType,
+        layoutProfile,
+        defaultViewMode: defaultMode,
+        sectionOrder,
+        hideEmptyInReadMode: true,
+      };
+    }
+    if (layoutProfile.includes('mixed')) {
+      return {
+        key: 'comparison_mixed_matrix',
+        name: '图文混合对比模板',
+        reportType,
+        layoutProfile,
+        defaultViewMode: defaultMode,
+        sectionOrder,
+        hideEmptyInReadMode: true,
+      };
+    }
+    return {
+      key: 'comparison_image_matrix',
+      name: '图片矩阵对比模板',
+      reportType,
+      layoutProfile,
+      defaultViewMode: defaultMode,
+      sectionOrder,
+      hideEmptyInReadMode: true,
+    };
+  }
+  if (reportType === 'model_merged_report') {
+    return {
+      key: 'model_dossier_timeline',
+      name: '型号阶段档案模板',
+      reportType,
+      layoutProfile,
+      defaultViewMode: defaultMode,
+      sectionOrder,
+      hideEmptyInReadMode: true,
+    };
+  }
+  if (reportType === 'custom_merged_report') {
+    return {
+      key: 'custom_merge_synthesis',
+      name: '自定义合并专题模板',
+      reportType,
+      layoutProfile,
+      defaultViewMode: defaultMode,
+      sectionOrder,
+      hideEmptyInReadMode: true,
+    };
+  }
+  return {
+    key: 'single_report_narrative',
+    name: '普通报告叙事模板',
+    reportType,
+    layoutProfile,
+    defaultViewMode: defaultMode,
+    sectionOrder,
+    hideEmptyInReadMode: true,
+  };
+}
+
 function aiSummaryOf(content: Row) {
   const generated = isRecord(content.ai_summary) ? content.ai_summary : {};
   const overrides = isRecord(content.review_overrides) && isRecord(content.review_overrides.ai_summary)
@@ -314,10 +408,8 @@ function sourceIds(report: Row, snapshotJson: Row) {
   };
 }
 
-function conclusionLevelFrom(report: Row, issueRows: Row[]) {
-  const aiStatus = text(report.ai_confirmation_status);
+function conclusionLevelFrom(report: Row, issueRows: Row[]): ReportDetailConclusion['conclusionLevel'] {
   const openHighRisk = issueRows.some((issue) => isHighRiskLevel(text(issue.level)) && !isClosedStatus(text(issue.status)));
-  if (aiStatus === 'pending' || aiStatus === 'rejected') return 'blocked';
   if (openHighRisk) return 'risk';
   return 'neutral';
 }
@@ -329,12 +421,10 @@ function conclusionFrom(report: Row, issues: Row[]): ReportDetailConclusion {
   const conclusionLevel = conclusionLevelFrom(report, issues);
 
   return {
-    keyConclusion: firstNonEmpty(aiSummary.summary, content.summary, report.title, 'No report conclusion is available.'),
+    keyConclusion: firstNonEmpty(aiSummary.summary, content.summary, report.title, '暂无报告结论。'),
     conclusionLevel,
     keyRisks: stringArray(aiSummary.risks),
-    recommendedNextAction: aiStatus === 'pending' || aiStatus === 'generated'
-      ? 'confirm_ai'
-      : conclusionLevel === 'blocked'
+    recommendedNextAction: conclusionLevel === 'blocked'
         ? 'fill_missing'
         : text(report.status).toLowerCase() === 'published' || text(report.status).includes('\u5df2\u53d1\u5e03')
           ? 'share'
@@ -350,13 +440,15 @@ function conclusionFrom(report: Row, issues: Row[]): ReportDetailConclusion {
 function buildHeader(report: Row, snapshot: Row | null | undefined): ReportDetailHeader {
   const snapshotJson = snapshotJsonOf(snapshot);
   const layoutProfile = layoutProfileOf(report, snapshotJson);
+  const reportType = reportTypeOf(report);
+  const template = templateSelectionFor(reportType, layoutProfile);
   const sources = sourceIds(report, snapshotJson);
   return {
     reportId: text(report.id),
-    title: text(report.title, 'Untitled report'),
-    reportType: reportTypeOf(report),
+    title: text(report.title, '未命名报告'),
+    reportType,
     layoutProfile,
-    defaultViewMode: defaultViewMode(layoutProfile),
+    defaultViewMode: template.defaultViewMode,
     productModel: text(report.product_model) || null,
     status: text(report.status, 'draft'),
     snapshotStatus: text(snapshotJson.snapshot_status, text(report.status, 'draft')),
@@ -365,6 +457,8 @@ function buildHeader(report: Row, snapshot: Row | null | undefined): ReportDetai
     sourceTaskIds: sources.sourceTaskIds,
     sourceReportIds: sources.sourceReportIds,
     templateVersion: DEFAULT_TEMPLATE_VERSION,
+    templateKey: template.key,
+    templateName: template.name,
   };
 }
 
@@ -393,13 +487,13 @@ function hasAny(...values: unknown[]) {
 function sourceTraceBlocks(report: Row, snapshotJson: Row): ReportDetailSectionBlock[] {
   const sources = sourceIds(report, snapshotJson);
   return [
-    block('source_trace:facts', 'facts', 'Source and version', {
+    block('source_trace:facts', 'facts', '来源与版本', {
       items: compact([
-        fact('Report ID', report.id),
-        fact('Task IDs', sources.sourceTaskIds.join(', ')),
-        fact('Report IDs', sources.sourceReportIds.join(', ')),
-        fact('Snapshot version', snapshotJson.version),
-        fact('Template version', DEFAULT_TEMPLATE_VERSION),
+        fact('当前报告', firstNonEmpty(report.title, report.id)),
+        fact('来源任务数', sources.sourceTaskIds.length),
+        fact('来源报告数', sources.sourceReportIds.length),
+        fact('快照版本', snapshotJson.version),
+        fact('模板版本', DEFAULT_TEMPLATE_VERSION),
       ]),
     }),
   ];
@@ -498,10 +592,24 @@ function stepProblemMedia(step: Row, owner: string) {
 }
 
 function taskDetailRows(task: Row) {
+  const fieldLabels: Record<string, string> = {
+    title: '任务名称',
+    product: '产品名称',
+    product_model: '产品型号',
+    project_type: '项目类型',
+    project_phase: '项目阶段',
+    product_category: '产品品类',
+    organizer: '任务负责人',
+    test_date: '测试日期',
+    status: '任务状态',
+    description: '任务说明',
+    created_at: '创建时间',
+    updated_at: '更新时间',
+  };
   return Object.entries(task)
     .filter(([key, value]) => !['id', 'selected_standards', 'created_by'].includes(key) && value !== null && value !== undefined && value !== '')
     .slice(0, 24)
-    .map(([key, value]) => ({ Field: key, Value: text(value) }));
+    .map(([key, value]) => ({ '字段': fieldLabels[key] || key, '内容': text(value) }));
 }
 
 function contentSections(report: Row, content: Row, issues: Row[], materials: Row[]): ReportDetailSection[] {
@@ -521,199 +629,181 @@ function contentSections(report: Row, content: Row, issues: Row[], materials: Ro
     ...reEvaluationMedia(issue),
   ];
   const recipeStepRows = recipes.flatMap((recipe) => rows(recipe.recipe_steps).map((step) => ({
-    Recipe: firstNonEmpty(recipe.name, recipe.id),
-    Step: firstNonEmpty(step.step_number, '-'),
-    Operation: firstNonEmpty(step.operation, '-'),
-    Problem: stepProblemText(step),
-    Evidence: String(stepProblemMedia(step, `${firstNonEmpty(recipe.name, recipe.id)} / step ${firstNonEmpty(step.step_number, '')}`).length),
+    '功能/食谱': firstNonEmpty(recipe.name, recipe.id),
+    '步骤': firstNonEmpty(step.step_number, '-'),
+    '具体操作': firstNonEmpty(step.operation, '-'),
+    '问题点': stepProblemText(step),
+    '素材数': String(stepProblemMedia(step, `${firstNonEmpty(recipe.name, recipe.id)} / 步骤 ${firstNonEmpty(step.step_number, '')}`).length),
   })));
   const recipeEffectRows = recipes.map((recipe) => {
     const effectMedia = mediaItems(rows(recipe.effect_materials), firstNonEmpty(recipe.name, recipe.id));
     const stepMediaCount = rows(recipe.recipe_steps).reduce((sum, step) => sum + rows(step.materials).length, 0);
     const effectProblemText = parseProblemPoints(recipe.effect_problem_point).map((point) => point.text).join('; ');
     return {
-      Recipe: firstNonEmpty(recipe.name, recipe.id),
-      Effect: firstNonEmpty(recipe.effect_description, isRecord(recipe.effect_ai_result) ? recipe.effect_ai_result.summary : '', '-'),
-      Score: firstNonEmpty(recipe.effect_score, isRecord(recipe.effect_ai_result) ? recipe.effect_ai_result.score : '', '-'),
-      Risk: firstNonEmpty(effectProblemText, Number(recipe.problem_count || 0) > 0 ? `${recipe.problem_count} problem(s)` : '', '-'),
-      Evidence: String(effectMedia.length + stepMediaCount),
+      '功能/食谱': firstNonEmpty(recipe.name, recipe.id),
+      '效果评价': firstNonEmpty(recipe.effect_description, isRecord(recipe.effect_ai_result) ? recipe.effect_ai_result.summary : '', '-'),
+      '评分': firstNonEmpty(recipe.effect_score, isRecord(recipe.effect_ai_result) ? recipe.effect_ai_result.score : '', '-'),
+      '问题点': firstNonEmpty(effectProblemText, Number(recipe.problem_count || 0) > 0 ? `${recipe.problem_count} 个问题` : '', '-'),
+      '素材数': String(effectMedia.length + stepMediaCount),
     };
   });
   const recipeMedia = recipes.flatMap((recipe) => [
     ...mediaItems(rows(recipe.effect_materials), firstNonEmpty(recipe.name, recipe.id)),
-    ...rows(recipe.recipe_steps).flatMap((step) => mediaItems(rows(step.materials), `${firstNonEmpty(recipe.name, recipe.id)} / step ${firstNonEmpty(step.step_number, '')}`)),
+    ...rows(recipe.recipe_steps).flatMap((step) => mediaItems(rows(step.materials), `${firstNonEmpty(recipe.name, recipe.id)} / 步骤 ${firstNonEmpty(step.step_number, '')}`)),
   ]);
   const effectProblemItems = recipes.flatMap((recipe) => parseProblemPoints(recipe.effect_problem_point).map((point, index) => ({
-    label: `${firstNonEmpty(recipe.name, recipe.id)} effect problem ${index + 1}`,
+    label: `${firstNonEmpty(recipe.name, recipe.id)} 效果问题 ${index + 1}`,
     value: point.text,
-    note: point.materialIds.length ? `materials: ${point.materialIds.join(', ')}` : undefined,
+    note: point.materialIds.length ? `素材：${point.materialIds.join('，')}` : undefined,
     status: 'warning' as const,
     media: mediaByIds(rows(recipe.effect_materials), point.materialIds, firstNonEmpty(recipe.name, recipe.id)),
   })));
   const reEvaluationItems = issueSource.flatMap((issue) => reEvaluationRows(issue).map((item, index) => ({
-    label: `${firstNonEmpty(issue.title, issue.check_item, issue.id)} re-evaluation ${index + 1}`,
-    value: firstNonEmpty(item.description, isRecord(item.ai_result) ? item.ai_result.summary : '', 'No re-evaluation detail'),
+    label: `${firstNonEmpty(issue.title, issue.check_item, issue.id)} 复评估 ${index + 1}`,
+    value: firstNonEmpty(item.description, isRecord(item.ai_result) ? item.ai_result.summary : '', '暂无复评估详情'),
     note: firstNonEmpty(isRecord(item.ai_result) ? item.ai_result.score : '', item.created_at),
     status: 'positive' as const,
-    media: mediaItems(rows(item.materials), `${firstNonEmpty(issue.title, issue.id)} / re-evaluation ${index + 1}`),
+    media: mediaItems(rows(item.materials), `${firstNonEmpty(issue.title, issue.id)} / 复评估 ${index + 1}`),
   })));
 
   return [
-    section('overview', 'Overview', 'ready', ['task_summary', 'conclusion'], {
+    section('overview', '报告概览', 'ready', ['任务摘要', '结论'], {
       blocks: [
-        block('overview:summary', 'summary', 'Report summary', {
+        block('overview:summary', 'summary', '报告摘要', {
           description: firstNonEmpty(aiSummary.summary, content.summary, report.title),
         }),
-        block('overview:facts', 'facts', 'Task facts', {
+        block('overview:facts', 'facts', '任务信息', {
           items: compact([
-            fact('Product', firstNonEmpty(task.product, report.product_model)),
-            fact('Model', firstNonEmpty(task.product_model, report.product_model)),
-            fact('Project type', firstNonEmpty(task.project_type, report.project_type)),
-            fact('Project phase', firstNonEmpty(task.project_phase, report.project_phase)),
-            fact('Organizer', firstNonEmpty(task.organizer, report.organizer)),
-            fact('Test date', task.test_date),
+            fact('产品名称', firstNonEmpty(task.product, report.product_model)),
+            fact('产品型号', firstNonEmpty(task.product_model, report.product_model)),
+            fact('项目类型', firstNonEmpty(task.project_type, report.project_type)),
+            fact('项目阶段', firstNonEmpty(task.project_phase, report.project_phase)),
+            fact('任务负责人', firstNonEmpty(task.organizer, report.organizer)),
+            fact('测试日期', task.test_date),
           ]),
         }),
-        block('overview:task-details', 'table', 'Task detail fields', {
-          columns: ['Field', 'Value'],
+        block('overview:task-details', 'table', '任务字段明细', {
+          columns: ['字段', '内容'],
           rows: taskDetailRows(task),
-          emptyMessage: 'No task detail fields are available.',
+          emptyMessage: '暂无任务字段明细。',
         }),
       ],
     }),
-    section('issue_closure', 'Issue closure', hasAny(issues, content.issues, records) ? 'ready' : 'empty', ['issue_table', 'issue_evidence'], {
+    section('issue_closure', '问题闭环', hasAny(issues, content.issues, records) ? 'ready' : 'empty', ['问题表', '问题素材'], {
       count: issues.length || rows(content.issues).length,
       blocks: [
-        block('issue_closure:table', 'table', 'Issue closure table', {
-          columns: ['Title', 'Level', 'Status', 'Source', 'Responsible', 'Plan', 'Validation', 'Evidence'],
+        block('issue_closure:table', 'table', '问题闭环表', {
+          columns: ['问题标题', '等级', '状态', '来源', '责任人', '整改方案', '验证情况', '素材数'],
           rows: issueSource.slice(0, 8).map((issue) => ({
-            Title: firstNonEmpty(issue.title, issue.check_item, issue.problem_description, issue.id),
-            Level: firstNonEmpty(issue.level, issue.problem_level, '-'),
-            Status: firstNonEmpty(issue.status, issue.evaluation_result, '-'),
-            Source: firstNonEmpty(issue.source_type, issue.standard_category, 'record'),
-            Responsible: firstNonEmpty(issue.responsible_person, issue.responsible_dept, '-'),
-            Plan: firstNonEmpty(issue.improve_plan, issue.no_improve_reason, '-'),
-            Validation: firstNonEmpty(issue.verification_note, reEvaluationRows(issue).length ? `${reEvaluationRows(issue).length} re-evaluation(s)` : '', '-'),
-            Evidence: String(issueMedia(issue).length),
+            '问题标题': firstNonEmpty(issue.title, issue.check_item, issue.problem_description, issue.id),
+            '等级': firstNonEmpty(issue.level, issue.problem_level, '-'),
+            '状态': firstNonEmpty(issue.status, issue.evaluation_result, '-'),
+            '来源': firstNonEmpty(issue.source_type, issue.standard_category, '检查记录'),
+            '责任人': firstNonEmpty(issue.responsible_person, issue.responsible_dept, '-'),
+            '整改方案': firstNonEmpty(issue.improve_plan, issue.no_improve_reason, '-'),
+            '验证情况': firstNonEmpty(issue.verification_note, reEvaluationRows(issue).length ? `${reEvaluationRows(issue).length} 次复评估` : '', '-'),
+            '素材数': String(issueMedia(issue).length),
           })),
-          emptyMessage: 'No issue or failed record is attached to this report.',
+          emptyMessage: '暂无问题或不合格记录。',
         }),
-        block('issue_closure:details', 'list', 'Issue details', {
+        block('issue_closure:details', 'list', '问题详情', {
           items: issueSource.slice(0, 12).map((issue) => ({
             label: firstNonEmpty(issue.title, issue.check_item, issue.id),
-            value: firstNonEmpty(issue.description, issue.problem_description, issue.improve_plan, 'No detail description'),
+            value: firstNonEmpty(issue.description, issue.problem_description, issue.improve_plan, '暂无详情说明'),
             note: firstNonEmpty(issue.responsible_person, issue.category, issue.source_type),
             status: isHighRiskLevel(firstNonEmpty(issue.level, issue.problem_level)) ? 'risk' : 'default',
             media: issueMedia(issue).slice(0, 6),
           })),
-          emptyMessage: 'No issue detail is available.',
+          emptyMessage: '暂无问题详情。',
         }),
-        block('issue_closure:re-evaluations', 'list', 'Re-evaluation evidence', {
+        block('issue_closure:re-evaluations', 'list', '复评估证据', {
           items: reEvaluationItems,
-          emptyMessage: 'No re-evaluation evidence is attached to these issues.',
+          emptyMessage: '暂无复评估证据。',
         }),
       ],
     }),
-    section('function_effect', 'Function effect', recipes.length > 0 ? 'ready' : 'empty', ['recipe_effects', 'effect_evidence'], {
+    section('function_effect', '功能效果', recipes.length > 0 ? 'ready' : 'empty', ['功能效果', '效果素材'], {
       count: recipes.length,
       blocks: [
-        block('function_effect:aggregation', 'table', 'Function effect aggregation', {
-          columns: ['Recipe', 'Effect', 'Score', 'Risk', 'Evidence'],
+        block('function_effect:aggregation', 'table', '功能效果汇总', {
+          columns: ['功能/食谱', '效果评价', '评分', '问题点', '素材数'],
           rows: recipeEffectRows,
-          emptyMessage: 'No function or recipe effect has been captured.',
+          emptyMessage: '暂无功能或食谱效果数据。',
         }),
-        block('function_effect:list', 'list', 'Function effects', {
+        block('function_effect:list', 'list', '功能效果', {
           items: recipes.slice(0, 8).map((recipe) => ({
             label: firstNonEmpty(recipe.name, recipe.id),
-            value: firstNonEmpty(recipe.effect_description, isRecord(recipe.effect_ai_result) ? recipe.effect_ai_result.summary : '', 'No effect description'),
-            note: firstNonEmpty(recipe.effect_score, recipe.problem_count ? `${recipe.problem_count} problem(s)` : ''),
+            value: firstNonEmpty(recipe.effect_description, isRecord(recipe.effect_ai_result) ? recipe.effect_ai_result.summary : '', '暂无效果描述'),
+            note: firstNonEmpty(recipe.effect_score, recipe.problem_count ? `${recipe.problem_count} 个问题` : ''),
             status: recipeProblems.some((item) => text(item.id) === text(recipe.id)) ? 'warning' : 'default',
           })),
-          emptyMessage: 'No function or recipe effect has been captured.',
+          emptyMessage: '暂无功能或食谱效果数据。',
         }),
-        block('function_effect:steps', 'table', 'Recipe steps and problems', {
-          columns: ['Recipe', 'Step', 'Operation', 'Problem', 'Evidence'],
+        block('function_effect:steps', 'table', '食谱步骤与问题点', {
+          columns: ['功能/食谱', '步骤', '具体操作', '问题点', '素材数'],
           rows: recipeStepRows.slice(0, 20),
           defaultCollapsed: true,
           collapsedLabel: '展开功能效果评估模板',
-          emptyMessage: 'No recipe step detail has been captured.',
+          emptyMessage: '暂无食谱步骤详情。',
         }),
-        block('function_effect:step-evidence', 'list', 'Step problem evidence', {
+        block('function_effect:step-evidence', 'list', '步骤问题证据', {
           items: recipes.flatMap((recipe) => rows(recipe.recipe_steps).map((step) => ({
-            label: `${firstNonEmpty(recipe.name, recipe.id)} / step ${firstNonEmpty(step.step_number, '')}`,
+            label: `${firstNonEmpty(recipe.name, recipe.id)} / 步骤 ${firstNonEmpty(step.step_number, '')}`,
             value: stepProblemText(step),
             note: firstNonEmpty(step.operation, recipe.recipe_type),
             status: stepProblemText(step) !== '-' ? 'warning' as const : 'default' as const,
-            media: stepProblemMedia(step, `${firstNonEmpty(recipe.name, recipe.id)} / step ${firstNonEmpty(step.step_number, '')}`).slice(0, 6),
+            media: stepProblemMedia(step, `${firstNonEmpty(recipe.name, recipe.id)} / 步骤 ${firstNonEmpty(step.step_number, '')}`).slice(0, 6),
           }))),
-          emptyMessage: 'No step evidence is attached.',
+          emptyMessage: '暂无步骤问题证据。',
         }),
-        block('function_effect:effect-problems', 'list', 'Effect problem points', {
+        block('function_effect:effect-problems', 'list', '效果问题点', {
           items: effectProblemItems,
-          emptyMessage: 'No effect problem point has been captured.',
+          emptyMessage: '暂无效果问题点。',
         }),
-        block('function_effect:media', 'media', 'Function effect media', {
+        block('function_effect:media', 'media', '功能效果素材', {
           media: recipeMedia.slice(0, 24),
-          emptyMessage: 'No function effect media is attached.',
+          emptyMessage: '暂无功能效果素材。',
         }),
       ],
     }),
-    section('ai_conclusion', 'AI conclusion', isRecord(content.ai_summary) || isRecord(content.review_overrides) ? 'ready' : 'warning', ['ai_summary'], {
+    section('ai_conclusion', '结论', isRecord(content.ai_summary) || isRecord(content.review_overrides) ? 'ready' : 'warning', ['摘要'], {
       blocks: [
-        block('ai_conclusion:summary', 'summary', 'AI summary', {
-          description: firstNonEmpty(aiSummary.summary, 'AI summary is not available.'),
+        block('ai_conclusion:summary', 'summary', '摘要', {
+          description: firstNonEmpty(aiSummary.summary, '暂无摘要。'),
         }),
-        block('ai_conclusion:list', 'list', 'AI strengths, risks, and suggestions', {
+        block('ai_conclusion:list', 'list', '亮点、风险与建议', {
           items: [
-            ...stringArray(aiSummary.strengths).map((strength) => ({ label: 'Strength', value: strength, status: 'positive' as const })),
-            ...stringArray(aiSummary.risks).map((risk) => ({ label: 'Risk', value: risk, status: 'risk' as const })),
-            ...stringArray(aiSummary.suggestions).map((suggestion) => ({ label: 'Suggestion', value: suggestion })),
-            ...(text(aiSummary.historical_position) ? [{ label: 'Historical position', value: text(aiSummary.historical_position) }] : []),
-            ...(reviewNote ? [{ label: 'Review note', value: reviewNote, status: 'warning' as const }] : []),
+            ...stringArray(aiSummary.strengths).map((strength) => ({ label: '亮点', value: strength, status: 'positive' as const })),
+            ...stringArray(aiSummary.risks).map((risk) => ({ label: '风险', value: risk, status: 'risk' as const })),
+            ...stringArray(aiSummary.suggestions).map((suggestion) => ({ label: '建议', value: suggestion })),
+            ...(text(aiSummary.historical_position) ? [{ label: '历史定位', value: text(aiSummary.historical_position) }] : []),
+            ...(reviewNote ? [{ label: '审核备注', value: reviewNote, status: 'warning' as const }] : []),
           ],
-          emptyMessage: 'No AI finding has been captured.',
+          emptyMessage: '暂无关键发现。',
         }),
       ],
     }),
-    section('source_trace', 'Source trace', 'ready', ['source_tasks', 'source_reports'], {
+    section('source_trace', '来源追溯', 'ready', ['来源任务', '来源报告'], {
       blocks: sourceTraceBlocks(report, {}),
     }),
-    section('evidence_archive', 'Evidence archive', contentMaterials.length + materials.length > 0 ? 'ready' : 'empty', ['material_archive'], {
+    section('evidence_archive', '素材归档', contentMaterials.length + materials.length > 0 ? 'ready' : 'empty', ['素材归档'], {
       count: contentMaterials.length + materials.length,
       blocks: [
-        block('evidence_archive:list', 'list', 'Material archive', {
+        block('evidence_archive:list', 'list', '素材归档', {
           items: [...contentMaterials, ...materials].slice(0, 12).map((material) => ({
             label: firstNonEmpty(material.file_name, material.id, material.file_path),
-            value: firstNonEmpty(material.media_role, material.material_type, 'material'),
+            value: firstNonEmpty(material.media_role, material.material_type, '素材'),
             note: firstNonEmpty(material.record_id, material.recipe_step_id, material.recipe_id, material.task_id),
           })),
-          emptyMessage: 'No material is attached to this report.',
+          emptyMessage: '暂无报告素材。',
         }),
-        block('evidence_archive:media', 'media', 'Evidence media', {
+        block('evidence_archive:media', 'media', '证据素材', {
           media: mediaItems([...contentMaterials, ...materials]).slice(0, 30),
-          emptyMessage: 'No media item is available.',
+          emptyMessage: '暂无可展示素材。',
         }),
       ],
     }),
   ];
-}
-
-function comparisonTableRows(snapshotJson: Row) {
-  const objects = rows(snapshotJson.objects);
-  const itemNodes = rows(snapshotJson.item_nodes);
-  const objectName = new Map(objects.map((object) => [text(object.id), firstNonEmpty(object.object_name, object.model, object.id)]));
-  const itemName = new Map(itemNodes.map((item) => [text(item.id), firstNonEmpty(item.node_label, item.id)]));
-  return rows(snapshotJson.cells).slice(0, 12).map((cell) => ({
-    Item: firstNonEmpty(itemName.get(text(cell.item_node_id)), cell.item_node_id),
-    Object: firstNonEmpty(objectName.get(text(cell.object_id)), cell.object_id),
-    Value: firstNonEmpty(cell.metric_value, cell.manual_score, '-'),
-    Score: firstNonEmpty(cell.manual_score, cell.ai_score, '-'),
-    Conclusion: firstNonEmpty(cell.effect_summary, cell.conclusion_tag, '-'),
-    Problems: stringArray(cell.problem_points).join('; ') || '-',
-    Evidence: String([...rows(cell.inline_media), ...rows(cell.appendix_media)].length),
-    AI: firstNonEmpty(cell.ai_status, '-'),
-    Anomaly: firstNonEmpty(cell.anomaly_reason, cell.metric_anomaly_reason, '-'),
-  }));
 }
 
 function comparisonCellMedia(cell: Row, owner?: string) {
@@ -742,12 +832,162 @@ function comparisonMatrixRowConclusion(rowCells: ReportDetailMatrixCell[], objec
   return filled.length > 0 ? '本项已完成横向对比，未标记突出风险。' : '本项暂无有效对比数据。';
 }
 
-function comparisonMatrix(snapshotJson: Row): ReportDetailMatrix {
+function isMetaComparisonObject(object: ReportDetailMatrixObject) {
+  const label = object.label.trim();
+  return ['整体小结', '报告信息', '报告小结', '体验总结', '总结', '小结'].some((keyword) => label.includes(keyword));
+}
+
+function isServerMatrixCellEmpty(cell: ReportDetailMatrixCell | undefined) {
+  if (!cell) return true;
+  const blank = (value: string | undefined) => {
+    const normalized = (value || '').trim();
+    return normalized === '' || normalized === '-' || normalized === '—' || normalized === '暂无' || normalized === '无';
+  };
+  return blank(cell.value)
+    && blank(cell.conclusion)
+    && blank(cell.score)
+    && blank(cell.anomaly)
+    && blank(cell.conclusionTag)
+    && cell.problems.length === 0
+    && cell.media.length === 0;
+}
+
+function isReportInfoMatrixRow(row: ReportDetailMatrixRow) {
+  return row.label.startsWith('报告信息');
+}
+
+function isSummaryMatrixRow(row: ReportDetailMatrixRow) {
+  const group = row.group || '';
+  return row.label.includes('总结') || row.label.includes('小结') || group.includes('总结') || group.includes('小结');
+}
+
+const MATRIX_CELL_NODE_TYPES = new Set(['item', 'condition', 'process_node', 'metric', 'issue_group']);
+
+function isMatrixItemNode(item: Row) {
+  return MATRIX_CELL_NODE_TYPES.has(text(item.node_type, 'item'));
+}
+
+function nodeConfig(item: Row) {
+  return isRecord(item.config) ? item.config : {};
+}
+
+function comparisonParentLabel(item: Row, itemsById: Map<string, Row>) {
+  const parentId = text(item.parent_id);
+  if (!parentId) return '';
+  const parent = itemsById.get(parentId);
+  return parent ? firstNonEmpty(parent.node_label, parent.metric_name, parent.id) : '';
+}
+
+function comparisonRowGroup(item: Row) {
+  const explicit = firstNonEmpty(item.parent_label, item.group_label, item.section_label, item.source_sheet_name);
+  if (explicit) return explicit;
+  const labelParts = text(item.node_label).split('/').map((part) => part.trim()).filter(Boolean);
+  if (labelParts.length >= 2) return labelParts[0];
+  if (item.depth !== undefined && Number(item.depth) > 0) return `层级 ${text(item.depth)}`;
+  return '';
+}
+
+function comparisonRowLabel(item: Row) {
+  const label = firstNonEmpty(item.node_label, item.metric_name, item.id);
+  if (firstNonEmpty(item.parent_label, item.group_label, item.section_label, item.source_sheet_name)) return label;
+  const labelParts = text(item.node_label).split('/').map((part) => part.trim()).filter(Boolean);
+  if (labelParts.length >= 2) return labelParts.slice(1).join(' / ');
+  return label;
+}
+
+function comparisonCellOwnerLabel(item: Row) {
+  const labelParts = text(item.node_label).split('/').map((part) => part.trim()).filter(Boolean);
+  if (labelParts.length >= 2) return labelParts.slice(1).join(' / ');
+  return firstNonEmpty(item.node_label, item.metric_name, item.id);
+}
+
+function filledMatrixCells(row: ReportDetailMatrixRow, objects: ReportDetailMatrixObject[]) {
+  return objects
+    .map((object) => row.cells[object.id])
+    .filter((cell): cell is ReportDetailMatrixCell => !isServerMatrixCellEmpty(cell));
+}
+
+function firstCellText(cell: ReportDetailMatrixCell) {
+  return firstNonEmpty(cell.conclusion, cell.value);
+}
+
+function normalizeReadableComparisonMatrix(matrix: ReportDetailMatrix): ReadableComparisonMatrix {
+  const realObjects = matrix.objects.filter((object) => !isMetaComparisonObject(object));
+  if (realObjects.length === matrix.objects.length) {
+    const summaryText = matrix.rows
+      .filter((row) => row.rowKind === 'summary')
+      .map((row) => row.summaryText || row.rowConclusion)
+      .filter(Boolean)
+      .join('\n\n');
+    return { ...matrix, summaryText };
+  }
+
+  const summaryParts: string[] = [];
+  const rowsForMatrix: ReportDetailMatrixRow[] = [];
+  const pivotRows = new Map<string, ReportDetailMatrixRow>();
+
+  for (const row of matrix.rows) {
+    if (row.rowKind === 'summary') {
+      rowsForMatrix.push({
+        ...row,
+        cells: {},
+      });
+      if (row.summaryText) summaryParts.push(row.summaryText);
+      continue;
+    }
+    const realFilled = filledMatrixCells(row, realObjects);
+    const allFilled = Object.values(row.cells).filter((cell) => !isServerMatrixCellEmpty(cell));
+    if (isSummaryMatrixRow(row) && allFilled.length > 0 && realFilled.length < 2) {
+      const summary = allFilled.map(firstCellText).filter(Boolean).join('\n');
+      if (summary) summaryParts.push(summary);
+      continue;
+    }
+    if (isReportInfoMatrixRow(row)) continue;
+    if (realFilled.length >= 2) {
+      rowsForMatrix.push({
+        ...row,
+        group: (row.group || '').includes('对比') ? '' : row.group,
+        cells: Object.fromEntries(realObjects.map((object) => [object.id, row.cells[object.id]])),
+      });
+      continue;
+    }
+
+    const group = row.group || '';
+    const sourceObject = realObjects.find((object) => group.includes(object.label) || (group && object.label.includes(group)));
+    if (!sourceObject || realFilled.length === 0) continue;
+    const existing = pivotRows.get(row.label) || {
+      id: `pivot:${row.label}`,
+      label: row.label,
+      group: '',
+      rowConclusion: '',
+      cells: Object.fromEntries(realObjects.map((object) => [object.id, {
+        id: `empty:${row.label}:${object.id}`,
+        value: '-',
+        conclusion: '-',
+        problems: [],
+        media: [],
+      } satisfies ReportDetailMatrixCell])),
+    };
+    existing.cells[sourceObject.id] = realFilled[0];
+    pivotRows.set(row.label, existing);
+  }
+
+  const fallbackRows = Array.from(pivotRows.values()).filter((row) => filledMatrixCells(row, realObjects).length >= 2);
+  const normalizedRows = rowsForMatrix.length > 0 ? rowsForMatrix : fallbackRows;
+  return {
+    objects: realObjects,
+    rows: normalizedRows,
+    emptyMessage: matrix.emptyMessage,
+    summaryText: Array.from(new Set(summaryParts)).join('\n\n'),
+  };
+}
+
+function comparisonMatrix(snapshotJson: Row): ReadableComparisonMatrix {
   const objects = sortedByOrder(rows(snapshotJson.objects)).map((object): ReportDetailMatrixObject => ({
     id: text(object.id),
     label: firstNonEmpty(object.object_name, object.model, object.id),
-    subtitle: firstNonEmpty(object.model, object.project_stage, object.task_id),
-    objectType: firstNonEmpty(object.object_type, object.brand),
+    subtitle: firstNonEmpty(object.model, object.project_stage, object.brand),
+    objectType: firstNonEmpty(object.brand, text(object.is_competitor) === 'true' ? '竞品对象' : '对比对象'),
     isCompetitor: Boolean(object.is_competitor),
   })).filter((object) => Boolean(object.id));
   const objectsById = new Map(objects.map((object) => [object.id, object]));
@@ -756,8 +996,34 @@ function comparisonMatrix(snapshotJson: Row): ReportDetailMatrix {
     `${text(cell.item_node_id)}::${text(cell.object_id)}`,
     cell,
   ]));
+  const orderedItems = sortedByOrder(rows(snapshotJson.item_nodes));
+  const itemsById = new Map(orderedItems.map((item) => [text(item.id), item]));
 
-  const matrixRows = sortedByOrder(rows(snapshotJson.item_nodes)).map((item): ReportDetailMatrixRow => {
+  const matrixRows = orderedItems.flatMap((item): ReportDetailMatrixRow[] => {
+    const nodeType = text(item.node_type, 'item');
+    if (nodeType === 'section') return [];
+    if (nodeType === 'summary') {
+      const config = nodeConfig(item);
+      const group = firstNonEmpty(comparisonParentLabel(item, itemsById), comparisonRowGroup(item));
+      const summaryText = firstNonEmpty(
+        config.summary_text,
+        config.summary,
+        item.summary_text,
+        item.summary,
+        item.description,
+        text(item.node_label).includes('总结') || text(item.node_label).includes('小结') ? '' : item.node_label,
+      );
+      return [{
+        id: text(item.id),
+        label: firstNonEmpty(item.node_label, '本大类小结'),
+        group,
+        rowKind: 'summary',
+        summaryText,
+        rowConclusion: summaryText || '本大类暂无小结。',
+        cells: {},
+      }];
+    }
+    if (!isMatrixItemNode(item)) return [];
     const cells = Object.fromEntries(objects.map((object) => {
       const cell = cellByKey.get(`${text(item.id)}::${object.id}`) || {};
       const matrixCell: ReportDetailMatrixCell = {
@@ -769,111 +1035,189 @@ function comparisonMatrix(snapshotJson: Row): ReportDetailMatrix {
         problems: stringArray(cell.problem_points),
         aiStatus: firstNonEmpty(cell.ai_status, cell.ai_confirmation_status),
         anomaly: firstNonEmpty(cell.anomaly_reason, cell.metric_anomaly_reason),
-        media: comparisonCellMedia(cell, `${firstNonEmpty(item.node_label, item.id)} / ${object.label}`).slice(0, 6),
+        media: comparisonCellMedia(cell, `${comparisonCellOwnerLabel(item)} / ${object.label}`),
       };
       return [object.id, matrixCell];
     }));
     const rowCells = Object.values(cells);
-    return {
+    return [{
       id: text(item.id),
-      label: firstNonEmpty(item.node_label, item.metric_name, item.id),
-      group: firstNonEmpty(item.parent_label, item.node_type, item.depth !== undefined ? `depth ${text(item.depth)}` : ''),
+      label: comparisonRowLabel(item),
+      group: firstNonEmpty(comparisonParentLabel(item, itemsById), comparisonRowGroup(item)),
       rowConclusion: comparisonMatrixRowConclusion(rowCells, objectsById),
       cells,
-    };
+    }];
   }).filter((row) => Boolean(row.id));
 
-  return {
+  return normalizeReadableComparisonMatrix({
     objects,
     rows: matrixRows,
-    emptyMessage: 'No comparison matrix data has been captured.',
-  };
-}
-
-function comparisonDifferenceItems(snapshotJson: Row) {
-  const objects = rows(snapshotJson.objects);
-  const itemNodes = rows(snapshotJson.item_nodes);
-  const objectName = new Map(objects.map((object) => [text(object.id), firstNonEmpty(object.object_name, object.model, object.id)]));
-  const itemName = new Map(itemNodes.map((item) => [text(item.id), firstNonEmpty(item.node_label, item.id)]));
-  return rows(snapshotJson.cells)
-    .filter((cell) => text(cell.conclusion_tag) === 'risk' || stringArray(cell.problem_points).length > 0 || text(cell.anomaly_reason) || text(cell.metric_anomaly_reason))
-    .slice(0, 12)
-    .map((cell) => ({
-      label: `${firstNonEmpty(itemName.get(text(cell.item_node_id)), cell.item_node_id)} / ${firstNonEmpty(objectName.get(text(cell.object_id)), cell.object_id)}`,
-      value: firstNonEmpty(cell.effect_summary, stringArray(cell.problem_points).join('; '), cell.anomaly_reason, cell.metric_anomaly_reason, 'Risk cell needs review'),
-      note: firstNonEmpty(cell.conclusion_tag, cell.metric_value, cell.manual_score),
-      status: 'risk' as const,
-      media: comparisonCellMedia(cell, firstNonEmpty(cell.id, cell.object_id)).slice(0, 6),
-    }));
-}
-
-function comparisonCellEvidenceItems(snapshotJson: Row) {
-  const objects = rows(snapshotJson.objects);
-  const itemNodes = rows(snapshotJson.item_nodes);
-  const objectName = new Map(objects.map((object) => [text(object.id), firstNonEmpty(object.object_name, object.model, object.id)]));
-  const itemName = new Map(itemNodes.map((item) => [text(item.id), firstNonEmpty(item.node_label, item.id)]));
-  return rows(snapshotJson.cells)
-    .filter((cell) => comparisonCellMedia(cell).length > 0)
-    .slice(0, 12)
-    .map((cell) => ({
-      label: `${firstNonEmpty(itemName.get(text(cell.item_node_id)), cell.item_node_id)} / ${firstNonEmpty(objectName.get(text(cell.object_id)), cell.object_id)}`,
-      value: firstNonEmpty(cell.effect_summary, cell.metric_value, cell.manual_score, 'Cell evidence'),
-      note: firstNonEmpty(cell.conclusion_tag, cell.ai_status),
-      status: text(cell.conclusion_tag) === 'risk' ? 'risk' as const : 'default' as const,
-      media: comparisonCellMedia(cell, firstNonEmpty(cell.id, cell.object_id)).slice(0, 6),
-    }));
-}
-
-function comparisonAiItems(report: Row, snapshotJson: Row) {
-  const snapshotAi = rows(snapshotJson.confirmed_ai_results).map((result) => ({
-    label: firstNonEmpty(result.scope, result.id, 'AI result'),
-    value: firstNonEmpty(result.summary, result.conclusion, result.status),
-    note: firstNonEmpty(result.status, result.updated_at),
-    status: text(result.status) === 'rejected' ? 'risk' as const : 'default' as const,
-  }));
-  const cellAi = rows(snapshotJson.cells)
-    .filter((cell) => text(cell.ai_status) || text(cell.ai_summary) || text(cell.ai_score))
-    .slice(0, 12)
-    .map((cell) => ({
-      label: firstNonEmpty(cell.id, 'Cell AI'),
-      value: firstNonEmpty(cell.ai_summary, cell.effect_summary, cell.ai_score, cell.ai_status),
-      note: firstNonEmpty(cell.ai_status, cell.conclusion_tag),
-      status: text(cell.ai_status) === 'rejected' ? 'risk' as const : 'default' as const,
-    }));
-  if (snapshotAi.length || cellAi.length) return [...snapshotAi, ...cellAi];
-  return [{
-    label: 'Report AI status',
-    value: `Report AI is ${firstNonEmpty(report.ai_confirmation_status, 'pending')}. Formal publish and PDF require confirmed AI.`,
-    status: text(report.ai_confirmation_status) === 'confirmed' ? 'positive' as const : 'warning' as const,
-  }];
+    emptyMessage: '暂无对比矩阵数据。',
+  });
 }
 
 function sourceReportIds(report: Row, snapshotJson: Row) {
   return sourceIds(report, snapshotJson).sourceReportIds;
 }
 
+function comparisonObjectLabelById(snapshotJson: Row) {
+  return new Map(rows(snapshotJson.objects).map((object) => [
+    text(object.id),
+    firstNonEmpty(object.object_name, object.model, object.id),
+  ]));
+}
+
+function comparisonItemById(snapshotJson: Row) {
+  return new Map(rows(snapshotJson.item_nodes).map((item) => [text(item.id), item]));
+}
+
+function extractExcelField(summary: string, column: string) {
+  const match = summary.match(new RegExp(`(?:^|\\n)${column}\\d+:\\s*([\\s\\S]*?)(?=\\n[A-Z]{1,2}\\d+:|$)`));
+  return match?.[1]?.trim() || '';
+}
+
+function comparisonIssueItems(snapshotJson: Row): ReportDetailSectionBlockItem[] {
+  const objectsById = comparisonObjectLabelById(snapshotJson);
+  const itemsById = comparisonItemById(snapshotJson);
+  const seen = new Set<string>();
+  const issueItems: ReportDetailSectionBlockItem[] = [];
+
+  for (const cell of rows(snapshotJson.cells)) {
+    const item = itemsById.get(text(cell.item_node_id)) || {};
+    const rawItemLabel = firstNonEmpty(item.node_label, item.metric_name, cell.item_node_id);
+    const rowLabel = comparisonRowLabel(item);
+    const group = comparisonRowGroup(item);
+    const objectLabel = firstNonEmpty(objectsById.get(text(cell.object_id)), cell.object_id);
+    const summary = firstNonEmpty(cell.effect_summary, cell.conclusion, cell.metric_value, cell.measurement_value);
+    const problems = stringArray(cell.problem_points);
+    const isIssueRow = rawItemLabel.includes('体验问题') || group.includes('体验问题') || rowLabel.includes('体验问题');
+    const problemText = firstNonEmpty(
+      problems.join('；'),
+      text(cell.conclusion_tag) === 'risk' ? summary : '',
+      firstNonEmpty(cell.anomaly_reason, cell.metric_anomaly_reason),
+      isIssueRow ? firstNonEmpty(extractExcelField(summary, 'E'), extractExcelField(summary, 'R')) : '',
+    );
+    if (!problemText) continue;
+
+    const dimension = firstNonEmpty(extractExcelField(summary, 'B'), extractExcelField(summary, 'C'));
+    const action = firstNonEmpty(extractExcelField(summary, 'G'), extractExcelField(summary, 'J'));
+    const note = compact([group && !group.includes(objectLabel) ? group : '', dimension, action]).join(' / ');
+    const key = `${objectLabel}::${rowLabel}::${problemText}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    issueItems.push({
+      label: `${objectLabel} / ${rowLabel}`,
+      value: problemText,
+      note: note || undefined,
+      status: text(cell.conclusion_tag) === 'risk' ? 'risk' : 'warning',
+      media: comparisonCellMedia(cell, `${rowLabel} / ${objectLabel}`),
+    });
+  }
+
+  return issueItems;
+}
+
+function aiSummaryItems(aiSummary: Row, sourceLabel: string): ReportDetailSectionBlockItem[] {
+  const items: ReportDetailSectionBlockItem[] = [];
+  const summary = firstNonEmpty(aiSummary.summary, aiSummary.conclusion, aiSummary.keyConclusion, aiSummary.recommendation);
+  if (summary) items.push({ label: `${sourceLabel}总结`, value: summary, status: 'default' });
+  for (const risk of stringArray(aiSummary.risks)) {
+    items.push({ label: `${sourceLabel}风险`, value: risk, status: 'warning' });
+  }
+  for (const suggestion of stringArray(aiSummary.suggestions)) {
+    items.push({ label: `${sourceLabel}建议`, value: suggestion, status: 'positive' });
+  }
+  for (const nextStep of stringArray(aiSummary.next_steps)) {
+    items.push({ label: `${sourceLabel}下一步`, value: nextStep, status: 'positive' });
+  }
+  return items;
+}
+
+function comparisonAiSuggestionItems(report: Row, content: Row, snapshotJson: Row): ReportDetailSectionBlockItem[] {
+  const items: ReportDetailSectionBlockItem[] = [];
+  const contentAi = aiSummaryOf(content);
+  items.push(...aiSummaryItems(contentAi, ''));
+
+  if (isRecord(snapshotJson.ai_summary)) items.push(...aiSummaryItems(snapshotJson.ai_summary, ''));
+  if (isRecord(snapshotJson.report_ai_summary)) items.push(...aiSummaryItems(snapshotJson.report_ai_summary, ''));
+
+  for (const result of rows(snapshotJson.confirmed_ai_results)) {
+    const value = firstNonEmpty(result.summary, result.conclusion, result.suggestion, result.value);
+    if (!value) continue;
+    items.push({
+      label: firstNonEmpty(result.scope, result.label, '建议'),
+      value,
+      note: firstNonEmpty(result.status, result.updated_at),
+      status: text(result.status) === 'rejected' ? 'risk' : 'default',
+    });
+  }
+
+  for (const risk of stringArray(snapshotJson.current_risks)) {
+    items.push({ label: '风险提示', value: risk, status: 'warning' });
+  }
+  for (const suggestion of stringArray(snapshotJson.next_validation_items)) {
+    items.push({ label: '验证建议', value: suggestion, status: 'positive' });
+  }
+
+  if (items.length === 0 && text(report.ai_confirmation_status) === 'confirmed') {
+    const summary = firstNonEmpty(snapshotJson.ai_summary_text, snapshotJson.ai_conclusion, snapshotJson.ai_suggestion);
+    if (summary) items.push({ label: '建议', value: summary, status: 'default' });
+  }
+
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = `${item.label}::${item.value}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function comparisonGeneratedSuggestionFallback(summaryText: string, issueItems: ReportDetailSectionBlockItem[]): ReportDetailSectionBlockItem[] {
+  if (!summaryText && issueItems.length === 0) return [];
+  const items: ReportDetailSectionBlockItem[] = [];
+  if (summaryText) {
+    items.push({
+      label: '报告生成总结',
+      value: summaryText,
+      note: '来自报告生成摘要',
+      status: 'default',
+    });
+  }
+  const issueLabels = Array.from(new Set(issueItems.map((item) => item.label.split(' / ').slice(0, 2).join(' / ')))).slice(0, 4);
+  if (issueLabels.length > 0) {
+    items.push({
+      label: '后续验证建议',
+      value: `建议优先围绕问题汇总中的 ${issueLabels.join('、')} 做整改验证，并在下一阶段复测中保留同工况图片/视频证据。`,
+      status: 'positive',
+    });
+  }
+  return items;
+}
+
 function modelStageRows(report: Row, content: Row, snapshotJson: Row) {
   const explicitStages = rows(snapshotJson.stages);
   if (explicitStages.length > 0) {
     return explicitStages.map((stage, index) => ({
-      Stage: firstNonEmpty(stage.stage, stage.project_phase, `Stage ${index + 1}`),
-      Report: firstNonEmpty(stage.report_title, stage.report_id, '-'),
-      Task: firstNonEmpty(stage.task_name, stage.task_id, '-'),
-      Date: firstNonEmpty(stage.test_date, stage.created_at, '-'),
-      Status: firstNonEmpty(stage.status, '-'),
-      Source: firstNonEmpty(stage.source_report_id, stage.report_id, '-'),
+      '阶段': firstNonEmpty(stage.stage, stage.project_phase, `阶段 ${index + 1}`),
+      '报告': firstNonEmpty(stage.report_title, stage.report_id, '-'),
+      '任务': firstNonEmpty(stage.task_name, stage.task_id, '-'),
+      '日期': firstNonEmpty(stage.test_date, stage.created_at, '-'),
+      '状态': firstNonEmpty(stage.status, '-'),
+      '来源': firstNonEmpty(stage.source_report_id, stage.report_id, '-'),
     }));
   }
 
   const task = isRecord(content.task) ? content.task : {};
   const reports = sourceReportIds(report, snapshotJson);
   return (reports.length > 0 ? reports : [text(report.id)]).map((sourceReportId, index) => ({
-    Stage: firstNonEmpty(index === reports.length - 1 ? report.project_phase : '', task.project_phase, report.project_phase, `Stage ${index + 1}`),
-    Report: firstNonEmpty(index === reports.length - 1 ? report.title : '', sourceReportId),
-    Task: firstNonEmpty(task.task_name, task.id, report.task_id, '-'),
-    Date: firstNonEmpty(task.test_date, report.created_at, '-'),
-    Status: firstNonEmpty(report.status, '-'),
-    Source: sourceReportId,
+    '阶段': firstNonEmpty(index === reports.length - 1 ? report.project_phase : '', task.project_phase, report.project_phase, `阶段 ${index + 1}`),
+    '报告': firstNonEmpty(index === reports.length - 1 ? report.title : '', sourceReportId),
+    '任务': firstNonEmpty(task.task_name, task.id, report.task_id, '-'),
+    '日期': firstNonEmpty(task.test_date, report.created_at, '-'),
+    '状态': firstNonEmpty(report.status, '-'),
+    '来源': sourceReportId,
   }));
 }
 
@@ -881,22 +1225,22 @@ function modelIssueEvolutionRows(content: Row, snapshotJson: Row) {
   const explicitRows = rows(snapshotJson.issue_evolution);
   if (explicitRows.length > 0) {
     return explicitRows.map((item) => ({
-      Stage: firstNonEmpty(item.stage, item.project_phase, '-'),
-      Issue: firstNonEmpty(item.issue, item.title, item.check_item, '-'),
-      Level: firstNonEmpty(item.level, item.problem_level, '-'),
-      Status: firstNonEmpty(item.status, item.evaluation_result, '-'),
-      Action: firstNonEmpty(item.action, item.improve_plan, '-'),
-      Evidence: firstNonEmpty(item.evidence, item.source_report_id, '-'),
+      '阶段': firstNonEmpty(item.stage, item.project_phase, '-'),
+      '问题': firstNonEmpty(item.issue, item.title, item.check_item, '-'),
+      '等级': firstNonEmpty(item.level, item.problem_level, '-'),
+      '状态': firstNonEmpty(item.status, item.evaluation_result, '-'),
+      '措施': firstNonEmpty(item.action, item.improve_plan, '-'),
+      '证据': firstNonEmpty(item.evidence, item.source_report_id, '-'),
     }));
   }
 
   return rows(content.records).map((record) => ({
-    Stage: firstNonEmpty(record.project_phase, record.test_phase, '-'),
-    Issue: firstNonEmpty(record.check_item, record.id, '-'),
-    Level: firstNonEmpty(record.problem_level, record.level, '-'),
-    Status: firstNonEmpty(record.evaluation_result, '-'),
-    Action: firstNonEmpty(record.improve_plan, record.problem_description, '-'),
-    Evidence: String(rows(record.materials).length),
+    '阶段': firstNonEmpty(record.project_phase, record.test_phase, '-'),
+    '问题': firstNonEmpty(record.check_item, record.id, '-'),
+    '等级': firstNonEmpty(record.problem_level, record.level, '-'),
+    '状态': firstNonEmpty(record.evaluation_result, '-'),
+    '措施': firstNonEmpty(record.improve_plan, record.problem_description, '-'),
+    '证据': String(rows(record.materials).length),
   }));
 }
 
@@ -904,8 +1248,8 @@ function modelEffectEvolutionItems(content: Row, snapshotJson: Row) {
   const explicitItems = rows(snapshotJson.function_effect_evolution);
   if (explicitItems.length > 0) {
     return explicitItems.map((item) => ({
-      label: firstNonEmpty(item.name, item.function_name, item.stage, 'Function effect'),
-      value: firstNonEmpty(item.effect_description, item.summary, item.effect_score, 'No effect summary'),
+      label: firstNonEmpty(item.name, item.function_name, item.stage, '功能效果'),
+      value: firstNonEmpty(item.effect_description, item.summary, item.effect_score, '暂无效果摘要'),
       note: firstNonEmpty(item.stage, item.effect_score, item.source_report_id),
       status: text(item.status) === 'risk' ? 'risk' as const : 'default' as const,
     }));
@@ -913,7 +1257,7 @@ function modelEffectEvolutionItems(content: Row, snapshotJson: Row) {
 
   return rows(content.recipes).map((recipe) => ({
     label: firstNonEmpty(recipe.name, recipe.id),
-    value: firstNonEmpty(recipe.effect_description, 'No effect description'),
+    value: firstNonEmpty(recipe.effect_description, '暂无效果描述'),
     note: firstNonEmpty(recipe.effect_score, recipe.recipe_type, ''),
     status: text(recipe.effect_problem_point) ? 'warning' as const : 'default' as const,
   }));
@@ -922,35 +1266,35 @@ function modelEffectEvolutionItems(content: Row, snapshotJson: Row) {
 function riskItems(content: Row, snapshotJson: Row) {
   const explicitRisks = stringArray(snapshotJson.current_risks);
   const summaryRisks = stringArray(aiSummaryOf(content).risks);
-  return [...explicitRisks, ...summaryRisks].map((risk) => ({ label: 'Risk', value: risk, status: 'risk' as const }));
+  return [...explicitRisks, ...summaryRisks].map((risk) => ({ label: '风险', value: risk, status: 'risk' as const }));
 }
 
 function validationItems(content: Row, snapshotJson: Row) {
   const explicitItems = stringArray(snapshotJson.next_validation_items);
   const suggestions = stringArray(aiSummaryOf(content).suggestions);
-  return [...explicitItems, ...suggestions].map((suggestion) => ({ label: 'Validation', value: suggestion }));
+  return [...explicitItems, ...suggestions].map((suggestion) => ({ label: '验证项', value: suggestion }));
 }
 
 function customSourceAlignmentRows(report: Row, content: Row, snapshotJson: Row) {
   const explicitRows = rows(snapshotJson.source_alignment);
   if (explicitRows.length > 0) {
     return explicitRows.map((item) => ({
-      Source: firstNonEmpty(item.source_report_id, item.report_id, '-'),
-      Report: firstNonEmpty(item.report_title, item.title, '-'),
-      Task: firstNonEmpty(item.task_name, item.task_id, '-'),
-      Scope: firstNonEmpty(item.scope, item.project_type, '-'),
-      Coverage: firstNonEmpty(item.coverage, item.status, '-'),
+      '来源': firstNonEmpty(item.source_report_id, item.report_id, '-'),
+      '报告': firstNonEmpty(item.report_title, item.title, '-'),
+      '任务': firstNonEmpty(item.task_name, item.task_id, '-'),
+      '范围': firstNonEmpty(item.scope, item.project_type, '-'),
+      '覆盖情况': firstNonEmpty(item.coverage, item.status, '-'),
     }));
   }
 
   const task = isRecord(content.task) ? content.task : {};
   const reports = sourceReportIds(report, snapshotJson);
   return reports.map((sourceReportId, index) => ({
-    Source: sourceReportId,
-    Report: firstNonEmpty(index === reports.length - 1 ? report.title : '', sourceReportId),
-    Task: firstNonEmpty(task.task_name, task.id, report.task_id, '-'),
-    Scope: firstNonEmpty(task.project_type, report.project_type, '-'),
-    Coverage: index === reports.length - 1 ? 'current content attached' : 'source reference only',
+    '来源': sourceReportId,
+    '报告': firstNonEmpty(index === reports.length - 1 ? report.title : '', sourceReportId),
+    '任务': firstNonEmpty(task.task_name, task.id, report.task_id, '-'),
+    '范围': firstNonEmpty(task.project_type, report.project_type, '-'),
+    '覆盖情况': index === reports.length - 1 ? '已附当前内容' : '仅来源引用',
   }));
 }
 
@@ -958,149 +1302,64 @@ function customFieldAlignmentRows(report: Row, content: Row, snapshotJson: Row) 
   const explicitRows = rows(snapshotJson.field_alignment);
   if (explicitRows.length > 0) {
     return explicitRows.map((item) => ({
-      Field: firstNonEmpty(item.field, item.label, '-'),
-      Status: firstNonEmpty(item.status, '-'),
-      Source: firstNonEmpty(item.source, item.source_report_id, '-'),
-      Gap: firstNonEmpty(item.gap, item.note, '-'),
+      '字段': firstNonEmpty(item.field, item.label, '-'),
+      '状态': firstNonEmpty(item.status, '-'),
+      '来源': firstNonEmpty(item.source, item.source_report_id, '-'),
+      '差异': firstNonEmpty(item.gap, item.note, '-'),
     }));
   }
 
   const fields = [
-    { field: 'task', present: isRecord(content.task), source: 'content.task' },
-    { field: 'records', present: rows(content.records).length > 0, source: 'content.records' },
-    { field: 'recipes', present: rows(content.recipes).length > 0, source: 'content.recipes' },
-    { field: 'issues', present: rows(content.issues).length > 0, source: 'content.issues' },
-    { field: 'source reports', present: sourceReportIds(report, snapshotJson).length > 0, source: 'reports.source_report_ids' },
+    { field: '任务信息', present: isRecord(content.task), source: 'content.task' },
+    { field: '检查记录', present: rows(content.records).length > 0, source: 'content.records' },
+    { field: '功能/食谱', present: rows(content.recipes).length > 0, source: 'content.recipes' },
+    { field: '问题点', present: rows(content.issues).length > 0, source: 'content.issues' },
+    { field: '来源报告', present: sourceReportIds(report, snapshotJson).length > 0, source: 'reports.source_report_ids' },
   ];
   return fields.map((item) => ({
-    Field: item.field,
-    Status: item.present ? 'covered' : 'missing',
-    Source: item.source,
-    Gap: item.present ? '-' : 'needs structured source mapping or manual validation',
+    '字段': item.field,
+    '状态': item.present ? '已覆盖' : '缺失',
+    '来源': item.source,
+    '差异': item.present ? '-' : '需要补充结构化来源或人工确认',
   }));
 }
 
-function comparisonSections(report: Row, snapshotJson: Row, layoutProfile: string): ReportDetailSection[] {
-  const objects = rows(snapshotJson.objects);
-  const cells = rows(snapshotJson.cells);
-  const itemNodes = rows(snapshotJson.item_nodes);
-  const metricDefinitions = rows(snapshotJson.metric_definitions);
+function comparisonSections(report: Row, content: Row, snapshotJson: Row, layoutProfile: string): ReportDetailSection[] {
   const metric = layoutProfile.includes('metric');
   const mixed = layoutProfile.includes('mixed');
-  const differenceItems = comparisonDifferenceItems(snapshotJson);
-  const cellEvidenceItems = comparisonCellEvidenceItems(snapshotJson);
-  const aiItems = comparisonAiItems(report, snapshotJson);
   const horizontalMatrix = comparisonMatrix(snapshotJson);
+  const blockTitle = metric ? '指标横向对比' : mixed ? '图文横向对比' : '横向对比矩阵';
+  const summaryText = firstNonEmpty(
+    horizontalMatrix.summaryText,
+    snapshotJson.comparison_summary,
+    isRecord(snapshotJson.assembly) ? snapshotJson.assembly.comparison_intent : '',
+    report.summary,
+    report.title,
+  );
+  const issueItems = comparisonIssueItems(snapshotJson);
+  const explicitAiItems = comparisonAiSuggestionItems(report, content, snapshotJson);
+  const aiItems = explicitAiItems.length > 0 ? explicitAiItems : comparisonGeneratedSuggestionFallback(summaryText, issueItems);
 
   return [
-    section('overview', 'Overview', 'ready', ['object_strip', 'test_conditions', 'comparability'], {
-      blocks: [
-        block('overview:summary', 'summary', 'Comparison intent', {
-          description: firstNonEmpty(
-            isRecord(snapshotJson.assembly) ? snapshotJson.assembly.comparison_intent : '',
-            isRecord(snapshotJson.assembly) ? snapshotJson.assembly.name : '',
-            report.title,
-          ),
-        }),
-        block('overview:facts', 'facts', 'Comparison facts', {
-          items: compact([
-            fact('Objects', objects.length),
-            fact('Items', itemNodes.length),
-            fact('Cells', cells.length),
-            fact('Layout profile', layoutProfile),
-            fact('Primary task', snapshotJson.primary_task_id),
-          ]),
-        }),
-        block('overview:objects', 'facts', 'Object strip', {
-          items: objects.map((object) => ({
-            label: firstNonEmpty(object.object_name, object.model, object.id),
-            value: firstNonEmpty(object.object_type, object.brand, 'object'),
-            note: firstNonEmpty(object.model, object.project_stage, object.task_id),
-            status: object.is_competitor ? 'warning' : 'default',
-          })),
-          emptyMessage: 'No comparison object is attached.',
-        }),
-        block('overview:comparability', 'summary', 'Comparability boundary', {
-          description: firstNonEmpty(
-            snapshotJson.comparability_statement,
-            isRecord(snapshotJson.assembly) ? snapshotJson.assembly.comparability_statement : '',
-            'Objects are compared within the captured task/snapshot context. Treat conclusions as evidence-backed comparison, not uncontrolled absolute ranking.',
-          ),
-        }),
-      ],
-    }),
-    section(metric ? 'metric_table' : mixed ? 'mixed_matrix' : 'image_matrix', metric ? 'Metric comparison' : mixed ? 'Mixed comparison' : 'Image matrix', cells.length > 0 ? 'ready' : 'empty', [
-      metric ? 'comparison_metric_table' : mixed ? 'comparison_mixed_matrix' : 'comparison_image_matrix',
-      'cell_evidence',
-    ], {
-      count: cells.length,
+    section(metric ? 'metric_table' : mixed ? 'mixed_matrix' : 'image_matrix', blockTitle, horizontalMatrix.rows.length > 0 ? 'ready' : 'empty', ['体验结论', blockTitle], {
       blocks: compact([
-        block(metric ? 'metric_table:matrix' : 'comparison_matrix:horizontal', 'matrix', metric ? 'Metric comparison matrix' : 'Multi-model comparison matrix', {
-          description: 'Rows are dimensions or metrics; columns are product/model/material/config objects. Cell media can be reviewed inline and is reused by A3 PDF output.',
+        summaryText && block('comparison_matrix:summary', 'summary', '体验结论', {
+          description: summaryText,
+        }),
+        issueItems.length > 0 && block('comparison_matrix:issues', 'list', '问题汇总', {
+          items: issueItems,
+          emptyMessage: '暂无问题点。',
+        }),
+        aiItems.length > 0 && block('comparison_matrix:ai_suggestions', 'list', 'AI建议', {
+          items: aiItems,
+          emptyMessage: '暂无AI建议。',
+        }),
+        block(metric ? 'metric_table:matrix' : 'comparison_matrix:horizontal', 'matrix', blockTitle, {
+          description: '横向为真实对比对象，纵向为同一工况或评价项；图片、视频和评价文字保留在对应单元格内。',
           matrix: horizontalMatrix,
           emptyMessage: horizontalMatrix.emptyMessage,
         }),
-        block(metric ? 'metric_table:table' : 'comparison_matrix:table', 'table', metric ? 'Metric comparison table' : 'Comparison matrix', {
-          columns: metric
-            ? ['Item', 'Object', 'Value', 'Score', 'Conclusion', 'Problems', 'Evidence', 'AI', 'Anomaly']
-            : ['Item', 'Object', 'Value', 'Score', 'Conclusion', 'Problems', 'Evidence', 'AI'],
-          rows: comparisonTableRows(snapshotJson),
-          emptyMessage: 'No comparison cells have been captured.',
-        }),
-        metricDefinitions.length > 0 && block('metric_table:definitions', 'table', 'Metric definitions', {
-          columns: ['Metric', 'Formula', 'Threshold'],
-          rows: metricDefinitions.map((definition) => ({
-            Metric: firstNonEmpty(definition.label, definition.key),
-            Formula: firstNonEmpty(definition.formula, '-'),
-            Threshold: firstNonEmpty(definition.threshold, '-'),
-          })),
-        }),
-        block(metric ? 'metric_table:differences' : 'comparison_matrix:differences', 'list', 'Key differences and risks', {
-          items: differenceItems,
-          emptyMessage: 'No risk or difference cell has been captured.',
-        }),
-        block(metric ? 'metric_table:cell-evidence' : 'comparison_matrix:cell-evidence', 'list', 'Cell evidence', {
-          items: cellEvidenceItems,
-          emptyMessage: 'No inline cell evidence has been captured.',
-        }),
       ]),
-    }),
-    section('row_conclusions', 'Row conclusions', itemNodes.length > 0 ? 'ready' : 'empty', ['row_conclusion_list'], {
-      count: itemNodes.length,
-      blocks: [
-        block('row_conclusions:list', 'list', 'Rows and dimensions', {
-          items: itemNodes.map((item) => ({
-            label: firstNonEmpty(item.node_label, item.id),
-            value: firstNonEmpty(item.node_type, 'item'),
-            note: item.depth !== undefined ? `depth ${text(item.depth)}` : undefined,
-          })),
-          emptyMessage: 'No row-level comparison dimension has been captured.',
-        }),
-      ],
-    }),
-    section('ai_conclusion', 'AI conclusion', text(report.ai_confirmation_status) === 'confirmed' ? 'ready' : 'blocked', ['cell_ai', 'row_ai', 'report_ai'], {
-      blocks: [
-        block('ai_conclusion:list', 'list', 'AI confirmation boundary', {
-          items: aiItems,
-          emptyMessage: 'No AI result is attached to this comparison snapshot.',
-        }),
-      ],
-    }),
-    section('source_trace', 'Source trace', 'ready', ['source_tasks', 'source_reports'], {
-      blocks: sourceTraceBlocks(report, snapshotJson),
-    }),
-    section('evidence_archive', 'Evidence archive', objects.length > 0 ? 'ready' : 'empty', ['comparison_archive'], {
-      count: objects.length,
-      blocks: [
-        block('evidence_archive:list', 'list', 'Comparison objects', {
-          items: objects.map((object) => ({
-            label: firstNonEmpty(object.object_name, object.model, object.id),
-            value: firstNonEmpty(object.object_type, 'object'),
-            note: firstNonEmpty(object.model, object.task_id),
-          })),
-          emptyMessage: 'No comparison object is attached to this snapshot.',
-        }),
-      ],
     }),
   ];
 }
@@ -1113,72 +1372,72 @@ function modelSections(report: Row, content: Row, snapshotJson: Row): ReportDeta
   const risks = riskItems(content, snapshotJson);
   const validations = validationItems(content, snapshotJson);
   return [
-    section('model_dossier', 'Model dossier', 'ready', ['model_header', 'current_conclusion'], {
+    section('model_dossier', '型号档案', 'ready', ['型号信息', '当前结论'], {
       blocks: [
-        block('model_dossier:facts', 'facts', 'Model dossier', {
+        block('model_dossier:facts', 'facts', '型号档案', {
           items: compact([
-            fact('Model', report.product_model),
-            fact('Project type', report.project_type),
-            fact('Project phase', report.project_phase),
-            fact('Current report', report.title),
-            fact('Source reports', sources.sourceReportIds.join(', ')),
-            fact('Source tasks', sources.sourceTaskIds.join(', ')),
+            fact('产品型号', report.product_model),
+            fact('项目类型', report.project_type),
+            fact('项目阶段', report.project_phase),
+            fact('当前报告', report.title),
+            fact('来源报告', sources.sourceReportIds.length),
+            fact('来源任务', sources.sourceTaskIds.length),
           ]),
         }),
-        block('model_dossier:comparability', 'summary', 'Comparability boundary', {
+        block('model_dossier:comparability', 'summary', '可比性边界', {
           description: firstNonEmpty(
             snapshotJson.comparability_statement,
-            'Stages are chained by model and source report references. Use this as an evolution dossier; do not treat weakly aligned stages as direct ranking evidence.',
+            '本页按型号和来源报告串联不同阶段，用于观察演进关系；阶段条件不完全一致时，不应作为直接排名证据。',
           ),
         }),
       ],
     }),
-    section('stage_timeline', 'Stage timeline', stageRows.length > 0 ? 'ready' : 'warning', ['stage_cards', 'source_trace'], {
+    section('stage_timeline', '阶段时间线', stageRows.length > 0 ? 'ready' : 'warning', ['阶段卡片', '来源追溯'], {
       count: stageRows.length,
       blocks: [
-        block('stage_timeline:table', 'table', 'Stage timeline', {
-          columns: ['Stage', 'Report', 'Task', 'Date', 'Status', 'Source'],
+        block('stage_timeline:table', 'table', '阶段时间线', {
+          columns: ['阶段', '报告', '任务', '日期', '状态', '来源'],
           rows: stageRows,
-          emptyMessage: 'No source report stage has been attached.',
+          emptyMessage: '暂无来源报告阶段。',
         }),
       ],
     }),
-    section('issue_evolution', 'Issue evolution', issueRows.length > 0 ? 'ready' : 'empty', ['issue_evolution_table'], {
+    section('issue_evolution', '问题演进', issueRows.length > 0 ? 'ready' : 'empty', ['问题演进表'], {
       count: issueRows.length,
       blocks: [
-        block('issue_evolution:table', 'table', 'Issue evolution', {
-          columns: ['Stage', 'Issue', 'Level', 'Status', 'Action', 'Evidence'],
+        block('issue_evolution:table', 'table', '问题演进', {
+          columns: ['阶段', '问题', '等级', '状态', '措施', '证据'],
           rows: issueRows,
-          emptyMessage: 'No issue evolution record has been captured.',
+          emptyMessage: '暂无问题演进记录。',
         }),
       ],
     }),
-    section('function_effect_evolution', 'Function effect evolution', effectItems.length > 0 ? 'ready' : 'empty', ['function_effect_timeline'], {
+    section('function_effect_evolution', '功能效果演进', effectItems.length > 0 ? 'ready' : 'empty', ['功能效果时间线'], {
       count: effectItems.length,
       blocks: [
-        block('function_effect_evolution:list', 'list', 'Function effect evolution', {
+        block('function_effect_evolution:list', 'list', '功能效果演进', {
           items: effectItems,
-          emptyMessage: 'No function effect evolution has been captured.',
+          emptyMessage: '暂无功能效果演进记录。',
         }),
       ],
     }),
-    section('current_risks', 'Current risks', risks.length > 0 ? 'ready' : 'empty', ['risk_summary'], {
+    section('current_risks', '当前风险', risks.length > 0 ? 'ready' : 'empty', ['风险摘要'], {
       blocks: [
-        block('current_risks:list', 'list', 'Current risks', {
+        block('current_risks:list', 'list', '当前风险', {
           items: risks,
-          emptyMessage: 'No current risk has been captured.',
+          emptyMessage: '暂无当前风险。',
         }),
       ],
     }),
-    section('next_validation', 'Next-stage validation', validations.length > 0 ? 'ready' : 'warning', ['validation_next_steps'], {
+    section('next_validation', '下一阶段验证', validations.length > 0 ? 'ready' : 'warning', ['验证事项'], {
       blocks: [
-        block('next_validation:list', 'list', 'Next-stage validation', {
+        block('next_validation:list', 'list', '下一阶段验证', {
           items: validations,
-          emptyMessage: 'No next-stage validation item has been captured.',
+          emptyMessage: '暂无下一阶段验证项。',
         }),
       ],
     }),
-    section('source_trace', 'Source reports', 'ready', ['source_reports'], {
+    section('source_trace', '来源报告', 'ready', ['来源报告'], {
       blocks: sourceTraceBlocks(report, snapshotJson),
     }),
   ];
@@ -1190,65 +1449,65 @@ function customSections(report: Row, content: Row, snapshotJson: Row) {
   const fieldAlignmentRows = customFieldAlignmentRows(report, content, snapshotJson);
   const validations = validationItems(content, snapshotJson);
   return [
-    section('merge_purpose', 'Merge purpose', 'ready', ['merge_goal'], {
+    section('merge_purpose', '合并目的', 'ready', ['合并目标'], {
       blocks: [
-        block('merge_purpose:summary', 'summary', 'Merge purpose', {
+        block('merge_purpose:summary', 'summary', '合并目的', {
           description: firstNonEmpty(content.summary, aiSummaryOf(content).summary, report.title),
         }),
       ],
     }),
-    section('source_alignment', 'Source alignment', sourceAlignmentRows.length > 0 ? 'ready' : 'warning', ['source_report_list', 'source_alignment_table'], {
+    section('source_alignment', '来源对齐', sourceAlignmentRows.length > 0 ? 'ready' : 'warning', ['来源报告列表', '来源对齐表'], {
       count: sourceAlignmentRows.length,
       blocks: [
-        block('source_alignment:table', 'table', 'Source alignment', {
-          columns: ['Source', 'Report', 'Task', 'Scope', 'Coverage'],
+        block('source_alignment:table', 'table', '来源对齐', {
+          columns: ['来源', '报告', '任务', '范围', '覆盖情况'],
           rows: sourceAlignmentRows,
-          emptyMessage: 'No source report has been attached.',
+          emptyMessage: '暂无来源报告。',
         }),
-        block('source_alignment:list', 'list', 'Source reports', {
-          items: sourceReports.map((sourceReportId) => ({ label: sourceReportId, value: 'source report' })),
-          emptyMessage: 'No source report has been attached.',
+        block('source_alignment:list', 'list', '来源报告', {
+          items: sourceReports.map((sourceReportId) => ({ label: sourceReportId, value: '来源报告' })),
+          emptyMessage: '暂无来源报告。',
         }),
       ],
     }),
-    section('field_alignment', 'Field alignment', fieldAlignmentRows.some((row) => row.Status === 'missing') ? 'warning' : 'ready', ['field_alignment_table'], {
-      summary: 'Field-level coverage is shown before synthesis so reviewers can see what is comparable and what still needs validation.',
+    section('field_alignment', '字段对齐', fieldAlignmentRows.some((row) => row['状态'] === '缺失') ? 'warning' : 'ready', ['字段对齐表'], {
+      summary: '先呈现字段覆盖情况，便于判断哪些内容可直接对比，哪些内容仍需验证。',
       blocks: [
-        block('field_alignment:table', 'table', 'Field alignment', {
-          columns: ['Field', 'Status', 'Source', 'Gap'],
+        block('field_alignment:table', 'table', '字段对齐', {
+          columns: ['字段', '状态', '来源', '差异'],
           rows: fieldAlignmentRows,
         }),
       ],
     }),
-    section('comparability_boundary', 'Comparability boundary', 'warning', ['comparability_statement'], {
+    section('comparability_boundary', '可比性边界', 'warning', ['可比性说明'], {
       blocks: [
-        block('comparability_boundary:summary', 'summary', 'Comparability boundary', {
-          description: 'Source reports may differ by phase, owner, field completeness, and evidence quality. Treat cross-source conclusions as synthesis, not raw one-to-one comparison.',
+        block('comparability_boundary:summary', 'summary', '可比性边界', {
+          description: '不同来源报告可能在阶段、负责人、字段完整度和证据质量上存在差异，跨来源结论应作为综合判断，而不是原始一对一排名。',
         }),
       ],
     }),
-    section('synthesis', 'Synthesis', hasAny(content.ai_summary, content.summary) ? 'ready' : 'empty', ['synthesis_summary'], {
+    section('synthesis', '综合结论', hasAny(content.ai_summary, content.summary) ? 'ready' : 'empty', ['综合摘要'], {
       blocks: [
-        block('synthesis:summary', 'summary', 'Synthesis', {
+        block('synthesis:summary', 'summary', '综合结论', {
           description: firstNonEmpty(aiSummaryOf(content).summary, content.summary),
         }),
       ],
     }),
-    section('gaps', 'Gaps', 'warning', ['missing_fields'], {
+    section('gaps', '待补信息', 'warning', ['缺失字段'], {
       blocks: [
-        block('gaps:list', 'list', 'Known gaps', {
+        block('gaps:list', 'list', '已知待补信息', {
           items: fieldAlignmentRows
-            .filter((row) => row.Status === 'missing')
-            .map((row) => ({ label: row.Field, value: row.Gap, note: row.Source, status: 'warning' as const })),
-          emptyMessage: 'No missing merge field has been detected.',
+            .filter((row) => row['状态'] === '缺失')
+            .map((row) => ({ label: row['字段'], value: row['差异'], note: row['来源'], status: 'warning' as const })),
+          emptyMessage: '暂无检测到缺失合并字段。',
         }),
       ],
     }),
-    section('validation_suggestions', 'Validation suggestions', validations.length > 0 ? 'ready' : 'warning', ['validation_next_steps'], {
+    section('validation_suggestions', '验证建议', validations.length > 0 ? 'ready' : 'warning', ['验证事项'], {
       blocks: [
-        block('validation_suggestions:list', 'list', 'Validation next steps', {
+        block('validation_suggestions:list', 'list', '后续验证建议', {
           items: validations,
-          emptyMessage: 'No validation suggestion has been captured.',
+          emptyMessage: '暂无验证建议。',
         }),
       ],
     }),
@@ -1260,7 +1519,7 @@ function buildSections(report: Row, snapshot: Row | null | undefined, issues: Ro
   const snapshotJson = snapshotJsonOf(snapshot);
   const reportType = reportTypeOf(report);
   const layoutProfile = layoutProfileOf(report, snapshotJson);
-  if (reportType === 'comparison_report') return comparisonSections(report, snapshotJson, layoutProfile);
+  if (reportType === 'comparison_report') return comparisonSections(report, content, snapshotJson, layoutProfile);
   if (reportType === 'model_merged_report') return modelSections(report, content, snapshotJson);
   if (reportType === 'custom_merged_report') return customSections(report, content, snapshotJson);
   return contentSections(report, content, issues, materials);
@@ -1304,13 +1563,19 @@ function evidenceFromSnapshot(snapshotJson: Row): ReportEvidenceSlot[] {
   for (const cell of rows(snapshotJson.cells)) {
     const inline = rows(cell.inline_media);
     const appendix = rows(cell.appendix_media);
+    const hasProblemPoints = stringArray(cell.problem_points).length > 0;
+    const hasCellContent = Boolean(
+      firstNonEmpty(cell.effect_summary, cell.conclusion, cell.manual_score, cell.ai_score, cell.metric_value, cell.measurement_value)
+      || hasProblemPoints
+      || text(cell.conclusion_tag),
+    );
     slots.push(evidenceSlot(
       `comparison_cell:${text(cell.id)}`,
       'comparison_cell',
       text(cell.id),
       'cell_evidence',
       [...inline, ...appendix].map(materialId).filter(Boolean),
-      Boolean(cell.problem_points) || text(cell.conclusion_tag) === 'risk',
+      hasCellContent && (hasProblemPoints || text(cell.conclusion_tag) === 'risk'),
     ));
   }
   return slots;
@@ -1444,28 +1709,28 @@ function buildPrintDelivery(input: {
   const snapshotStatus = firstNonEmpty(snapshotJson.snapshot_status, input.snapshot?.status, input.report.status);
 
   if (missingRequired.length > 0) {
-    errors.push(preflightIssue('missing_required_evidence', 'error', `${missingRequired.length} required evidence slot(s) are missing.`, 'Add or reconnect the required evidence before exporting PDF.'));
+    warnings.push(preflightIssue('missing_required_evidence', 'warning', `${missingRequired.length} 个重点证据位尚未关联素材。`, '补充或重新关联素材后，报告证据链会更完整。'));
   }
   if (aiStatus === 'pending' || aiStatus === 'generated') {
-    errors.push(preflightIssue('ai_unconfirmed', 'error', 'AI conclusion is not manually confirmed.', 'Confirm or replace AI conclusions before formal PDF delivery.'));
+    warnings.push(preflightIssue('ai_unconfirmed', 'warning', '结论尚未人工确认。', '如需正式归档，可由管理员确认或替换结论。'));
   }
   if (videoWithoutCover.length > 0) {
-    warnings.push(preflightIssue('video_cover_missing', 'warning', `${videoWithoutCover.length} inline video evidence item(s) may not have a printable cover.`, 'Attach a cover image or move the video to appendix-only evidence.'));
+    warnings.push(preflightIssue('video_cover_missing', 'warning', `${videoWithoutCover.length} 个视频素材可能缺少打印封面。`, '补充视频封面或将视频移至附录素材。'));
   }
   if ((profile.paper === 'A3' && maxColumns > 9) || (profile.paper === 'A4' && maxColumns > 6)) {
-    warnings.push(preflightIssue('matrix_over_wide', 'warning', `The widest print table has ${maxColumns} columns.`, 'Split wide matrices or verify the A3 landscape profile before delivery.'));
+    warnings.push(preflightIssue('matrix_over_wide', 'warning', `最宽表格有 ${maxColumns} 列。`, '建议拆分宽矩阵，或确认使用 A3 横向版式。'));
   }
   if (input.snapshot && text(snapshotStatus).toLowerCase() !== 'published') {
-    warnings.push(preflightIssue('snapshot_unpublished', 'warning', 'The latest snapshot is not marked as published.', 'Publish or confirm the snapshot before treating the PDF as a formal deliverable.'));
+    warnings.push(preflightIssue('snapshot_unpublished', 'warning', '当前快照尚未标记为正式发布。', '正式归档前可由管理员确认快照版本。'));
   }
   if (!input.snapshot && reportType === 'comparison_report') {
-    errors.push(preflightIssue('snapshot_missing', 'error', 'Comparison report is missing a snapshot.', 'Generate a report snapshot before PDF export.'));
+    errors.push(preflightIssue('snapshot_missing', 'error', '对比报告缺少可渲染快照。', '请先生成报告快照。'));
   } else if (!input.snapshot) {
-    warnings.push(preflightIssue('content_json_fallback', 'warning', 'No snapshot is attached; print preview uses current report content.', 'Publish a snapshot to freeze the formal delivery version.'));
+    warnings.push(preflightIssue('content_json_fallback', 'warning', '当前报告未绑定快照，打印预览会读取最新内容。', '正式归档前建议生成快照。'));
   }
   for (const check of input.qualityChecks.filter((check) => check.severity === 'error')) {
     if (errors.some((item) => item.code === check.code)) continue;
-    errors.push(preflightIssue(check.code, 'error', check.message, 'Resolve the blocking quality check before export.'));
+    errors.push(preflightIssue(check.code, 'error', check.message, '请先处理该诊断项。'));
   }
 
   return {
@@ -1494,34 +1759,34 @@ function buildActions(report: Row, qualityChecks: ReportQualityCheck[], pdfJobs:
   return [
     {
       type: 'confirm_ai',
-      label: 'Confirm AI',
+      label: '确认结论',
       priority: 'primary',
       enabled: aiStatus === 'pending' || aiStatus === 'generated',
-      reason: aiStatus === 'confirmed' ? 'AI is already confirmed.' : undefined,
+      reason: aiStatus === 'confirmed' ? '结论已确认。' : undefined,
     },
     {
       type: 'publish',
-      label: 'Publish snapshot',
+      label: '确认归档版本',
       priority: 'primary',
-      enabled: !hasErrors && aiStatus === 'confirmed',
-      reason: hasErrors ? 'Blocking quality checks exist.' : aiStatus !== 'confirmed' ? 'AI is not confirmed.' : undefined,
+      enabled: !hasErrors,
+      reason: hasErrors ? '存在需要处理的诊断项。' : undefined,
     },
     {
       type: latestPdfFailed ? 'retry_pdf' : 'export_pdf',
-      label: latestPdfFailed ? 'Retry PDF' : 'Export PDF',
+      label: latestPdfFailed ? '重新生成PDF' : '导出PDF',
       priority: 'secondary',
-      enabled: !hasErrors && aiStatus === 'confirmed',
-      reason: aiStatus !== 'confirmed' ? 'AI is not confirmed.' : undefined,
+      enabled: !hasErrors,
+      reason: hasErrors ? '存在需要处理的诊断项。' : undefined,
     },
     {
       type: 'share',
-      label: 'Share',
+      label: '分享报告',
       priority: 'secondary',
       enabled: !hasErrors,
     },
     {
       type: 'view_source',
-      label: 'View source',
+      label: '查看来源',
       priority: 'governance',
       enabled: true,
     },
@@ -1535,31 +1800,31 @@ function buildQualityChecks(report: Row, snapshot: Row | null | undefined, issue
   const sources = sourceIds(report, snapshotJsonOf(snapshot));
 
   if (reportType === 'comparison_report' && !snapshot) {
-    checks.push({ code: 'missing_comparison_snapshot', severity: 'error', message: 'Comparison report is missing a renderable snapshot.' });
+    checks.push({ code: 'missing_comparison_snapshot', severity: 'error', message: '对比报告缺少可渲染快照。' });
   }
   if (reportType !== 'comparison_report' && !isRecord(report.content)) {
-    checks.push({ code: 'missing_report_content', severity: 'error', message: 'Report is missing content JSON.' });
+    checks.push({ code: 'missing_report_content', severity: 'error', message: '报告缺少结构化内容。' });
   }
   if (sources.sourceTaskIds.length === 0 && sources.sourceReportIds.length === 0) {
-    checks.push({ code: 'missing_sources', severity: 'warning', message: 'Report has no source task or source report.' });
+    checks.push({ code: 'missing_sources', severity: 'warning', message: '报告缺少来源任务或来源报告。' });
   }
   if (aiStatus === 'pending' || aiStatus === 'generated') {
-    checks.push({ code: 'ai_unconfirmed', severity: 'error', message: 'AI conclusion is not manually confirmed; formal publish and PDF delivery are blocked.' });
+    checks.push({ code: 'ai_unconfirmed', severity: 'warning', message: '结论尚未人工确认。' });
   }
   if (aiStatus === 'rejected') {
-    checks.push({ code: 'ai_rejected', severity: 'warning', message: 'AI conclusion was rejected and needs a manual conclusion.' });
+    checks.push({ code: 'ai_rejected', severity: 'warning', message: '结论已被驳回，需要补充人工结论。' });
   }
   const missingRequiredEvidence = evidenceSlots.filter((slot) => slot.required && slot.status === 'missing');
   if (missingRequiredEvidence.length > 0) {
-    checks.push({ code: 'missing_required_evidence', severity: 'error', message: `${missingRequiredEvidence.length} required evidence slot(s) are missing.` });
+    checks.push({ code: 'missing_required_evidence', severity: 'warning', message: `${missingRequiredEvidence.length} 个重点证据位尚未关联素材。` });
   }
   const openHighRiskIssues = issues.filter((issue) => isHighRiskLevel(text(issue.level)) && !isClosedStatus(text(issue.status)));
   if (openHighRiskIssues.length > 0) {
-    checks.push({ code: 'open_high_risk_issues', severity: 'warning', message: `${openHighRiskIssues.length} high-risk issue(s) are still open.` });
+    checks.push({ code: 'open_high_risk_issues', severity: 'warning', message: `${openHighRiskIssues.length} 个高风险问题仍未关闭。` });
   }
   const failedPdf = pdfJobs.find((job) => text(job.report_id) === text(report.id) && text(job.status) === 'failed');
   if (failedPdf) {
-    checks.push({ code: 'pdf_failed', severity: 'warning', message: text(failedPdf.error_message, 'PDF generation failed and needs a retry.') });
+    checks.push({ code: 'pdf_failed', severity: 'warning', message: text(failedPdf.error_message, 'PDF生成失败，需要重试。') });
   }
   return checks;
 }
@@ -1574,8 +1839,13 @@ export function buildReportDetailModel({
   const evidenceSlots = buildEvidenceSlots(report, snapshot, materials);
   const qualityChecks = buildQualityChecks(report, snapshot, issues, evidenceSlots, pdfJobs);
   const sections = buildSections(report, snapshot, issues, materials);
+  const snapshotJson = snapshotJsonOf(snapshot);
+  const layoutProfile = layoutProfileOf(report, snapshotJson);
+  const reportType = reportTypeOf(report);
+  const template = templateSelectionFor(reportType, layoutProfile, sections.map((sectionItem) => sectionItem.key));
   return {
     header: buildHeader(report, snapshot),
+    template,
     conclusion: conclusionFrom(report, issues),
     sections,
     evidenceSlots,

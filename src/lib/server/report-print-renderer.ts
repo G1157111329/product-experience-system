@@ -9,6 +9,22 @@ function escapeHtml(value: unknown) {
     .replace(/'/g, '&#39;');
 }
 
+function isBlankMatrixText(value: string | undefined) {
+  const normalized = (value || '').trim();
+  return normalized === '' || normalized === '-' || normalized === '—' || normalized === '暂无' || normalized === '无';
+}
+
+function isMatrixCellEmpty(cell: NonNullable<NonNullable<ReportDetailSectionBlock['matrix']>['rows'][number]['cells'][string]> | undefined) {
+  if (!cell) return true;
+  return isBlankMatrixText(cell.value)
+    && isBlankMatrixText(cell.conclusion)
+    && isBlankMatrixText(cell.score)
+    && isBlankMatrixText(cell.anomaly)
+    && isBlankMatrixText(cell.conclusionTag)
+    && cell.problems.length === 0
+    && cell.media.length === 0;
+}
+
 function renderBlock(block: ReportDetailSectionBlock) {
   const title = `<h3>${escapeHtml(block.title)}</h3>`;
   const description = block.description ? `<p class="description">${escapeHtml(block.description)}</p>` : '';
@@ -37,19 +53,37 @@ function renderBlock(block: ReportDetailSectionBlock) {
     const head = [
       '<th class="matrix-item">维度/项目</th>',
       ...matrix.objects.map((object) => `<th>${escapeHtml(object.label)}<small>${escapeHtml([object.subtitle, object.objectType].filter(Boolean).join(' / '))}</small></th>`),
-      '<th class="matrix-conclusion">本项结论</th>',
     ].join('');
-    const body = matrix.rows.map((row) => `
+    let lastGroup = '';
+    const body = matrix.rows.map((row) => {
+      const group = row.group || '';
+      const groupRow = group && group !== lastGroup
+        ? `<tr class="matrix-group"><td colspan="${matrix.objects.length + 1}">${escapeHtml(group)}</td></tr>`
+        : '';
+      lastGroup = group;
+      if (row.rowKind === 'summary') {
+        const summary = row.summaryText || row.rowConclusion || '本大类暂无小结。';
+        return `
+      ${groupRow}
+      <tr class="matrix-summary">
+        <td class="matrix-item"><b>${escapeHtml(row.label || '本大类小结')}</b></td>
+        <td colspan="${Math.max(1, matrix.objects.length)}">${escapeHtml(summary)}</td>
+      </tr>
+    `;
+      }
+      return `
+      ${groupRow}
       <tr>
-        <td class="matrix-item"><b>${escapeHtml(row.label)}</b>${row.group ? `<small>${escapeHtml(row.group)}</small>` : ''}</td>
+        <td class="matrix-item"><b>${escapeHtml(row.label)}</b></td>
         ${matrix.objects.map((object) => {
           const cell = row.cells[object.id];
-          if (!cell) return '<td>-</td>';
-          const media = renderMedia(cell.media.slice(0, 3));
+          if (isMatrixCellEmpty(cell)) return '<td class="matrix-empty">-</td>';
+          if (!cell) return '<td class="matrix-empty">-</td>';
+          const media = renderMedia(cell.media);
           const problems = cell.problems.length ? `<p class="cell-risk">${escapeHtml(cell.problems.join('；'))}</p>` : '';
           const anomaly = cell.anomaly ? `<p class="cell-warning">${escapeHtml(cell.anomaly)}</p>` : '';
           return `<td class="${escapeHtml(cell.conclusionTag || 'default')}">
-            <b>${escapeHtml(cell.conclusion)}</b>
+            <b>${escapeHtml(isBlankMatrixText(cell.conclusion) ? cell.value : cell.conclusion)}</b>
             ${cell.value && cell.value !== cell.conclusion ? `<p>${escapeHtml(cell.value)}</p>` : ''}
             ${cell.score ? `<em>Score: ${escapeHtml(cell.score)}</em>` : ''}
             ${problems}
@@ -58,9 +92,9 @@ function renderBlock(block: ReportDetailSectionBlock) {
             ${media}
           </td>`;
         }).join('')}
-        <td class="matrix-conclusion">${escapeHtml(row.rowConclusion || '-')}</td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
     return `<div class="block matrix">${title}${description}<table class="matrix-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
   }
   if (block.type === 'media') {
@@ -130,10 +164,10 @@ export function renderReportDetailPdfHtml(model: ReportDetailModel, generatedAt 
     .matrix-table th, .matrix-table td { padding: 4px; }
     .matrix-table small { display: block; color: #6b7280; font-weight: 400; margin-top: 2px; }
     .matrix-item { width: 44mm; }
-    .matrix-conclusion { width: 48mm; }
     .matrix-table p { margin: 2px 0; }
     .matrix-table em { display: block; color: #6b7280; font-style: normal; font-size: 8px; }
     .matrix-table .risk { background: #fef2f2; color: #991b1b; }
+    .matrix-summary td { background: #fffbeb; color: #78350f; white-space: pre-wrap; }
     .cell-risk { color: #991b1b; }
     .cell-warning { color: #92400e; }
     .media-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
@@ -147,12 +181,12 @@ export function renderReportDetailPdfHtml(model: ReportDetailModel, generatedAt 
 <body>
   <div class="cover">
     <h1>${escapeHtml(model.header.title)}</h1>
-    <div class="meta">Profile: ${escapeHtml(profile.id)} / ${escapeHtml(profile.paper)} ${escapeHtml(profile.orientation)} / Generated: ${escapeHtml(generatedAt.toISOString())}</div>
+    <div class="meta">版式：${escapeHtml(profile.paper)} ${profile.orientation === 'landscape' ? '横向' : '纵向'} / 生成时间：${escapeHtml(generatedAt.toISOString())}</div>
     <div>${escapeHtml(model.conclusion.keyConclusion)}</div>
   </div>
   <div class="preflight" data-testid="pdf-preflight-summary">
-    <b>Print preflight: ${model.printDelivery.preflight.ok ? 'OK' : 'BLOCKED'}</b>
-    <ul>${preflight || '<li class="positive">No blocking print issue.</li>'}</ul>
+    <b>打印预检：${model.printDelivery.preflight.ok ? '可导出' : '需处理'}</b>
+    <ul>${preflight || '<li class="positive">暂无影响导出的预检问题。</li>'}</ul>
   </div>
   ${sections}
 </body>

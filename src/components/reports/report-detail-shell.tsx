@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { useAuth } from '@/lib/auth-context';
 import { cn } from '@/lib/utils';
 import { hasReadableSectionBlocks, ReportSectionBlockView } from './report-section-block-renderer';
 import type { ReportDetailAction, ReportDetailModel, ReportDetailSection, ReportEvidenceSlot } from '@/lib/server/report-detail';
@@ -33,10 +34,10 @@ type ReportDetailShellProps = {
 };
 
 const levelLabel: Record<string, string> = {
-  positive: '正向',
-  neutral: '中性',
-  risk: '风险',
-  blocked: '阻断',
+  positive: '表现良好',
+  neutral: '可阅读',
+  risk: '需关注',
+  blocked: '需补充',
 };
 
 const reportTypeLabel: Record<string, string> = {
@@ -55,16 +56,69 @@ const viewModeLabel: Record<string, string> = {
 };
 
 const sectionStatusLabel: Record<string, string> = {
-  ready: 'Ready',
-  empty: 'Empty',
-  warning: 'Needs review',
-  blocked: 'Blocked',
+  ready: '已完成',
+  empty: '暂无内容',
+  warning: '待完善',
+  blocked: '需处理',
 };
 
 const evidenceStatusLabel: Record<string, string> = {
-  ready: 'Evidence ready',
-  missing: 'Evidence missing',
+  ready: '素材已关联',
+  missing: '待补素材',
 };
+
+const actionTypeLabel: Record<string, string> = {
+  confirm_ai: '确认结论',
+  publish: '确认归档版本',
+  fill_missing: '补充报告内容',
+  retry_pdf: '重新生成PDF',
+  share: '分享报告',
+  export_pdf: '导出PDF',
+  view_source: '查看来源',
+  no_action: '无需操作',
+};
+
+function userActionLabel(actionType: string) {
+  return actionTypeLabel[actionType] || actionType;
+}
+
+function deliveryLayoutLabel(layoutProfile: string) {
+  if (layoutProfile.includes('comparison') && layoutProfile.includes('image')) return '图片对比矩阵';
+  if (layoutProfile.includes('comparison') && layoutProfile.includes('mixed')) return '图文对比矩阵';
+  if (layoutProfile.includes('comparison') && layoutProfile.includes('metric')) return '指标对比矩阵';
+  if (layoutProfile.includes('model_merged')) return '型号合并报告';
+  if (layoutProfile.includes('custom_merged')) return '自定义合并报告';
+  if (layoutProfile.includes('a3_landscape')) return 'A3 横向报告';
+  if (layoutProfile.includes('a4_portrait')) return 'A4 纵向报告';
+  return '标准报告版式';
+}
+
+function aiStatusLabel(status: string) {
+  if (status === 'confirmed') return '已确认';
+  if (status === 'rejected') return '已驳回';
+  if (status === 'generated') return '已生成待确认';
+  if (status === 'pending') return '待确认';
+  return status || '待确认';
+}
+
+function evidenceRoleLabel(role: string) {
+  if (role.includes('cell')) return '矩阵单元格素材';
+  if (role.includes('archive')) return '素材归档';
+  if (role.includes('effect')) return '效果评价素材';
+  if (role.includes('step')) return '步骤素材';
+  if (role.includes('issue')) return '问题点素材';
+  if (role.includes('material')) return '素材';
+  return role;
+}
+
+function ownerTypeLabel(ownerType: string) {
+  if (ownerType === 'comparison_cell') return '矩阵单元格';
+  if (ownerType === 'record') return '检查记录';
+  if (ownerType === 'issue') return '问题点';
+  if (ownerType === 'recipe') return '功能/食谱';
+  if (ownerType === 'recipe_step') return '步骤';
+  return ownerType || '未关联对象';
+}
 
 function statusClass(status: string) {
   if (status === 'ready') return 'border-emerald-200 bg-emerald-50 text-emerald-800';
@@ -73,23 +127,16 @@ function statusClass(status: string) {
   return 'border-muted bg-muted/30 text-muted-foreground';
 }
 
-function severityClass(severity: string) {
-  if (severity === 'error') return 'border-red-200 bg-red-50 text-red-800';
-  if (severity === 'warning') return 'border-amber-200 bg-amber-50 text-amber-900';
-  return 'border-muted bg-muted/30 text-muted-foreground';
-}
-
 function SectionPill({ section }: { section: ReportDetailSection }) {
   return (
     <a
       href={`#report-section-${section.key}`}
       className={cn(
-        'flex min-h-10 min-w-40 shrink-0 items-center justify-between gap-2 rounded-md border px-3 py-2 text-left text-xs transition-colors hover:bg-muted/60 lg:min-w-0',
+        'flex min-h-10 min-w-40 shrink-0 items-center gap-2 rounded-md border px-3 py-2 text-left text-xs transition-colors hover:bg-muted/60 lg:min-w-0',
         statusClass(section.status),
       )}
     >
       <span className="min-w-0 truncate font-medium">{section.title}</span>
-      <span className="shrink-0 tabular-nums">{section.count ?? section.blockKeys.length}</span>
     </a>
   );
 }
@@ -133,12 +180,17 @@ function actionsForSection(section: ReportDetailSection, actions: ReportDetailAc
   return actions.filter((action) => actionTypes.has(action.type)).slice(0, 3);
 }
 
+function sectionsForCurrentView(model: ReportDetailModel, showDiagnostics: boolean) {
+  if (showDiagnostics || !model.template.hideEmptyInReadMode) return model.sections;
+  return model.sections.filter((section) => section.status !== 'empty');
+}
+
 function SectionEmptyState({ section }: { section: ReportDetailSection }) {
   const message = section.status === 'empty'
-    ? 'No structured data has been captured for this section yet.'
+    ? '当前模块暂无结构化数据。'
     : section.status === 'warning'
-      ? 'This section is available, but it still needs review before formal delivery.'
-      : 'This section is blocked by a required quality check.';
+      ? '当前模块已有内容，仍建议补充确认后再归档。'
+      : '当前模块需要补充必要信息。';
 
   return (
     <div data-testid="report-section-empty" className="rounded-md border border-dashed bg-muted/20 px-3 py-4 text-sm text-muted-foreground">
@@ -154,7 +206,7 @@ function EvidenceSlotList({ slots }: { slots: ReportEvidenceSlot[] }) {
   if (slots.length === 0) {
     return (
       <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-        No evidence slot is mapped to this section.
+        当前模块没有单独映射的素材证据。
       </div>
     );
   }
@@ -171,18 +223,18 @@ function EvidenceSlotList({ slots }: { slots: ReportEvidenceSlot[] }) {
           )}
         >
           <div className="flex items-center justify-between gap-2">
-            <span className="min-w-0 truncate font-medium">{slot.role}</span>
+            <span className="min-w-0 truncate font-medium">{evidenceRoleLabel(slot.role)}</span>
             <Badge variant={slot.status === 'missing' && slot.required ? 'destructive' : 'outline'} className="text-[10px]">
               {evidenceStatusLabel[slot.status]}
             </Badge>
           </div>
-          <p className="mt-1 truncate text-muted-foreground">{slot.ownerType} / {slot.ownerId || 'unassigned'}</p>
-          <p className="mt-1 tabular-nums text-muted-foreground">{slot.materialIds.length} material(s)</p>
+          <p className="mt-1 truncate text-muted-foreground">{ownerTypeLabel(slot.ownerType)} / {slot.ownerId || '未关联'}</p>
+          <p className="mt-1 tabular-nums text-muted-foreground">{slot.materialIds.length} 个素材</p>
         </div>
       ))}
       {slots.length > 6 && (
         <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-          +{slots.length - 6} more evidence slot(s)
+          还有 {slots.length - 6} 个素材证据位
         </div>
       )}
     </div>
@@ -193,7 +245,7 @@ function SectionActionList({ actions }: { actions: ReportDetailAction[] }) {
   if (actions.length === 0) {
     return (
       <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-        No section action is available.
+        当前模块没有单独操作建议。
       </div>
     );
   }
@@ -210,17 +262,19 @@ function SectionActionList({ actions }: { actions: ReportDetailAction[] }) {
           title={action.reason}
           className="h-8"
         >
-          {action.label}
+          {userActionLabel(action.type)}
         </Button>
       ))}
     </div>
   );
 }
 
-function ReportSectionCanvas({ model }: { model: ReportDetailModel }) {
+function ReportSectionCanvas({ model, showDiagnostics }: { model: ReportDetailModel; showDiagnostics: boolean }) {
+  const sections = sectionsForCurrentView(model, showDiagnostics);
+
   return (
     <div data-testid="report-section-canvas" className="space-y-3">
-      {model.sections.map((section) => {
+      {sections.map((section) => {
         const evidenceSlots = evidenceForSection(section, model.evidenceSlots);
         const sectionActions = actionsForSection(section, model.actions);
 
@@ -246,18 +300,17 @@ function ReportSectionCanvas({ model }: { model: ReportDetailModel }) {
                   <p className="mt-3 text-sm leading-6 text-muted-foreground">{section.summary}</p>
                 )}
               </div>
-              <Badge variant={section.status === 'blocked' ? 'destructive' : 'outline'} className="w-fit text-[10px]">
-                {section.count ?? section.blockKeys.length}
-              </Badge>
             </div>
 
-            <div className="mt-4 flex flex-wrap gap-2">
-              {section.blockKeys.map((key) => (
-                <span key={key} className="rounded-md border bg-muted/20 px-2 py-1 text-[11px] text-muted-foreground">
-                  {key}
-                </span>
-              ))}
-            </div>
+            {showDiagnostics && (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {section.blockKeys.map((key) => (
+                  <span key={key} className="rounded-md border bg-muted/20 px-2 py-1 text-[11px] text-muted-foreground">
+                    {key}
+                  </span>
+                ))}
+              </div>
+            )}
 
             {section.status !== 'ready' && (
               <div className="mt-4">
@@ -271,27 +324,35 @@ function ReportSectionCanvas({ model }: { model: ReportDetailModel }) {
               ))}
               {section.blocks.length === 0 && (
                 <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                  No structured section block is available.
+                  当前模块暂无结构化内容。
                 </div>
               )}
             </div>
 
-            <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_16rem]">
-              <div className="min-w-0">
-                <div className="mb-2 flex items-center gap-2">
-                  <FolderOpen className="h-4 w-4 text-muted-foreground" />
-                  <p className="text-xs font-medium text-muted-foreground">Evidence slots</p>
+            {showDiagnostics && (
+              <details className="mt-4 rounded-md border bg-muted/10 p-3">
+                <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
+                  <FolderOpen className="h-4 w-4" />
+                  管理员诊断
+                </summary>
+                <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_16rem]">
+                  <div className="min-w-0">
+                    <div className="mb-2 flex items-center gap-2">
+                      <FolderOpen className="h-4 w-4 text-muted-foreground" />
+                      <p className="text-xs font-medium text-muted-foreground">素材证据位</p>
+                    </div>
+                    <EvidenceSlotList slots={evidenceSlots} />
+                  </div>
+                  <div>
+                    <div className="mb-2 flex items-center gap-2">
+                      <Eye className="h-4 w-4 text-muted-foreground" />
+                      <p className="text-xs font-medium text-muted-foreground">操作建议</p>
+                    </div>
+                    <SectionActionList actions={sectionActions} />
+                  </div>
                 </div>
-                <EvidenceSlotList slots={evidenceSlots} />
-              </div>
-              <div>
-                <div className="mb-2 flex items-center gap-2">
-                  <Eye className="h-4 w-4 text-muted-foreground" />
-                  <p className="text-xs font-medium text-muted-foreground">Actions</p>
-                </div>
-                <SectionActionList actions={sectionActions} />
-              </div>
-            </div>
+              </details>
+            )}
           </section>
         );
       })}
@@ -310,18 +371,17 @@ export function ReportDetailShell({
   debugLegacyBody = false,
   children,
 }: ReportDetailShellProps) {
+  const { isAdmin } = useAuth();
   const header = model?.header;
   const conclusion = model?.conclusion;
   const title = header?.productModel || header?.title || fallbackTitle;
   const reportType = header?.reportType || 'single_report';
-  const qualityErrors = model?.qualityChecks.filter((check) => check.severity === 'error') ?? [];
-  const qualityWarnings = model?.qualityChecks.filter((check) => check.severity === 'warning') ?? [];
-  const enabledActions = model?.actions.filter((action) => action.enabled) ?? [];
   const legacyBodyOpen = !hasReadableSectionBlocks(model);
   const legacyBodyMode = legacyBodyOpen ? 'fallback' : debugLegacyBody ? 'parity' : 'hidden';
+  const visibleSections = model ? sectionsForCurrentView(model, isAdmin) : [];
 
   return (
-    <div data-testid="report-detail-shell" className="mx-auto grid w-full min-w-0 max-w-6xl gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
+    <div data-testid="report-detail-shell" className="mx-auto w-full min-w-0 max-w-6xl space-y-4">
       <div className="min-w-0 space-y-4">
         <section className="min-w-0 rounded-xl border bg-background p-4 shadow-sm">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
@@ -347,8 +407,8 @@ export function ReportDetailShell({
               </div>
               <h1 className="break-words text-xl font-semibold leading-tight lg:text-2xl">{title}</h1>
               <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                {header?.layoutProfile && <span>{header.layoutProfile}</span>}
-                {header?.aiConfirmationStatus && <span>AI: {header.aiConfirmationStatus}</span>}
+                {header?.layoutProfile && <span>版式：{deliveryLayoutLabel(header.layoutProfile)}</span>}
+                {isAdmin && header?.aiConfirmationStatus && <span>结论状态：{aiStatusLabel(header.aiConfirmationStatus)}</span>}
                 {header?.sourceTaskIds?.length ? <span>来源任务 {header.sourceTaskIds.length}</span> : null}
                 {header?.sourceReportIds?.length ? <span>来源报告 {header.sourceReportIds.length}</span> : null}
               </div>
@@ -380,16 +440,16 @@ export function ReportDetailShell({
             </span>
             <div className="min-w-0 flex-1">
               <div className="mb-1 flex flex-wrap items-center gap-2">
-                <p className="text-xs font-medium text-muted-foreground">结论条</p>
+                <p className="text-xs font-medium text-muted-foreground">结论摘要</p>
                 {conclusion?.conclusionLevel && (
                   <Badge variant="outline" className="text-[10px]">{levelLabel[conclusion.conclusionLevel]}</Badge>
                 )}
-                {conclusion?.recommendedNextAction && (
-                  <Badge variant="secondary" className="text-[10px]">下一步：{conclusion.recommendedNextAction}</Badge>
+                {conclusion?.recommendedNextAction && conclusion.recommendedNextAction !== 'no_action' && (
+                  <Badge variant="secondary" className="text-[10px]">下一步：{userActionLabel(conclusion.recommendedNextAction)}</Badge>
                 )}
               </div>
               <p className="break-words text-sm leading-6 text-foreground">
-                {conclusion?.keyConclusion || '正在加载 V2.6 报告详情模型。'}
+                {conclusion?.keyConclusion || '正在加载报告详情。'}
               </p>
               {conclusion?.keyRisks?.length ? (
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -410,10 +470,10 @@ export function ReportDetailShell({
             <p className="text-sm font-medium">模块目录</p>
           </div>
           <div className="flex gap-2 overflow-x-auto pb-1 lg:grid lg:grid-cols-3 lg:overflow-visible">
-            {(model?.sections ?? []).map((section) => (
+            {visibleSections.map((section) => (
               <SectionPill key={section.key} section={section} />
             ))}
-            {!model?.sections?.length && (
+            {!visibleSections.length && (
               <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">详情模型加载中</div>
             )}
           </div>
@@ -421,10 +481,10 @@ export function ReportDetailShell({
 
         <div id="report-content-canvas" className="min-w-0 space-y-4 scroll-mt-4">
           {model ? (
-            <ReportSectionCanvas model={model} />
+            <ReportSectionCanvas model={model} showDiagnostics={isAdmin} />
           ) : (
             <section className="min-w-0 rounded-xl border bg-background p-4 shadow-sm">
-              <SectionEmptyState section={{ key: 'loading', title: 'Detail model', status: 'warning', blockKeys: ['detail_model'], blocks: [] }} />
+              <SectionEmptyState section={{ key: 'loading', title: '报告详情', status: 'warning', blockKeys: ['detail_model'], blocks: [] }} />
             </section>
           )}
           {legacyBodyMode !== 'hidden' && (
@@ -437,14 +497,14 @@ export function ReportDetailShell({
               <summary data-testid="report-legacy-summary" className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
                 <span className="flex min-w-0 items-center gap-2">
                   <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <span className="truncate">Original report body</span>
+                  <span className="truncate">原始报告内容</span>
                 </span>
                 <Badge variant={legacyBodyOpen ? 'secondary' : 'outline'} className="shrink-0 text-[10px]">
-                  {legacyBodyOpen ? 'Fallback view' : 'Parity mode'}
+                  {legacyBodyOpen ? '兜底视图' : '核对视图'}
                 </Badge>
               </summary>
               <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                Section blocks are the primary report reading surface. This original body is only available for debug and parity checks.
+                结构化模块是主要阅读界面，原始内容仅用于核对历史报告。
               </p>
               <div data-testid="report-legacy-body" className="mt-4 space-y-4">
                 {children}
@@ -453,46 +513,6 @@ export function ReportDetailShell({
           )}
         </div>
       </div>
-
-      <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
-        <section data-testid="report-action-rail" className="rounded-xl border bg-background p-4 shadow-sm">
-          <div className="mb-3 flex items-center gap-2">
-            <FileText className="h-4 w-4 text-muted-foreground" />
-            <p className="text-sm font-medium">Action Rail</p>
-          </div>
-          <div className="space-y-2">
-            {enabledActions.slice(0, 5).map((action) => (
-              <div key={action.type} className="rounded-md border bg-muted/20 px-3 py-2">
-                <p className="text-xs font-medium">{action.label}</p>
-                <p className="mt-1 text-[11px] text-muted-foreground">{action.priority}</p>
-              </div>
-            ))}
-            {enabledActions.length === 0 && (
-              <p className="text-xs leading-5 text-muted-foreground">当前没有可执行动作，请先处理质量检查项。</p>
-            )}
-          </div>
-        </section>
-
-        <section data-testid="report-quality-checks" className="rounded-xl border bg-background p-4 shadow-sm">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <p className="text-sm font-medium">质量检查</p>
-            <Badge variant={qualityErrors.length ? 'destructive' : 'outline'} className="text-[10px]">
-              {qualityErrors.length} 阻断 / {qualityWarnings.length} 风险
-            </Badge>
-          </div>
-          <div className="space-y-2">
-            {(model?.qualityChecks ?? []).slice(0, 6).map((check) => (
-              <div key={check.code} className={cn('rounded-md border px-3 py-2 text-xs leading-5', severityClass(check.severity))}>
-                <p className="font-medium">{check.code}</p>
-                <p className="mt-1">{check.message}</p>
-              </div>
-            ))}
-            {!model?.qualityChecks?.length && (
-              <p className="text-xs leading-5 text-muted-foreground">暂无阻断项。</p>
-            )}
-          </div>
-        </section>
-      </aside>
     </div>
   );
 }

@@ -2,13 +2,11 @@
 
 import { useEffect, useState, useCallback, type ReactNode } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { Share2, Copy, X, Loader2, Star, Sparkles } from 'lucide-react';
+import { Share2, Copy, X, Loader2, Star, FileText, ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { copyToClipboard } from '@/lib/clipboard';
 import { useImagePreview } from '@/components/image-preview';
@@ -17,6 +15,7 @@ import { PageShell } from '@/components/app';
 import { MediaGallery } from '@/components/app/media-gallery';
 import { ComparisonReportView, type ComparisonSnapshot } from '@/components/reports/comparison-report-view';
 import { ReportDetailShell } from '@/components/reports/report-detail-shell';
+import { IssueRectificationDialog, type IssueForRectification } from '@/components/issues/issue-rectification-dialog';
 import { buildDisplayReportContent, type AiSummaryLike, type ReportContentWithReview, type ReportReviewOverrides } from '@/lib/report-review-overrides';
 import type { ReportDetailModel } from '@/lib/server/report-detail';
 import {
@@ -66,8 +65,12 @@ interface CheckRecord {
 
 interface IssueItem {
   id: string; title: string; description: string | null; level: string | null;
-  status: string; source_report_id: string | null; source_type: string | null;
+  status: string; source_report_id: string | null; source_type: string | null; source: string | null;
+  task_id: string; product_model: string | null;
   category: string | null; improve_plan: string | null; responsible_person: string | null;
+  is_improve: boolean | null; no_improve_reason: string | null;
+  plan_complete_date: string | null; actual_complete_date: string | null;
+  verification_note: string | null;
   [key: string]: unknown;
 }
 
@@ -224,10 +227,10 @@ function AiSummaryBlock({ summary }: { summary?: AiSummaryLike | null }) {
     <div className="space-y-4 rounded-lg border bg-background p-4 sm:p-5">
       <div className="flex flex-wrap items-center gap-2">
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-          <Sparkles className="h-4 w-4" />
+          <FileText className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <h3 className="text-base font-semibold leading-6 text-foreground">总结</h3>
+          <h3 className="text-base font-semibold leading-6 text-foreground">结论摘要</h3>
           <p className="text-xs text-muted-foreground">提炼核心判断、优势、风险和后续动作</p>
         </div>
         {summary.tag && <Badge className="shrink-0 text-xs">{summary.tag}</Badge>}
@@ -301,7 +304,6 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
   onStatusClick: (issue: IssueItem) => void;
   onPreview: (url: string) => void;
 }) {
-  const records = report.content?.records || [];
   const recipes = report.content?.recipes || [];
   const task = report.content?.task;
   const display = buildDisplayReportContent({
@@ -377,7 +379,7 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
                       <div className="flex items-center gap-1.5">
                         <Badge variant="secondary" className="text-[10px]">第{idx + 1}次复测</Badge>
                         {re.ai_result && (
-                          <Badge variant="outline" className="text-[10px]">AI评分: {re.ai_result.score}</Badge>
+                          <Badge variant="outline" className="text-[10px]">评分: {re.ai_result.score}</Badge>
                         )}
                         <span className="text-[10px] text-muted-foreground ml-auto">
                           {new Date(re.created_at).toLocaleDateString('zh-CN')}
@@ -387,7 +389,7 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
                         <p className="text-[10px] break-all whitespace-pre-wrap">{re.description}</p>
                       )}
                       {re.ai_result && re.ai_result.summary && (
-                        <p className="text-[10px] text-muted-foreground break-all">AI总结: {re.ai_result.summary}</p>
+                        <p className="text-[10px] text-muted-foreground break-all">总结: {re.ai_result.summary}</p>
                       )}
                       {reMats && reMats.length > 0 && (
                         <MediaGallery materials={reMats} responsive columns={{ mobile: 2, sm: 3 }} onPreview={onPreview} />
@@ -404,55 +406,130 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
         </ReportPaperSection>
       )}
 
-      {/* Check Records */}
-      {records.length > 0 && (
-        <ReportPaperSection index="04" title={`五感检查记录 (${records.length})`}>
-          <div className="space-y-3">
-          {records.map((record) => {
-            const recordMats = record.materials || [];
-            return (
-              <div key={record.id} className="p-3 rounded-lg border bg-background space-y-2">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className={cn(
-                    'text-[10px] font-medium px-1.5 py-0.5 rounded',
-                    record.evaluation_result === '合格' && 'bg-emerald-100 text-emerald-700',
-                    record.evaluation_result === '不合格' && 'bg-red-100 text-red-700',
-                    record.evaluation_result === '待定' && 'bg-amber-100 text-amber-700',
-                  )}>{record.evaluation_result}</span>
-                  <span className="text-xs font-medium flex-1 min-w-0 truncate">{record.check_item}</span>
-                  {record.check_dimension && (
-                    <span className="text-[10px] text-muted-foreground bg-background px-1 py-0.5 rounded">{record.check_dimension}</span>
-                  )}
-                </div>
-                {(record.check_requirement || record.check_standard) && (
-                  <div className="text-[10px] text-muted-foreground space-y-0.5 pl-1 break-all">
-                    {record.check_requirement && <div>要求: {record.check_requirement}</div>}
-                    {record.check_standard && <div>标准: {record.check_standard}</div>}
-                  </div>
-                )}
-                {record.problem_description && (
-                  <p className="text-[10px] text-muted-foreground break-all">{record.problem_description}</p>
-                )}
-                <MediaGallery materials={recordMats} responsive columns={{ mobile: 2, sm: 3, lg: 4 }} onPreview={onPreview} />
-              </div>
-            );
-          })}
-          </div>
-        </ReportPaperSection>
+      {/* Recipes — collapsed by default, expandable steps */}
+      {recipes.length > 0 && (
+        <RecipeEffectSection
+          recipes={recipes}
+          liveIssues={liveIssues}
+          onIssueClick={onStatusClick}
+          onPreview={onPreview}
+        />
       )}
 
-      {/* Recipes */}
-      {recipes.length > 0 && (
-        <ReportPaperSection index="05" title={`功能/食谱效果 (${recipes.length})`}>
-          <div className="space-y-3">
-          {recipes.map((recipe) => (
-            <div key={recipe.id} className="rounded-lg border bg-background p-3 space-y-2">
-              <div className="flex items-center gap-2">
-                <Badge variant="secondary" className="text-[10px] shrink-0">{recipe.recipe_type}</Badge>
-                <span className="text-xs font-medium flex-1 min-w-0 truncate">{recipe.name}</span>
-                <span className="text-[10px] text-muted-foreground">{recipe.problem_count || 0} 问题</span>
-              </div>
-              {recipe.recipe_steps?.map((step) => {
+    </div>
+  );
+}
+
+function matchRecipeProblemIssue(liveIssues: IssueItem[], recipeName: string | undefined, stepNumber: number | undefined, problemText: string): IssueItem | null {
+  const title = problemText.substring(0, 200);
+  const stepDesc = stepNumber !== undefined ? `步骤${stepNumber}: ` : '';
+  for (const issue of liveIssues) {
+    if (issue.source_type !== 'recipe_problem') continue;
+    if (issue.title !== title) continue;
+    if (stepDesc && issue.description && !issue.description.startsWith(stepDesc)) continue;
+    if (recipeName && issue.source && !issue.source.includes(`(${recipeName})`)) continue;
+    return issue;
+  }
+  return null;
+}
+
+function matchEffectProblemIssue(liveIssues: IssueItem[], problemText: string): IssueItem | null {
+  const title = problemText.substring(0, 200);
+  for (const issue of liveIssues) {
+    if (issue.source_type !== 'recipe_problem') continue;
+    if (issue.title === title && (!issue.description || !issue.description.startsWith('步骤'))) return issue;
+  }
+  return null;
+}
+
+function RecipeEffectSection({ recipes, liveIssues, onIssueClick, onPreview }: {
+  recipes: Recipe[];
+  liveIssues: IssueItem[];
+  onIssueClick: (issue: IssueItem) => void;
+  onPreview: (url: string) => void;
+}) {
+  const [expandedRecipeIds, setExpandedRecipeIds] = useState<Set<string>>(new Set());
+
+  const toggleRecipe = (id: string) => {
+    setExpandedRecipeIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  return (
+    <ReportPaperSection index="04" title={`功能/食谱效果 (${recipes.length})`}>
+      <div className="space-y-2">
+      {recipes.map((recipe) => {
+        const expanded = expandedRecipeIds.has(recipe.id);
+        const effectPoints = parseProblemPoints(recipe.effect_problem_point);
+        const stepProblemPoints = (recipe.recipe_steps || []).flatMap((step) =>
+          getStepProblemPoints(step).map((pp) => ({ step, pp }))
+        );
+        const totalPoints = effectPoints.length + stepProblemPoints.length;
+        const effectSummary = recipe.effect_ai_result?.summary || recipe.effect_description || '';
+        return (
+        <div key={recipe.id} className="rounded-lg border bg-background">
+          <button
+            type="button"
+            onClick={() => toggleRecipe(recipe.id)}
+            className="flex w-full items-center gap-2 p-3 text-left transition-colors hover:bg-muted/30"
+          >
+            {expanded ? <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
+            <Badge variant="secondary" className="text-[10px] shrink-0">{recipe.recipe_type}</Badge>
+            <span className="text-xs font-medium flex-1 min-w-0 truncate">{recipe.name}</span>
+            {recipe.effect_score && (
+              <Badge className={`text-[9px] shrink-0 ${Number(recipe.effect_score) >= 8 ? 'bg-emerald-600' : Number(recipe.effect_score) >= 6 ? 'bg-blue-600' : Number(recipe.effect_score) >= 4 ? 'bg-amber-600' : 'bg-red-600'} text-white`}>
+                {recipe.effect_score}分
+              </Badge>
+            )}
+            <span className="text-[10px] text-muted-foreground shrink-0">{totalPoints} 问题</span>
+          </button>
+
+          {/* Always visible: effect evaluation + problem points summary */}
+          {(effectSummary || effectPoints.length > 0) && (
+            <div className="border-t p-3 space-y-2">
+              {effectSummary && (
+                <div className="flex items-start gap-2">
+                  <Star className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] font-medium text-primary mb-1">效果/出品效果评价</p>
+                    <p className="text-[11px] text-muted-foreground whitespace-pre-wrap break-all">{effectSummary}</p>
+                  </div>
+                </div>
+              )}
+              {effectPoints.length > 0 && (
+                <div className="space-y-1.5">
+                  {effectPoints.map((point, pointIndex) => {
+                    const pointMaterials = getBoundMaterials(recipe.effect_materials || [], point.material_ids);
+                    const linkedIssue = matchEffectProblemIssue(liveIssues, point.text);
+                    return (
+                      <div key={`${point.text}-${pointIndex}`} className="space-y-1.5">
+                        <p
+                          className={cn('text-[11px] text-amber-600 break-all', linkedIssue && 'cursor-pointer hover:underline')}
+                          onClick={() => linkedIssue && onIssueClick(linkedIssue)}
+                        >
+                          {effectPoints.length > 1 ? `问题${pointIndex + 1}: ` : '问题: '}{point.text}
+                          {linkedIssue && <span className="ml-1 text-[10px] text-muted-foreground">[{linkedIssue.status}]</span>}
+                        </p>
+                        {pointMaterials.length > 0 && (
+                          <MediaGallery materials={pointMaterials} responsive columns={{ mobile: 2, sm: 2, lg: 3 }} gap="gap-3" onPreview={onPreview} />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Expanded: step-by-step details */}
+          {expanded && (recipe.recipe_steps || []).length > 0 && (
+            <div className="border-t p-3 space-y-2">
+              <p className="text-[11px] font-medium text-muted-foreground">步骤详情</p>
+              {(recipe.recipe_steps || []).map((step) => {
                 const problemPoints = getStepProblemPoints(step);
                 const stepMaterials = step.materials || [];
                 const stepLevelMaterials = getUnboundStepMaterials(stepMaterials, problemPoints);
@@ -469,11 +546,16 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
                       <div className="ml-5 space-y-2">
                         {pps.map((pp, ppIdx) => {
                           const pointMaterials = getBoundMaterials(stepMaterials, pp.material_ids);
+                          const linkedIssue = matchRecipeProblemIssue(liveIssues, recipe.name, step.step_number, pp.text);
                           return (
                           <div key={`${pp.text}-${ppIdx}`} className="space-y-1.5">
-                          <p className="text-[10px] text-amber-600 break-all">
+                          <p
+                            className={cn('text-[10px] text-amber-600 break-all', linkedIssue && 'cursor-pointer hover:underline')}
+                            onClick={() => linkedIssue && onIssueClick(linkedIssue)}
+                          >
                             {pps.length > 1 && <span className="font-medium">问题{ppIdx + 1}: </span>}
                             {pp.text}
+                            {linkedIssue && <span className="ml-1 text-[9px] text-muted-foreground">[{linkedIssue.status}]</span>}
                           </p>
                           <MediaGallery materials={pointMaterials} responsive columns={{ mobile: 2, sm: 3, lg: 4 }} onPreview={onPreview} />
                           </div>
@@ -486,65 +568,134 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
                 </div>
                 );
               })}
-              {/* Effect Evaluation */}
-              {(recipe.effect_description || recipe.effect_problem_point || recipe.effect_score || recipe.effect_ai_result || (recipe.effect_materials && recipe.effect_materials.length > 0)) && (
-                <div className="mt-2 p-2.5 rounded-lg border bg-background space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <Star className="h-3.5 w-3.5 text-primary" />
-                    <span className="text-[11px] font-medium text-primary">效果/出品效果评价</span>
-                    {recipe.effect_score && (
-                      <Badge className={`text-[9px] ml-auto ${Number(recipe.effect_score) >= 8 ? 'bg-emerald-600' : Number(recipe.effect_score) >= 6 ? 'bg-blue-600' : Number(recipe.effect_score) >= 4 ? 'bg-amber-600' : 'bg-red-600'} text-white`}>
-                        {recipe.effect_score}分/10分
-                      </Badge>
-                    )}
-                  </div>
-                  {recipe.effect_ai_result && (
-                      <p className="text-[11px] text-muted-foreground whitespace-pre-wrap break-all ml-5">{recipe.effect_ai_result.summary}</p>
-                  )}
-                  {!recipe.effect_ai_result && recipe.effect_description && (
-                    <p className="text-[11px] text-muted-foreground whitespace-pre-wrap break-all ml-5">{recipe.effect_description}</p>
-                  )}
-                  {(() => {
-                    const effectPoints = parseProblemPoints(recipe.effect_problem_point);
-                    const effectMaterials = recipe.effect_materials || [];
-                    const hasBoundMaterials = effectPoints.some((point) => point.material_ids?.length);
-                    return (
-                      <>
-                        {effectPoints.length > 0 && (
-                          <div className="ml-5 space-y-2">
-                            {effectPoints.map((point, pointIndex) => {
-                              const pointMaterials = getBoundMaterials(effectMaterials, point.material_ids);
-                              return (
-                                <div key={`${point.text}-${pointIndex}`} className="space-y-1.5">
-                                  <p className="text-[11px] text-amber-600 break-all">
-                                    {effectPoints.length > 1 ? `问题${pointIndex + 1}: ` : '问题: '}{point.text}
-                                  </p>
-                                  <MediaGallery materials={pointMaterials} responsive columns={{ mobile: 2, sm: 2, lg: 3 }} gap="gap-3" onPreview={onPreview} />
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                        <MediaGallery
-                          materials={hasBoundMaterials ? [] : effectMaterials}
-                          responsive
-                          columns={{ mobile: 2, sm: 2, lg: 3 }}
-                          gap="gap-3"
-                          className="ml-5"
-                          onPreview={onPreview}
-                        />
-                      </>
-                    );
-                  })()}
-                </div>
-              )}
             </div>
-          ))}
-          </div>
-        </ReportPaperSection>
-      )}
+          )}
+        </div>
+        );
+      })}
+      </div>
+    </ReportPaperSection>
+  );
+}
 
-    </div>
+const PHASE_ORDER = ['手板', '试制', '试产', '量产'];
+
+function formatDateShort(value: string | null | undefined): string {
+  if (!value) return '';
+  try {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return String(value);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
+  } catch {
+    return String(value);
+  }
+}
+
+function MergedIssuesSection({ reports, liveIssuesMap, onIssueClick }: {
+  reports: ReportDetail[];
+  liveIssuesMap: Record<string, IssueItem[]>;
+  onIssueClick: (issue: IssueItem) => void;
+}) {
+  // Group reports by phase, then by date
+  type Group = { key: string; phase: string | null; date: string | null; issues: Array<{ issue: IssueItem; report: ReportDetail }> };
+  const groups: Group[] = [];
+  const findGroup = (phase: string | null, date: string | null, key: string): Group => {
+    let g = groups.find((item) => item.phase === phase && item.date === date);
+    if (!g) {
+      g = { key, phase, date, issues: [] };
+      groups.push(g);
+    }
+    return g;
+  };
+
+  for (const rpt of reports) {
+    const rptTask = rpt.content?.task as Record<string, unknown> | undefined;
+    const phase = (rptTask?.project_phase as string) || null;
+    const date = (rptTask?.test_date as string) || null;
+    const dateShort = formatDateShort(date);
+    // Decide group key: phase+date when both phase exists AND multiple reports in same phase, otherwise phase-only or date-only
+    let key: string;
+    let gPhase: string | null;
+    let gDate: string | null;
+    if (phase) {
+      // Group under phase; if multiple dates within same phase, will separate by date
+      gPhase = phase;
+      gDate = dateShort || null;
+      key = `${phase}|${dateShort}`;
+    } else {
+      gPhase = null;
+      gDate = dateShort || null;
+      key = `|${dateShort}`;
+    }
+    const group = findGroup(gPhase, gDate, key);
+    for (const issue of (liveIssuesMap[rpt.id] || [])) {
+      group.issues.push({ issue, report: rpt });
+    }
+  }
+
+  // Sort groups: phase groups first by PHASE_ORDER, then by date asc; no-phase groups at end by date asc
+  groups.sort((a, b) => {
+    if (a.phase && !b.phase) return -1;
+    if (!a.phase && b.phase) return 1;
+    if (a.phase && b.phase) {
+      const ai = PHASE_ORDER.indexOf(a.phase);
+      const bi = PHASE_ORDER.indexOf(b.phase);
+      const pa = ai === -1 ? 999 : ai;
+      const pb = bi === -1 ? 999 : bi;
+      if (pa !== pb) return pa - pb;
+      return (a.date || '').localeCompare(b.date || '');
+    }
+    return (a.date || '').localeCompare(b.date || '');
+  });
+
+  const totalIssues = groups.reduce((s, g) => s + g.issues.length, 0);
+  if (totalIssues === 0) return null;
+
+  return (
+    <Card className="mx-auto max-w-6xl border bg-background shadow-sm">
+      <CardHeader className="border-b bg-background pb-3">
+        <CardTitle className="text-sm font-medium">问题点合并视图 ({totalIssues})</CardTitle>
+      </CardHeader>
+      <CardContent className="pt-4 space-y-4">
+        {groups.map((group, idx) => {
+          const heading = group.phase
+            ? (group.date ? `${group.phase} ${group.date}` : group.phase)
+            : (group.date || '未指定日期');
+          return (
+            <div key={`${group.key}-${idx}`} className="space-y-2">
+              <div className="flex items-center gap-2 border-b pb-1">
+                <span className="text-sm font-semibold">{heading}</span>
+                <Badge variant="secondary" className="text-[10px]">{group.issues.length} 个</Badge>
+              </div>
+              <div className="space-y-1.5">
+                {group.issues.map(({ issue }) => (
+                  <button
+                    key={issue.id}
+                    type="button"
+                    onClick={() => onIssueClick(issue)}
+                    className="flex w-full items-center gap-2 rounded-lg border bg-background p-2 text-left transition-colors hover:bg-muted/30"
+                  >
+                    <Badge className={cn('text-[10px] shrink-0', LEVEL_COLORS[issue.level || '二类'] || LEVEL_COLORS['二类'])}>
+                      {issue.level || '二类'}
+                    </Badge>
+                    {issue.source_type === 'recipe_problem' ? (
+                      <Badge variant="outline" className="text-[10px] shrink-0">功能</Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] shrink-0">五感</Badge>
+                    )}
+                    <span className="text-xs flex-1 min-w-0 break-all">{issue.title}</span>
+                    <span className={cn('text-[10px] px-1.5 py-0.5 rounded shrink-0', STATUS_COLORS[issue.status] || STATUS_COLORS['待整改'])}>
+                      {issue.status || '待整改'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -560,11 +711,8 @@ export default function ReportDetailPage() {
   const [liveIssuesMap, setLiveIssuesMap] = useState<Record<string, IssueItem[]>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
+  const [rectificationOpen, setRectificationOpen] = useState(false);
   const [editingIssue, setEditingIssue] = useState<IssueItem | null>(null);
-  const [tempStatus, setTempStatus] = useState('');
-  const [tempLevel, setTempLevel] = useState('');
-  const [saving, setSaving] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareDuration, setShareDuration] = useState<'7d' | '30d' | 'permanent'>('30d');
   const [shareCreating, setShareCreating] = useState(false);
@@ -672,45 +820,55 @@ export default function ReportDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siblingReports]);
 
-  const handleOpenStatusDialog = (issue: IssueItem) => {
+  const handleOpenRectification = (issue: IssueItem) => {
     setEditingIssue(issue);
-    setTempStatus(issue.status);
-    setTempLevel(issue.level || '二类');
-    setStatusDialogOpen(true);
+    setRectificationOpen(true);
   };
 
-  const handleSaveStatus = async () => {
-    if (!editingIssue) return;
-    setSaving(true);
-    try {
-      await fetch(`/api/issues/${editingIssue.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: tempStatus, level: tempLevel }),
+  const handleRectificationSaved = async (updated: IssueForRectification) => {
+    setLiveIssuesMap(prev => {
+      const updatedMap = { ...prev };
+      Object.keys(updatedMap).forEach(reportId => {
+        updatedMap[reportId] = updatedMap[reportId].map(i =>
+          i.id === updated.id ? { ...i, ...updated } as IssueItem : i
+        );
       });
-      setStatusDialogOpen(false);
-      // Update local state
-      setLiveIssuesMap(prev => {
-        const updated = { ...prev };
-        Object.keys(updated).forEach(reportId => {
-          updated[reportId] = updated[reportId].map(i =>
-            i.id === editingIssue.id ? { ...i, status: tempStatus, level: tempLevel } : i
-          );
-        });
-        return updated;
-      });
-      toast.success('整改状态已更新');
-    } finally {
-      setSaving(false);
+      return updatedMap;
+    });
+    // Refresh re-evaluations for this issue's report
+    if (updated.source_report_id) {
+      await fetchLiveIssues(updated.source_report_id);
     }
   };
 
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     if (report?.report_type === 'comparison_report') {
-      window.open(`/api/reports/${id}/pdf`, '_blank');
+      toast.info('正在准备对比报告PDF...');
+      try {
+        const preflightRes = await fetch(`/api/reports/${id}/pdf?preflight=1`);
+        const preflight = await preflightRes.json().catch(() => null);
+        if (!preflightRes.ok || preflight?.code !== 0 || preflight?.data?.preflight?.ok === false) {
+          const firstError = preflight?.data?.preflight?.errors?.[0]?.message;
+          toast.error(firstError || preflight?.message || 'PDF导出预检未通过，请稍后重试');
+          return;
+        }
+        const opened = window.open(`/api/reports/${id}/pdf`, '_blank');
+        if (!opened) {
+          toast.error('浏览器阻止了新窗口，请允许弹窗后重试');
+          return;
+        }
+        toast.success('PDF已在新窗口打开');
+      } catch {
+        toast.error('PDF导出失败，请稍后重试');
+      }
       return;
     }
-    window.open(`/reports/print?id=${id}&mode=fast`, '_blank');
+    const opened = window.open(`/reports/print?id=${id}&mode=fast`, '_blank');
+    if (!opened) {
+      toast.error('浏览器阻止了新窗口，请允许弹窗后重试');
+      return;
+    }
+    toast.success('打印导出页已打开');
   };
 
   const openShareDialog = async () => {
@@ -854,6 +1012,15 @@ export default function ReportDetailPage() {
         </div>
       </div>
 
+      {/* Merged issues view (only for model-merged reports) */}
+      {isMerged && (
+        <MergedIssuesSection
+          reports={allReports}
+          liveIssuesMap={liveIssuesMap}
+          onIssueClick={handleOpenRectification}
+        />
+      )}
+
       {/* Report sections */}
       {allReports.map((rpt, idx) => {
         const rptTask = rpt.content?.task as Record<string, unknown> | undefined;
@@ -889,7 +1056,7 @@ export default function ReportDetailPage() {
               <ReportSection
                 report={rpt}
                 liveIssues={liveIssuesMap[rpt.id] || []}
-                onStatusClick={handleOpenStatusDialog}
+                onStatusClick={handleOpenRectification}
                 onPreview={open}
               />
             </CardContent>
@@ -900,61 +1067,13 @@ export default function ReportDetailPage() {
       )}
       </ReportDetailShell>
 
-      {/* Issue Status Quick Edit Dialog */}
-      <Dialog open={statusDialogOpen} onOpenChange={(v) => { if (!v) { setStatusDialogOpen(false); setEditingIssue(null); } else setStatusDialogOpen(v); }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="text-base">整改状态</DialogTitle>
-            <DialogDescription className="sr-only">调整该问题点的整改状态和问题等级。</DialogDescription>
-          </DialogHeader>
-          {editingIssue && (
-            <div className="space-y-4">
-              {/* Issue title */}
-              <div className="text-sm font-medium break-all">{editingIssue.title}</div>
-              {editingIssue.description && (
-                <p className="text-xs text-muted-foreground break-all">{editingIssue.description}</p>
-              )}
-
-              {/* Level */}
-              <div className="space-y-2">
-                <Label>问题点等级</Label>
-                <div className="flex gap-2">
-                  {['一类', '二类', '三类'].map(l => (
-                    <button key={l} type="button" onClick={() => setTempLevel(l)}
-                      className={cn('flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors',
-                        tempLevel === l
-                          ? LEVEL_COLORS[l] + ' border-current'
-                          : 'bg-background border-border hover:bg-muted/50')}>
-                      {l}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Status */}
-              <div className="space-y-2">
-                <Label>整改状态</Label>
-                <div className="flex gap-2">
-                  {STATUS_LIST.map(s => (
-                    <button key={s} type="button" onClick={() => setTempStatus(s)}
-                      className={cn('flex-1 px-2 py-2 rounded-lg text-xs font-medium border transition-colors',
-                        tempStatus === s
-                          ? STATUS_COLORS[s] + ' border-current'
-                          : 'bg-background border-border hover:bg-muted/50')}>
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex gap-2 justify-end pt-2 border-t">
-                <Button variant="outline" onClick={() => { setStatusDialogOpen(false); setEditingIssue(null); }}>取消</Button>
-                <Button onClick={handleSaveStatus} disabled={saving}>{saving ? '保存中...' : '保存'}</Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Issue Rectification Dialog (reusable) */}
+      <IssueRectificationDialog
+        issue={editingIssue}
+        open={rectificationOpen}
+        onOpenChange={(v) => { setRectificationOpen(v); if (!v) setEditingIssue(null); }}
+        onSaved={handleRectificationSaved}
+      />
 
       {/* Share Sheet */}
       <Sheet open={shareOpen} onOpenChange={setShareOpen}>

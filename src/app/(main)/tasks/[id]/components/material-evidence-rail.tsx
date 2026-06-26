@@ -8,7 +8,6 @@ import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
-import { MediaCaptureDialog } from '@/components/media-capture-dialog';
 import { useImagePreview } from '@/components/image-preview';
 import { cn } from '@/lib/utils';
 import { usePresignedUrls } from '@/lib/use-presigned-url';
@@ -19,6 +18,7 @@ type MaterialEvidenceRailProps = {
   bindingTarget: EvidenceBindingTarget | null;
   onMaterialsChange?: (materials: Material[]) => void;
   embedded?: boolean;
+  compact?: boolean;
 };
 
 const filters: Array<{ key: MaterialEvidenceFilter; label: string }> = [
@@ -48,15 +48,16 @@ function matchesFilter(material: Material, filter: MaterialEvidenceFilter) {
   return true;
 }
 
-export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange, embedded = false }: MaterialEvidenceRailProps) {
+export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange, embedded = false, compact = false }: MaterialEvidenceRailProps) {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [filter, setFilter] = useState<MaterialEvidenceFilter>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [captureMode, setCaptureMode] = useState<'image' | 'video' | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const cameraImageRef = useRef<HTMLInputElement>(null);
+  const cameraVideoRef = useRef<HTMLInputElement>(null);
   const { open, PreviewComponent } = useImagePreview();
   const presignedUrls = usePresignedUrls(materials);
 
@@ -168,7 +169,7 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
   return (
     <section className={cn(embedded ? 'space-y-3' : 'rounded-lg border bg-card p-3 shadow-sm')}>
       <PreviewComponent />
-      <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
+      <div className={cn('flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between', compact && '2xl:flex-row')}>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="whitespace-nowrap text-sm font-semibold">素材证据</h2>
@@ -177,20 +178,41 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
-          <Button variant="outline" size="sm" onClick={() => setCaptureMode('image')} disabled={uploading} className="whitespace-nowrap">
-            <Camera className="mr-1.5 h-4 w-4" />拍照
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setCaptureMode('video')} disabled={uploading} className="whitespace-nowrap">
-            <Video className="mr-1.5 h-4 w-4" />录像
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => imageInputRef.current?.click()} disabled={uploading} className="whitespace-nowrap">
-            <ImageIcon className="mr-1.5 h-4 w-4" />相册图片
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => videoInputRef.current?.click()} disabled={uploading} className="whitespace-nowrap">
-            <Film className="mr-1.5 h-4 w-4" />相册视频
-          </Button>
-        </div>
+        {compact ? (
+          <div className="grid grid-cols-2 gap-2 lg:flex lg:flex-row lg:gap-1 lg:shrink-0">
+            <Button variant="outline" size="sm" onClick={() => cameraImageRef.current?.click()} disabled={uploading} className="whitespace-nowrap lg:h-7 lg:w-7 lg:px-0 lg:justify-center">
+              <Camera className="mr-1.5 h-4 w-4 lg:mr-0 lg:h-3.5 lg:w-3.5" />
+              <span className="lg:hidden">拍照</span>
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => cameraVideoRef.current?.click()} disabled={uploading} className="whitespace-nowrap lg:h-7 lg:w-7 lg:px-0 lg:justify-center">
+              <Video className="mr-1.5 h-4 w-4 lg:mr-0 lg:h-3.5 lg:w-3.5" />
+              <span className="lg:hidden">录像</span>
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => imageInputRef.current?.click()} disabled={uploading} className="whitespace-nowrap lg:h-7 lg:w-7 lg:px-0 lg:justify-center">
+              <ImageIcon className="mr-1.5 h-4 w-4 lg:mr-0 lg:h-3.5 lg:w-3.5" />
+              <span className="lg:hidden">相册</span>
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => videoInputRef.current?.click()} disabled={uploading} className="whitespace-nowrap lg:h-7 lg:w-7 lg:px-0 lg:justify-center">
+              <Film className="mr-1.5 h-4 w-4 lg:mr-0 lg:h-3.5 lg:w-3.5" />
+              <span className="lg:hidden">视频</span>
+            </Button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant="outline" size="sm" onClick={() => cameraImageRef.current?.click()} disabled={uploading} className="whitespace-nowrap">
+              <Camera className="mr-1.5 h-4 w-4" />拍照
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => cameraVideoRef.current?.click()} disabled={uploading} className="whitespace-nowrap">
+              <Video className="mr-1.5 h-4 w-4" />录像
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => imageInputRef.current?.click()} disabled={uploading} className="whitespace-nowrap">
+              <ImageIcon className="mr-1.5 h-4 w-4" />相册图片
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => videoInputRef.current?.click()} disabled={uploading} className="whitespace-nowrap">
+              <Film className="mr-1.5 h-4 w-4" />相册视频
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -285,13 +307,8 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
 
       <input ref={imageInputRef} type="file" accept="image/*" multiple className="hidden" onChange={async (event) => { await handleUpload(event.target.files); event.target.value = ''; }} />
       <input ref={videoInputRef} type="file" accept="video/*" multiple className="hidden" onChange={async (event) => { await handleUpload(event.target.files); event.target.value = ''; }} />
-      <MediaCaptureDialog
-        mode={captureMode || 'image'}
-        open={captureMode !== null}
-        onOpenChange={(open) => setCaptureMode(open ? (captureMode || 'image') : null)}
-        onCapture={(file) => handleUpload([file])}
-        busy={uploading}
-      />
+      <input ref={cameraImageRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={async (event) => { await handleUpload(event.target.files); event.target.value = ''; }} />
+      <input ref={cameraVideoRef} type="file" accept="video/*" capture="environment" className="hidden" onChange={async (event) => { await handleUpload(event.target.files); event.target.value = ''; }} />
     </section>
   );
 }
