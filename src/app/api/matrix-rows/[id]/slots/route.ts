@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessAssembly, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
+import { mergeNodeConfig } from '@/lib/matrix/slot-helpers';
 
 /**
  * 数据矩阵 - 三槽位 PATCH (Task 7 / Data Matrix Input View)
@@ -14,9 +15,18 @@ import { writeSecurityAudit } from '@/lib/server/security-audit';
  * process_note），而非 check_records —— check_records 写入推迟到后续任务。
  * projection.ts 已支持从 config 读取这些字段作为权威来源。
  *
- * 乐观锁：config 中维护一个 `_slot_version` 计数器，每次写入自增。若请求体
- * 携带 `version` 且与当前 `_slot_version` 不匹配，返回 409 MATRIX_VERSION_CONFLICT；
- * 若未携带 `version`，则跳过检查（last-write-wins）。
+ * 乐观锁：所有 config 写入统一走 mergeNodeConfig（见 slot-helpers.ts），该助手
+ * 读取 config + _slot_version、浅合并、自增版本、写回并复读校验。若请求体携带
+ * `version` 且与当前 `_slot_version` 不匹配（或在写后被并发覆盖），返回
+ * 409 MATRIX_VERSION_CONFLICT；若未携带 `version`，则跳过前置检查
+ * （last-write-wins），但仍会复读检测并发覆盖。
+ *
+ * 注意：矩阵行的元数据 PATCH（/api/matrix-rows/[id]）也通过 mergeNodeConfig
+ * 写 config（subject_key），因此它同样会自增 _slot_version —— 前端在做完元数据
+ * 编辑后应刷新其槽位版本，避免下一次槽位写触发 409。
+ *
+ * 清空语义：result.status / result.summary / process.note 均为 "提供键即写"。
+ * 提供空串/缺省 → 写 null（清空），与"未提供键"区分开。
  *
  * Body: {
  *   result?: { status?: string; summary?: string };
@@ -38,10 +48,6 @@ interface UpdateSlotsBody {
   version?: number;
 }
 
-function isNonEmptyString(v: unknown): v is string {
-  return typeof v === 'string' && v.trim().length > 0;
-}
-
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -52,10 +58,10 @@ export async function PATCH(
 
   const { id: rowId } = await params;
 
-  // 解析行所在组装、节点类型与当前 config。
+  // 解析行所在组装与节点类型（鉴权 + 类型校验）。
   const { data: row, error: rowErr } = await client
     .from('comparison_item_nodes')
-    .select('assembly_id, node_type, config')
+    .select('assembly_id, node_type')
     .eq('id', rowId)
     .maybeSingle();
   if (rowErr) {
@@ -79,54 +85,46 @@ export async function PATCH(
   }
 
   const body = (await request.json().catch(() => ({}))) as UpdateSlotsBody;
-  const currentConfig = ((row as { config?: Record<string, unknown> }).config ?? {}) as Record<
-    string,
-    unknown
-  >;
 
-  // 乐观锁：读取/初始化 _slot_version，比对请求体中的 version。
-  const currentVersionRaw = currentConfig._slot_version;
-  const currentVersion = typeof currentVersionRaw === 'number' ? currentVersionRaw : 0;
-  if (typeof body.version === 'number' && body.version !== currentVersion) {
+  // 仅收集"提供了键"的字段做浅合并。空串/缺省 → 清空（写 null）。
+  const partial: Record<string, unknown> = {};
+  if (body.result && typeof body.result === 'object') {
+    const r = body.result;
+    if (r.status !== undefined) partial.result_status = r.status && r.status.trim() ? r.status.trim() : null;
+    if (r.summary !== undefined) partial.result_summary = r.summary && r.summary.trim() ? r.summary.trim() : null;
+  }
+  if (body.process && typeof body.process === 'object') {
+    if (body.process.note !== undefined) {
+      partial.process_note =
+        body.process.note && body.process.note.trim() ? body.process.note.trim() : null;
+    }
+  }
+
+  if (Object.keys(partial).length === 0) {
+    return NextResponse.json({ code: 1, message: '没有可更新的槽位字段' }, { status: 400 });
+  }
+
+  let result;
+  try {
+    result = await mergeNodeConfig(client, {
+      rowId,
+      expectedVersion: typeof body.version === 'number' ? body.version : undefined,
+      partial,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '槽位更新失败';
+    return NextResponse.json({ code: 1, message }, { status: 500 });
+  }
+
+  if (!result.ok) {
     return NextResponse.json(
       {
         code: 1,
         message: '槽位版本冲突，请刷新后重试',
-        data: { code: 'MATRIX_VERSION_CONFLICT', currentVersion, expectedVersion: body.version },
+        data: { code: result.code, currentVersion: result.currentVersion },
       },
       { status: 409 },
     );
-  }
-
-  // 合并槽位字段。
-  const newConfig: Record<string, unknown> = { ...currentConfig };
-  if (body.result && typeof body.result === 'object') {
-    const r = body.result;
-    if ('status' in r) {
-      newConfig.result_status = isNonEmptyString(r.status) ? r.status!.trim() : newConfig.result_status;
-    }
-    if ('summary' in r) {
-      newConfig.result_summary = isNonEmptyString(r.summary) ? r.summary!.trim() : newConfig.result_summary;
-    }
-  }
-  if (body.process && typeof body.process === 'object') {
-    // process.note 缺省/空串 → 清空（写 null），与"未提供 note 键"区分开。
-    if ('note' in body.process) {
-      newConfig.process_note = isNonEmptyString(body.process.note)
-        ? body.process.note!.trim()
-        : null;
-    }
-  }
-
-  const newSlotVersion = currentVersion + 1;
-  newConfig._slot_version = newSlotVersion;
-
-  const { error: updateErr } = await client
-    .from('comparison_item_nodes')
-    .update({ config: newConfig })
-    .eq('id', rowId);
-  if (updateErr) {
-    return NextResponse.json({ code: 1, message: updateErr.message }, { status: 500 });
   }
 
   await writeSecurityAudit(client, {
@@ -138,11 +136,11 @@ export async function PATCH(
     targetId: rowId,
     metadata: {
       assemblyId,
-      version: newSlotVersion,
+      version: result.newVersion,
       fields: {
-        resultStatus: body.result && 'status' in body.result,
-        resultSummary: body.result && 'summary' in body.result,
-        processNote: body.process && 'note' in body.process,
+        resultStatus: body.result && body.result.status !== undefined,
+        resultSummary: body.result && body.result.summary !== undefined,
+        processNote: body.process && body.process.note !== undefined,
       },
     },
   });
@@ -150,6 +148,6 @@ export async function PATCH(
   return NextResponse.json({
     code: 0,
     message: 'success',
-    data: { rowId, version: newSlotVersion },
+    data: { rowId, version: result.newVersion },
   });
 }
