@@ -84,6 +84,21 @@ function asRows(value: unknown): Row[] {
 }
 
 /**
+ * Coerce a DB value to a number. Real Supabase serializes `numeric(18,6)`
+ * columns as STRINGS (e.g. `"558.7"`), so a bare `typeof === 'number'` check
+ * silently drops the value in production. This accepts numbers, numeric
+ * strings, and null/empty/invalid → undefined.
+ */
+function coerceNumber(v: unknown): number | undefined {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string' && v !== '') {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  return undefined;
+}
+
+/**
  * Issue statuses considered "closed" (no longer an open problem) and therefore
  * excluded from the row severity summary. Mirrors issue-row.tsx rectified logic.
  */
@@ -94,6 +109,14 @@ const CLOSED_ISSUE_STATUSES = new Set([
   '已整改',
   '不整改',
 ]);
+
+/**
+ * Calculation-run statuses considered valid for the read projection. Any stray
+ * DB value (e.g. 'running', 'partial_success') is NOT force-cast through the
+ * type system — it falls back to 'unknown' so callers never observe an
+ * unmodeled state.
+ */
+const KNOWN_CALC_STATUSES = new Set(['succeeded', 'failed', 'partial', 'unknown']);
 
 /** Map a raw metric_evaluations row to the read DTO. */
 function mapMetric(
@@ -123,13 +146,14 @@ function mapMetric(
 
   // display: first version just stringifies the underlying value.
   let display: string | undefined;
-  const numeric = typeof m.numeric_value === 'number' ? m.numeric_value : undefined;
+  const numeric = coerceNumber(m.numeric_value);
+  const durationMs = coerceNumber(m.duration_ms);
   if (typeof m.display_value === 'string' && m.display_value) {
     display = m.display_value;
   } else if (numeric !== undefined) {
     display = String(numeric);
-  } else if (m.duration_ms !== null && m.duration_ms !== undefined) {
-    display = String(m.duration_ms);
+  } else if (durationMs !== undefined) {
+    display = String(durationMs);
   } else if (m.text_value) {
     display = String(m.text_value);
   }
@@ -137,7 +161,7 @@ function mapMetric(
   return {
     state,
     value: numeric,
-    durationMs: typeof m.duration_ms === 'number' ? m.duration_ms : undefined,
+    durationMs,
     text: m.text_value ?? undefined,
     unit: m.unit_code ?? undefined,
     display,
@@ -265,7 +289,9 @@ export async function buildMatrixReadProjection(
     }
   }
 
-  const totalRows = nodeRows.filter((n) => n.node_type === 'item' || n.node_type === 'condition').length;
+  // totalRows is reconciled after the groups loop below — it counts only the
+  // rows that actually rendered (orphans whose parent_id does not resolve to a
+  // section are dropped from the groups, so they must not inflate the count).
 
   // 6-9. Build groups + per-row projections.
   const groups: MatrixReadGroup[] = [];
@@ -284,15 +310,23 @@ export async function buildMatrixReadProjection(
     });
   }
 
-  // 12. Latest calculation run status.
-  const { data: calcRunRaw } = await client
+  // 12. Latest calculation run status. Secondary `.order('id')` is a
+  // deterministic tie-breaker so two runs sharing `computed_at` resolve
+  // consistently (newer id wins) — important for reproducible Task 12 snapshots.
+  const { data: calcRunRaw, error: calcErr } = await client
     .from('matrix_calculation_runs')
     .select('id, status')
     .eq('matrix_instance_id', assemblyId)
     .order('computed_at', { ascending: false })
+    .order('id', { ascending: false })
     .limit(1);
+  if (calcErr) throw new Error(calcErr.message || '加载计算运行失败');
   const calcRun = asRows(calcRunRaw)[0];
-  const calcStatus = (calcRun?.status as MatrixReadProjection['calculation']['status']) ?? 'unknown';
+  const rawStatus = calcRun?.status;
+  const calcStatus: MatrixReadProjection['calculation']['status'] =
+    typeof rawStatus === 'string' && KNOWN_CALC_STATUSES.has(rawStatus)
+      ? (rawStatus as MatrixReadProjection['calculation']['status'])
+      : 'unknown';
 
   // 11. Permissions — first version: row/observed editing allowed if a user is
   // present (real permission wiring arrives in Task 7); formula editing is
@@ -307,6 +341,10 @@ export async function buildMatrixReadProjection(
   // 13. version — first version uses 1; there is no row-level version
   // aggregation yet (tracked for a future pass).
   const version = 1;
+
+  // totalRows counts only rendered rows (sum across groups), so orphan item/
+  // condition nodes whose parent_id resolves to no section are excluded.
+  const totalRows = groups.reduce((sum, g) => sum + g.rows.length, 0);
 
   return {
     matrixId: assemblyId,
@@ -350,20 +388,22 @@ async function buildRowProjection(
   const cfg = (row.config ?? {}) as Record<string, any>;
 
   // 6. Metrics for this row (cell_id === row node id).
-  const { data: metricRowsRaw } = await client
+  const { data: metricRowsRaw, error: mErr } = await client
     .from('metric_evaluations')
     .select('*')
     .eq('cell_id', rowId);
+  if (mErr) throw new Error(mErr.message || '加载指标失败');
   const metrics: Record<string, MatrixMetricReadValue> = {};
   for (const m of asRows(metricRowsRaw)) {
     metrics[String(m.metric_key)] = mapMetric(m, formulaVersionByMetric);
   }
 
   // 7. Issues for this row — precise filter via source_item_node_id.
-  const { data: issueRowsRaw } = await client
+  const { data: issueRowsRaw, error: isErr } = await client
     .from('issues')
     .select('id, level, status')
     .eq('source_item_node_id', rowId);
+  if (isErr) throw new Error(isErr.message || '加载问题失败');
   const issueRows = asRows(issueRowsRaw);
   const openIssues = issueRows.filter((i) => !CLOSED_ISSUE_STATUSES.has(String(i.status ?? '')));
   const severityLevels = Array.from(
@@ -371,13 +411,14 @@ async function buildRowProjection(
   );
 
   // 8. Evidence previews (cell_primary materials).
-  const { data: evidenceRowsRaw } = await client
+  const { data: evidenceRowsRaw, error: evErr } = await client
     .from('materials')
     .select('id')
     .eq('comparison_cell_id', rowId)
     .eq('media_role', 'cell_primary')
     .order('media_display_order', { ascending: true })
     .limit(3);
+  if (evErr) throw new Error(evErr.message || '加载证据失败');
   const evidenceRows = asRows(evidenceRowsRaw);
   const previewIds = evidenceRows.map((m) => String(m.id));
 

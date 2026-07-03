@@ -14,22 +14,41 @@ import { buildMatrixReadProjection } from './projection';
 interface StubState {
   _table: string | null;
   _filters: Array<{ col: string; val: any }>;
-  _order: { col: string; ascending: boolean } | null;
+  _orders: Array<{ col: string; ascending: boolean }>;
   _limit: number | null;
   _single: boolean;
 }
 
-function makeStubClient(tables: Record<string, any[]>) {
-  const resolve = (state: StubState): Promise<{ data: any; error: null }> => {
+interface StubOptions {
+  /**
+   * Per-table forced errors. When a table key is present, the resolved query
+   * returns `{ data: null, error: {...} }` for that table — mirroring a real
+   * Supabase RLS denial / network blip. Used to exercise Fix 1's error throw.
+   */
+  errors?: Record<string, { message: string }>;
+}
+
+function makeStubClient(tables: Record<string, any[]>, options: StubOptions = {}) {
+  const resolve = (state: StubState): Promise<{ data: any; error: any }> => {
+    // Simulate a Supabase error for this table (RLS denial, etc.).
+    const forcedError = options.errors?.[state._table!];
+    if (forcedError) {
+      return Promise.resolve({ data: null, error: forcedError });
+    }
     let rows = (tables[state._table!] || []).filter((r: any) =>
       state._filters.every((f) => r[f.col] === f.val),
     );
-    if (state._order) {
-      const { col, ascending } = state._order;
+    // Apply stacked `.order()` calls left-to-right; earlier keys have higher
+    // priority (matches Postgres / Supabase multi-column ORDER BY semantics).
+    if (state._orders.length > 0) {
       rows = [...rows].sort((a, b) => {
-        const av = a[col];
-        const bv = b[col];
-        return ascending ? (av < bv ? -1 : av > bv ? 1 : 0) : (av > bv ? -1 : av < bv ? 1 : 0);
+        for (const { col, ascending } of state._orders) {
+          const av = a[col];
+          const bv = b[col];
+          if (av === bv) continue;
+          return ascending ? (av < bv ? -1 : 1) : (av > bv ? -1 : 1);
+        }
+        return 0;
       });
     }
     if (state._limit != null) rows = rows.slice(0, state._limit);
@@ -41,7 +60,7 @@ function makeStubClient(tables: Record<string, any[]>) {
     select() { return this; },
     eq(this: StubState, col: string, val: any) { this._filters.push({ col, val }); return this; },
     order(this: StubState, col: string, opts: any) {
-      this._order = { col, ascending: opts.ascending };
+      this._orders.push({ col, ascending: opts.ascending });
       return this;
     },
     limit(this: StubState, n: number) { this._limit = n; return this; },
@@ -54,7 +73,7 @@ function makeStubClient(tables: Record<string, any[]>) {
   const newState = (): StubState => ({
     _table: null,
     _filters: [],
-    _order: null,
+    _orders: [],
     _limit: null,
     _single: false,
   });
@@ -241,6 +260,77 @@ async function main() {
   const unknownProj = await buildMatrixReadProjection(makeStubClient(emptyCalc), 'a1');
   assert.equal(unknownProj.calculation.status, 'unknown');
   assert.equal(unknownProj.calculation.lastRunId, undefined);
+
+  // --- Fix 3: stray calc status (e.g. 'running') coerces to 'unknown' --
+  const strayStatusFixtures = {
+    ...fixtures,
+    matrix_calculation_runs: [
+      { id: 'runX', matrix_instance_id: 'a1', status: 'running', computed_at: '2026-01-03T00:00:00Z' },
+    ],
+  };
+  const strayProj = await buildMatrixReadProjection(makeStubClient(strayStatusFixtures), 'a1');
+  assert.equal(strayProj.calculation.status, 'unknown');
+  assert.equal(strayProj.calculation.lastRunId, 'runX');
+
+  // --- Fix 4: numeric_value arrives as STRING from real Supabase -------
+  const stringNumberFixtures = {
+    ...fixtures,
+    metric_evaluations: [
+      { cell_id: 'r1', metric_key: 'juice_weight', value_kind: 'number', numeric_value: '558.7', unit_code: 'g', input_state: 'valid', calculation_mode: 'manual', version: 1 },
+    ],
+  };
+  const stringNumProj = await buildMatrixReadProjection(makeStubClient(stringNumberFixtures), 'a1');
+  const stringNumRow = stringNumProj.groups[0].rows[0];
+  assert.equal(stringNumRow.metrics.juice_weight.value, 558.7);
+  assert.equal(stringNumRow.metrics.juice_weight.state, 'valid');
+  assert.equal(stringNumRow.metrics.juice_weight.display, '558.7');
+
+  // --- Fix 1: per-row Supabase error (RLS denial) → projection throws ---
+  // Previously the error was silently swallowed (row projected as empty);
+  // now it propagates. The stub provides a message, so the per-row loader's
+  // `mErr.message || '加载指标失败'` surfaces the message verbatim.
+  await assert.rejects(
+    () => buildMatrixReadProjection(
+      makeStubClient(fixtures, { errors: { metric_evaluations: { message: 'RLS denied' } } }),
+      'a1',
+    ),
+    /RLS denied/,
+  );
+
+  // --- Bonus: orphan item node (parent_id resolves to no section) is ---
+  // --- dropped from groups AND excluded from totalRows. ---------------
+  const orphanFixtures = {
+    ...fixtures,
+    comparison_item_nodes: [
+      { id: 'g1', assembly_id: 'a1', parent_id: null, node_type: 'section', node_label: '胡萝卜', sort_order: 0, depth: 0, config: {} },
+      {
+        id: 'r1',
+        assembly_id: 'a1',
+        parent_id: 'g1',
+        node_type: 'item',
+        node_label: '160mm口径',
+        sort_order: 0,
+        depth: 1,
+        config: { subject_key: 'aperture_160' },
+      },
+      // orphan: parent_id points at a non-existent section
+      {
+        id: 'orphan',
+        assembly_id: 'a1',
+        parent_id: 'ghost',
+        node_type: 'item',
+        node_label: '孤儿',
+        sort_order: 0,
+        depth: 1,
+        config: { subject_key: 'lost' },
+      },
+    ],
+  };
+  const orphanProj = await buildMatrixReadProjection(makeStubClient(orphanFixtures), 'a1');
+  // only the rendered row counts — the orphan must NOT inflate totalRows.
+  assert.equal(orphanProj.viewport.totalRows, 1);
+  assert.equal(orphanProj.groups[0].rows.length, 1);
+  assert.equal(orphanProj.groups[0].rows[0].id, 'r1');
 
   console.log('projection builder tests passed');
 }
