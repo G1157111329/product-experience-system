@@ -13,6 +13,70 @@ import {
 } from '@/storage/database/shared/schema';
 import { preserveReviewOverrides, type ReportContentWithReview } from '@/lib/report-review-overrides';
 import { buildComparisonReportSnapshot, findAssemblyForTask } from '@/lib/server/comparison-assembly';
+import { buildMatrixReadProjection, type MatrixReadProjection } from '@/lib/matrix/projection';
+
+/**
+ * Find a data_matrix assembly linked to a task.
+ *
+ * data-matrix instances link to a task via `source_task_ids` JSONB containing
+ * the taskId, with `matrix_role='data_matrix'`. `findAssemblyForTask` does not
+ * filter by role, so we explicitly select data_matrix assemblies and JS-filter
+ * by source_task_ids.
+ */
+async function findDataMatrixAssemblyId(client: ReturnType<typeof getSupabaseClient>, taskId: string): Promise<string | null> {
+  const { data: assemblies } = await client
+    .from('comparison_assemblies')
+    .select('id, source_task_ids')
+    .eq('matrix_role', 'data_matrix');
+  const rows = (assemblies || []) as Array<{ id: string; source_task_ids: unknown }>;
+  const match = rows.find((assembly) => Array.isArray(assembly.source_task_ids) && assembly.source_task_ids.includes(taskId));
+  return match?.id || null;
+}
+
+/**
+ * Build a data-matrix read projection for a task, or null when the task has no
+ * data_matrix assembly or the projection load fails. Failures are non-fatal —
+ * a data-matrix projection error must never block report generation.
+ */
+async function loadDataMatrixProjection(client: ReturnType<typeof getSupabaseClient>, taskId: string): Promise<{ assemblyId: string; projection: MatrixReadProjection } | null> {
+  let assemblyId: string | null = null;
+  try {
+    assemblyId = await findDataMatrixAssemblyId(client, taskId);
+  } catch {
+    return null;
+  }
+  if (!assemblyId) return null;
+  try {
+    const projection = await buildMatrixReadProjection(client, assemblyId);
+    return { assemblyId, projection };
+  } catch {
+    // matrix-load failure must NOT block report generation; logged upstream via null
+    return null;
+  }
+}
+
+/**
+ * Read assembly-level fields needed for the frozen snapshot (§11.3 no-drift)
+ * that are NOT part of the MatrixReadProjection DTO — specifically
+ * `comparability_status` and the schema version id. Returns null on failure.
+ */
+async function loadDataMatrixAssemblyMeta(client: ReturnType<typeof getSupabaseClient>, assemblyId: string): Promise<{ comparabilityStatus?: string; matrixSchemaVersionId?: string } | null> {
+  try {
+    const { data: assembly } = await client
+      .from('comparison_assemblies')
+      .select('comparability_status, matrix_schema_version_id')
+      .eq('id', assemblyId)
+      .maybeSingle();
+    if (!assembly) return null;
+    const row = assembly as { comparability_status?: string; matrix_schema_version_id?: string };
+    return {
+      comparabilityStatus: row.comparability_status ?? undefined,
+      matrixSchemaVersionId: row.matrix_schema_version_id ?? undefined,
+    };
+  } catch {
+    return null;
+  }
+}
 
 function parsePositiveInt(value: string | null, fallback: number, max: number) {
   const num = Number(value);
@@ -334,9 +398,126 @@ export async function POST(request: NextRequest) {
       .update({ status: '\u5df2\u5b8c\u6210', updated_at: new Date().toISOString() })
       .eq('id', body.task_id);
 
+    // ── 对比矩阵问题点纳入问题管理 ──
+    // 从 snapshot.cells 提取问题点，复用 recipe_problem 类型，按 conclusionTag 推导等级
+    const snapshotCells = (snapshot.cells || []) as Array<Record<string, unknown>>;
+    const snapshotNodes = (snapshot.item_nodes || []) as Array<Record<string, unknown>>;
+    const snapshotObjects = (snapshot.objects || []) as Array<Record<string, unknown>>;
+    const assemblyId = comparisonSource.assemblyId;
+    const createdKeys = new Set<string>();
+    const matrixIssueRows: Array<typeof issuesTable.$inferInsert> = [];
+
+    const nodeLabel = (nodeId: string) => {
+      const node = snapshotNodes.find((n) => String(n.id ?? '') === nodeId);
+      return String(node?.node_label ?? node?.name ?? '');
+    };
+    const objectName = (objId: string) => {
+      const obj = snapshotObjects.find((o) => String(o.id ?? '') === objId);
+      return String(obj?.object_name ?? obj?.name ?? '');
+    };
+    // 按 conclusionTag 推导等级：risk→二类，retest/average→三类，其余不创建
+    const levelFromTag = (tag: string): string | null => {
+      if (tag === 'risk' || tag === 'failed') return '二类';
+      if (tag === 'retest' || tag === 'average') return '三类';
+      return null;
+    };
+
+    for (const cell of snapshotCells) {
+      const cellId = String(cell.id ?? '');
+      const itemNodeId = String(cell.item_node_id ?? cell.itemNodeId ?? '');
+      const objectId = String(cell.object_id ?? cell.objectId ?? '');
+      const conclusionTag = String(cell.conclusion_tag ?? '');
+      const effectSummary = String(cell.effect_summary ?? '');
+      const problemPoints = cell.problem_points;
+
+      // 收集问题文本：problem_points 数组优先，否则用 conclusion_tag=risk 时的 effect_summary
+      const problemTexts: string[] = [];
+      if (Array.isArray(problemPoints)) {
+        for (const pp of problemPoints) {
+          const text = typeof pp === 'string' ? pp : String((pp as Record<string, unknown>)?.text ?? '');
+          if (text.trim()) problemTexts.push(text.trim());
+        }
+      }
+      // 无显式 problem_points 但标签为 risk/retest，用 effect_summary 作为问题描述
+      if (problemTexts.length === 0 && (conclusionTag === 'risk' || conclusionTag === 'retest') && effectSummary.trim()) {
+        problemTexts.push(effectSummary.trim());
+      }
+
+      const level = levelFromTag(conclusionTag);
+      // 有显式 problem_points 的单元格即使标签非 risk 也创建（文本类问题），等级取 level 或默认三类
+      const finalLevel = problemTexts.length > 0 ? (level || '三类') : level;
+      if (!finalLevel || problemTexts.length === 0) continue;
+
+      const nodeText = nodeLabel(itemNodeId);
+      const objText = objectName(objectId);
+      for (const ppText of problemTexts) {
+        const issueTitle = `[对比]${objText} - ${nodeText}：${ppText}`.substring(0, 200);
+        const issueKey = `recipe_problem::${issueTitle}`;
+        if (createdKeys.has(issueKey)) continue;
+
+        matrixIssueRows.push({
+          taskId: body.task_id,
+          title: issueTitle,
+          productModel: (task as Record<string, unknown>)?.product_model as string || null,
+          level: finalLevel,
+          source: `${reportTitle} - 对比矩阵问题`.substring(0, 50),
+          sourceReportId: report.id,
+          sourceType: 'recipe_problem',
+          description: `对象：${objText}\n项目：${nodeText}\n问题：${ppText}`,
+          status: '待整改',
+          sourceAssemblyId: assemblyId,
+          sourceCellId: cellId || null,
+          sourceItemNodeId: itemNodeId || null,
+          sourceObjectId: objectId || null,
+        });
+        createdKeys.add(issueKey);
+      }
+    }
+
+    if (matrixIssueRows.length > 0) {
+      try {
+        const matrixDb = getDb();
+        await matrixDb.insert(issuesTable).values(matrixIssueRows).onConflictDoNothing();
+      } catch {
+        // 矩阵问题点创建失败不应阻断报告生成；UNIQUE 约束冲突已被 onConflictDoNothing 吞掉
+      }
+    }
+
+    // ── 五感体验不合格项也纳入问题管理（对比报告此前会遗漏 record_fail）──
+    const { data: comparisonRecords } = await client.from('check_records').select('*').eq('task_id', body.task_id);
+    const sensoryIssueRows: Array<typeof issuesTable.$inferInsert> = [];
+    for (const record of (comparisonRecords || []) as Array<Record<string, unknown>>) {
+      if (record.evaluation_result !== '不合格') continue;
+      const issueTitle = String(record.check_item || '不合格检查项').substring(0, 200);
+      const issueKey = `record_fail::${issueTitle}`;
+      if (createdKeys.has(issueKey)) continue;
+      sensoryIssueRows.push({
+        taskId: body.task_id,
+        title: issueTitle,
+        productModel: (task as Record<string, unknown>)?.product_model as string || null,
+        level: '二类',
+        source: `${reportTitle} - 不合格检查项`.substring(0, 50),
+        sourceReportId: report.id,
+        sourceType: 'record_fail',
+        description: [record.check_requirement, record.check_standard, record.problem_description].filter(Boolean).join('\n'),
+        status: '待整改',
+        recordId: String(record.id || '') || null,
+      });
+      createdKeys.add(issueKey);
+    }
+    if (sensoryIssueRows.length > 0) {
+      try {
+        const sensoryDb = getDb();
+        await sensoryDb.insert(issuesTable).values(sensoryIssueRows).onConflictDoNothing();
+      } catch {
+        // 同样不阻断报告生成
+      }
+    }
+
+    const totalNewIssues = matrixIssueRows.length + sensoryIssueRows.length;
     return NextResponse.json({
       code: 0,
-      message: '对比矩阵报告生成成功',
+      message: totalNewIssues > 0 ? `对比矩阵报告生成成功，已创建 ${totalNewIssues} 个问题点` : '对比矩阵报告生成成功',
       data: updatedReport || report,
     });
   }
@@ -436,12 +617,18 @@ export async function POST(request: NextRequest) {
     ? { ...(task as Record<string, unknown>), status: '\u5df2\u5b8c\u6210' }
     : task;
 
+  // ── 数据矩阵投影：若任务关联 data_matrix 组装，读取投影并写入 content（Sub-task A）──
+  // 失败不应阻断报告生成，统一降级为 null。
+  const dataMatrix = await loadDataMatrixProjection(client, body.task_id);
+  const dataMatrixProjection: MatrixReadProjection | null = dataMatrix?.projection ?? null;
+
   const reportContent = {
     task: completedTaskSnapshot,
     ai_summary: aiSummaryData?.value || null,
     records: recordsWithMaterials || [],
     recipes: recipesWithCount || [],
     materials: materials || [],
+    data_matrix_projection: dataMatrixProjection,
     generatedAt: new Date().toISOString(),
   };
   const finalReportContent = preserveReviewOverrides(
@@ -502,11 +689,12 @@ export async function POST(request: NextRequest) {
         productModel: (task as Record<string, unknown>)?.product_model as string || null,
         level: '二类',
         source: sourceText(`${reportTitle} - 不合格检查项`),
-        sourceReportId: report.id,
-        sourceType: 'record_fail',
-        description: [record.check_requirement, record.check_standard, record.problem_description].filter(Boolean).join('\n'),
-        status: '待整改',
-      });
+          sourceReportId: report.id,
+          sourceType: 'record_fail',
+          description: [record.check_requirement, record.check_standard, record.problem_description].filter(Boolean).join('\n'),
+          status: '待整改',
+          recordId: String(record.id || '') || null,
+        });
       createdKeys.add(issueKey);
     }
 
@@ -615,6 +803,58 @@ export async function POST(request: NextRequest) {
 
     return report;
   });
+
+  // ── 数据矩阵快照冻结（Sub-task C, §11.3 no-drift）──
+  // 当任务关联 data_matrix 组装时，发布一份快照并把完整投影冻结进
+  // snapshot_json.matrix_projection（含 schema key/version、行标签、排序、
+  // 指标值、公式版本、证据、可比性状态）。重新读取最新投影以保证发布精度，
+  // 绝不仅存 matrix_instance_id。镜像对比报告在生成时自动发布快照的既有模式。
+  if (dataMatrixProjection) {
+    try {
+      // 重新读取最新投影以保证发布精度（绝不仅存 matrix_instance_id）。
+      const fresh = dataMatrix?.assemblyId
+        ? await loadDataMatrixProjection(client, body.task_id)
+        : null;
+      const freshProjection = fresh?.projection ?? dataMatrixProjection;
+      // 补充投影 DTO 未携带但 §11.3 要求冻结的字段：可比性状态 + schema version id。
+      const assemblyMeta = (fresh?.assemblyId ?? dataMatrix?.assemblyId)
+        ? await loadDataMatrixAssemblyMeta(client, String(fresh?.assemblyId ?? dataMatrix?.assemblyId))
+        : null;
+      const frozenProjection = {
+        ...freshProjection,
+        comparabilityStatus: assemblyMeta?.comparabilityStatus,
+        matrixSchemaVersionId: assemblyMeta?.matrixSchemaVersionId,
+      };
+      const frozenSnapshotJson = {
+        report_type: 'single_report',
+        snapshot_status: 'published',
+        generated_at: new Date().toISOString(),
+        primary_task_id: body.task_id,
+        source_task_ids: [body.task_id],
+        matrix_projection: frozenProjection,
+      };
+      const { data: savedSnapshot } = await client
+        .from('report_snapshots')
+        .insert({
+          report_id: savedReport.id,
+          report_type: 'single_report',
+          version: 1,
+          snapshot_json: frozenSnapshotJson,
+          layout_profile: 'single_a4_portrait',
+          created_by: user.id,
+        })
+        .select()
+        .single();
+      if (savedSnapshot?.id) {
+        await client
+          .from('reports')
+          .update({ snapshot_id: savedSnapshot.id, updated_at: new Date().toISOString() })
+          .eq('id', savedReport.id);
+      }
+    } catch {
+      // 快照写入失败不阻断报告生成；content.data_matrix_projection 仍可用
+    }
+  }
 
   const data = {
     ...savedReport,

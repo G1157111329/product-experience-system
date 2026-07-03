@@ -3,7 +3,7 @@
 export type ReportViewMode = 'read' | 'data' | 'evidence' | 'review' | 'print';
 export type ReportSectionStatus = 'ready' | 'empty' | 'warning' | 'blocked';
 export type ReportQualitySeverity = 'info' | 'warning' | 'error';
-export type ReportDetailSectionBlockType = 'summary' | 'facts' | 'list' | 'table' | 'media' | 'matrix';
+export type ReportDetailSectionBlockType = 'summary' | 'facts' | 'list' | 'table' | 'media' | 'matrix' | 'data_matrix';
 export type ReportDetailTemplateKey =
   | 'single_report_narrative'
   | 'comparison_image_matrix'
@@ -109,6 +109,46 @@ export type ReportDetailMatrix = {
   emptyMessage?: string;
 };
 
+/**
+ * Frozen data-matrix projection (Task 12). This mirrors the shape produced by
+ * `buildMatrixReadProjection` and is stored verbatim under
+ * `content.data_matrix_projection` (generation) and
+ * `snapshot_json.matrix_projection` (publish freeze, §11.3 no-drift). Kept as a
+ * loose record so report-detail does not import the projection module.
+ */
+export type ReportDetailDataMatrixProjection = {
+  matrixId: string;
+  taskId?: string;
+  schema: {
+    key: string;
+    version: number;
+    name: string;
+    dimensions: Array<Record<string, unknown>>;
+    formulas: Array<Record<string, unknown>>;
+  };
+  permissions?: Record<string, unknown>;
+  viewport?: { totalGroups: number; totalRows: number };
+  groups: Array<{
+    id: string;
+    label: string;
+    conditionSummary?: string;
+    rows: Array<{
+      id: string;
+      version: number;
+      subject: { key: string; label: string };
+      metrics: Record<string, Record<string, unknown>>;
+      slots?: {
+        result?: { status?: string; summary?: string };
+        process?: { note?: string };
+        issues?: { count: number; severitySummary: string[] };
+      };
+      evidence?: { primaryCount: number; previewIds: string[] };
+    }>;
+  }>;
+  calculation?: { status: string; lastRunId?: string };
+  version?: number;
+};
+
 type ReadableComparisonMatrix = ReportDetailMatrix & {
   summaryText?: string;
 };
@@ -123,6 +163,7 @@ export type ReportDetailSectionBlock = {
   items?: ReportDetailSectionBlockItem[];
   media?: ReportDetailMediaItem[];
   matrix?: ReportDetailMatrix;
+  dataMatrix?: ReportDetailDataMatrixProjection;
   defaultCollapsed?: boolean;
   collapsedLabel?: string;
   emptyMessage?: string;
@@ -610,6 +651,101 @@ function taskDetailRows(task: Row) {
     .filter(([key, value]) => !['id', 'selected_standards', 'created_by'].includes(key) && value !== null && value !== undefined && value !== '')
     .slice(0, 24)
     .map(([key, value]) => ({ '字段': fieldLabels[key] || key, '内容': text(value) }));
+}
+
+// ── 数据矩阵投影渲染（Task 12, Sub-task B）─────────────────────────────────
+// 当 content.data_matrix_projection 或 snapshot_json.matrix_projection 存在时，
+// 渲染一个只读的数据矩阵区块。读取顺序：snapshot 冻结值优先（历史不漂移），
+// 回退到 content 中的投影。所有矩阵新增都受「投影存在」守卫，不影响既有报告类型。
+
+function dataMatrixProjectionOf(content: Row, snapshotJson: Row): ReportDetailDataMatrixProjection | null {
+  const snapshotProjection = isRecord(snapshotJson.matrix_projection) ? snapshotJson.matrix_projection : null;
+  const contentProjection = isRecord(content.data_matrix_projection) ? content.data_matrix_projection : null;
+  const source = snapshotProjection || contentProjection;
+  if (!source || !Array.isArray(source.groups)) return null;
+  // Defensive: ensure schema block exists so the section is renderable.
+  if (!isRecord(source.schema)) return null;
+  return source as ReportDetailDataMatrixProjection;
+}
+
+function dataMatrixDimensionColumns(projection: ReportDetailDataMatrixProjection): Array<{ key: string; label: string }> {
+  const dimensions = Array.isArray(projection.schema.dimensions) ? projection.schema.dimensions : [];
+  return dimensions.map((dim) => ({
+    key: firstNonEmpty(dim.dimensionKey, dim.key),
+    label: firstNonEmpty(dim.displayName, dim.dimensionKey, dim.key),
+  })).filter((col) => Boolean(col.key));
+}
+
+function dataMatrixMetricDisplay(metric: Record<string, unknown>): string {
+  if (metric.display) return text(metric.display);
+  if (metric.value !== undefined && metric.value !== null && metric.value !== '') return text(metric.value);
+  if (metric.text) return text(metric.text);
+  const state = text(metric.state);
+  if (state === 'missing') return '（缺失）';
+  if (state === 'not_applicable') return '（不适用）';
+  if (state === 'calculation_failed') return '（计算失败）';
+  if (state === 'pending') return '（待计算）';
+  return '-';
+}
+
+function dataMatrixRowTableRows(projection: ReportDetailDataMatrixProjection): Array<Record<string, string>> {
+  const columns = dataMatrixDimensionColumns(projection);
+  const tableRows: Array<Record<string, string>> = [];
+  for (const group of projection.groups) {
+    for (const row of group.rows) {
+      const base: Record<string, string> = {
+        '分组': group.label,
+        '行项目': firstNonEmpty(row.subject?.label, row.id),
+        '结果': firstNonEmpty(row.slots?.result?.status, row.slots?.result?.summary, '-'),
+        '问题数': String(row.slots?.issues?.count ?? 0),
+        '证据': `${row.evidence?.primaryCount ?? 0} 条`,
+      };
+      for (const col of columns) {
+        const metric = row.metrics?.[col.key] || {};
+        base[col.label] = dataMatrixMetricDisplay(metric);
+      }
+      tableRows.push(base);
+    }
+  }
+  return tableRows;
+}
+
+function dataMatrixSchemaFacts(projection: ReportDetailDataMatrixProjection): ReportDetailSectionBlockItem[] {
+  return compact([
+    fact('矩阵模式 Key', projection.schema.key),
+    fact('模式版本', projection.schema.version),
+    fact('模式名称', projection.schema.name),
+    fact('维度数', Array.isArray(projection.schema.dimensions) ? projection.schema.dimensions.length : 0),
+    fact('公式数', Array.isArray(projection.schema.formulas) ? projection.schema.formulas.length : 0),
+    fact('分组数', projection.viewport?.totalGroups ?? projection.groups.length),
+    fact('数据行数', projection.viewport?.totalRows ?? projection.groups.reduce((sum, g) => sum + (g.rows?.length ?? 0), 0)),
+    fact('计算状态', projection.calculation?.status),
+    fact('可比性', (projection as Row).comparabilityStatus),
+  ]);
+}
+
+function dataMatrixSection(projection: ReportDetailDataMatrixProjection): ReportDetailSection {
+  const tableRows = dataMatrixRowTableRows(projection);
+  const columns = ['分组', '行项目', ...dataMatrixDimensionColumns(projection).map((col) => col.label), '结果', '问题数', '证据'];
+  const totalRows = projection.viewport?.totalRows ?? projection.groups.reduce((sum, g) => sum + (g.rows?.length ?? 0), 0);
+  return section('data_matrix', '数据矩阵', totalRows > 0 ? 'ready' : 'empty', ['矩阵概览', '矩阵明细'], {
+    count: totalRows,
+    blocks: compact([
+      block('data_matrix:facts', 'facts', '矩阵概览', {
+        items: dataMatrixSchemaFacts(projection),
+      }),
+      block('data_matrix:matrix', 'data_matrix', '矩阵投影', {
+        description: '只读数据矩阵投影：分组 → 行 → 指标值（含结果、问题数与证据引用）。历史报告读取冻结快照，不会随源数据漂移。',
+        dataMatrix: projection,
+        emptyMessage: '暂无数据矩阵行。',
+      }),
+      tableRows.length > 0 && block('data_matrix:table', 'table', '矩阵明细', {
+        columns,
+        rows: tableRows,
+        emptyMessage: '暂无数据矩阵明细。',
+      }),
+    ]),
+  });
 }
 
 function contentSections(report: Row, content: Row, issues: Row[], materials: Row[]): ReportDetailSection[] {
@@ -1522,7 +1658,12 @@ function buildSections(report: Row, snapshot: Row | null | undefined, issues: Ro
   if (reportType === 'comparison_report') return comparisonSections(report, content, snapshotJson, layoutProfile);
   if (reportType === 'model_merged_report') return modelSections(report, content, snapshotJson);
   if (reportType === 'custom_merged_report') return customSections(report, content, snapshotJson);
-  return contentSections(report, content, issues, materials);
+  const sections = contentSections(report, content, issues, materials);
+  // ── 数据矩阵追加（Task 12, Sub-task B）──
+  // 仅当存在冻结快照或 content 投影时追加；既有 single_report 类型无投影时不受影响。
+  const dataMatrixProjection = dataMatrixProjectionOf(content, snapshotJson);
+  if (dataMatrixProjection) sections.push(dataMatrixSection(dataMatrixProjection));
+  return sections;
 }
 
 function evidenceSlot(id: string, ownerType: string, ownerId: string, role: string, materialIds: string[], required = false): ReportEvidenceSlot {
