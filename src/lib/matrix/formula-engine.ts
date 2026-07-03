@@ -35,6 +35,14 @@ function parseError(detail: string): MatrixFormulaError {
   return new MatrixFormulaError(PARSE_ERROR_CODE, detail);
 }
 
+/**
+ * Generous cap on paren-nesting depth. Authored formulas never approach this;
+ * ~6000 is where V8's stack overflows during recursive descent, so 200 leaves
+ * a wide safety margin and lets us fail with a typed error instead of leaking
+ * a raw `RangeError` (which would defeat {@link parseErrorToCode}).
+ */
+const MAX_PAREN_DEPTH = 200;
+
 // ---------------------------------------------------------------------------
 // Whitelists
 // ---------------------------------------------------------------------------
@@ -86,13 +94,14 @@ export type Token =
 class Lexer {
   private readonly src: string;
   private pos = 0;
+  private parenDepth = 0;
 
   constructor(src: string) {
     this.src = src;
   }
 
   private fail(detail: string): never {
-    throw parseError(detail);
+    throw parseError(`${detail} at pos ${this.pos}`);
   }
 
   private peek(offset = 0): string {
@@ -229,10 +238,15 @@ class Lexer {
     }
 
     if (ch === '(') {
+      this.parenDepth += 1;
+      if (this.parenDepth > MAX_PAREN_DEPTH) {
+        this.fail('formula nesting too deep');
+      }
       this.pos += 1;
       return { kind: 'lparen' };
     }
     if (ch === ')') {
+      if (this.parenDepth > 0) this.parenDepth -= 1;
       this.pos += 1;
       return { kind: 'rparen' };
     }
@@ -327,8 +341,8 @@ export type Ast =
 //   comparison  ( > >= < <= == != )
 //   additive    ( + - )
 //   multiplicative ( * / )
+//   unary       ( - prefix, binds LOOSER than power so -2^2 == -(2^2) )
 //   power       ( ^, right-associative )
-//   unary       ( - prefix )
 //   primary     ( SELF/REF/GROUP_*, number, string, IDENT(args), "( expr )" )
 // ---------------------------------------------------------------------------
 
@@ -403,12 +417,12 @@ class Parser {
   }
 
   private parseMultiplicative(): Ast {
-    let left = this.parsePower();
+    let left = this.parseUnary();
     while (true) {
       const tok = this.peek();
       if (tok?.kind === 'op' && (tok.symbol === '*' || tok.symbol === '/')) {
         this.advance();
-        const right = this.parsePower();
+        const right = this.parseUnary();
         left = { kind: 'binop', op: tok.symbol, left, right };
       } else {
         break;
@@ -417,16 +431,11 @@ class Parser {
     return left;
   }
 
-  private parsePower(): Ast {
-    const base = this.parseUnary();
-    if (this.isOp('^')) {
-      this.advance();
-      const exponent = this.parsePower(); // right-associative
-      return { kind: 'binop', op: '^', left: base, right: exponent };
-    }
-    return base;
-  }
-
+  /**
+   * Unary prefix `-`/`+`. Sits ABOVE power in the ladder so that `-2^2`
+   * parses as `-(2^2)` (i.e. `0 - (2^2)` = -4), matching Excel/Python/math
+   * convention, rather than `(-2)^2` = 4.
+   */
   private parseUnary(): Ast {
     if (this.isOp('-')) {
       this.advance();
@@ -434,7 +443,26 @@ class Parser {
       // Desugar unary minus into `0 - operand` (no dedicated unary AST node).
       return { kind: 'binop', op: '-', left: { kind: 'num', value: 0 }, right: operand };
     }
-    return this.parsePrimary();
+    if (this.isOp('+')) {
+      // Unary plus is a no-op; drop it and keep parsing.
+      this.advance();
+      return this.parseUnary();
+    }
+    return this.parsePower();
+  }
+
+  private parsePower(): Ast {
+    const base = this.parsePrimary();
+    if (this.isOp('^')) {
+      this.advance();
+      // Exponent recurses through parseUnary (not parsePower) so that a
+      // negative exponent like `2^-2` is accepted — `2 ^ (0 - 2)`. This still
+      // preserves right-associativity of `^` because parseUnary falls through
+      // to parsePower, so `2^3^2` stays `2^(3^2)`.
+      const exponent = this.parseUnary();
+      return { kind: 'binop', op: '^', left: base, right: exponent };
+    }
+    return base;
   }
 
   private parsePrimary(): Ast {

@@ -39,4 +39,91 @@ import { tokenize, parse, parseErrorToCode } from './formula-engine';
   }
 }
 
+// Power right-associativity: 2^3^2 = 2^(3^2)
+{
+  const ast: any = parse('2^3^2');
+  assert.equal(ast.kind, 'binop');
+  assert.equal(ast.op, '^');
+  assert.equal(ast.left.value, 2);
+  assert.equal(ast.right.kind, 'binop'); // right side is the nested 3^2
+  assert.equal(ast.right.left.value, 3);
+  assert.equal(ast.right.right.value, 2);
+}
+
+// Subtraction left-associativity: 10-5-2 = (10-5)-2
+{
+  const ast: any = parse('10-5-2');
+  assert.equal(ast.kind, 'binop');
+  assert.equal(ast.op, '-');
+  assert.equal(ast.left.kind, 'binop'); // left side is 10-5
+  assert.equal(ast.left.left.value, 10);
+  assert.equal(ast.left.right.value, 5);
+  assert.equal(ast.right.value, 2);
+}
+
+// Multiplication binds tighter than addition: 2+3*4
+{
+  const ast: any = parse('2+3*4');
+  assert.equal(ast.kind, 'binop');
+  assert.equal(ast.op, '+');
+  assert.equal(ast.left.value, 2);
+  assert.equal(ast.right.kind, 'binop'); // right side is 3*4
+  assert.equal(ast.right.op, '*');
+}
+
+// Unary minus binds looser than power: -2^2 = -(2^2), NOT (-2)^2
+{
+  const ast: any = parse('-2^2');
+  // Should be 0 - (2^2), i.e. outer binop is '-', left is 0, right is the power
+  assert.equal(ast.kind, 'binop');
+  assert.equal(ast.op, '-');
+  assert.equal(ast.left.value, 0);
+  assert.equal(ast.right.kind, 'binop');
+  assert.equal(ast.right.op, '^');
+}
+
+// Negative exponent still parses: 2^-2
+{
+  const ast: any = parse('2^-2');
+  assert.equal(ast.kind, 'binop');
+  assert.equal(ast.op, '^');
+  // right side represents -2 (either unary node or 0-2 binop)
+  assert.equal(ast.right.kind, 'binop');
+  assert.equal(ast.right.op, '-');
+  assert.equal(ast.right.left.value, 0);
+  assert.equal(ast.right.right.value, 2);
+}
+
+// Plain unary minus still works: -5
+{
+  const ast: any = parse('-5');
+  assert.equal(ast.kind, 'binop');
+  assert.equal(ast.op, '-');
+  assert.equal(ast.left.value, 0);
+  assert.equal(ast.right.value, 5);
+}
+
+// Double negation: --5 = -(-5) = 5
+{
+  const ast: any = parse('--5');
+  assert.equal(ast.kind, 'binop');
+  assert.equal(ast.op, '-');
+  assert.equal(ast.left.value, 0);
+  assert.equal(ast.right.kind, 'binop');
+  assert.equal(ast.right.op, '-');
+  assert.equal(ast.right.left.value, 0);
+  assert.equal(ast.right.right.value, 5);
+}
+
+// Deep nesting rejected cleanly (no raw RangeError leak)
+{
+  const deep = '('.repeat(500) + '1' + ')'.repeat(500);
+  try {
+    parse(deep);
+    assert.fail('should have thrown');
+  } catch (e) {
+    assert.equal(parseErrorToCode(e), 'MATRIX_FORMULA_PARSE_ERROR');
+  }
+}
+
 console.log('formula-engine parser tests passed');
