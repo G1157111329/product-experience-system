@@ -13,6 +13,24 @@ import { writeSecurityAudit } from '@/lib/server/security-audit';
  * source_task_ids 关联到任务。
  */
 
+/** comparison_assemblies 查询结果行（仅 GET/POST 实际 select 的列）。 */
+interface MatrixAssemblyRow {
+  id: string;
+  name: string;
+  matrix_role: string;
+  matrix_schema_version_id: string | null;
+  status: string;
+  comparability_status: string | null;
+  created_at: string;
+  source_task_ids: string[] | null;
+}
+
+/** POST /api/tasks/[id]/matrices 请求体。 */
+interface ApplyMatrixBody {
+  schemaVersionId?: string;
+  name?: string;
+}
+
 /**
  * GET /api/tasks/[id]/matrices
  * 返回当前任务下所有数据矩阵实例（matrix_role='data_matrix' 且 source_task_ids 包含 taskId）。
@@ -27,25 +45,25 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ code: 1, message: '无权访问该任务' }, { status: 403 });
   }
 
-  // 复用 findAssemblyForTask 的查询方式：拉取全部后按 source_task_ids 过滤。
-  // 这里额外按 matrix_role='data_matrix' 过滤，避免误返回对比组装实例。
+  // matrix_role='data_matrix' 过滤下推到数据库；source_task_ids 仍按 JS 过滤
+  // （与 findAssemblyForTask 的约定保持一致，PostgREST .contains 同样可行但仓库统一用 JS）。
   const { data, error } = await client
     .from('comparison_assemblies')
     .select(
       'id,name,matrix_role,matrix_schema_version_id,status,comparability_status,created_at,source_task_ids',
     )
+    .eq('matrix_role', 'data_matrix')
     .order('created_at', { ascending: false });
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
 
-  const matrices = (data || []).filter(
-    (a: any) =>
-      a.matrix_role === 'data_matrix' &&
+  const matrices = (data as MatrixAssemblyRow[] | null || []).filter(
+    (a) =>
       Array.isArray(a.source_task_ids) &&
       a.source_task_ids.includes(taskId),
   );
 
   // 响应中剥离 source_task_ids，保持载荷干净，字段转为 camelCase。
-  const cleaned = matrices.map((a: any) => ({
+  const cleaned = matrices.map((a) => ({
     id: a.id,
     name: a.name,
     matrixRole: a.matrix_role,
@@ -62,6 +80,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
  * POST /api/tasks/[id]/matrices
  * 应用已发布模式版本到当前任务，创建一个 data_matrix 实例。
  *
+ * 幂等：同一 taskId + schemaVersionId 重复调用时返回已存在的实例（HTTP 200，existing: true），
+ * 不再插入新行，避免双击产生重复组装。
+ *
  * Body: { schemaVersionId: string; name?: string }
  */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -74,8 +95,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ code: 1, message: '无权访问该任务' }, { status: 403 });
   }
 
-  const body = await request.json().catch(() => ({}));
-  const schemaVersionId = body?.schemaVersionId;
+  const body = (await request.json().catch(() => ({}))) as ApplyMatrixBody;
+  const schemaVersionId = body.schemaVersionId;
   if (!schemaVersionId) {
     return NextResponse.json({ code: 1, message: '缺少 schemaVersionId' }, { status: 400 });
   }
@@ -101,13 +122,32 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (taskErr) return NextResponse.json({ code: 1, message: taskErr.message }, { status: 500 });
   if (!task) return NextResponse.json({ code: 1, message: '未找到任务' }, { status: 404 });
 
-  // 3. 写入组装行（matrix_role='data_matrix'）。
-  const schemaName =
-    (sv.schema_json &&
-      typeof sv.schema_json === 'object' &&
-      (sv.schema_json as any).title) ||
-    '数据矩阵';
-  const name = body?.name || `${task.task_name} - ${schemaName}`;
+  // 3. 幂等检查：若该任务已存在同 schemaVersionId 的 data_matrix 实例，直接返回。
+  //    matrix_role 过滤下推到数据库，剩余 source_task_ids / schema_version 仍按 JS 匹配。
+  const { data: existingRows } = await client
+    .from('comparison_assemblies')
+    .select('id,matrix_role,matrix_schema_version_id,source_task_ids')
+    .eq('matrix_role', 'data_matrix');
+  const existing = (existingRows as MatrixAssemblyRow[] | null || []).find(
+    (a) =>
+      Array.isArray(a.source_task_ids) &&
+      a.source_task_ids.includes(taskId) &&
+      a.matrix_schema_version_id === schemaVersionId,
+  );
+  if (existing) {
+    return NextResponse.json(
+      {
+        code: 0,
+        message: '已存在数据矩阵实例',
+        data: { assemblyId: existing.id, matrixSchemaVersionId: schemaVersionId, existing: true },
+      },
+      { status: 200 },
+    );
+  }
+
+  // 4. 写入组装行（matrix_role='data_matrix'）。
+  const schemaTitle = (sv.schema_json as { title?: string } | null)?.title;
+  const name = body.name || `${task.task_name} - ${schemaTitle ?? '数据矩阵'}`;
   const insertPayload = {
     name,
     assembly_type: 'task_comparison',
@@ -129,7 +169,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (insErr) return NextResponse.json({ code: 1, message: insErr.message }, { status: 500 });
   const assemblyId = inserted.id;
 
-  // 4. 安全审计日志（沿用仓库既有的 writeSecurityAudit 助手约定）。
+  // 5. 安全审计日志（沿用仓库既有的 writeSecurityAudit 助手约定）。
   await writeSecurityAudit(client, {
     request,
     actor: user,
