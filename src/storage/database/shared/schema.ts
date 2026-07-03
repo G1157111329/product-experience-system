@@ -1,6 +1,38 @@
-﻿import { pgTable, serial, timestamp, varchar, jsonb, boolean, index, foreignKey, integer, text, unique, date } from "drizzle-orm/pg-core"
+﻿import { pgTable, serial, timestamp, varchar, jsonb, boolean, index, foreignKey, integer, text, unique, date, bigint, numeric } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 import type { AnyPgColumn } from "drizzle-orm/pg-core"
+
+// V3.1.1 §27.2.6 / §16.3 — server-side dictionaries.
+export {
+  projectPhaseDict,
+  issueStatusDict,
+  taskStatusDict,
+  reportStatusDict,
+  issueSeverityDict,
+  slaPolicyDict,
+  dictionaryTables,
+  DICT_TYPES,
+} from "./dictionary-tables";
+import type { DictType } from "./dictionary-tables";
+export type { DictType };
+
+// V3.1 §16.2 / §16.3 — five contract tables + process tables.
+export {
+  reportViewConfigs,
+  reportOutlineSections,
+  reportActionItems,
+  exportJobs,
+  renderProfiles,
+  reportPrintBlocks,
+  issueOccurrences,
+  rectificationActions,
+  verifications,
+  reportSummaries,
+  aiRuns,
+  outboxEvents,
+  notifications,
+  v3ContractTables,
+} from "./v3-contract-tables";
 
 
 export const healthCheck = pgTable("health_check", {
@@ -38,6 +70,13 @@ export const reports = pgTable("reports", {
 	snapshotId: varchar("snapshot_id", { length: 36 }),
 	layoutProfile: varchar("layout_profile", { length: 80 }),
 	aiConfirmationStatus: varchar("ai_confirmation_status", { length: 20 }).default('pending'),
+	// V3.1 §16.2 — report-level fields for the contract layer. Nullable for
+	// backward compat with pre-V3 reports; backfill in Wave 1 sets these.
+	reportNo: varchar("report_no", { length: 60 }),
+	reportScopeType: varchar("report_scope_type", { length: 40 }), // task_report | comparison_report | model_dossier_report | synthesis_report
+	ownerId: varchar("owner_id", { length: 36 }),
+	reviewerId: varchar("reviewer_id", { length: 36 }),
+	publishedAt: timestamp("published_at", { withTimezone: true, mode: 'string' }),
 }, (table) => [
 	index("reports_created_at_idx").using("btree", table.createdAt.asc().nullsLast().op("timestamptz_ops")),
 	index("reports_product_model_idx").using("btree", table.productModel.asc().nullsLast().op("text_ops")),
@@ -72,6 +111,7 @@ export const recipes = pgTable("recipes", {
 	effectScore: varchar("effect_score", { length: 20 }),
 	effectProblemPoint: text("effect_problem_point"),
 	effectAiResult: jsonb("effect_ai_result"),
+	effectStatus: varchar("effect_status", { length: 20 }),
 }, (table) => [
 	index("recipes_task_id_idx").using("btree", table.taskId.asc().nullsLast().op("text_ops")),
 	foreignKey({
@@ -197,12 +237,28 @@ export const issues = pgTable("issues", {
 	source: varchar({ length: 50 }),
 	sourceReportId: varchar("source_report_id", { length: 36 }),
 	sourceType: varchar("source_type", { length: 20 }),
+	// V3.1 §16.3 — issue main record fields for the contract + occurrence split.
+	// Nullable for backward compat; backfill in Wave 1.
+	severityCode: varchar("severity_code", { length: 40 }), // FK to issue_severity_dict.code
+	moduleCode: varchar("module_code", { length: 80 }), // functional module tag, for filtering
+	dueAt: timestamp("due_at", { withTimezone: true, mode: 'string' }),
+	firstSeenAt: timestamp("first_seen_at", { withTimezone: true, mode: 'string' }),
+	lastSeenAt: timestamp("last_seen_at", { withTimezone: true, mode: 'string' }),
+	version: integer("version").default(1).notNull(),
+	// 对比矩阵溯源字段：将矩阵单元格问题点关联回矩阵，便于整改回写
+	sourceAssemblyId: varchar("source_assembly_id", { length: 36 }),
+	sourceCellId: varchar("source_cell_id", { length: 36 }),
+	sourceItemNodeId: varchar("source_item_node_id", { length: 36 }),
+	sourceObjectId: varchar("source_object_id", { length: 36 }),
 }, (table) => [
 	index("issues_created_at_idx").using("btree", table.createdAt.asc().nullsLast().op("timestamptz_ops")),
 	index("issues_severity_idx").using("btree", table.severity.asc().nullsLast().op("text_ops")),
 	index("issues_source_type_idx").using("btree", table.sourceType.asc().nullsLast().op("text_ops")),
 	index("issues_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
 	index("issues_task_id_idx").using("btree", table.taskId.asc().nullsLast().op("text_ops")),
+	index("issues_severity_code_idx").using("btree", table.severityCode.asc().nullsLast().op("text_ops")),
+	index("issues_due_at_idx").using("btree", table.dueAt.asc().nullsLast().op("timestamptz_ops")),
+	index("issues_source_assembly_id_idx").using("btree", table.sourceAssemblyId.asc().nullsLast().op("text_ops")),
 	foreignKey({
 			columns: [table.taskId],
 			foreignColumns: [experienceTasks.id],
@@ -258,11 +314,20 @@ export const experienceTasks = pgTable("experience_tasks", {
 	comparisonIntent: text("comparison_intent"),
 	comparisonLayoutType: varchar("comparison_layout_type", { length: 40 }),
 	comparisonSource: varchar("comparison_source", { length: 40 }),
+	// V3.1 §16.3 — task-level fields for the contract layer. Nullable for
+	// backward compat; backfill in Wave 1.
+	taskNo: varchar("task_no", { length: 60 }),
+	sourceTaskIds: jsonb("source_task_ids").default([]),
+	sourceReportIds: jsonb("source_report_ids").default([]),
+	reviewerId: varchar("reviewer_id", { length: 36 }),
+	ownerId: varchar("owner_id", { length: 36 }),
+	version: integer("version").default(1).notNull(),
 }, (table) => [
 	index("experience_tasks_created_at_idx").using("btree", table.createdAt.asc().nullsLast().op("timestamptz_ops")),
 	index("experience_tasks_product_category_idx").using("btree", table.productCategory.asc().nullsLast().op("text_ops")),
 	index("experience_tasks_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
 	index("experience_tasks_task_mode_idx").using("btree", table.taskMode.asc().nullsLast().op("text_ops")),
+	index("experience_tasks_task_no_idx").using("btree", table.taskNo.asc().nullsLast().op("text_ops")),
 ]);
 
 export const platformUsers = pgTable("platform_users", {
@@ -613,6 +678,10 @@ export const comparisonAssemblies = pgTable("comparison_assemblies", {
 	createdBy: varchar("created_by", { length: 36 }).notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	// Data Matrix Input View — marks assemblies that are typed-value matrix instances.
+	matrixSchemaVersionId: varchar("matrix_schema_version_id", { length: 36 }),
+	matrixRole: varchar("matrix_role", { length: 20 }).default('comparison').notNull(),
+	comparabilityStatus: varchar("comparability_status", { length: 20 }).default('unknown'),
 }, (table) => [
 	index("comparison_assemblies_created_by_idx").using("btree", table.createdBy.asc().nullsLast().op("text_ops")),
 	index("comparison_assemblies_assembly_type_idx").using("btree", table.assemblyType.asc().nullsLast().op("text_ops")),
@@ -621,6 +690,13 @@ export const comparisonAssemblies = pgTable("comparison_assemblies", {
 		columns: [table.createdBy],
 		foreignColumns: [platformUsers.id],
 		name: "comparison_assemblies_created_by_fkey"
+	}).onDelete("set null"),
+	// Forward reference: matrixSchemaVersions is defined later in this file.
+	// Drizzle defers the config callback, so the reference resolves at eval time.
+	foreignKey({
+		columns: [table.matrixSchemaVersionId],
+		foreignColumns: [matrixSchemaVersions.id],
+		name: "comparison_assemblies_matrix_schema_version_id_fkey"
 	}).onDelete("set null"),
 ]);
 
@@ -819,6 +895,18 @@ export const metricEvaluations = pgTable("metric_evaluations", {
 	evaluationNote: text("evaluation_note"),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	// Data Matrix Input View — typed-value columns (raw + calculated) and provenance.
+	valueKind: varchar("value_kind", { length: 20 }),
+	numericValue: numeric("numeric_value", { precision: 18, scale: 6 }),
+	textValue: text("text_value"),
+	durationMs: bigint("duration_ms", { mode: "number" }),
+	unitCode: varchar("unit_code", { length: 40 }),
+	inputState: varchar("input_state", { length: 20 }).default('valid'),
+	calculationMode: varchar("calculation_mode", { length: 20 }),
+	formulaDefinitionId: varchar("formula_definition_id", { length: 36 }),
+	sourceRunId: varchar("source_run_id", { length: 36 }),
+	errorCode: varchar("error_code", { length: 60 }),
+	version: integer("version").default(1),
 }, (table) => [
 	unique("metric_evaluations_cell_metric_key").on(table.cellId, table.metricKey),
 	index("metric_evaluations_cell_id_idx").using("btree", table.cellId.asc().nullsLast().op("text_ops")),
@@ -836,6 +924,12 @@ export const metricEvaluations = pgTable("metric_evaluations", {
 		columns: [table.thresholdRuleId],
 		foreignColumns: [metricThresholdRules.id],
 		name: "metric_evaluations_threshold_rule_id_fkey"
+	}).onDelete("set null"),
+	// Forward reference: matrixCalculationRuns is defined later in this file.
+	foreignKey({
+		columns: [table.sourceRunId],
+		foreignColumns: [matrixCalculationRuns.id],
+		name: "metric_evaluations_source_run_id_fkey"
 	}).onDelete("set null"),
 ]);
 
@@ -865,10 +959,133 @@ export const comparisonAiResults = pgTable("comparison_ai_results", {
 		name: "comparison_ai_results_assembly_id_fkey"
 	}).onDelete("cascade"),
 	foreignKey({
-		columns: [table.confirmedBy],
-		foreignColumns: [platformUsers.id],
-		name: "comparison_ai_results_confirmed_by_fkey"
-	}).onDelete("set null"),
+			columns: [table.confirmedBy],
+			foreignColumns: [platformUsers.id],
+			name: "comparison_ai_results_confirmed_by_fkey"
+		}).onDelete("set null"),
+]);
+
+// ============================================================
+// Data Matrix Input View — schema registry / versioning / dimensions / formulas / calc runs
+// ============================================================
+
+// Matrix schema registry (admin-published, versioned)
+export const matrixSchemas = pgTable("matrix_schemas", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	schemaKey: varchar("schema_key", { length: 100 }).notNull().unique(),
+	name: varchar("name", { length: 200 }).notNull(),
+	productCategory: varchar("product_category", { length: 100 }),
+	experienceTypeAllowlist: jsonb("experience_type_allowlist").default([]),
+	status: varchar("status", { length: 20 }).default('draft').notNull(),
+	latestPublishedVersionId: varchar("latest_published_version_id", { length: 36 }),
+	ownerId: varchar("owner_id", { length: 36 }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("matrix_schemas_schema_key_idx").using("btree", table.schemaKey.asc().nullsLast().op("text_ops")),
+	foreignKey({
+			columns: [table.ownerId],
+			foreignColumns: [platformUsers.id],
+			name: "matrix_schemas_owner_id_fkey"
+		}).onDelete("set null"),
+]);
+
+// Matrix schema versions (immutable once published)
+export const matrixSchemaVersions = pgTable("matrix_schema_versions", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	schemaId: varchar("schema_id", { length: 36 }).notNull(),
+	versionNo: integer("version_no").notNull(),
+	status: varchar("status", { length: 20 }).default('draft').notNull(),
+	schemaJson: jsonb("schema_json").notNull(),
+	checksum: varchar("checksum", { length: 80 }),
+	publishedAt: timestamp("published_at", { withTimezone: true, mode: 'string' }),
+	publishedBy: varchar("published_by", { length: 36 }),
+	effectiveFrom: timestamp("effective_from", { withTimezone: true, mode: 'string' }),
+	effectiveTo: timestamp("effective_to", { withTimezone: true, mode: 'string' }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	unique("matrix_schema_versions_schema_version_key").on(table.schemaId, table.versionNo),
+	index("matrix_schema_versions_schema_id_idx").using("btree", table.schemaId.asc().nullsLast().op("text_ops")),
+	foreignKey({
+			columns: [table.schemaId],
+			foreignColumns: [matrixSchemas.id],
+			name: "matrix_schema_versions_schema_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.publishedBy],
+			foreignColumns: [platformUsers.id],
+			name: "matrix_schema_versions_published_by_fkey"
+		}).onDelete("set null"),
+]);
+
+// Matrix dimension bindings (columns/rows per schema version)
+export const matrixDimensionBindings = pgTable("matrix_dimension_bindings", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	schemaVersionId: varchar("schema_version_id", { length: 36 }).notNull(),
+	dimensionKey: varchar("dimension_key", { length: 100 }).notNull(),
+	displayName: varchar("display_name", { length: 200 }).notNull(),
+	columnGroup: varchar("column_group", { length: 20 }).notNull(),
+	valueKind: varchar("value_kind", { length: 20 }).notNull(),
+	unitCode: varchar("unit_code", { length: 40 }),
+	metricDefinitionId: varchar("metric_definition_id", { length: 36 }),
+	required: boolean("required").default(false),
+	editable: boolean("editable").default(true),
+	sortOrder: integer("sort_order").default(0).notNull(),
+	displayFormatJson: jsonb("display_format_json").default({}),
+	validationRuleJson: jsonb("validation_rule_json").default({}),
+}, (table) => [
+	unique("matrix_dimension_bindings_version_dimension_key").on(table.schemaVersionId, table.dimensionKey),
+	foreignKey({
+			columns: [table.schemaVersionId],
+			foreignColumns: [matrixSchemaVersions.id],
+			name: "matrix_dimension_bindings_schema_version_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.metricDefinitionId],
+			foreignColumns: [metricDefinitions.id],
+			name: "matrix_dimension_bindings_metric_definition_id_fkey"
+		}).onDelete("set null"),
+]);
+
+// Matrix formula definitions (DSL-based calculated dimensions per schema version)
+export const matrixFormulaDefinitions = pgTable("matrix_formula_definitions", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	schemaVersionId: varchar("schema_version_id", { length: 36 }).notNull(),
+	outputDimensionKey: varchar("output_dimension_key", { length: 100 }).notNull(),
+	formulaDsl: text("formula_dsl").notNull(),
+	compiledAst: jsonb("compiled_ast"),
+	dependencyJson: jsonb("dependency_json"),
+	scope: varchar("scope", { length: 20 }).default('row').notNull(),
+	formulaVersion: varchar("formula_version", { length: 40 }).notNull(),
+	status: varchar("status", { length: 20 }).default('draft').notNull(),
+}, (table) => [
+	unique("matrix_formula_definitions_version_output_key").on(table.schemaVersionId, table.outputDimensionKey),
+	foreignKey({
+			columns: [table.schemaVersionId],
+			foreignColumns: [matrixSchemaVersions.id],
+			name: "matrix_formula_definitions_schema_version_id_fkey"
+		}).onDelete("cascade"),
+]);
+
+// Matrix calculation runs (audit trail of formula evaluations per matrix instance)
+export const matrixCalculationRuns = pgTable("matrix_calculation_runs", {
+	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+	matrixInstanceId: varchar("matrix_instance_id", { length: 36 }).notNull(),
+	triggerType: varchar("trigger_type", { length: 20 }).notNull(),
+	inputVersionHash: varchar("input_version_hash", { length: 80 }).notNull(),
+	formulaVersionHash: varchar("formula_version_hash", { length: 80 }).notNull(),
+	status: varchar("status", { length: 20 }).notNull(),
+	errorCode: varchar("error_code", { length: 60 }),
+	errorDetailSanitized: text("error_detail_sanitized"),
+	computedAt: timestamp("computed_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	traceId: varchar("trace_id", { length: 60 }),
+}, (table) => [
+	index("matrix_calculation_runs_instance_idx").using("btree", table.matrixInstanceId.asc().nullsLast().op("text_ops")),
+	foreignKey({
+			columns: [table.matrixInstanceId],
+			foreignColumns: [comparisonAssemblies.id],
+			name: "matrix_calculation_runs_matrix_instance_id_fkey"
+		}).onDelete("cascade"),
 ]);
 
 // 报告快照：发布后内容冻结，分享页/PDF基于快照渲染
