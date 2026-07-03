@@ -11,11 +11,17 @@
     "dev": "tsx watch src/server.ts",
     "audit:materials": "tsx scripts/audit-orphan-materials.ts",
     "seed:golden": "tsx scripts/seed-golden-test-data.ts",
+    "seed:dictionaries": "tsx scripts/seed-dictionaries.ts",
     "smoke:e2e": "playwright test",
     "preinstall": "npx only-allow pnpm",
     "lint": "eslint",
     "start": "node dist/server.js",
-    "ts-check": "tsc -p tsconfig.json"
+    "ts-check": "tsc -p tsconfig.json",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:push": "drizzle-kit push --force",
+    "db:studio": "drizzle-kit studio",
+    "db:drop": "drizzle-kit drop"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1066.0",
