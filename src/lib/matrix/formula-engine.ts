@@ -1,13 +1,14 @@
 /**
- * Data-matrix DSL formula engine — parser half.
+ * Data-matrix DSL formula engine — parser + evaluator.
  *
  * This module is intentionally pure TypeScript with no Node/browser-specific
  * imports so it can be shared between the frontend (optimistic computation)
  * and the backend (authoritative recompute). Formulas use a restricted DSL of
  * semantic references (SELF / REF / GROUP_* and a small whitelist of scalar
- * functions) rather than Excel A1-style references. The evaluator half lives
- * in a sibling module and is added separately — do not implement evaluation
- * here.
+ * functions) rather than Excel A1-style references.
+ *
+ * The top half is the parser (`tokenize` / `parse`); the bottom half is the
+ * evaluator (`compileFormula` / `buildDependencyGraph` / `evaluate`).
  */
 
 // ---------------------------------------------------------------------------
@@ -524,4 +525,375 @@ class Parser {
 /** Parses a formula source string into an {@link Ast}. */
 export function parse(src: string): Ast {
   return new Parser(tokenize(src)).parseProgram();
+}
+
+// ---------------------------------------------------------------------------
+// Evaluator half
+//
+// Compile: parse the source once into an AST and collect the metric keys it
+// references (SELF/REF/GROUP_*). Evaluate: walk the AST against an EvalContext
+// that resolves those references. Both the frontend and the backend share
+// this exact code path so the optimistic and authoritative results agree.
+//
+// Errors are returned, never thrown, so callers don't need try/catch around
+// evaluation. Each error carries a stable code that the UI/API can switch on.
+// ---------------------------------------------------------------------------
+
+// Error codes returned by {@link evaluate}. Kept here (not in the parser
+// section) because they describe *runtime* failures, distinct from the parse
+// errors above.
+const CALC_INPUT_MISSING = 'MATRIX_CALC_INPUT_MISSING';
+const CALC_DIVIDE_BY_ZERO = 'MATRIX_CALC_DIVIDE_BY_ZERO';
+const CALC_INVALID_OPERATION = 'MATRIX_CALC_INVALID_OPERATION';
+const FORMULA_UNIT_MISMATCH = 'MATRIX_FORMULA_UNIT_MISMATCH';
+
+/** Runtime representation of a metric value as a context can return it. */
+export type MetricValue =
+  | { value: number; unit: string }
+  | { durationMs: number }
+  | { text: string }
+  | null;
+
+/**
+ * The evaluator reads inputs via this context — keep it pure, no DB access
+ * here. The backend wires {@link groupAggregate} / {@link refSameGroup} to its
+ * data layer; the frontend wires them to its optimistic in-memory snapshot.
+ */
+export interface EvalContext {
+  /** Value of a metric on the *current* subject (the row being computed). */
+  self: (key: string) => MetricValue;
+  /** Value of a metric on another subject within the same group (REF node). */
+  refSameGroup: (subjectKey: string, key: string) => MetricValue;
+  /** A GROUP_* aggregate over the current group, or null if unavailable. */
+  groupAggregate: (fn: string, key: string) => MetricValue | null;
+}
+
+/** A parsed formula bundled with its referenced metric keys. */
+export type CompiledFormula = { ast: Ast; dependencies: string[] };
+
+/** Outcome of {@link evaluate}: either a number or a typed error code. */
+export type EvalResult =
+  | { ok: true; value: number }
+  | { ok: false; code: string; detail?: string };
+
+/**
+ * Internal evaluation result for a single AST node:
+ *   number  — usable in arithmetic.
+ *   boolean — produced by comparison ops; illegal in arithmetic.
+ *   missing — an unresolved SELF/REF/GROUP reference (top-level → INPUT_MISSING).
+ *   error   — a typed runtime error (div-by-zero, unit mismatch, etc.).
+ *
+ * {@link evaluate} collapses this into the public {@link EvalResult} at the top.
+ */
+type EvalLeaf =
+  | { kind: 'number'; value: number }
+  | { kind: 'boolean'; value: boolean }
+  | { kind: 'missing' }
+  | { kind: 'error'; code: string; detail?: string };
+
+const MISSING: EvalLeaf = { kind: 'missing' };
+const num = (value: number): EvalLeaf => ({ kind: 'number', value });
+const bool = (value: boolean): EvalLeaf => ({ kind: 'boolean', value });
+const errorLeaf = (code: string, detail?: string): EvalLeaf => ({ kind: 'error', code, detail });
+
+/**
+ * Compiles a formula: parse once and collect the SELF/REF/GROUP_* metric keys.
+ * The returned object is safe to cache and {@link evaluate} repeatedly against
+ * different contexts.
+ */
+export function compileFormula(src: string): CompiledFormula {
+  const ast = parse(src);
+  return { ast, dependencies: collectDependencies(ast) };
+}
+
+/**
+ * Just the referenced metric keys, exposed for schema-publish validation
+ * (e.g. "does this formula reference keys that exist on the metric schema?").
+ */
+export function buildDependencyGraph(src: string): string[] {
+  return collectDependencies(parse(src));
+}
+
+/** Walks an AST collecting metric keys referenced by SELF/REF/GROUP_* nodes. */
+function collectDependencies(ast: Ast): string[] {
+  const out: string[] = [];
+  const walk = (node: Ast): void => {
+    switch (node.kind) {
+      case 'self':
+        out.push(node.metricKey);
+        return;
+      case 'ref':
+        out.push(node.metricKey);
+        return;
+      case 'group_agg':
+        if (node.metricKey) out.push(node.metricKey);
+        return;
+      case 'binop':
+        walk(node.left);
+        walk(node.right);
+        return;
+      case 'call':
+        for (const a of node.args) walk(a);
+        return;
+      default:
+        return;
+    }
+  };
+  walk(ast);
+  return out;
+}
+
+/** Evaluates a compiled formula against a context. Returns a number or an error. */
+export function evaluate(compiled: CompiledFormula, ctx: EvalContext): EvalResult {
+  const leaf = evalAst(compiled.ast, ctx);
+  return leafToResult(leaf);
+}
+
+/** Converts the internal {@link EvalLeaf} into the public {@link EvalResult}. */
+function leafToResult(leaf: EvalLeaf): EvalResult {
+  switch (leaf.kind) {
+    case 'number':
+      return { ok: true, value: leaf.value };
+    case 'boolean':
+      // A bare boolean result (formula was just `1 > 2`) is surfaced as the
+      // number 1/0 to stay consistent with "evaluate returns a number".
+      return { ok: true, value: leaf.value ? 1 : 0 };
+    case 'missing':
+      return { ok: false, code: CALC_INPUT_MISSING };
+    case 'error':
+      return { ok: false, code: leaf.code, detail: leaf.detail };
+  }
+}
+
+/** Recursive evaluator. Returns a {@link EvalLeaf}; never throws. */
+function evalAst(node: Ast, ctx: EvalContext): EvalLeaf {
+  switch (node.kind) {
+    case 'num':
+      return num(node.value);
+    case 'str':
+      // A bare string literal has no numeric value; only COALESCE consumes it.
+      return { kind: 'missing' };
+    case 'self':
+      return metricToLeaf(ctx.self(node.metricKey));
+    case 'ref':
+      return metricToLeaf(ctx.refSameGroup(node.subjectKey, node.metricKey));
+    case 'group_agg':
+      return metricToLeaf(ctx.groupAggregate(node.fn, node.metricKey));
+    case 'binop':
+      return evalBinop(node, ctx);
+    case 'call':
+      return evalCall(node, ctx);
+  }
+}
+
+/**
+ * Resolves a {@link MetricValue} from the context into an {@link EvalLeaf}.
+ *   null          → missing (the caller had no value for this key)
+ *   {value, unit} → its numeric value (units are validated by the schema layer)
+ *   {durationMs}  → its millisecond count
+ *   {text}        → UNIT_MISMATCH: a text metric has no numeric value, so using
+ *                   it anywhere (including standalone) is a type error. The spec
+ *                   calls this out specifically for arithmetic, but since the
+ *                   evaluator's contract is to return a number, a bare text
+ *                   metric can never succeed either.
+ */
+function metricToLeaf(mv: MetricValue): EvalLeaf {
+  if (mv === null) return MISSING;
+  if ('value' in mv) return num(mv.value);
+  if ('durationMs' in mv) return num(mv.durationMs);
+  // { text } — the only remaining variant.
+  return errorLeaf(FORMULA_UNIT_MISMATCH, 'text value used as a number');
+}
+
+/** Evaluates a binary operator node (arithmetic + comparison). */
+function evalBinop(node: Extract<Ast, { kind: 'binop' }>, ctx: EvalContext): EvalLeaf {
+  const left = evalAst(node.left, ctx);
+  // An error in an operand propagates before we even look at the right side.
+  if (left.kind === 'error') return left;
+  const right = evalAst(node.right, ctx);
+  if (right.kind === 'error') return right;
+  // A missing operand short-circuits to missing (matches Excel's "propagate
+  // blanks" behaviour and keeps the top-level error INPUT_MISSING).
+  if (left.kind === 'missing' || right.kind === 'missing') return MISSING;
+
+  const op = node.op;
+  const isComparison = op === '>' || op === '>=' || op === '<' || op === '<=' || op === '==' || op === '!=';
+
+  // Comparisons require numbers on both sides; a boolean operand is a type
+  // error (the left/right of a comparison was itself a comparison result).
+  if (isComparison) {
+    if (left.kind === 'boolean' || right.kind === 'boolean') {
+      return errorLeaf(FORMULA_UNIT_MISMATCH, `operator "${op}" expected numbers`);
+    }
+    return compare(op, left.value, right.value);
+  }
+
+  // Arithmetic requires numbers on both sides.
+  if (left.kind === 'boolean' || right.kind === 'boolean') {
+    return errorLeaf(FORMULA_UNIT_MISMATCH, `operator "${op}" expected numbers`);
+  }
+  return arithmetic(op, left.value, right.value);
+}
+
+/** Runs an arithmetic op on two numbers; returns a typed error on failure. */
+function arithmetic(op: string, a: number, b: number): EvalLeaf {
+  switch (op) {
+    case '+':
+      return num(a + b);
+    case '-':
+      return num(a - b);
+    case '*':
+      return num(a * b);
+    case '/':
+      if (b === 0) return errorLeaf(CALC_DIVIDE_BY_ZERO, `${a} / 0`);
+      return num(a / b);
+    case '^':
+      return power(a, b);
+    default:
+      return errorLeaf(CALC_INVALID_OPERATION, `operator "${op}"`);
+  }
+}
+
+/**
+ * `^` via Math.pow. Fractional exponents of negative bases (e.g. `(-8)^(1/3)`)
+ * yield NaN in JS; surface that as a typed error rather than a silent NaN
+ * leaking into a stored result.
+ */
+function power(a: number, b: number): EvalLeaf {
+  const v = Math.pow(a, b);
+  if (Number.isNaN(v)) {
+    return errorLeaf(CALC_INVALID_OPERATION, `Math.pow(${a}, ${b}) is not a real number`);
+  }
+  return num(v);
+}
+
+/** Runs a comparison op; returns a boolean leaf. */
+function compare(op: string, a: number, b: number): EvalLeaf {
+  switch (op) {
+    case '>':
+      return bool(a > b);
+    case '>=':
+      return bool(a >= b);
+    case '<':
+      return bool(a < b);
+    case '<=':
+      return bool(a <= b);
+    case '==':
+      return bool(a === b);
+    case '!=':
+      return bool(a !== b);
+    default:
+      return errorLeaf(CALC_INVALID_OPERATION, `comparison "${op}"`);
+  }
+}
+
+/** Evaluates a whitelist scalar function call. */
+function evalCall(node: Extract<Ast, { kind: 'call' }>, ctx: EvalContext): EvalLeaf {
+  const args = node.args;
+  switch (node.fn) {
+    case 'IF': {
+      if (args.length < 2) return errorLeaf(CALC_INVALID_OPERATION, 'IF needs (cond, a[, b])');
+      const cond = evalAst(args[0]!, ctx);
+      // A missing/error condition short-circuits so the failure surfaces.
+      if (cond.kind === 'missing') return MISSING;
+      if (cond.kind === 'error') return cond;
+      if (cond.kind !== 'boolean') return mismatch('IF condition');
+      return cond.value ? evalAst(args[1]!, ctx) : args[2] ? evalAst(args[2]!, ctx) : MISSING;
+    }
+    case 'COALESCE': {
+      for (const arg of args) {
+        const v = evalAst(arg, ctx);
+        if (v.kind !== 'missing') return v;
+      }
+      return MISSING;
+    }
+    case 'ROUND': {
+      if (args.length === 0) return errorLeaf(CALC_INVALID_OPERATION, 'ROUND needs a value');
+      const v = evalAst(args[0]!, ctx);
+      if (v.kind === 'missing') return MISSING;
+      if (v.kind === 'error') return v;
+      if (v.kind === 'boolean') return mismatch('ROUND');
+      // n must be a numeric literal; if absent or non-numeric, treat as 0.
+      let n = 0;
+      if (args.length >= 2) {
+        const nNode = args[1]!;
+        if (nNode.kind === 'num') n = nNode.value;
+      }
+      const factor = Math.pow(10, n);
+      return num(Math.round(v.value * factor) / factor);
+    }
+    case 'MIN':
+    case 'MAX': {
+      const nums = collectNums(args, ctx);
+      if (nums.kind !== 'numbers') return nums; // propagate missing/mismatch/error
+      if (nums.value.length === 0) return MISSING;
+      const arr = nums.value;
+      return num(arr.reduce((acc, x) => (node.fn === 'MIN' ? Math.min(acc, x) : Math.max(acc, x))));
+    }
+    case 'SUM': {
+      const nums = collectNums(args, ctx);
+      if (nums.kind !== 'numbers') return nums;
+      return num(nums.value.reduce((acc, x) => acc + x, 0));
+    }
+    case 'AVG': {
+      const nums = collectNums(args, ctx);
+      if (nums.kind !== 'numbers') return nums;
+      if (nums.value.length === 0) return MISSING;
+      return num(nums.value.reduce((acc, x) => acc + x, 0) / nums.value.length);
+    }
+    case 'ABS': {
+      if (args.length !== 1) return errorLeaf(CALC_INVALID_OPERATION, 'ABS needs one value');
+      const v = evalAst(args[0]!, ctx);
+      if (v.kind === 'missing') return MISSING;
+      if (v.kind === 'error') return v;
+      if (v.kind === 'boolean') return mismatch('ABS');
+      return num(Math.abs(v.value));
+    }
+    case 'UNIT': {
+      // UNIT(value, "g") wraps a number with unit metadata. The unit is
+      // metadata (validated by the schema layer); the result is the number.
+      if (args.length < 1) return errorLeaf(CALC_INVALID_OPERATION, 'UNIT needs a value');
+      const v = evalAst(args[0]!, ctx);
+      if (v.kind === 'missing') return MISSING;
+      if (v.kind === 'error') return v;
+      if (v.kind === 'boolean') return mismatch('UNIT');
+      return num(v.value);
+    }
+    case 'TO_SECONDS': {
+      if (args.length !== 1) return errorLeaf(CALC_INVALID_OPERATION, 'TO_SECONDS needs one value');
+      const v = evalAst(args[0]!, ctx);
+      if (v.kind === 'missing') return MISSING;
+      if (v.kind === 'error') return v;
+      if (v.kind === 'boolean') return mismatch('TO_SECONDS');
+      // The source should be a duration metric ({durationMs}); we accept any
+      // number here and convert ms → seconds.
+      return num(v.value / 1000);
+    }
+    default:
+      return errorLeaf(CALC_INVALID_OPERATION, `function "${node.fn}"`);
+  }
+}
+
+/**
+ * Evaluates each arg expecting a number, returning either the list of values
+ * (under a distinct `kind: 'numbers'` so TS can narrow it apart from the
+ * scalar `EvalLeaf` variants) or the first non-number leaf to propagate.
+ * Used by SUM/AVG/MIN/MAX.
+ */
+function collectNums(args: Ast[], ctx: EvalContext): EvalLeaf | { kind: 'numbers'; value: number[] } {
+  const out: number[] = [];
+  for (const arg of args) {
+    const v = evalAst(arg, ctx);
+    if (v.kind !== 'number') return v; // missing / error / boolean all propagate
+    out.push(v.value);
+  }
+  return { kind: 'numbers', value: out };
+}
+
+/**
+ * Type-mismatch helper for call args. Kept as a named function so call sites
+ * read clearly and the code/detail stay consistent with the binop path.
+ */
+function mismatch(op: string): EvalLeaf {
+  return errorLeaf(FORMULA_UNIT_MISMATCH, `operator "${op}" expected numbers`);
 }

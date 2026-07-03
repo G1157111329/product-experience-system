@@ -126,4 +126,47 @@ import { tokenize, parse, parseErrorToCode } from './formula-engine';
   }
 }
 
+// ---------------------------------------------------------------------------
+// Evaluator half (Task 2)
+// ---------------------------------------------------------------------------
+
+import { evaluate, buildDependencyGraph, compileFormula } from './formula-engine';
+
+// Happy path: juice_yield = juice_weight / ingredient_weight
+{
+  const compiled = compileFormula('ROUND(SELF("juice_weight") / SELF("ingredient_weight"), 4)');
+  const result = evaluate(compiled, {
+    self: (k) => k === 'juice_weight' ? { value: 558.7, unit: 'g' } : k === 'ingredient_weight' ? { value: 1193.1, unit: 'g' } : null,
+    refSameGroup: () => null,
+    groupAggregate: () => null,
+  });
+  assert.ok(result.ok);
+  if (result.ok) assert.ok(Math.abs(result.value - 0.4683) < 1e-6, `got ${result.value}`);
+}
+
+// Divide by zero
+{
+  const compiled = compileFormula('SELF("a") / SELF("b")');
+  const result = evaluate(compiled, {
+    self: (k) => k === 'a' ? { value: 1, unit: 'g' } : k === 'b' ? { value: 0, unit: 'g' } : null,
+    refSameGroup: () => null, groupAggregate: () => null,
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.code, 'MATRIX_CALC_DIVIDE_BY_ZERO');
+}
+
+// Missing input
+{
+  const compiled = compileFormula('SELF("missing")');
+  const result = evaluate(compiled, { self: () => null, refSameGroup: () => null, groupAggregate: () => null });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.code, 'MATRIX_CALC_INPUT_MISSING');
+}
+
+// Dependency graph
+{
+  const deps = buildDependencyGraph('ROUND(SELF("juice_weight") / SELF("ingredient_weight"), 4)');
+  assert.deepEqual(deps.sort(), ['ingredient_weight', 'juice_weight']);
+}
+
 console.log('formula-engine parser tests passed');
