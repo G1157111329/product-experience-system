@@ -169,4 +169,37 @@ import { evaluate, buildDependencyGraph, compileFormula } from './formula-engine
   assert.deepEqual(deps.sort(), ['ingredient_weight', 'juice_weight']);
 }
 
+// Infinity overflow guard (critical for Task 8: JSON.stringify turns Infinity
+// into null, which would otherwise ship ok:true with a null value)
+{
+  const compiled = compileFormula('SELF("huge") * 10');
+  const result = evaluate(compiled, {
+    self: (k) => k === 'huge' ? { value: 1e308, unit: '' } : null,
+    refSameGroup: () => null, groupAggregate: () => null,
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.code, 'MATRIX_CALC_INVALID_OPERATION');
+}
+
+// ROUND half-away-from-zero on negatives (Excel parity)
+{
+  const compiled = compileFormula('ROUND(SELF("x"), 0)');
+  const r1 = evaluate(compiled, { self: (k) => k === 'x' ? { value: -0.5, unit: '' } : null, refSameGroup: () => null, groupAggregate: () => null });
+  assert.ok(r1.ok && r1.value === -1, `ROUND(-0.5,0) should be -1, got ${r1.ok ? r1.value : r1.code}`);
+  const r2 = evaluate(compiled, { self: (k) => k === 'x' ? { value: -1.5, unit: '' } : null, refSameGroup: () => null, groupAggregate: () => null });
+  assert.ok(r2.ok && r2.value === -2, `ROUND(-1.5,0) should be -2, got ${r2.ok ? r2.value : r2.code}`);
+}
+
+// ROUND with non-literal decimals must error (otherwise a typo'd formula
+// silently coerces to n=0 and produces wrong authoritative results)
+{
+  const compiled = compileFormula('ROUND(SELF("x"), SELF("y"))');
+  const result = evaluate(compiled, {
+    self: (k) => k === 'x' ? { value: 0.123456, unit: '' } : k === 'y' ? { value: 2, unit: '' } : null,
+    refSameGroup: () => null, groupAggregate: () => null,
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.code, 'MATRIX_CALC_INVALID_OPERATION');
+}
+
 console.log('formula-engine parser tests passed');

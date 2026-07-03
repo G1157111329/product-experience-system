@@ -33,6 +33,9 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: Matrix formula contract
+        run: pnpm check:matrix-formula
+
       - name: Audit high severity dependencies
         run: pnpm audit --audit-level high
         env:

@@ -739,19 +739,39 @@ function evalBinop(node: Extract<Ast, { kind: 'binop' }>, ctx: EvalContext): Eva
 function arithmetic(op: string, a: number, b: number): EvalLeaf {
   switch (op) {
     case '+':
-      return num(a + b);
+      return finNum(a + b);
     case '-':
-      return num(a - b);
+      return finNum(a - b);
     case '*':
-      return num(a * b);
-    case '/':
+      return finNum(a * b);
+    case '/': {
       if (b === 0) return errorLeaf(CALC_DIVIDE_BY_ZERO, `${a} / 0`);
-      return num(a / b);
+      const v = a / b;
+      // DIVIDE_BY_ZERO is the specific code for literal zero; any other
+      // non-finite result (e.g. 1e308 / 1e-308 → Infinity, or NaN) is a
+      // generic overflow, surfaced via CALC_INVALID_OPERATION.
+      if (!Number.isFinite(v)) {
+        return errorLeaf(CALC_INVALID_OPERATION, 'arithmetic result is not finite');
+      }
+      return num(v);
+    }
     case '^':
       return power(a, b);
     default:
       return errorLeaf(CALC_INVALID_OPERATION, `operator "${op}"`);
   }
+}
+
+/**
+ * Returns a number leaf, or a typed error if the result overflowed to
+ * Infinity/NaN (which would otherwise serialize to `null` via JSON and be
+ * stored as `ok:true`).
+ */
+function finNum(v: number): EvalLeaf {
+  if (!Number.isFinite(v)) {
+    return errorLeaf(CALC_INVALID_OPERATION, 'arithmetic result is not finite');
+  }
+  return num(v);
 }
 
 /**
@@ -761,7 +781,9 @@ function arithmetic(op: string, a: number, b: number): EvalLeaf {
  */
 function power(a: number, b: number): EvalLeaf {
   const v = Math.pow(a, b);
-  if (Number.isNaN(v)) {
+  // NaN (e.g. (-8)^(1/3)) and Infinity (e.g. 1e200 ^ 3) both must be rejected
+  // — otherwise JSON.stringify turns them into `null` and ships ok:true.
+  if (!Number.isFinite(v)) {
     return errorLeaf(CALC_INVALID_OPERATION, `Math.pow(${a}, ${b}) is not a real number`);
   }
   return num(v);
@@ -813,14 +835,22 @@ function evalCall(node: Extract<Ast, { kind: 'call' }>, ctx: EvalContext): EvalL
       if (v.kind === 'missing') return MISSING;
       if (v.kind === 'error') return v;
       if (v.kind === 'boolean') return mismatch('ROUND');
-      // n must be a numeric literal; if absent or non-numeric, treat as 0.
+      // The decimals argument is optional; if absent, round to 0 places.
+      // A present decimals arg MUST be a non-negative integer literal — a
+      // non-literal (e.g. SELF, or an expression like 2+1) would silently
+      // coerce to 0 and produce wrong authoritative results with no signal.
       let n = 0;
       if (args.length >= 2) {
         const nNode = args[1]!;
-        if (nNode.kind === 'num') n = nNode.value;
+        if (nNode.kind !== 'num' || !Number.isInteger(nNode.value) || nNode.value < 0) {
+          return errorLeaf(CALC_INVALID_OPERATION, 'ROUND decimals must be a non-negative integer literal');
+        }
+        n = nNode.value;
       }
       const factor = Math.pow(10, n);
-      return num(Math.round(v.value * factor) / factor);
+      // Excel rounds half *away from zero*: ROUND(-0.5,0) → -1, ROUND(-1.5,0) → -2.
+      // Math.round rounds half toward +∞, which gives the wrong sign on negatives.
+      return num(Math.sign(v.value) * (Math.round(Math.abs(v.value) * factor) / factor));
     }
     case 'MIN':
     case 'MAX': {
