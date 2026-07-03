@@ -8,6 +8,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Sparkles,
+  Table,
   WandSparkles,
   Wrench,
 } from 'lucide-react';
@@ -16,13 +17,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { cn } from '@/lib/utils';
 import { AgentAssistPanel } from './agent-assist-panel';
 
-type TaskTabKey = 'agent' | 'info' | 'materials' | 'senses' | 'functions' | 'comparison';
+type TaskTabKey = 'agent' | 'info' | 'materials' | 'senses' | 'functions' | 'comparison' | 'matrix';
 
 type ReportAuthoringShellProps = {
   taskId: string;
   activeTab: TaskTabKey;
   agentOpen: boolean;
   isComparisonTask?: boolean;
+  hasMatrixInstance?: boolean;
   onTabChange: (tab: TaskTabKey) => void;
   onAgentOpenChange: (open: boolean) => void;
   materialRail?: ReactNode;
@@ -41,19 +43,36 @@ export function ReportAuthoringShell({
   activeTab,
   agentOpen,
   isComparisonTask = true,
+  hasMatrixInstance = false,
   onTabChange,
   onAgentOpenChange,
   materialRail,
   children,
 }: ReportAuthoringShellProps) {
   const [navCollapsed, setNavCollapsed] = useState(false);
-  const navItems = isComparisonTask
-    ? [
-      baseNavItems[0],
-      { key: 'comparison' as const, label: '对比矩阵', icon: GitCompareArrows },
-      ...baseNavItems.slice(1),
-    ]
-    : baseNavItems;
+  const matrixNavItem = { key: 'matrix' as const, label: '数据矩阵', icon: Table };
+  const navItems = (() => {
+    if (isComparisonTask) {
+      const withComparison = [
+        baseNavItems[0],
+        { key: 'comparison' as const, label: '对比矩阵', icon: GitCompareArrows },
+        ...baseNavItems.slice(1),
+      ];
+      if (hasMatrixInstance) {
+        const comparisonIndex = withComparison.findIndex((item) => item.key === 'comparison');
+        return [
+          ...withComparison.slice(0, comparisonIndex + 1),
+          matrixNavItem,
+          ...withComparison.slice(comparisonIndex + 1),
+        ];
+      }
+      return withComparison;
+    }
+    if (hasMatrixInstance) {
+      return [baseNavItems[0], matrixNavItem, ...baseNavItems.slice(1)];
+    }
+    return baseNavItems;
+  })();
 
   const compactRail = useMemo(() => {
     if (!materialRail || !isValidElement(materialRail)) return materialRail;
@@ -137,7 +156,7 @@ export function ReportAuthoringShell({
       </div>
 
       <Dialog open={agentOpen} onOpenChange={onAgentOpenChange}>
-        <DialogContent className="max-h-[90dvh] max-w-3xl overflow-hidden p-0">
+        <DialogContent className="max-h-[90dvh] max-w-3xl overflow-y-auto p-0">
           <DialogHeader className="sr-only">
             <DialogTitle>AI辅助</DialogTitle>
           </DialogHeader>

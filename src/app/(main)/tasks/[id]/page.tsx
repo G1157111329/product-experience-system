@@ -1,9 +1,11 @@
 'use client';
 
+/* eslint-disable @next/next/no-img-element */
+
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { PresignedImage, PresignedVideo } from '@/components/presigned-media';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, ArrowRightLeft, FileText, Eye, Wrench, Package, Plus, Camera, Video, Film, Image as ImageIcon, Pencil, Trash2, Check, X, Play, GripVertical, Sparkles, Save, Star, AlertTriangle, Crop } from 'lucide-react';
+import { ArrowLeft, ArrowRightLeft, FileText, Eye, Package, Plus, Camera, Video, Film, Image as ImageIcon, Pencil, Trash2, Check, X, Play, Sparkles, Save, Star, AlertTriangle, Crop } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -17,6 +19,7 @@ import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/lib/auth-context';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { useDictLabels } from '@/hooks/useDictionary';
 import { useImagePreview } from '@/components/image-preview';
 import { MaterialPicker } from '@/components/material-picker';
 import { MediaCaptureDialog } from '@/components/media-capture-dialog';
@@ -30,6 +33,7 @@ import { ReportAuthoringShell } from './components/report-authoring-shell';
 import { SensesInputWorkspace } from './components/senses-input-workspace';
 import { FunctionsInputWorkspace } from './components/functions-input-workspace';
 import { ComparisonWorkspace } from './components/comparison-workspace';
+import { MatrixInputView } from './components/matrix-input-view';
 import type { EvidenceBindingTarget } from './types';
 
 /* ─── Types ─── */
@@ -160,7 +164,7 @@ export default function TaskDetailPage() {
   const id = params.id as string;
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'agent' | 'info' | 'materials' | 'senses' | 'functions' | 'comparison'>('agent');
+  const [activeTab, setActiveTab] = useState<'agent' | 'info' | 'materials' | 'senses' | 'functions' | 'comparison' | 'matrix'>('agent');
   const [evidenceBindingTarget, setEvidenceBindingTarget] = useState<EvidenceBindingTarget | null>(null);
   const [agentAssistOpen, setAgentAssistOpen] = useState(false);
   const [generateConfirmOpen, setGenerateConfirmOpen] = useState(false);
@@ -221,10 +225,22 @@ export default function TaskDetailPage() {
   }, [activeTab, fetchReportRecipes]);
   useEffect(() => {
     const tab = searchParams.get('tab');
-    if (tab === 'agent' || tab === 'info' || tab === 'materials' || tab === 'senses' || tab === 'functions' || tab === 'comparison') {
+    if (tab === 'agent' || tab === 'info' || tab === 'materials' || tab === 'senses' || tab === 'functions' || tab === 'comparison' || tab === 'matrix') {
       setActiveTab(tab);
     }
   }, [searchParams]);
+  const [hasMatrixInstance, setHasMatrixInstance] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`/api/tasks/${id}/matrices`, { cache: 'no-store' });
+        const json = await res.json();
+        if (json.code === 0 && Array.isArray(json.data) && json.data.length > 0) {
+          setHasMatrixInstance(true);
+        }
+      } catch { /* ignore — tab just won't show */ }
+    })();
+  }, [id]);
   useEffect(() => {
     setEvidenceBindingTarget(null);
   }, [activeTab]);
@@ -411,7 +427,8 @@ export default function TaskDetailPage() {
         agentOpen={agentAssistOpen}
         onTabChange={setActiveTab}
         onAgentOpenChange={setAgentAssistOpen}
-        materialRail={(activeTab === 'senses' || activeTab === 'functions' || activeTab === 'comparison') ? (
+        hasMatrixInstance={hasMatrixInstance}
+        materialRail={(activeTab === 'senses' || activeTab === 'functions' || activeTab === 'comparison' || activeTab === 'matrix') ? (
           <MaterialEvidenceRail
             taskId={id}
             bindingTarget={evidenceBindingTarget}
@@ -441,6 +458,9 @@ export default function TaskDetailPage() {
       {activeTab === 'materials' && <MaterialsTab taskId={id} />}
         {activeTab === 'comparison' && (
           <ComparisonWorkspace taskId={id} taskName={task.task_name} initialLayoutType={task.comparison_layout_type} />
+        )}
+        {activeTab === 'matrix' && (
+          <MatrixInputView taskId={id} taskName={task.task_name} />
         )}
         {activeTab === 'senses' && <SensesTab taskId={id} records={task.records || []} taskProductCategory={task.product_category} taskProduct={task.product} onRefresh={fetchTask} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onBindingTargetChange={setEvidenceBindingTarget} />}
         {activeTab === 'functions' && <FunctionsTab taskId={id} initialRecipes={reportRecipes} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onRecipesChange={setReportRecipes} onBindingTargetChange={setEvidenceBindingTarget} />}
@@ -709,7 +729,7 @@ function BasicInfoTab({ task, onRefresh }: { task: TaskDetail; onRefresh: () => 
   const selectedCategoryData = categories.find(c => c.name === form.product_category);
   const availableProducts = selectedCategoryData?.products || [];
   const projectTypes = ['ODM', 'OEM', '竞品研究', '自研', '前期研究', '改型降本优化', '海外产品'];
-  const projectPhases = ['手板研究', '试制阶段', '试产阶段', '量产阶段'];
+  const projectPhases = useDictLabels('project_phase_dict');
 
   const handleSave = async () => {
     if (saving) return;
@@ -2255,12 +2275,6 @@ function FunctionsTab({
   const [editStepForm, setEditStepForm] = useState({ operation: '', step_material_ids: [] as string[], problem_points: [{ text: '', material_ids: [] as string[] }] });
   const [, setEditStepMaterialIds] = useState<string[]>([]);
   const [, setEditStepMaterials] = useState<Material[]>([]);
-  // Drag state for step reorder
-  const [dragStepIdx, setDragStepIdx] = useState<number | null>(null);
-  const [dragStepOverIdx, setDragStepOverIdx] = useState<number | null>(null);
-  // Drag state for recipe reorder
-  const [dragRecipeIdx, setDragRecipeIdx] = useState<number | null>(null);
-  const [dragRecipeOverIdx, setDragRecipeOverIdx] = useState<number | null>(null);
   const { open, PreviewComponent } = useImagePreview();
 
   // ── Effect evaluation states ──
@@ -2269,6 +2283,7 @@ function FunctionsTab({
   const [aiDetectingProblems, setAiDetectingProblems] = useState<Record<string, boolean>>({});
   const [effectMaterialIds, setEffectMaterialIds] = useState<Record<string, string[]>>({});
   const [effectSaving, setEffectSaving] = useState<Record<string, boolean>>({});
+  const [effectEditing, setEffectEditing] = useState<Record<string, boolean>>({});
   const [aiEvaluating, setAiEvaluating] = useState<Record<string, boolean>>({});
   const [aiResult, setAiResult] = useState<Record<string, {
     result?: {
@@ -2612,8 +2627,8 @@ function FunctionsTab({
     }
   };
 
-  // ── Save effect evaluation ──
-  const handleSaveEffect = async (recipe: Recipe) => {
+  // Save effect evaluation
+  const handleSaveEffect = async (recipe: Recipe): Promise<boolean> => {
     setEffectSaving(prev => ({ ...prev, [recipe.id]: true }));
     try {
       const desc = effectDesc[recipe.id] ?? recipe.effect_description ?? '';
@@ -2632,36 +2647,54 @@ function FunctionsTab({
           effect_material_ids: matIds,
         }),
       });
-      const data = await res.json();
-      if (data.code === 0) {
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.code === 0) {
         fetchRecipes();
         toast.success('效果评价已保存');
-      } else toast.error(data.message);
+        return true;
+      }
+      toast.error(data?.message || `保存失败 (${res.status})`);
+      return false;
+    } catch (error) {
+      toast.error(error instanceof Error ? `保存失败：${error.message}` : '保存失败');
+      return false;
     } finally {
       setEffectSaving(prev => ({ ...prev, [recipe.id]: false }));
     }
   };
 
-  // ── AI evaluate effect ──
+  // AI evaluate effect
   const handleAiEvaluate = async (recipe: Recipe) => {
-    // Save first
-    await handleSaveEffect(recipe);
+    const saved = await handleSaveEffect(recipe);
+    if (!saved) return;
     setAiEvaluating(prev => ({ ...prev, [recipe.id]: true }));
     try {
       const res = await fetch(`/api/recipes/${recipe.id}/ai-evaluate`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
       });
-      const data = await res.json();
-      if (data.code === 0) {
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.code === 0) {
         setAiResult(prev => ({ ...prev, [recipe.id]: data.data }));
+        setRecipes(prev => prev.map(item => (
+          item.id === recipe.id
+            ? {
+              ...item,
+              effect_score: String(data.data?.score ?? item.effect_score ?? ''),
+              effect_ai_result: data.data?.result ?? item.effect_ai_result ?? null,
+            }
+            : item
+        )));
         fetchRecipes();
         toast.success(`AI评价完成：综合${data.data.score}分`);
-      } else toast.error(data.message);
+      } else {
+        toast.error(data?.message || `AI评价失败 (${res.status})`);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? `AI评价失败：${error.message}` : 'AI评价失败');
     } finally {
       setAiEvaluating(prev => ({ ...prev, [recipe.id]: false }));
     }
   };
-
   // ── AI detect problems for recipe ──
   const handleAiDetectProblems = async (recipe: Recipe) => {
     setAiDetectingProblems(prev => ({ ...prev, [recipe.id]: true }));
@@ -2742,422 +2775,204 @@ function FunctionsTab({
         }}
         onBindingTargetChange={(target) => onBindingTargetChange?.(target)}
         onRefresh={fetchRecipes}
-        renderEffectEditor={(recipe) => (
-          <div className="rounded-lg border bg-card p-3 shadow-sm space-y-3">
-            <div className="flex items-center gap-2">
-              <Star className="h-4 w-4 text-primary" />
-              <span className="text-sm font-medium">编辑效果/出品评价</span>
-              {recipe.effect_score && (
-                <Badge className="ml-auto text-[10px]">
-                  {recipe.effect_score}分
-                </Badge>
-              )}
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">评价描述</Label>
-              <Textarea
-                placeholder="描述该功能/食谱的出品效果、使用感受和关键观察..."
-                value={effectDesc[recipe.id] ?? recipe.effect_description ?? ''}
-                onChange={(e) => setEffectDesc(prev => ({ ...prev, [recipe.id]: e.target.value }))}
-                rows={3}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">效果素材</Label>
-              <MaterialPicker
-                taskId={taskId}
-                selectedIds={effectMaterialIds[recipe.id] ?? (recipe.effect_materials || []).map(m => m.id)}
-                initialMaterials={recipe.effect_materials || []}
-                onSelectionChange={(ids) => {
-                  setEffectMaterialIds(prev => ({ ...prev, [recipe.id]: ids }));
-                }}
-                selectedPreviewSize="md"
-              />
-            </div>
-            {(() => {
-              const aiData = aiResult[recipe.id]?.result || recipe.effect_ai_result;
-              const aiScore = aiResult[recipe.id]?.score || recipe.effect_score;
-              if (!aiData && !aiScore) return null;
-              return (
-                <div className="rounded-lg border bg-muted/40 p-2.5 space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="h-3.5 w-3.5 text-primary" />
-                    <span className="text-xs font-medium">AI评价结果</span>
-                    {aiScore && <Badge className="ml-auto text-[10px]">{aiScore}分</Badge>}
-                  </div>
-                  {aiData?.summary && <p className="text-[11px] text-muted-foreground">{aiData.summary}</p>}
-                </div>
-              );
-            })()}
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Button variant="outline" size="sm" onClick={() => handleSaveEffect(recipe)} disabled={effectSaving[recipe.id]}>
-                <Save className="h-3.5 w-3.5 mr-1" />
-                {effectSaving[recipe.id] ? '保存中...' : '保存评价'}
-              </Button>
-              <Button size="sm" onClick={() => handleAiEvaluate(recipe)}
-                disabled={aiEvaluating[recipe.id] || (!effectDesc[recipe.id] && !recipe.effect_description && (!effectMaterialIds[recipe.id]?.length && !recipe.effect_materials?.length))}>
-                <Sparkles className="h-3.5 w-3.5 mr-1" />
-                {aiEvaluating[recipe.id] ? 'AI评价中...' : 'AI总结评分'}
-              </Button>
-            </div>
-            <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 space-y-3">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-amber-600" />
-                <span className="text-sm font-medium">问题点</span>
-                <span className="text-[10px] text-muted-foreground">
-                  ({(effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? []).filter(p => p.text.trim()).length}条)
-                </span>
-              </div>
-              {(effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? []).map((pp, ppIdx) => (
-                <div key={ppIdx} className="space-y-2 rounded-md border border-amber-200/60 bg-background p-2">
-                  <div className="flex items-start gap-2">
-                    <span className="mt-2 shrink-0 text-[10px] font-medium text-amber-600">问题{ppIdx + 1}</span>
-                    <Input
-                      placeholder="描述问题点..."
-                      value={pp.text}
-                      onChange={(e) => handleUpdateProblemPoint(recipe.id, ppIdx, e.target.value)}
-                      className="text-xs"
-                    />
-                    <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
-                      onClick={() => handleRemoveProblemPoint(recipe.id, ppIdx)}>
-                      <X className="h-3.5 w-3.5" />
+        renderEffectEditor={(recipe) => {
+          const editing = effectEditing[recipe.id] ?? false;
+          const aiData = aiResult[recipe.id]?.result || recipe.effect_ai_result;
+          const aiScore = aiResult[recipe.id]?.score || recipe.effect_score;
+          const pps = effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? [];
+          const validPps = pps.filter(p => p.text?.trim());
+          const effectMats = recipe.effect_materials || [];
+
+          // 只读视图：保存后字段固定显示，点击编辑按钮进入可编辑状态
+          if (!editing) {
+            const hasAnyContent = recipe.effect_description || effectMats.length > 0 || aiData || aiScore || validPps.length > 0;
+            return (
+              <div
+                className="rounded-lg border bg-card p-3 shadow-sm space-y-3 cursor-pointer hover:border-primary/40 transition-colors"
+                onClick={() => setEffectEditing(prev => ({ ...prev, [recipe.id]: true }))}
+              >
+                <div className="flex items-center gap-2">
+                  <Star className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-semibold">效果/出品评价</span>
+                  <div className="ml-auto flex items-center gap-2">
+                    {aiScore && <Badge className="text-[10px]">{aiScore}分</Badge>}
+                    <Button variant="ghost" size="sm" className="h-7" onClick={(e) => { e.stopPropagation(); setEffectEditing(prev => ({ ...prev, [recipe.id]: true })); }}>
+                      <Pencil className="mr-1 h-3 w-3" />编辑
                     </Button>
                   </div>
-                  <div className="ml-12">
-                    <MaterialPicker
-                      taskId={taskId}
-                      selectedIds={pp.material_ids || []}
-                      selectedPreviewSize="md"
-                      onSelectionChange={(ids) => {
-                        const existing = effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? [];
-                        setEffectProblemPoints(prev => ({
-                          ...prev,
-                          [recipe.id]: existing.map((item, i) => i === ppIdx ? { ...item, material_ids: ids } : item),
-                        }));
-                      }}
-                    />
-                  </div>
                 </div>
-              ))}
-              <div className="grid gap-2 sm:grid-cols-3">
-                <Button variant="outline" size="sm" onClick={() => handleAddProblemPoint(recipe.id)}>
-                  <Plus className="h-3.5 w-3.5 mr-1" /> 新增问题点
-                </Button>
-                <Button size="sm" onClick={() => handleAiDetectProblems(recipe)} disabled={aiDetectingProblems[recipe.id]}>
-                  <Sparkles className="h-3.5 w-3.5 mr-1" />
-                  {aiDetectingProblems[recipe.id] ? '识别中...' : 'AI识别问题点'}
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => handleSaveEffect(recipe)} disabled={effectSaving[recipe.id]}>
-                  <Save className="h-3.5 w-3.5 mr-1" />
-                  {effectSaving[recipe.id] ? '保存中...' : '保存'}
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-      />
-
-      <div className="hidden">
-      {loading ? (
-        <div className="space-y-2">{[1,2].map(i => <div key={i} className="h-16 bg-muted animate-pulse rounded-lg" />)}</div>
-      ) : recipes.length === 0 ? (
-        <Card><CardContent className="flex flex-col items-center py-12 text-center">
-          <Wrench className="h-10 w-10 text-muted-foreground/50 mb-3" />
-          <p className="text-sm text-muted-foreground">暂无食谱/功能</p>
-          <p className="text-xs text-muted-foreground mt-1">点击下方按钮新增</p>
-        </CardContent></Card>
-      ) : (
-        <div className="space-y-2">
-          <span className="text-[10px] text-muted-foreground">拖拽食谱可重新排序</span>
-          {recipes.map((recipe, recipeIdx) => (
-            <Card key={recipe.id}
-              className={cn(
-                'cursor-pointer hover:bg-muted/30 transition-all',
-                dragRecipeIdx === recipeIdx && 'opacity-50 scale-95',
-                dragRecipeOverIdx === recipeIdx && 'border-primary border-2',
-              )}
-              onClick={() => setSelectedRecipe(selectedRecipe?.id === recipe.id ? null : recipe)}
-              onDragOver={(e) => { e.preventDefault(); setDragRecipeOverIdx(recipeIdx); }}
-              onDragLeave={() => setDragRecipeOverIdx(null)}
-            >
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="cursor-grab active:cursor-grabbing shrink-0"
-                    draggable
-                    onDragStart={() => setDragRecipeIdx(recipeIdx)}
-                    onDragEnd={async () => {
-                      if (dragRecipeIdx !== null && dragRecipeOverIdx !== null && dragRecipeIdx !== dragRecipeOverIdx) {
-                        const newRecipes = [...recipes];
-                        const [moved] = newRecipes.splice(dragRecipeIdx, 1);
-                        newRecipes.splice(dragRecipeOverIdx, 0, moved);
-                        setRecipes(newRecipes);
-                        await fetch('/api/recipes', {
-                          method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ recipes: newRecipes.map((r, i) => ({ id: r.id, sort_order: i })) }),
-                        });
-                      }
-                      setDragRecipeIdx(null);
-                      setDragRecipeOverIdx(null);
-                    }}
-                  >
-                    <GripVertical className="h-4 w-4 text-muted-foreground" />
+                {!hasAnyContent ? (
+                  <div className="flex items-center justify-center rounded-md border border-dashed py-6 text-xs text-muted-foreground">
+                    点击进入，录入效果评价与问题点
                   </div>
-                  <Badge variant="secondary" className="text-[10px] shrink-0">{recipe.recipe_type}</Badge>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{recipe.name}</p>
-                    <p className="text-xs text-muted-foreground truncate">{recipe.ingredients || '-'}</p>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
-                    <span>{recipe.recipe_steps?.length || 0} 步骤</span>
-                    <span>{recipe.problem_count || 0} 问题</span>
-                    {recipe.effect_score && <span className="text-primary font-medium">{recipe.effect_score}分</span>}
-                  </div>
-                  <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={(e) => { e.stopPropagation(); handleEditRecipe(recipe); }}>
-                    <Pencil className="h-3 w-3 text-muted-foreground" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={(e) => { e.stopPropagation(); handleDeleteRecipe(recipe); }}>
-                    <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
-                  </Button>
-                </div>
-              </CardContent>
-
-              {/* Expanded detail */}
-              {selectedRecipe?.id === recipe.id && (
-                <div className="px-4 pb-4 space-y-2 border-t border-border pt-3" onClick={(e) => e.stopPropagation()}>
-                  <span className="text-[10px] text-muted-foreground">拖拽步骤可重新排序</span>
-                  {recipe.recipe_steps?.map((step, stepIdx) => (
-                    <div key={step.id}
-                      className={cn(
-                        'p-3 rounded-lg bg-muted/30 space-y-1.5 transition-all',
-                        dragStepIdx === stepIdx && 'opacity-50 scale-95',
-                        dragStepOverIdx === stepIdx && 'border-primary border-2',
-                      )}
-                      onDragOver={(e) => { e.preventDefault(); setDragStepOverIdx(stepIdx); }}
-                      onDragLeave={() => setDragStepOverIdx(null)}
-                    >
-                      <div className="flex items-center gap-2">
-                        <div className="cursor-grab active:cursor-grabbing shrink-0 text-muted-foreground/40 hover:text-muted-foreground"
-                          draggable
-                          onDragStart={() => setDragStepIdx(stepIdx)}
-                          onDragEnd={async () => {
-                            if (dragStepIdx !== null && dragStepOverIdx !== null && dragStepIdx !== dragStepOverIdx) {
-                              const steps = recipe.recipe_steps || [];
-                              const newSteps = [...steps];
-                              const [moved] = newSteps.splice(dragStepIdx, 1);
-                              newSteps.splice(dragStepOverIdx, 0, moved);
-                              const updatedRecipes = recipes.map(r => {
-                                if (r.id !== recipe.id) return r;
-                                return { ...r, recipe_steps: newSteps };
-                              });
-                              setRecipes(updatedRecipes);
-                              const reorderData = newSteps.map((s, i) => ({ id: s.id, step_number: i + 1 }));
-                              await fetch('/api/recipe-steps', {
-                                method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ steps: reorderData }),
-                              });
-                            }
-                            setDragStepIdx(null);
-                            setDragStepOverIdx(null);
-                          }}
-                        >
-                          <GripVertical className="h-4 w-4" />
-                        </div>
-                        <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] flex items-center justify-center font-medium">
-                          {stepIdx + 1}
-                        </span>
-                        <span className="text-sm flex-1 min-w-0 break-all">{step.operation}</span>
-                        <div className="flex items-center gap-0.5 shrink-0">
-                          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => handleEditStep(step)}>
-                            <Pencil className="h-3 w-3 text-muted-foreground" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => handleDeleteStep(step)}>
-                            <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
-                          </Button>
-                        </div>
-                      </div>
-                      {/* Step-level materials (below operation) */}
-                      {(() => {
-                        const stepMats = step.materials || [];
-                        return stepMats.length > 0 ? (
-                          <div className="flex gap-1.5 ml-7 flex-wrap">
-                            {stepMats.map((mat) => (
-                              <div key={mat.id} className="w-12 h-12 rounded-md overflow-hidden border border-border cursor-pointer"
-                                onClick={(e) => { e.stopPropagation(); open(mat.file_path || mat.file_url); }}>
-                                {mat.material_type === 'image' ? (
-                                  <PresignedImage filePath={mat.file_path || mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center bg-muted relative">
-                                    <PresignedVideo filePath={mat.file_path || mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
-                                    <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                                      <Play className="h-3 w-3 text-white fill-white" />
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        ) : null;
-                      })()}
-                      <MediaGallery materials={step.materials || []} responsive columns={{ mobile: 3, sm: 4 }} className="ml-7" onPreview={open} />
+                ) : (
+                  <>
+                    <div className="whitespace-pre-wrap rounded-md border bg-background p-3 text-sm">
+                      {recipe.effect_description || '暂无效果描述'}
                     </div>
-                  ))}
-                  <Button variant="outline" size="sm" className="w-full"
-                    onClick={() => { setSelectedRecipe(recipe); setAddStepDialogOpen(true); }}>
-                    <Plus className="h-3.5 w-3.5 mr-1" /> 新增步骤
-                  </Button>
-
-                  {/* Effect Evaluation Section */}
-                  <div className="mt-3 p-3 rounded-lg border border-primary/20 bg-primary/5 space-y-3">
-                    <div className="flex items-center gap-2">
-                      <Star className="h-4 w-4 text-primary" />
-                      <span className="text-sm font-medium">效果/出品效果评价</span>
-                      {recipe.effect_score && (
-                        <Badge className="text-[10px] bg-primary text-primary-foreground ml-auto">
-                          {recipe.effect_score}分
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">评价描述</Label>
-                      <Textarea
-                        placeholder="描述该食谱/功能的效果和出品表现..."
-                        value={effectDesc[recipe.id] ?? recipe.effect_description ?? ''}
-                        onChange={(e) => setEffectDesc(prev => ({ ...prev, [recipe.id]: e.target.value }))}
-                        rows={3}
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">附件素材</Label>
-                      <p className="text-[11px] text-muted-foreground">上传效果图片或视频，AI将结合文字和图片进行评价</p>
-                      <MaterialPicker
-                        taskId={taskId}
-                        selectedIds={effectMaterialIds[recipe.id] ?? (recipe.effect_materials || []).map(m => m.id)}
-                        initialMaterials={recipe.effect_materials || []}
-                        onSelectionChange={(ids) => {
-                          setEffectMaterialIds(prev => ({ ...prev, [recipe.id]: ids }));
-                        }}
-                        selectedPreviewSize="md"
-                      />
-                    </div>
-                    {/* AI result display */}
-                    {(() => {
-                      const aiData = aiResult[recipe.id]?.result || recipe.effect_ai_result;
-                      const aiScore = aiResult[recipe.id]?.score || recipe.effect_score;
-                      if (!aiData && !aiScore) return null;
-                      return (
-                        <div className="p-2.5 rounded-lg bg-muted/50 border border-border space-y-1.5">
-                          <div className="flex items-center gap-2">
-                            <Sparkles className="h-3.5 w-3.5 text-primary" />
-                            <span className="text-xs font-medium">AI评价结果</span>
-                            {aiScore && (
-                              <Badge className={`text-[10px] ml-auto ${Number(aiScore) >= 8 ? 'bg-emerald-600' : Number(aiScore) >= 6 ? 'bg-blue-600' : Number(aiScore) >= 4 ? 'bg-amber-600' : 'bg-red-600'} text-white`}>
-                                {aiScore}分/10分
-                              </Badge>
+                    {effectMats.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {effectMats.map(m => (
+                          <div key={m.id} className="h-16 w-16 overflow-hidden rounded-md border bg-muted">
+                            {m.material_type === 'image' ? (
+                              <img src={m.file_url || m.file_path} alt={m.file_name} className="h-full w-full object-cover" />
+                            ) : (
+                              <video src={m.file_url || m.file_path} className="h-full w-full object-cover" muted preload="metadata" />
                             )}
-                          </div>
-                          {aiData?.summary && (
-                            <p className="text-[11px] text-muted-foreground">{aiData.summary}</p>
-                          )}
-                        </div>
-                      );
-                    })()}
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm" className="flex-1"
-                        onClick={() => handleSaveEffect(recipe)}
-                        disabled={effectSaving[recipe.id]}>
-                        <Save className="h-3.5 w-3.5 mr-1" />
-                        {effectSaving[recipe.id] ? '保存中...' : '保存评价'}
-                      </Button>
-                      <Button size="sm" className="flex-1"
-                        onClick={() => handleAiEvaluate(recipe)}
-                        disabled={aiEvaluating[recipe.id] || (!effectDesc[recipe.id] && !recipe.effect_description && (!effectMaterialIds[recipe.id]?.length && !recipe.effect_materials?.length))}>
-                        <Sparkles className="h-3.5 w-3.5 mr-1" />
-                        {aiEvaluating[recipe.id] ? 'AI评价中...' : 'AI总结评分'}
-                      </Button>
-                    </div>
-                  </div>
-                  {/* Problem Points Section (standalone, same level as steps and effect) */}
-                  <div className="mt-3 p-3 rounded-lg border border-amber-200 bg-amber-50/50 space-y-3">
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle className="h-4 w-4 text-amber-600" />
-                      <span className="text-sm font-medium">问题点</span>
-                      <span className="text-[10px] text-muted-foreground ml-1">
-                        ({(effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? []).filter(p => p.text.trim()).length}条)
-                      </span>
-                    </div>
-                    {/* Problem point list */}
-                    {(effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? []).length > 0 && (
-                      <div className="space-y-2">
-                        {(effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? []).map((pp, ppIdx) => (
-                          <div key={ppIdx} className="p-2 rounded-md border border-amber-200/60 bg-white space-y-2">
-                            <div className="flex items-start gap-1.5">
-                              <span className="text-[10px] text-amber-600 font-medium shrink-0 mt-1.5">问题{ppIdx + 1}</span>
-                              <div className="flex-1 min-w-0">
-                                <Input
-                                  placeholder="描述问题点..."
-                                  value={pp.text}
-                                  onChange={(e) => handleUpdateProblemPoint(recipe.id, ppIdx, e.target.value)}
-                                  className="text-xs"
-                                />
-                              </div>
-                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0 text-muted-foreground hover:text-red-500"
-                                onClick={() => handleRemoveProblemPoint(recipe.id, ppIdx)}>
-                                <X className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                            {/* Per-problem-point material picker */}
-                            <div className="ml-8">
-                              <MaterialPicker
-                                taskId={taskId}
-                                selectedIds={pp.material_ids || []}
-                                selectedPreviewSize="md"
-                                onSelectionChange={(ids) => {
-                                  const existing = effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? [];
-                                  setEffectProblemPoints(prev => ({
-                                    ...prev,
-                                    [recipe.id]: existing.map((item, i) => i === ppIdx ? { ...item, material_ids: ids } : item),
-                                  }));
-                                }}
-                              />
-                            </div>
                           </div>
                         ))}
                       </div>
                     )}
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm" className="flex-1"
-                        onClick={() => handleAddProblemPoint(recipe.id)}>
-                        <Plus className="h-3.5 w-3.5 mr-1" /> 新增问题点
-                      </Button>
-                      <Button size="sm" className="flex-1"
-                        onClick={() => handleAiDetectProblems(recipe)}
-                        disabled={aiDetectingProblems[recipe.id]}>
-                        <Sparkles className="h-3.5 w-3.5 mr-1" />
-                        {aiDetectingProblems[recipe.id] ? 'AI识别中...' : 'AI识别问题点'}
-                      </Button>
-                      <Button variant="outline" size="sm"
-                        onClick={() => handleSaveEffect(recipe)}
-                        disabled={effectSaving[recipe.id]}>
-                        <Save className="h-3.5 w-3.5 mr-1" />
-                        {effectSaving[recipe.id] ? '保存中...' : '保存'}
+                    {(aiData || aiScore) && (
+                      <div className="rounded-lg border bg-muted/40 p-2.5 space-y-1.5">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="h-3.5 w-3.5 text-primary" />
+                          <span className="text-xs font-medium">AI评价结果</span>
+                          {aiScore && <Badge className="ml-auto text-[10px]">{aiScore}分</Badge>}
+                        </div>
+                        {aiData?.summary && <p className="text-[11px] text-muted-foreground">{aiData.summary}</p>}
+                      </div>
+                    )}
+                    {validPps.length > 0 && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle className="h-4 w-4 text-amber-600" />
+                          <span className="text-sm font-medium">问题点</span>
+                          <span className="text-[10px] text-muted-foreground">({validPps.length}条)</span>
+                        </div>
+                        {validPps.map((pp, ppIdx) => (
+                          <div key={ppIdx} className="rounded-md border border-amber-200/60 bg-background p-2">
+                            <div className="text-xs">{pp.text}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          }
+
+          // 编辑视图：可编辑表单
+          return (
+            <div className="rounded-lg border border-primary/40 bg-card p-3 shadow-sm space-y-3">
+              <div className="flex items-center gap-2">
+                <Star className="h-4 w-4 text-primary" />
+                <span className="text-sm font-semibold">效果/出品评价</span>
+                {recipe.effect_score && (
+                  <Badge className="ml-auto text-[10px]">{recipe.effect_score}分</Badge>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">评价描述</Label>
+                <Textarea
+                  placeholder="描述该功能/食谱的出品效果、使用感受和关键观察..."
+                  value={effectDesc[recipe.id] ?? recipe.effect_description ?? ''}
+                  onChange={(e) => setEffectDesc(prev => ({ ...prev, [recipe.id]: e.target.value }))}
+                  rows={3}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">效果素材</Label>
+                <MaterialPicker
+                  taskId={taskId}
+                  selectedIds={effectMaterialIds[recipe.id] ?? (recipe.effect_materials || []).map(m => m.id)}
+                  initialMaterials={recipe.effect_materials || []}
+                  onSelectionChange={(ids) => {
+                    setEffectMaterialIds(prev => ({ ...prev, [recipe.id]: ids }));
+                  }}
+                  selectedPreviewSize="md"
+                />
+              </div>
+              {(() => {
+                if (!aiData && !aiScore) return null;
+                return (
+                  <div className="rounded-lg border bg-muted/40 p-2.5 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-3.5 w-3.5 text-primary" />
+                      <span className="text-xs font-medium">AI评价结果</span>
+                      {aiScore && <Badge className="ml-auto text-[10px]">{aiScore}分</Badge>}
+                    </div>
+                    {aiData?.summary && <p className="text-[11px] text-muted-foreground">{aiData.summary}</p>}
+                  </div>
+                );
+              })()}
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Button variant="outline" size="sm"
+                  onClick={async () => {
+                    const ok = await handleSaveEffect(recipe);
+                    if (ok) setEffectEditing(prev => ({ ...prev, [recipe.id]: false }));
+                  }}
+                  disabled={effectSaving[recipe.id]}>
+                  <Save className="h-3.5 w-3.5 mr-1" />
+                  {effectSaving[recipe.id] ? '保存中...' : '保存'}
+                </Button>
+                <Button size="sm" onClick={() => handleAiEvaluate(recipe)}
+                  disabled={aiEvaluating[recipe.id] || (!effectDesc[recipe.id] && !recipe.effect_description && (!effectMaterialIds[recipe.id]?.length && !recipe.effect_materials?.length))}>
+                  <Sparkles className="h-3.5 w-3.5 mr-1" />
+                  {aiEvaluating[recipe.id] ? 'AI评价中...' : 'AI总结评分'}
+                </Button>
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 space-y-3">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-600" />
+                  <span className="text-sm font-medium">问题点</span>
+                  <span className="text-[10px] text-muted-foreground">({validPps.length}条)</span>
+                </div>
+                {pps.map((pp, ppIdx) => (
+                  <div key={ppIdx} className="space-y-2 rounded-md border border-amber-200/60 bg-background p-2">
+                    <div className="flex items-start gap-2">
+                      <span className="mt-2 shrink-0 text-[10px] font-medium text-amber-600">问题{ppIdx + 1}</span>
+                      <Input
+                        placeholder="描述问题点..."
+                        value={pp.text}
+                        onChange={(e) => handleUpdateProblemPoint(recipe.id, ppIdx, e.target.value)}
+                        className="text-xs"
+                      />
+                      <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => handleRemoveProblemPoint(recipe.id, ppIdx)}>
+                        <X className="h-3.5 w-3.5" />
                       </Button>
                     </div>
+                    <div className="ml-12">
+                      <MaterialPicker
+                        taskId={taskId}
+                        selectedIds={pp.material_ids || []}
+                        selectedPreviewSize="md"
+                        onSelectionChange={(ids) => {
+                          const existing = effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? [];
+                          setEffectProblemPoints(prev => ({
+                            ...prev,
+                            [recipe.id]: existing.map((item, i) => i === ppIdx ? { ...item, material_ids: ids } : item),
+                          }));
+                        }}
+                      />
+                    </div>
                   </div>
+                ))}
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <Button variant="outline" size="sm" onClick={() => handleAddProblemPoint(recipe.id)}>
+                    <Plus className="h-3.5 w-3.5 mr-1" /> 新增问题点
+                  </Button>
+                  <Button size="sm" onClick={() => handleAiDetectProblems(recipe)} disabled={aiDetectingProblems[recipe.id]}>
+                    <Sparkles className="h-3.5 w-3.5 mr-1" />
+                    {aiDetectingProblems[recipe.id] ? '识别中...' : 'AI识别问题点'}
+                  </Button>
+                  <Button variant="outline" size="sm"
+                    onClick={async () => {
+                      const ok = await handleSaveEffect(recipe);
+                      if (ok) setEffectEditing(prev => ({ ...prev, [recipe.id]: false }));
+                    }}
+                    disabled={effectSaving[recipe.id]}>
+                    <Save className="h-3.5 w-3.5 mr-1" />
+                    {effectSaving[recipe.id] ? '保存中...' : '保存'}
+                  </Button>
                 </div>
-              )}
-            </Card>
-          ))}
-        </div>
-      )}
-
-      <div className="sticky bottom-4">
-        <Button className="w-full" onClick={() => setAddDialogOpen(true)}>
-          <Plus className="h-4 w-4 mr-1.5" /> 新增食谱/功能
-        </Button>
-      </div>
-
-      </div>
+              </div>
+            </div>
+          );
+        }}
+      />
 
       {/* Add recipe dialog */}
       <Dialog open={addDialogOpen} onOpenChange={(open) => { setAddDialogOpen(open); if (!open) { setRecipeSearch(''); setRecipeSearchResults([]); } }}>
