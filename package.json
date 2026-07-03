@@ -6,6 +6,7 @@
     "build": "pnpm next build && pnpm tsup ././src/server.ts --format cjs --platform node --target node18 --outDir dist --no-splitting --no-minify",
     "clean:next": "node scripts/clean-next-cache.mjs",
     "check:golden": "tsx scripts/check-golden-test-contract.ts",
+    "check:matrix-formula": "tsx scripts/check-matrix-formula-engine.ts",
     "check:material-naming": "tsx scripts/check-material-naming.ts",
     "check:v2.6-success": "tsx scripts/check-v2.6-success-metrics.ts",
     "dev": "tsx watch src/server.ts",
