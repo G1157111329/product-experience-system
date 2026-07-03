@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessAssembly, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
-import { recomputeAffected } from '@/lib/matrix/recompute';
+import { recomputeAffected, MatrixMetricConflictError } from '@/lib/matrix/recompute';
 
 /**
  * 数据矩阵 - 指标值 PATCH (Task 8 / Data Matrix Input View)
@@ -134,7 +134,7 @@ export async function PATCH(
     );
   }
   // 拒绝直接写计算列：那些只能由 recompute 产出。
-  if ((binding as Row).column_group === 'calculated') {
+  if (isCalculatedDimension(binding as DimensionBindingLike)) {
     return NextResponse.json(
       { code: 1, message: '计算列只读，不可直接写入', data: { code: 'MATRIX_CALCULATED_VALUE_READONLY' } },
       { status: 409 },
@@ -168,6 +168,19 @@ export async function PATCH(
     numericValue = nv ?? null;
   }
 
+  // Fix I2: an empty body (no value/durationMs/text at all) would otherwise
+  // write null to every value column with input_state='valid', silently wiping
+  // a real value. Reject it — UNLESS the caller explicitly passed
+  // inputState 'not_applicable' or 'missing' with no value, which is a
+  // legitimate "mark this cell N/A / missing" intent.
+  const emptyBody = emptyMetricBody(body);
+  if (emptyBody.isLiteralAllNull && !emptyBody.isExplicitStateMarker) {
+    return NextResponse.json(
+      { code: 1, message: '缺少 value/durationMs/text 之一' },
+      { status: 400 },
+    );
+  }
+
   // 3. 乐观锁：读当前 metric_evaluations，若提供 expectedVersion 则校验。
   const { data: existing, error: readErr } = await client
     .from('metric_evaluations')
@@ -181,7 +194,7 @@ export async function PATCH(
   const currentVersion = typeof (existing as Row)?.version === 'number'
     ? Number((existing as Row).version)
     : 0;
-  if (body.expectedVersion !== undefined && body.expectedVersion !== currentVersion) {
+  if (versionConflict(body.expectedVersion, currentVersion)) {
     return NextResponse.json(
       {
         code: 1,
@@ -244,6 +257,16 @@ export async function PATCH(
     cryptoRandomId();
 
   // 6. 服务端权威重算受影响的计算指标（与前端乐观计算同一 DSL 引擎）。
+  //
+  // Note (C2 — deferred): the manual metric write (step 4) and this recompute
+  // are NOT in a single DB transaction (the repo's pg-query Supabase adapter
+  // does not expose transaction support). This is the documented intentional
+  // tradeoff: on recompute failure the manual value is PRESERVED (correct —
+  // the user's input should survive), but the calculated values may be stale
+  // until the next successful recompute. The 500 response below therefore
+  // carries needs_recompute: true so the client can retry. A future task should
+  // add tx support to pg-query and wrap steps 4–6 so the write is rolled back
+  // atomically on recompute failure (or the recompute retried inside the tx).
   let result;
   try {
     result = await recomputeAffected({
@@ -256,6 +279,42 @@ export async function PATCH(
       triggerType: 'api_save',
     });
   } catch (err) {
+    // Fix I1: a version conflict surfaced by recomputeAffected's guarded
+    // upsert (two concurrent recomputes raced on the same calculated cell) is
+    // mapped to a 409, not a 500. The manual value was written successfully,
+    // so the client can refresh and retry the save.
+    if (err instanceof MatrixMetricConflictError) {
+      await writeSecurityAudit(client, {
+        request,
+        actor: user,
+        action: 'matrix_metric.recompute_conflict',
+        outcome: 'denied',
+        targetType: 'comparison_item_node',
+        targetId: rowId,
+        metadata: {
+          assemblyId,
+          dimensionKey,
+          conflictCellId: err.cellId,
+          conflictMetricKey: err.metricKey,
+          staleVersion: err.staleVersion,
+        },
+      });
+      return NextResponse.json(
+        {
+          code: 1,
+          message: '计算指标版本冲突，请重试',
+          data: {
+            code: 'MATRIX_CALCULATION_CONFLICT',
+            conflictMetricKey: err.metricKey,
+            latestVersion: err.staleVersion,
+            metricEvaluationId,
+            version: newVersion,
+            needs_recompute: true,
+          },
+        },
+        { status: 409 },
+      );
+    }
     // 手动值已写入；重算失败不应吞掉该写入。返回写入成功 + 重算失败信号，
     // 前端可据 authoritativeCalculations 为空提示重算异常。
     const message = err instanceof Error ? err.message : '重算失败';
@@ -272,7 +331,15 @@ export async function PATCH(
       {
         code: 1,
         message: `指标已写入，但重算失败：${message}`,
-        data: { metricEvaluationId, version: newVersion, authoritativeCalculations: [], calculationRunId: null },
+        data: {
+          metricEvaluationId,
+          version: newVersion,
+          authoritativeCalculations: [],
+          calculationRunId: null,
+          // C2 (deferred): see the comment above step 6 — the manual write and
+          // recompute are not transactional, so flag that a retry is needed.
+          needs_recompute: true,
+        },
       },
       { status: 500 },
     );
@@ -314,4 +381,64 @@ function cryptoRandomId(): string {
   const g = globalThis as { crypto?: { randomUUID?: () => string } };
   if (g.crypto?.randomUUID) return g.crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Pure validation helpers (exported for unit testing — Fix I3).
+// These take plain values, no Request/client, so they can be tested directly
+// without spinning up the Next.js route runtime.
+// ---------------------------------------------------------------------------
+
+/**
+ * A dimension binding as read from matrix_dimension_bindings, narrowed to the
+ * fields the validation helpers care about. `column_group === 'calculated'`
+ * marks a computed column that must only be written by recompute, never by a
+ * direct PATCH.
+ */
+export interface DimensionBindingLike {
+  column_group?: string | null;
+  editable?: boolean | null;
+}
+
+/**
+ * True when the dimension is a calculated column. Such columns are read-only
+ * via this endpoint; only recompute may produce their values. (Fix I3.)
+ */
+export function isCalculatedDimension(binding: DimensionBindingLike | null | undefined): boolean {
+  return !!binding && binding.column_group === 'calculated';
+}
+
+/** Result of {@link emptyMetricBody}. */
+export interface EmptyBodyCheck {
+  /** No value/durationMs/text was passed at all. */
+  isLiteralAllNull: boolean;
+  /** Caller explicitly set inputState to not_applicable/missing (a marker). */
+  isExplicitStateMarker: boolean;
+}
+
+/**
+ * Determine whether a PATCH body carries an actual value vs. being empty. An
+ * empty body (all three of value/durationMs/text undefined) would otherwise
+ * write null to every value column — silently wiping a real value. It's only
+ * acceptable when the caller explicitly passes inputState 'not_applicable' or
+ * 'missing', which is the intentional "mark N/A / missing" flow. (Fix I2.)
+ */
+export function emptyMetricBody(body: PatchMetricBody): EmptyBodyCheck {
+  const isLiteralAllNull =
+    body.value === undefined && body.durationMs === undefined && body.text === undefined;
+  const isExplicitStateMarker =
+    body.inputState === 'not_applicable' || body.inputState === 'missing';
+  return { isLiteralAllNull, isExplicitStateMarker };
+}
+
+/**
+ * True if an optimistic-version check should fail: expectedVersion was supplied
+ * and does not equal the row's current version. (Fix I3 — extracted from the
+ * inline check so the 409 path is unit-testable.)
+ */
+export function versionConflict(
+  expectedVersion: number | undefined,
+  currentVersion: number,
+): boolean {
+  return expectedVersion !== undefined && expectedVersion !== currentVersion;
 }

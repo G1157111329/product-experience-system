@@ -56,6 +56,31 @@ export interface RecomputeResult {
 type Row = Record<string, any>;
 type QueryResult = { data: Row | Row[] | null; error: { message?: string } | null };
 
+/**
+ * Error code thrown by {@link upsertMetricEvaluation} when a version-guarded
+ * update affects 0 rows (a concurrent recompute bumped the row's version
+ * between our read and write). The API route maps this to a 409. (Fix I1.)
+ */
+export const MATRIX_METRIC_VERSION_CONFLICT = 'MATRIX_METRIC_VERSION_CONFLICT';
+
+/**
+ * Typed error carrying the conflict code + the version we read (which the API
+ * can return as `latestVersion` so the client can refresh and retry).
+ */
+export class MatrixMetricConflictError extends Error {
+  readonly code = MATRIX_METRIC_VERSION_CONFLICT;
+  readonly cellId: string;
+  readonly metricKey: string;
+  readonly staleVersion: number;
+  constructor(cellId: string, metricKey: string, staleVersion: number) {
+    super(`${MATRIX_METRIC_VERSION_CONFLICT}: ${cellId}/${metricKey} version ${staleVersion} stale`);
+    this.name = 'MatrixMetricConflictError';
+    this.cellId = cellId;
+    this.metricKey = metricKey;
+    this.staleVersion = staleVersion;
+  }
+}
+
 function asRows(value: unknown): Row[] {
   return Array.isArray(value) ? (value as Row[]) : [];
 }
@@ -146,6 +171,10 @@ export async function recomputeAffected(input: RecomputeInput): Promise<Recomput
   const formulaRows = asRows(formulaRowsRaw);
 
   const compiledFormulas: CompiledFormulaRow[] = [];
+  // Formulas that failed to compile are skipped (they can't produce a value),
+  // but the failure is logged and surfaced in the run's error_detail_sanitized
+  // so there's an auditable trace instead of a silent swallow. (Fix M2.)
+  const formulaCompileFailures: string[] = [];
   for (const f of formulaRows) {
     try {
       compiledFormulas.push({
@@ -154,9 +183,11 @@ export async function recomputeAffected(input: RecomputeInput): Promise<Recomput
         formulaVersion: String(f.formula_version ?? ''),
         compiled: compileFormula(String(f.formula_dsl ?? '')),
       });
-    } catch {
-      // Broken formula (parse error, etc.): skip it. It cannot produce a value,
-      // and leaving it out keeps partial/failed semantics meaningful.
+    } catch (err) {
+      const code = err instanceof Error ? err.message : 'unknown compile error';
+      const note = `formula ${String(f.id)} (${String(f.output_dimension_key)}) failed to compile: ${code}`;
+      formulaCompileFailures.push(note);
+      console.error(`[recompute] ${note}`);
     }
   }
 
@@ -317,7 +348,8 @@ export async function recomputeAffected(input: RecomputeInput): Promise<Recomput
     };
   }
 
-  // 9. Insert the run row (status placeholder 'succeeded'; updated at the end).
+  // 9. Insert the run row (status placeholder 'succeeded'; corrected at the end
+  //    of the loop, or to 'failed' if the loop throws — see try/catch below).
   const runId = genId();
   const triggerType = input.triggerType ?? 'api_save';
   const { error: runInsertErr } = await client.from('matrix_calculation_runs').insert({
@@ -341,64 +373,78 @@ export async function recomputeAffected(input: RecomputeInput): Promise<Recomput
   let failureCount = 0;
   const updated: RecomputeUpdate[] = [];
 
-  for (const formula of compiledFormulas) {
-    const result = evaluate(formula.compiled, ctx);
-    const outputMetricKey = formula.outputDimensionKey;
-    const binding = bindingByMetric.get(outputMetricKey);
-    const unitCode = binding?.unit_code ?? null;
-    // value_kind from the dimension binding (default 'number' for calculated).
-    const valueKind = String(binding?.value_kind ?? 'number');
+  // Fix C1: wrap the evaluate+upsert loop in try/catch so that if a write
+  // throws mid-loop, the run row is ALWAYS corrected to 'failed' before the
+  // error propagates. Without this the row would stay at the placeholder
+  // 'succeeded' even though writes failed → an orphaned, misleading run.
+  try {
+    for (const formula of compiledFormulas) {
+      const result = evaluate(formula.compiled, ctx);
+      const outputMetricKey = formula.outputDimensionKey;
+      const binding = bindingByMetric.get(outputMetricKey);
+      const unitCode = binding?.unit_code ?? null;
+      // value_kind from the dimension binding (default 'number' for calculated).
+      const valueKind = String(binding?.value_kind ?? 'number');
 
-    const update: RecomputeUpdate = {
-      rowId: triggeredRowId,
-      metricKey: outputMetricKey,
-      formulaVersion: formula.formulaVersion,
-      formulaDefinitionId: formula.id,
-      status: result.ok ? 'valid' : 'calculation_failed',
-    };
+      const update: RecomputeUpdate = {
+        rowId: triggeredRowId,
+        metricKey: outputMetricKey,
+        formulaVersion: formula.formulaVersion,
+        formulaDefinitionId: formula.id,
+        status: result.ok ? 'valid' : 'calculation_failed',
+      };
 
-    if (result.ok) {
-      successCount++;
-      update.value = result.value;
-      await upsertMetricEvaluation(client, {
-        cellId: triggeredRowId,
-        metricKey: outputMetricKey,
-        valueKind,
-        numericValue: result.value,
-        durationMs: null,
-        textValue: null,
-        unitCode,
-        inputState: 'valid',
-        calculationMode: 'calculated',
-        formulaDefinitionId: formula.id,
-        sourceRunId: runId,
-        errorCode: null,
-      });
-    } else {
-      failureCount++;
-      update.errorCode = result.code;
-      await upsertMetricEvaluation(client, {
-        cellId: triggeredRowId,
-        metricKey: outputMetricKey,
-        valueKind,
-        numericValue: null,
-        durationMs: null,
-        textValue: null,
-        unitCode,
-        // input_state stays 'valid' — the *input* is fine; the *calculation*
-        // failed. The projection maps calculation_mode+error_code →
-        // 'calculation_failed' regardless of input_state.
-        inputState: 'valid',
-        calculationMode: 'calculated',
-        formulaDefinitionId: formula.id,
-        sourceRunId: runId,
-        errorCode: result.code,
-      });
+      if (result.ok) {
+        successCount++;
+        update.value = result.value;
+        await upsertMetricEvaluation(client, {
+          cellId: triggeredRowId,
+          metricKey: outputMetricKey,
+          valueKind,
+          numericValue: result.value,
+          durationMs: null,
+          textValue: null,
+          unitCode,
+          inputState: 'valid',
+          calculationMode: 'calculated',
+          formulaDefinitionId: formula.id,
+          sourceRunId: runId,
+          errorCode: null,
+        });
+      } else {
+        failureCount++;
+        update.errorCode = result.code;
+        await upsertMetricEvaluation(client, {
+          cellId: triggeredRowId,
+          metricKey: outputMetricKey,
+          valueKind,
+          numericValue: null,
+          durationMs: null,
+          textValue: null,
+          unitCode,
+          // input_state stays 'valid' — the *input* is fine; the *calculation*
+          // failed. The projection maps calculation_mode+error_code →
+          // 'calculation_failed' regardless of input_state.
+          inputState: 'valid',
+          calculationMode: 'calculated',
+          formulaDefinitionId: formula.id,
+          sourceRunId: runId,
+          errorCode: result.code,
+        });
+      }
+      updated.push(update);
     }
-    updated.push(update);
+  } catch (err) {
+    // A write threw mid-loop. Mark the run failed (with the error message — no
+    // stack, so no sensitive internal detail leaks) and rethrow so the caller
+    // sees the failure. The metrics written before the throw remain; they're
+    // marked with their own per-formula status.
+    const errMessage = err instanceof Error ? err.message : 'unknown error';
+    await updateRunStatus(client, runId, 'failed', errMessage, formulaCompileFailures);
+    throw err;
   }
 
-  // 11. Finalize run status.
+  // 11. Finalize run status (normal completion path).
   let runStatus: 'succeeded' | 'failed' | 'partial';
   if (compiledFormulas.length === 0 || (successCount > 0 && failureCount === 0)) {
     runStatus = 'succeeded';
@@ -407,11 +453,7 @@ export async function recomputeAffected(input: RecomputeInput): Promise<Recomput
   } else {
     runStatus = 'failed';
   }
-  const { error: runUpdateErr } = await client
-    .from('matrix_calculation_runs')
-    .update({ status: runStatus })
-    .eq('id', runId);
-  if (runUpdateErr) throw new Error(runUpdateErr.message || '更新计算运行状态失败');
+  await updateRunStatus(client, runId, runStatus, null, formulaCompileFailures);
 
   return {
     runId,
@@ -420,6 +462,38 @@ export async function recomputeAffected(input: RecomputeInput): Promise<Recomput
     inputVersionHash,
     formulaVersionHash,
   };
+}
+
+/**
+ * Update a calculation run's status (and optional error info). The error
+ * message goes into error_detail_sanitized verbatim (no stack / no internal
+ * paths) so audit/debugging surfaces a useful trace without leaking sensitive
+ * detail. Best-effort: errors updating the run are logged but not thrown, so a
+ * status-update failure never masks the original error. (Fix C1.)
+ */
+async function updateRunStatus(
+  client: any,
+  runId: string,
+  status: 'succeeded' | 'failed' | 'partial',
+  errorCode: string | null,
+  formulaCompileFailures: string[] = [],
+): Promise<void> {
+  // On 'failed', fold any compile failures into error_detail_sanitized so the
+  // trace is durable. error_code stays the surfaced error; detail is the prose.
+  const detailParts = [...formulaCompileFailures];
+  if (errorCode) detailParts.unshift(`error: ${errorCode}`);
+  const errorDetailSanitized = detailParts.length > 0 ? detailParts.join('; ') : null;
+  const { error } = await client
+    .from('matrix_calculation_runs')
+    .update({
+      status,
+      ...(errorCode !== null ? { error_code: errorCode } : {}),
+      ...(errorDetailSanitized !== null ? { error_detail_sanitized: errorDetailSanitized } : {}),
+    })
+    .eq('id', runId);
+  if (error) {
+    console.error(`[recompute] failed to update run ${runId} status to ${status}: ${error.message ?? error}`);
+  }
 }
 
 /**
@@ -493,12 +567,41 @@ async function upsertMetricEvaluation(client: any, input: UpsertMetricInput): Pr
   };
 
   if (existing?.id) {
-    const { error: updErr } = await client
+    // Fix I1: version-guarded update. Two concurrent recomputes targeting the
+    // same calculated (cell_id, metric_key) can both read version=N and both
+    // write version=N+1, silently clobbering each other (lost update). The
+    // second `.eq('version', prevVersion)` guard makes the UPDATE affect 0 rows
+    // if someone bumped the version between our read and write; we then throw a
+    // typed conflict so the API maps it to a 409.
+    //
+    // RESIDUAL RACE WINDOW: the read→guard-update is still not atomic without
+    // SELECT ... FOR UPDATE. Two writers can both read N, one wins the guarded
+    // update (0 rows lost), the other gets the conflict. The window is the
+    // small gap between the SELECT and UPDATE here — much smaller than the old
+    // unguarded read-then-write, but not serializable. Acceptable for v1; a
+    // transaction + row lock would close it entirely.
+    const { data: updatedRow, error: updErr } = await client
       .from('metric_evaluations')
       .update(payload)
-      .eq('id', existing.id);
+      .eq('id', existing.id)
+      .eq('version', prevVersion) // guard: only update if version hasn't changed
+      .select('id')
+      .maybeSingle();
     if (updErr) throw new Error(updErr.message || '更新指标失败');
+    if (!updatedRow) {
+      // 0 rows affected → someone else updated between our read and write.
+      // Surface a typed conflict (no retry here) so the API maps it to 409.
+      throw new MatrixMetricConflictError(
+        input.cellId,
+        input.metricKey,
+        prevVersion,
+      );
+    }
   } else {
+    // INSERT path: no version guard. The unique constraint
+    // (cell_id, metric_key) protects against duplicate inserts; if two
+    // concurrent inserts race, the second gets a unique-violation from Postgres
+    // which the Supabase client surfaces as `error` → we throw. Rare race.
     payload.created_at = nowIso();
     const { error: insErr } = await client
       .from('metric_evaluations')

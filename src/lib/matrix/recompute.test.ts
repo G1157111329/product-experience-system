@@ -86,16 +86,42 @@ function makeStubClient(tables: Record<string, any[]>) {
         records[table].push(rec);
         return Promise.resolve({ data: [rec], error: null });
       },
+      // update().eq().eq()… supports stacked filters (mirrors the version guard
+      // in recompute.ts: `.update(payload).eq('id',…).eq('version',…)`). Each
+      // .eq() returns a chainable object; awaiting it applies the update to the
+      // rows matching ALL stacked filters and resolves with { data, error }.
+      // An optional `.select(...).maybeSingle()` tail returns the single matched
+      // (updated) row or null — matching real Supabase `.update().select()`.
       update(row: Record<string, unknown>) {
-        return {
+        const filters: Array<{ col: string; val: any }> = [];
+        let matched: Record<string, unknown>[] = [];
+        const apply = () => {
+          const arr = records[table] || [];
+          matched = arr.filter((r) => filters.every((f) => r[f.col] === f.val));
+          for (const r of matched) Object.assign(r, row);
+        };
+        const updateChain = {
           eq(col: string, val: unknown) {
-            const arr = records[table] || [];
-            for (const r of arr) {
-              if (r[col] === val) Object.assign(r, row);
-            }
-            return Promise.resolve({ data: null, error: null });
+            filters.push({ col, val });
+            return this;
+          },
+          // .select(...) after update: model the "returning" projection. The
+          // returned chain is awaitable (thenable) AND has maybeSingle().
+          select() {
+            return {
+              maybeSingle() {
+                apply();
+                return Promise.resolve({ data: matched[0] ?? null, error: null });
+              },
+            };
+          },
+          // Awaiting the update chain directly (no .select) applies + resolves.
+          then(onFulfilled: any, onRejected?: any) {
+            apply();
+            return Promise.resolve({ data: null, error: null }).then(onFulfilled, onRejected);
           },
         };
+        return updateChain;
       },
       // select() chains onto the read API with the same mutable state.
       ...api,
@@ -280,14 +306,34 @@ async function main() {
     assert.equal(yieldRow.input_state, 'valid');
     assert.equal(yieldRow.source_run_id, result.runId);
 
-    // Some formulas failed (those depending on ingredient_weight) and others
-    // could fail too (pure_juice_yield/pulp_ratio depend on juice_weight=100,
-    // which is fine, but pulp depends on pulp_in_juice_weight which is missing).
-    // juice_yield definitely failed → status is at least 'partial' or 'failed'.
-    assert.ok(
-      result.status === 'partial' || result.status === 'failed',
-      `expected partial/failed, got ${result.status}`,
+    // Fix M4: assert the EXACT computed status for this fixture rather than
+    // accepting either 'partial' or 'failed'. With juice_weight=100 and
+    // ingredient_weight=0:
+    //   - juice_yield = 100/0 → MATRIX_CALC_DIVIDE_BY_ZERO (fail)
+    //   - pure_juice_yield needs filtered_juice_weight, which is NOT in the
+    //     fixture → MATRIX_CALC_INPUT_MISSING (fail)
+    //   - pulp_ratio needs pulp_in_juice_weight, also NOT in the fixture →
+    //     MATRIX_CALC_INPUT_MISSING (fail)
+    // All 3 formulas fail (0 success, 3 failure) → status is 'failed', not
+    // 'partial'. (A 'partial' status would require at least one formula to
+    // succeed; here none do because the fixture supplies neither numerator for
+    // the two ratio formulas.) Assert exactly 'failed'.
+    assert.equal(
+      result.status,
+      'failed',
+      `expected 'failed' (all 3 formulas fail in this fixture), got ${result.status}`,
     );
+
+    // And every formula's outcome should reflect a failure.
+    assert.equal(result.updated.length, 3, 'fixture has 3 formulas');
+    for (const u of result.updated) {
+      assert.equal(u.status, 'calculation_failed', `${u.metricKey} should be calculation_failed`);
+    }
+    // juice_yield specifically is div-by-zero; the other two are INPUT_MISSING.
+    const pure = result.updated.find((u) => u.metricKey === 'pure_juice_yield');
+    assert.ok(pure && pure.errorCode === 'MATRIX_CALC_INPUT_MISSING');
+    const pulp = result.updated.find((u) => u.metricKey === 'pulp_ratio');
+    assert.ok(pulp && pulp.errorCode === 'MATRIX_CALC_INPUT_MISSING');
   }
 
   console.log('recompute tests passed');
