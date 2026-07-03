@@ -982,7 +982,6 @@ export const matrixSchemas = pgTable("matrix_schemas", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-	index("matrix_schemas_schema_key_idx").using("btree", table.schemaKey.asc().nullsLast().op("text_ops")),
 	foreignKey({
 			columns: [table.ownerId],
 			foreignColumns: [platformUsers.id],
@@ -1005,7 +1004,6 @@ export const matrixSchemaVersions = pgTable("matrix_schema_versions", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	unique("matrix_schema_versions_schema_version_key").on(table.schemaId, table.versionNo),
-	index("matrix_schema_versions_schema_id_idx").using("btree", table.schemaId.asc().nullsLast().op("text_ops")),
 	foreignKey({
 			columns: [table.schemaId],
 			foreignColumns: [matrixSchemas.id],

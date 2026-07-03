@@ -11,10 +11,10 @@ CREATE TABLE IF NOT EXISTS matrix_schemas (
   status varchar(20) NOT NULL DEFAULT 'draft',
   latest_published_version_id varchar(36),
   owner_id varchar(36) REFERENCES platform_users(id) ON DELETE SET NULL,
-  created_at timestamptz DEFAULT now(),
-  updated_at timestamptz DEFAULT now()
+  created_at timestamptz DEFAULT now() NOT NULL,
+  updated_at timestamptz DEFAULT now() NOT NULL
 );
-
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS matrix_schema_versions (
   id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid(),
   schema_id varchar(36) NOT NULL REFERENCES matrix_schemas(id) ON DELETE CASCADE,
@@ -26,10 +26,10 @@ CREATE TABLE IF NOT EXISTS matrix_schema_versions (
   published_by varchar(36) REFERENCES platform_users(id) ON DELETE SET NULL,
   effective_from timestamptz,
   effective_to timestamptz,
-  created_at timestamptz DEFAULT now(),
+  created_at timestamptz DEFAULT now() NOT NULL,
   UNIQUE (schema_id, version_no)
 );
-
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS matrix_dimension_bindings (
   id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid(),
   schema_version_id varchar(36) NOT NULL REFERENCES matrix_schema_versions(id) ON DELETE CASCADE,
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS matrix_dimension_bindings (
   validation_rule_json jsonb DEFAULT '{}',
   UNIQUE (schema_version_id, dimension_key)
 );
-
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS matrix_formula_definitions (
   id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid(),
   schema_version_id varchar(36) NOT NULL REFERENCES matrix_schema_versions(id) ON DELETE CASCADE,
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS matrix_formula_definitions (
   status varchar(20) NOT NULL DEFAULT 'draft',
   UNIQUE (schema_version_id, output_dimension_key)
 );
-
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS matrix_calculation_runs (
   id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid(),
   matrix_instance_id varchar(36) NOT NULL REFERENCES comparison_assemblies(id) ON DELETE CASCADE,
@@ -69,17 +69,18 @@ CREATE TABLE IF NOT EXISTS matrix_calculation_runs (
   status varchar(20) NOT NULL,
   error_code varchar(60),
   error_detail_sanitized text,
-  computed_at timestamptz DEFAULT now(),
+  computed_at timestamptz DEFAULT now() NOT NULL,
   trace_id varchar(60)
 );
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS matrix_calculation_runs_instance_idx ON matrix_calculation_runs(matrix_instance_id);
-
+--> statement-breakpoint
 -- Mark comparison_assemblies that are data-matrix instances
 ALTER TABLE comparison_assemblies
   ADD COLUMN IF NOT EXISTS matrix_schema_version_id varchar(36) REFERENCES matrix_schema_versions(id) ON DELETE SET NULL,
-  ADD COLUMN IF NOT EXISTS matrix_role varchar(20) DEFAULT 'comparison',
+  ADD COLUMN IF NOT EXISTS matrix_role varchar(20) NOT NULL DEFAULT 'comparison',
   ADD COLUMN IF NOT EXISTS comparability_status varchar(20) DEFAULT 'unknown';
-
+--> statement-breakpoint
 -- Typed-value columns on metric_evaluations (raw + calculated)
 ALTER TABLE metric_evaluations
   ADD COLUMN IF NOT EXISTS value_kind varchar(20),

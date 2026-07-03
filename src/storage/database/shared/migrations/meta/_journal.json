@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1782692768223,
+      "tag": "0000_dict_tables_v3_1_1",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1782699399639,
+      "tag": "0001_v3_contract_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782700000000,
+      "tag": "0002_matrix_input_tables",
+      "breakpoints": true
+    }
+  ]
+}
