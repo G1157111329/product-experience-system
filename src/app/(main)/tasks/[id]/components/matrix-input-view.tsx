@@ -137,6 +137,51 @@ interface CompiledFormulaEntry {
 }
 
 /**
+ * Topologically sort compiled formulas so a formula is evaluated after all
+ * formulas whose output it depends on. This matters for calculated→calculated
+ * chains: if `C = SELF("B") + 1` and `B = SELF("x") * 2` but `C` sorts before
+ * `B`, evaluating in insertion (sortOrder) order would read `B` from its stale
+ * authoritative value and produce a wrong optimistic `C`.
+ *
+ * Only dependencies that are themselves formula outputs count as edges
+ * (observed-metric deps have no ordering constraint). Falls back to the
+ * original order on a cycle (which schema-publish already rejects, so this is
+ * just defensive). Re-running per call is cheap for ≤30 formulas.
+ */
+function topoSortEntries(entries: CompiledFormulaEntry[]): CompiledFormulaEntry[] {
+  const by = new Map<string, string[]>(); // output key -> [output keys that depend on it]
+  const indeg = new Map<string, number>();
+  const outputKeys = new Set(entries.map((e) => e.dim.dimensionKey));
+  for (const e of entries) indeg.set(e.dim.dimensionKey, 0);
+  for (const e of entries) {
+    for (const dep of e.compiled.dependencies) {
+      if (outputKeys.has(dep) && dep !== e.dim.dimensionKey) {
+        const list = by.get(dep) ?? [];
+        list.push(e.dim.dimensionKey);
+        by.set(dep, list);
+        indeg.set(e.dim.dimensionKey, (indeg.get(e.dim.dimensionKey) ?? 0) + 1);
+      }
+    }
+  }
+  const queue: string[] = entries
+    .filter((e) => (indeg.get(e.dim.dimensionKey) ?? 0) === 0)
+    .map((e) => e.dim.dimensionKey);
+  const ordered: string[] = [];
+  while (queue.length) {
+    const k = queue.shift()!;
+    ordered.push(k);
+    for (const dependent of by.get(k) ?? []) {
+      indeg.set(dependent, (indeg.get(dependent) ?? 0) - 1);
+      if ((indeg.get(dependent) ?? 0) === 0) queue.push(dependent);
+    }
+  }
+  // Defensive: cycle (rejected at schema-publish) → keep original order.
+  if (ordered.length !== entries.length) return entries;
+  const byEntry = new Map(entries.map((e) => [e.dim.dimensionKey, e]));
+  return ordered.map((k) => byEntry.get(k)!).filter(Boolean);
+}
+
+/**
  * Pre-compile all calculated-dimension formulas once per schema. Parse failures
  * (a malformed DSL) are silently skipped — the authoritative calc still runs on
  * the server; we just can't preview it optimistically for that column.
@@ -163,9 +208,9 @@ function useCompiledFormulas(
 /**
  * Compute optimistic values for every calculated dimension on the edited row.
  *
- * Formulas are evaluated in definition order so that a formula depending on
- * another calculated dimension picks up that dimension's freshly-computed
- * optimistic value (transitive optimism). Only values that DIFFER from the
+ * Formulas are evaluated in topological (dependency) order so that a formula
+ * depending on another calculated dimension picks up that dimension's freshly-
+ * computed optimistic value (transitive optimism). Only values that DIFFER from the
  * authoritative value are returned, so unchanged cells don't flash a "乐观"
  * badge. Group-scope formulas aggregate over the group using the override.
  */
@@ -247,7 +292,11 @@ function computeOptimistic(
   };
 
   const out: Record<string, OptimisticMetric> = {};
-  for (const [outKey, { compiled: c }] of compiled) {
+  // Iterate in TOPOLOGICAL (dependency) order, not insertion/sortOrder order,
+  // so a calculated→calculated chain sees its upstream formula's freshly-
+  // computed optimistic value rather than the stale authoritative one.
+  for (const { dim, compiled: c } of topoSortEntries([...compiled.values()])) {
+    const outKey = dim.dimensionKey;
     // Skip formulas that don't (transitively) involve the edited key. We
     // approximate transitivity by re-evaluating everything in order; if a
     // formula's result is unchanged, we drop it from the badge set below.
@@ -458,17 +507,27 @@ export function MatrixInputView({ taskId, taskName }: MatrixInputViewProps) {
         if (json.code !== 0) throw new Error(json.message || '保存指标失败');
 
         // 3. Apply authoritative values: the edited observed cell + all recalc'd cells.
-        let next = setRowMetric(proj, row.id, dimensionKey, {
-          state: commit.parsed ? 'valid' : 'missing',
-          value: commit.parsed?.value,
-          durationMs: commit.parsed?.durationMs,
-          text: commit.parsed?.text,
-          unit: dim.unitCode,
+        // Use the FUNCTIONAL updater so concurrent in-flight metric PATCHes don't
+        // clobber each other: building on `proj` (a snapshot captured at the start
+        // of this call) would revert an already-resolved concurrent edit until the
+        // next refetch. Building on `prev` (the latest committed state) avoids
+        // that lost-update.
+        setProjection((prev) => {
+          // A concurrent refetch could have cleared the projection; nothing to
+          // patch then (the next render will show the authoritative load).
+          if (!prev) return prev;
+          let next = setRowMetric(prev, row.id, dimensionKey, {
+            state: commit.parsed ? 'valid' : 'missing',
+            value: commit.parsed?.value,
+            durationMs: commit.parsed?.durationMs,
+            text: commit.parsed?.text,
+            unit: dim.unitCode,
+          });
+          for (const u of json.data?.authoritativeCalculations ?? []) {
+            next = setRowMetric(next, u.rowId, u.metricKey, authoritativeToMetric(u));
+          }
+          return next;
         });
-        for (const u of json.data?.authoritativeCalculations ?? []) {
-          next = setRowMetric(next, u.rowId, u.metricKey, authoritativeToMetric(u));
-        }
-        setProjection(next);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : '保存指标失败');
         if (instanceId) await refetchProjection(instanceId);
