@@ -12,6 +12,7 @@
     "dev": "tsx watch src/server.ts",
     "audit:materials": "tsx scripts/audit-orphan-materials.ts",
     "seed:golden": "tsx scripts/seed-golden-test-data.ts",
+    "seed:matrix-schema": "tsx scripts/seed-matrix-juicer-schema.ts",
     "seed:dictionaries": "tsx scripts/seed-dictionaries.ts",
     "smoke:e2e": "playwright test",
     "preinstall": "npx only-allow pnpm",
