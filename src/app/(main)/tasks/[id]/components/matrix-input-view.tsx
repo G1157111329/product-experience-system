@@ -46,6 +46,7 @@ import {
 import { toMetricValue } from './matrix-cell';
 import type { OptimisticMetric } from './matrix-cell';
 import { RecordContextBar } from './record-context-bar';
+import { MatrixMobileCards } from './matrix-mobile-cards';
 import { MatrixToolbar, type CalcStatus } from './matrix-toolbar';
 import { MatrixVirtualGrid } from './matrix-virtual-grid';
 
@@ -644,6 +645,33 @@ export function MatrixInputView({ taskId, taskName }: MatrixInputViewProps) {
   const calcStatus: CalcStatus = projection.calculation.status;
   const canEdit = projection.permissions.canEditRows;
 
+  // When no dimensions are toggled visible, fall back to all (so a fresh load
+  // isn't blank). Shared by both desktop grid and mobile cards.
+  const effectiveObserved = visibleObserved.length > 0 ? visibleObserved : observedDimensions;
+  const effectiveCalculated =
+    visibleCalculated.length > 0 ? visibleCalculated : calculatedDimensions;
+
+  // Shared handler bundle for both the desktop grid and the mobile cards so
+  // the two views route edits through the exact same PATCH + optimistic path.
+  const sharedHandlers: {
+    onSlotChange: typeof handleSlotChange;
+    onMetricChange: typeof handleMetricChange;
+    onFocusRow: (row: MatrixReadRow) => void;
+    onAddRowToGroup: typeof handleAddRowToGroup;
+  } = {
+    onSlotChange: handleSlotChange,
+    onMetricChange: handleMetricChange,
+    onFocusRow: (row) => {
+      // Resolve the row from the latest projection so the context bar reflects
+      // authoritative values rather than a stale row object.
+      const fresh = projection.groups
+        .flatMap((g) => g.rows)
+        .find((r) => r.id === row.id);
+      setFocusedRow(fresh ?? row);
+    },
+    onAddRowToGroup: handleAddRowToGroup,
+  };
+
   return (
     <div className="flex min-w-0 flex-col gap-0">
       <RecordContextBar focusedRow={focusedRow} schemaName={projection.schema.name} />
@@ -656,29 +684,32 @@ export function MatrixInputView({ taskId, taskName }: MatrixInputViewProps) {
         onVisibleKeysChange={setVisibleKeys}
         canEditRows={canEdit}
       />
-      <MatrixVirtualGrid
-        projection={projection}
-        taskId={taskId}
-        observedDimensions={visibleObserved.length > 0 ? visibleObserved : observedDimensions}
-        calculatedDimensions={visibleCalculated.length > 0 ? visibleCalculated : calculatedDimensions}
-        optimistic={optimistic}
-        busyCells={busyCells}
-        collapsedGroups={collapsedGroups}
-        onToggleGroup={handleToggleGroup}
-        handlers={{
-          onSlotChange: handleSlotChange,
-          onMetricChange: handleMetricChange,
-          onFocusRow: (row) => {
-            // Resolve the row from the latest projection so the context bar
-            // reflects authoritative values rather than a stale row object.
-            const fresh = projection.groups
-              .flatMap((g) => g.rows)
-              .find((r) => r.id === row.id);
-            setFocusedRow(fresh ?? row);
-          },
-          onAddRowToGroup: handleAddRowToGroup,
-        }}
-      />
+      <div className="hidden md:block">
+        <MatrixVirtualGrid
+          projection={projection}
+          taskId={taskId}
+          observedDimensions={effectiveObserved}
+          calculatedDimensions={effectiveCalculated}
+          optimistic={optimistic}
+          busyCells={busyCells}
+          collapsedGroups={collapsedGroups}
+          onToggleGroup={handleToggleGroup}
+          handlers={sharedHandlers}
+        />
+      </div>
+      <div className="md:hidden">
+        <MatrixMobileCards
+          projection={projection}
+          taskId={taskId}
+          observedDimensions={effectiveObserved}
+          calculatedDimensions={effectiveCalculated}
+          optimistic={optimistic}
+          busyCells={busyCells}
+          collapsedGroups={collapsedGroups}
+          onToggleGroup={handleToggleGroup}
+          handlers={sharedHandlers}
+        />
+      </div>
       <div className="px-3 py-1.5 text-[10px] text-muted-foreground">
         {taskName} · {projection.schema.name} · {projection.viewport.totalGroups} 大类 · {projection.viewport.totalRows} 行
       </div>
