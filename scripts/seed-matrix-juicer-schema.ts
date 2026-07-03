@@ -175,7 +175,7 @@ async function main() {
   } catch (err) {
     await client.query("ROLLBACK").catch(() => undefined);
     console.error("[seed] failed:", err);
-    process.exit(1);
+    process.exitCode = 1;
   } finally {
     client.release();
     await pool.end();
