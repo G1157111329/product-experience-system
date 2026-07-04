@@ -103,6 +103,17 @@
 | `security_audit_logs` | 统一安全审计日志（登录、越权、上传、分享、AI调用、导出、配置变更等） |
 | `security_rate_limits` | 多实例共享限速状态 |
 | `ai_model_configs` | AI 模型配置（API Key 加密保存） |
+| `matrix_schemas` | 数据矩阵模式定义（schema_key 全局唯一，状态 draft/published；管理员发布，版本化，发布后不可变） |
+| `matrix_schema_versions` | 模式版本（每个版本携带完整 schema_json 快照，发布后冻结，记录 checksum/published_by/effectiveFrom-To） |
+| `matrix_dimension_bindings` | 模式维度绑定（列/行定义：dimension_key、column_group、value_kind、单位、必填/可编辑、校验规则） |
+| `matrix_formula_definitions` | 模式公式定义（受限 DSL 计算维度：output_dimension_key、formula_dsl、compiled_ast、依赖、formula_version） |
+| `matrix_calculation_runs` | 公式计算审计记录（每个矩阵实例的输入/公式哈希、触发类型、状态、错误码、trace_id） |
+
+> 数据矩阵输入视图复用既有表并扩展字段：
+> - `comparison_assemblies` 扩展 `matrix_role`（`data_matrix`/`comparison`）、`matrix_schema_version_id`、`comparability_status`，用于标记数据矩阵实例。
+> - `comparison_item_nodes` 通过 section/item 节点类型承载分组与记录行。
+> - `metric_evaluations` 扩展 typed-value 列（`numeric_value`/`text_value`/`duration_ms`/`unit_code`/`value_kind`/`input_state`/`calculation_mode`/`formula_definition_id`/`source_run_id`/`version`），区分原始输入与计算结果。
+> - 素材与问题复用 `materials`/`issues` 表。
 
 ## 标准分类体系
 
@@ -178,6 +189,19 @@
 | GET/POST | `/api/issue-re-evaluations` | 问题复评估列表/创建（支持issue_id和issue_ids参数）；GET返回含素材 |
 | PUT/DELETE | `/api/issue-re-evaluations/[id]` | 复评估更新/删除 |
 | POST | `/api/issue-re-evaluations/[id]/ai-evaluate` | AI效果评价（基于描述+图片，同食谱四维评价体系） |
+| GET | `/api/matrix-schemas` | 可用模式库（已登录可读） |
+| POST | `/api/matrix-schemas` | 新建模式草稿（管理员） |
+| POST | `/api/matrix-schemas/[id]/versions` | 新建版本草稿（管理员） |
+| POST | `/api/matrix-schema-versions/[id]/publish` | 编译+校验+发布模式（管理员；原子：先全量校验通过再落库） |
+| GET | `/api/tasks/[id]/matrices` | 任务的数据矩阵实例列表 |
+| POST | `/api/tasks/[id]/matrices` | 应用模式创建实例（幂等，重复应用同一模式返回既有实例） |
+| GET | `/api/task-matrices/[id]` | 窗口化 MatrixReadProjection（分组/行/单元格/指标分页读取） |
+| POST | `/api/task-matrices/[id]/groups` | 新增分组 |
+| POST | `/api/task-matrices/[id]/rows` | 新增记录行 |
+| POST | `/api/task-matrices/[id]/validate` | 提交前校验（必填项/单位/范围） |
+| PATCH | `/api/matrix-rows/[id]` | 修改行元数据（对象/规格/排序） |
+| PATCH | `/api/matrix-rows/[id]/slots` | 三槽位（效果结论/过程记录；关联问题由问题模块管理） |
+| PATCH | `/api/matrix-rows/[id]/metrics/[dimensionKey]` | 写原始指标 + 服务端复核计算（同一引擎复核，返回 needs_recompute） |
 
 ## 构建与运行
 
@@ -238,6 +262,12 @@ pnpm build
 
 # 启动生产环境
 pnpm start
+
+# 数据矩阵：初始化/升级原汁机黄金样本模式（执行 0002_matrix_input_tables.sql 迁移后运行）
+pnpm seed:matrix-schema
+
+# 数据矩阵：公式引擎契约测试（受限 DSL 白名单/拒绝规则/语义引用）
+pnpm check:matrix-formula
 ```
 
 `pnpm dev` 仅用于本地开发。移动端或验收环境若出现左下角黑色 Next.js “N” 浮层，属于开发模式 Dev Indicator 暴露；应视为部署/环境问题处理。生产/验收必须先 `pnpm build`，再以 `NODE_ENV=production PORT=5000 pnpm start` 启动。`next.config.mjs` 已设置 `devIndicators: false` 隐藏开发期指示器，但不能替代生产构建。
@@ -263,6 +293,8 @@ pnpm audit --audit-level moderate --registry https://registry.npmjs.org
 NODE_ENV=production PORT=5000 pnpm start
 ```
 
+> 部署数据矩阵特性需额外执行：先运行迁移 `0002_matrix_input_tables.sql`（已登记进 drizzle journal，建立 5 张 matrix_* 表 + comparison_assemblies/metric_evaluations 扩展列），再执行 `pnpm seed:matrix-schema` 初始化原汁机黄金样本模式。未跑迁移会导致矩阵相关 API 500，未跑 seed 会导致默认无可用模式。
+
 生产部署注意：
 
 - 生产环境必须显式配置 `DATABASE_ACCESS_MODE`、`AUTH_SESSION_SECRET`、`AI_CONFIG_ENCRYPTION_KEY` 和 `SECURITY_SCHEMA_VERIFIED=true`。
@@ -272,6 +304,28 @@ NODE_ENV=production PORT=5000 pnpm start
 - 文件存储默认 local，上传写入 `public/uploads`；服务器部署必须将该目录挂载到持久化磁盘。
 - local 默认保留 `/uploads/*` 静态直连，避免历史报告和分享页长期查看时裂图；更高安全要求环境可显式设置 `LOCAL_UPLOAD_PUBLIC_ACCESS=protected`。
 - AI 内网、本机或 HTTP 地址不会默认拦截，便于内网优先部署；公网部署建议配置 `AI_ALLOWED_HOSTS` 并配合网络出口 ACL。
+
+### 当前生产实例与部署注意
+
+截至 2026-06-29，当前生产实例：
+
+- 主机：`118.25.178.78`
+- 应用目录：`/home/ubuntu/product-experience-system`
+- PM2 进程名：`product-experience-system`
+- 外部访问入口：`http://118.25.178.78:5000`
+- 当前 Node 应用端口：`PORT=5001`，生产环境变量来自 PM2 当前进程环境，不以仓库 `.env.local` 为准。
+- 回滚包目录：`/home/ubuntu/deploy-backups/`
+
+部署或排障时必须遵守：
+
+- 不要把生产密码、API Key、AI 连接密钥写入 README、AGENTS、提交信息或脚本注释；文档只写变量名和操作原则。
+- 远端非交互 shell 优先使用 `npx pnpm@9.0.0 ...`。
+- 数据库迁移后要验证真实表，而不是只看脚本退出：至少检查 `project_phase_dict`、`issue_status_dict`、`report_view_configs`、`report_outline_sections`、`report_action_items`、`ai_runs`、`outbox_events`。
+- V3.1.1/Wave 1 P0 回填在生产库 `reports=0` 时会得到 `report_outline_sections=0`、`report_action_items=0`，这是正常空库结果，不要误判为回填失败。
+- 远端 `next build` 可能长时间卡住并导致 `.next/BUILD_ID` 缺失。此时不要重启 PM2 到半构建目录；先停止残留 build 进程，确认 `.next/BUILD_ID` 和 `dist/server.js` 存在，再重启。
+- 如远端构建不可用，可在本地先通过 `pnpm build`，再上传运行时产物 `.next`（不含 cache）和 `dist/server.js` 恢复生产。上传后用 SHA256 对比关键文件。
+- 部署完成的最小验证：PM2 在线、无残留 `next build` 进程、`curl http://127.0.0.1:5001/login` 返回 200、`curl http://127.0.0.1:5001/api/v1/dictionaries/project_phase_dict` 返回 200 且包含正常中文阶段值、`curl http://127.0.0.1:5001/reports` 返回 200。
+- 外网验收以 `118.25.178.78:5000` 为入口；`5001` 是应用内层端口，不要求公网直接访问。
 
 ### Docker 本地测试模拟环境
 
@@ -394,10 +448,20 @@ INITIAL_ADMIN_PASSWORD=<strong-password>
 74. **AI模型切换**: 已迁移至统一的兼容接口调用方式；支持在 `ai_model_configs` 表配置当前启用的 AI 接入信息；移除 `forceBuiltInModel` 参数，统一走 fetch 调用
 75. **Agent预设错误上报**: Agent预设API(agent-presets)不再静默吞掉AI调用失败错误；无结果且有错误时返回code:1和500状态码，部分失败时在warnings字段返回错误详情，前端toast显示失败原因
 76. **标准建议过滤放宽**: normalizePresetSuggestions对standards的过滤条件从"必须有standardItemId"放宽为"有standardItemId或reason或focus"，使AI生成的新建议（无DB ID）也能展示
-77.
+77. **（预留项）**
 78. **功能效果食谱管理增强**: 功能效果中食谱列表支持删除（带确认弹窗）和拖拽排序（GripVertical手柄）；食谱步骤支持删除和拖拽排序
 79. **问题点复评估闭环**: 功能效果来源(recipe_problem)的问题点支持多次复评估；新增issue_re_evaluations表存储复测记录（description+ai_result+materials）；素材通过materials.re_evaluation_id关联复评估记录；五感体验来源(record_fail)的问题点弹窗保持原样（整改方案/责任人/计划完成日期），功能效果来源显示复评估表单（描述评价+选择素材+AI总结）；复测结果按时间倒序排列（最新顶置），报告详情页/打印页/分享页问题清单下方附录复测结果（含素材图片）
 80. **复评估AI总结可编辑**: 复评估记录中AI评分和AI总结文本支持点击编辑按钮进入编辑模式，修改后保存；描述评价也支持编辑
+81. **数据矩阵录入视图定位**: 数据矩阵输入视图是任务工作台的一个录入组件（任务详情页新增“数据矩阵”Tab，仅当任务存在 data_matrix 装配时显示），与既有对比矩阵并列；它不是报告模板，也不是 Excel 复刻。详细规格见 `docs/superpowers/specs/2026-07-03-data-matrix-input-view-design.md`，实现计划见 `docs/superpowers/plans/2026-07-03-data-matrix-input-view-implementation.md`。
+82. **Schema 驱动原则（核心）**: 列/行/单元格的全部内容由 `MatrixSchema` 决定（管理员发布、版本化、发布后不可变）。Excel 样本（`数据矩阵.xlsx`）仅作示意，平台绝不硬编码出汁率/食材重量等业务字段。不同 schema 渲染出不同矩阵；原汁机孔径模式是 `pnpm seed:matrix-schema` 初始化的黄金样本，不是平台默认。结果状态选项（达标/待观察/不达标/不适用）schema 可覆盖，缺省回退到平台四选项默认。
+83. **受限 DSL 公式引擎**: 公式使用语义引用 `SELF("juice_weight")/SELF("ingredient_weight")`，不是 Excel 的 `=H3/G3` 坐标引用。白名单函数：IF/COALESCE/ROUND/MIN/MAX/ABS/SUM/AVG/UNIT/TO_SECONDS + 分组聚合 GROUP_AVG/SUM/MIN/MAX/COUNT。拒绝：前导 `=`、INDIRECT/OFFSET/WEBSERVICE/VBA/MACRO、`&` 拼接、动态坐标。前后端共享同一份引擎文件 `src/lib/matrix/formula-engine.ts`，避免双份实现漂移。
+84. **乐观 + 权威计算**: 前端乐观计算即时回显，服务端用同一引擎复核（`recomputeAffected`），不使用异步队列。复核幂等于 `input_version_hash + formula_version_hash`，相同输入不重复计算。`matrix_calculation_runs` 记录每次复核的输入/公式哈希与状态作为审计链。
+85. **三槽位规则**: 每行三个槽位——效果结论 / 过程记录 / 关联问题，无人工评分框。问题通过 `issues` 表关联（issues 的严重度一类/二类/三类是平台级语义，不是 schema 维度）。对应 V3.1.1 §27.2.3。
+86. **复用既有表**: 不为数据矩阵新建独立实例表，而是复用 `comparison_assemblies`（打 `matrix_role='data_matrix'` 标记）、`comparison_item_nodes`（section/item 节点承载分组与行）、`metric_evaluations`（扩展 typed-value 列承载原始输入与计算结果）；素材/问题复用 `materials`/`issues`。仅新增 5 张 schema/版本/维度/公式/计算记录表。
+87. **移动端响应式**: 数据矩阵在窄屏切换为分组卡片 + 维度抽屉布局，使用纯 CSS 响应式断点切换，不依赖 JS 媒体查询 hook。
+88. **报告投影冻结**: 生成报告时将 data_matrix 投影完整冻结写入 `report_snapshots.snapshot_json.matrix_projection`，而不是仅存 instance_id，避免后续 schema 变更或数据修改导致报告内容漂移。
+89. **已知限制**: (a) schema-publish 循环依赖检测存在自环缺口——自引用公式如 `juice_yield = SELF("juice_yield")+1` 会因 `dep !== from` 守卫跳过自身而漏检，待后续加固；(b) manual 指标写入 + recompute 之间无 DB 事务（pg-query 适配器限制），复核失败时保留手动值（有意），计算值可能短暂陈旧，API 返回 `needs_recompute: true`；(c) 并发计算单元格 upsert 仍存在窄读→守卫更新竞态窗口，比此前收窄但未完全原子（需 SELECT FOR UPDATE 才能彻底消除）。
+90. **数据矩阵 Wave 映射**: Wave 0（schema/公式引擎/迁移）与 Wave 1（实例/CRUD/投影/移动端/报告）已完成；Wave 2（受限公式构建器、模式草稿/审批、批量粘贴增强）未做；RESERVED（任意 Excel 解析、A1 自由公式、宏/VBA、自由画布单元格格式）明确不做。
 
 ## 代码风格
 
