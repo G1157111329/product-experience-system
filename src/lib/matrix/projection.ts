@@ -82,7 +82,6 @@ export interface MatrixReadProjection {
 // ---------------------------------------------------------------------------
 
 type Row = Record<string, any>;
-type QueryResult = { data: Row | Row[] | null; error: { message?: string } | null };
 
 function asRows(value: unknown): Row[] {
   return Array.isArray(value) ? (value as Row[]) : [];

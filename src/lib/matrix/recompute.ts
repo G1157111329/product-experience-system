@@ -54,7 +54,6 @@ export interface RecomputeResult {
 // ---------------------------------------------------------------------------
 
 type Row = Record<string, any>;
-type QueryResult = { data: Row | Row[] | null; error: { message?: string } | null };
 
 /**
  * Error code thrown by {@link upsertMetricEvaluation} when a version-guarded
