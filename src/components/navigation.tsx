@@ -24,6 +24,7 @@ import { useAuth } from '@/lib/auth-context';
 import { BrandLogo } from '@/components/brand-logo';
 import { AiAgentSettings } from '@/components/settings/ai-agent-settings';
 import { AuditLogSettings } from '@/components/settings/audit-log-settings';
+import { MatrixSchemaSettings } from '@/components/settings/matrix-schema-settings';
 import { toast } from 'sonner';
 
 const themeOptions = [
@@ -713,6 +714,7 @@ function PlatformSettingsDialog({
   onOpenStandardOptions,
   onOpenAiAgent,
   onOpenAuditLog,
+  onOpenMatrixSchema,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -720,6 +722,7 @@ function PlatformSettingsDialog({
   onOpenStandardOptions: () => void;
   onOpenAiAgent: () => void;
   onOpenAuditLog: () => void;
+  onOpenMatrixSchema: () => void;
 }) {
   const openSetting = (handler: () => void) => {
     onOpenChange(false);
@@ -746,6 +749,12 @@ function PlatformSettingsDialog({
       action: onOpenAiAgent,
     },
     {
+      title: '数据矩阵模式管理',
+      description: '管理数据矩阵录入页的字段模式、行列定义与默认配置。',
+      icon: BarChart3,
+      action: onOpenMatrixSchema,
+    },
+    {
       title: '日志管理',
       description: '查看和导出账号、报告、AI、分享、导出等关键操作审计日志。',
       icon: ShieldCheck,
@@ -755,8 +764,8 @@ function PlatformSettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
+      <DialogContent className="w-[calc(100vw-1rem)] max-w-none p-0 sm:!w-[min(760px,calc(100vw-2rem))] sm:!max-w-[760px]">
+        <DialogHeader className="border-b px-5 py-4">
           <DialogTitle className="flex items-center gap-2">
             <Settings className="h-5 w-5" /> 平台设置
           </DialogTitle>
@@ -764,25 +773,30 @@ function PlatformSettingsDialog({
             统一管理基础资料、标准字段和 AI Prompt 配置。
           </DialogDescription>
         </DialogHeader>
+        <div className="space-y-4 px-5 py-4">
         <ThemeModeControl />
-        <div className="grid gap-3 py-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2">
           {settingItems.map((item) => (
             <button
               key={item.title}
               type="button"
               onClick={() => openSetting(item.action)}
-              className="group flex min-h-36 flex-col rounded-lg border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="group flex min-h-28 items-start gap-3 rounded-lg border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <span className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-primary/10 text-primary">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
                 <item.icon className="h-4 w-4" />
               </span>
-              <span className="text-sm font-medium text-foreground">{item.title}</span>
-              <span className="mt-2 text-xs leading-relaxed text-muted-foreground">{item.description}</span>
-              <span className="mt-auto pt-4 text-xs font-medium text-primary opacity-0 transition-opacity group-hover:opacity-100">
-                打开设置
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium leading-5 text-foreground">{item.title}</span>
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">{item.description}</span>
+                <span className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-primary">
+                  打开设置
+                  <ChevronRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
+                </span>
               </span>
             </button>
           ))}
+        </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -804,6 +818,8 @@ function UserSection({ collapsed = false }: { collapsed?: boolean }) {
   // ── AI Agent settings (admin-only global, stored in DB) ──
   const [aiConfigOpen, setAiConfigOpen] = useState(false);
   const [auditLogOpen, setAuditLogOpen] = useState(false);
+  // ── Data matrix schema settings (admin-only global, stored in DB) ──
+  const [matrixSchemaOpen, setMatrixSchemaOpen] = useState(false);
 
   useEffect(() => {
     if (profileOpen && isAdmin && user?.id) {
@@ -1029,11 +1045,13 @@ function UserSection({ collapsed = false }: { collapsed?: boolean }) {
         onOpenStandardOptions={() => setStandardOptionsOpen(true)}
         onOpenAiAgent={() => setAiConfigOpen(true)}
         onOpenAuditLog={() => setAuditLogOpen(true)}
+        onOpenMatrixSchema={() => setMatrixSchemaOpen(true)}
       />
       <CategoryProductSettings open={settingsOpen} onOpenChange={setSettingsOpen} />
       <StandardOptionsSettings open={standardOptionsOpen} onOpenChange={setStandardOptionsOpen} />
       <AiAgentSettings open={aiConfigOpen} onOpenChange={setAiConfigOpen} />
       <AuditLogSettings open={auditLogOpen} onOpenChange={setAuditLogOpen} />
+      <MatrixSchemaSettings open={matrixSchemaOpen} onOpenChange={setMatrixSchemaOpen} />
     </>
   );
 }
@@ -1116,6 +1134,7 @@ function MobileUserIcon() {
   const [standardOptionsOpen, setStandardOptionsOpen] = useState(false);
   const [aiConfigOpen, setAiConfigOpen] = useState(false);
   const [auditLogOpen, setAuditLogOpen] = useState(false);
+  const [matrixSchemaOpen, setMatrixSchemaOpen] = useState(false);
 
   if (!user) return null;
   return (
@@ -1164,11 +1183,13 @@ function MobileUserIcon() {
         onOpenStandardOptions={() => setStandardOptionsOpen(true)}
         onOpenAiAgent={() => setAiConfigOpen(true)}
         onOpenAuditLog={() => setAuditLogOpen(true)}
+        onOpenMatrixSchema={() => setMatrixSchemaOpen(true)}
       />
       <CategoryProductSettings open={settingsOpen} onOpenChange={setSettingsOpen} />
       <StandardOptionsSettings open={standardOptionsOpen} onOpenChange={setStandardOptionsOpen} />
       <AiAgentSettings open={aiConfigOpen} onOpenChange={setAiConfigOpen} />
       <AuditLogSettings open={auditLogOpen} onOpenChange={setAuditLogOpen} />
+      <MatrixSchemaSettings open={matrixSchemaOpen} onOpenChange={setMatrixSchemaOpen} />
     </>
   );
 }
