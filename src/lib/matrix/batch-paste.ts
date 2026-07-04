@@ -1,3 +1,6 @@
+import { recomputeAffected, upsertMetricEvaluation, MatrixMetricConflictError } from './recompute';
+import type { UpsertMetricInput } from './recompute';
+
 export const BATCH_LIMIT = 500;
 
 export interface BatchSetMetricCommand {
@@ -104,4 +107,258 @@ export function validateBatchRequest(req: BatchPasteRequest, ctx: ValidationCont
     }
   }
   return { valid: true };
+}
+
+// ---------------------------------------------------------------------------
+// Execution orchestrator
+// ---------------------------------------------------------------------------
+
+export interface ExecuteOptions {
+  actorId: string;
+}
+
+/**
+ * Execute a batch paste: load the assembly, run an idempotency check against
+ * prior runs (keyed by `clientOperationId` written as the run's trace_id),
+ * validate geometry, write each command via {@link upsertMetricEvaluation}
+ * (partial success — one command's failure does NOT block others), then
+ * recompute calculated metrics ONCE PER AFFECTED ROW (deduped, not once per
+ * command) via {@link recomputeAffected}. Returns a shaped {@link BatchPasteResult}.
+ *
+ * The orchestrator does NOT write its own top-level matrix_calculation_runs
+ * row — recomputeAffected writes per-row runs whose trace_id is the
+ * clientOperationId, which doubles as the idempotency record (step 2).
+ */
+export async function executeBatchPaste(
+  client: any,
+  assemblyId: string,
+  req: BatchPasteRequest,
+  _opts: ExecuteOptions,
+): Promise<BatchPasteResult> {
+  // 1. Load assembly — must be a data_matrix instance.
+  const { data: assembly, error: aErr } = await client.from('comparison_assemblies')
+    .select('id,matrix_role,matrix_schema_version_id')
+    .eq('id', assemblyId)
+    .maybeSingle();
+  if (aErr) throw new Error(aErr.message || '加载组装失败');
+  if (!assembly || assembly.matrix_role !== 'data_matrix') {
+    throw new Error('未找到数据矩阵实例');
+  }
+  const schemaVersionId = String(assembly.matrix_schema_version_id);
+
+  // 2. Idempotency: a prior run with trace_id === clientOperationId means the
+  //    batch was already applied. (recomputeAffected writes runs with
+  //    trace_id = clientOperationId.) v1 returns a minimal confirmation rather
+  //    than replaying per-command results (that needs a results snapshot,
+  //    deferred).
+  const { data: existingRun, error: idemErr } = await client.from('matrix_calculation_runs')
+    .select('id')
+    .eq('matrix_instance_id', assemblyId)
+    .eq('trace_id', req.clientOperationId)
+    .maybeSingle();
+  if (idemErr) throw new Error(idemErr.message || '幂等查询失败');
+  if (existingRun) {
+    return {
+      operationId: req.clientOperationId,
+      status: 'succeeded',
+      results: [],
+      authoritativeCalculations: [],
+      calculationRunIds: [String(existingRun.id)],
+      warnings: ['该操作已执行过，返回幂等确认（v1 不重放逐项结果，请刷新投影）'],
+    };
+  }
+
+  // 3. Load schema bindings → observed+editable sort order + lookup-by-key map.
+  const { data: bindings, error: bErr } = await client.from('matrix_dimension_bindings')
+    .select('dimension_key,column_group,editable,sort_order,value_kind,unit_code')
+    .eq('schema_version_id', schemaVersionId)
+    .order('sort_order', { ascending: true });
+  if (bErr) throw new Error(bErr.message || '加载维度绑定失败');
+  const bindingRows = (bindings || []) as Array<Record<string, any>>;
+  const observedSortOrder = bindingRows
+    .filter((b) => b.column_group === 'observed' && b.editable !== false)
+    .map((b) => String(b.dimension_key));
+  const bindingByKey = new Map(bindingRows.map((b) => [String(b.dimension_key), b]));
+
+  // 4. Load group rows: find the anchor row's parent (the group), then all
+  //    item/condition rows under that group in sort_order.
+  const { data: allNodes, error: nErr } = await client.from('comparison_item_nodes')
+    .select('id,parent_id,node_type,sort_order')
+    .eq('assembly_id', assemblyId)
+    .order('sort_order', { ascending: true });
+  if (nErr) throw new Error(nErr.message || '加载节点失败');
+  const nodeRows = (allNodes || []) as Array<Record<string, any>>;
+  const anchorNode = nodeRows.find((n) => String(n.id) === req.anchor.rowId);
+  if (!anchorNode || !['item', 'condition'].includes(String(anchorNode.node_type))) {
+    return failedResult(req, 'MATRIX_BATCH_ANCHOR_INVALID', 'anchor 行不是数据行');
+  }
+  const groupId = String(anchorNode.parent_id);
+  const groupRows = nodeRows
+    .filter((n) => String(n.parent_id) === groupId && ['item', 'condition'].includes(String(n.node_type)))
+    .map((n) => String(n.id));
+
+  // 5. Geometry validation (pure — reuse validateBatchRequest).
+  const validation = validateBatchRequest(req, { observedSortOrder, groupRows });
+  if (!validation.valid) {
+    return failedResult(req, validation.code, validation.message);
+  }
+
+  // 6. Per-command write. Partial success: each command is isolated in its own
+  //    try/catch so a conflict or invalid value on one cell does NOT block the
+  //    others. UpsertMetricInput is constructed cleanly per value_kind (no casts):
+  //    the input field is set, the other two value slots are null.
+  const results: BatchCommandResult[] = [];
+  for (let i = 0; i < req.commands.length; i++) {
+    const cmd = req.commands[i];
+    const binding = bindingByKey.get(cmd.dimensionKey);
+    if (!binding || binding.column_group !== 'observed' || binding.editable === false) {
+      results.push({
+        index: i, status: 'validation_failed',
+        rowId: cmd.rowId, dimensionKey: cmd.dimensionKey,
+        error: { code: 'MATRIX_CALCULATED_VALUE_READONLY', message: '该列为计算指标或不可编辑' },
+      });
+      continue;
+    }
+    try {
+      const valueKind = String(binding.value_kind || 'number');
+      const unitCode = cmd.unitCode || binding.unit_code || null;
+
+      // Build UpsertMetricInput without casts: set the active value slot, null
+      // the others. Number coercion rejects non-finite values.
+      let numericValue: number | null = null;
+      let durationMs: number | null = null;
+      let textValue: string | null = null;
+      if (valueKind === 'duration') {
+        const n = typeof cmd.value === 'number' ? cmd.value : Number(cmd.value);
+        if (!Number.isFinite(n)) throw new Error('MATRIX_VALUE_INVALID');
+        durationMs = n;
+      } else if (valueKind === 'text') {
+        textValue = String(cmd.value);
+      } else {
+        const n = typeof cmd.value === 'number' ? cmd.value : Number(cmd.value);
+        if (!Number.isFinite(n)) throw new Error('MATRIX_VALUE_INVALID');
+        numericValue = n;
+      }
+
+      const upsertInput: UpsertMetricInput = {
+        cellId: cmd.rowId,
+        metricKey: cmd.dimensionKey,
+        valueKind,
+        numericValue,
+        durationMs,
+        textValue,
+        unitCode,
+        inputState: 'valid',
+        calculationMode: 'manual',
+        formulaDefinitionId: null,
+        sourceRunId: null,
+        errorCode: null,
+      };
+      await upsertMetricEvaluation(client, upsertInput);
+
+      // Read back the new version for the result.
+      const { data: row, error: rErr } = await client.from('metric_evaluations')
+        .select('version')
+        .eq('cell_id', cmd.rowId)
+        .eq('metric_key', cmd.dimensionKey)
+        .maybeSingle();
+      if (rErr) throw new Error(rErr.message);
+      results.push({
+        index: i, status: 'succeeded',
+        rowId: cmd.rowId, dimensionKey: cmd.dimensionKey,
+        newVersion: row?.version,
+      });
+    } catch (err) {
+      if (err instanceof MatrixMetricConflictError) {
+        const { data: latest } = await client.from('metric_evaluations')
+          .select('version,numeric_value,duration_ms,text_value')
+          .eq('cell_id', cmd.rowId)
+          .eq('metric_key', cmd.dimensionKey)
+          .maybeSingle();
+        results.push({
+          index: i, status: 'conflict',
+          rowId: cmd.rowId, dimensionKey: cmd.dimensionKey,
+          error: {
+            code: 'MATRIX_METRIC_VERSION_CONFLICT',
+            latestVersion: latest?.version,
+            latestValue: latest?.numeric_value ?? latest?.duration_ms ?? latest?.text_value,
+          },
+        });
+      } else {
+        const code = (err instanceof Error && err.message) || 'MATRIX_VALUE_INVALID';
+        results.push({
+          index: i, status: 'validation_failed',
+          rowId: cmd.rowId, dimensionKey: cmd.dimensionKey,
+          error: { code, message: err instanceof Error ? err.message : undefined },
+        });
+      }
+    }
+  }
+
+  // 7. 集中重算: dedupe the rows that had at least one succeeded command and
+  //    recompute each ONCE (not once per command). recomputeAffected is itself
+  //    idempotent on (instance, input_version_hash, formula_version_hash) and
+  //    writes the run with trace_id = clientOperationId, which is what step 2's
+  //    idempotency check keys on.
+  const affectedRowIds = Array.from(new Set(
+    results.filter((r) => r.status === 'succeeded').map((r) => r.rowId),
+  ));
+  const authoritativeCalculations: AuthoritativeCalc[] = [];
+  const calculationRunIds: string[] = [];
+  for (const rowId of affectedRowIds) {
+    const recompute = await recomputeAffected({
+      client,
+      assemblyId,
+      schemaVersionId,
+      triggeredRowId: rowId,
+      triggeredDimensionKey: '<batch>',
+      traceId: req.clientOperationId,
+      triggerType: 'batch_paste',
+    });
+    for (const u of recompute.updated) {
+      authoritativeCalculations.push({
+        rowId: u.rowId,
+        metricKey: u.metricKey,
+        value: u.value,
+        formulaVersion: u.formulaVersion,
+        status: u.status,
+        errorCode: u.errorCode,
+      });
+    }
+    calculationRunIds.push(recompute.runId);
+  }
+
+  // 8. Compose the top-level status from per-command outcomes.
+  const succeededCount = results.filter((r) => r.status === 'succeeded').length;
+  const status: BatchPasteResult['status'] =
+    succeededCount === results.length ? 'succeeded'
+    : succeededCount === 0 ? 'failed'
+    : 'partially_succeeded';
+
+  return {
+    operationId: req.clientOperationId,
+    status,
+    results,
+    authoritativeCalculations,
+    calculationRunIds,
+    warnings: [],
+  };
+}
+
+/** Build a uniform failed result (all commands marked validation_failed). */
+function failedResult(req: BatchPasteRequest, code: string, message?: string): BatchPasteResult {
+  return {
+    operationId: req.clientOperationId,
+    status: 'failed',
+    results: req.commands.map((cmd, i) => ({
+      index: i,
+      status: 'validation_failed' as const,
+      rowId: cmd.rowId,
+      dimensionKey: cmd.dimensionKey,
+      error: { code, message },
+    })),
+    authoritativeCalculations: [],
+    calculationRunIds: [],
+    warnings: [],
+  };
 }

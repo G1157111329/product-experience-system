@@ -93,3 +93,275 @@ const observedOrder = ['duration', 'ingredient_weight', 'juice_weight', 'pulp_we
 }
 
 console.log('batch-paste validation tests passed');
+
+// ===========================================================================
+// Execution tests for executeBatchPaste — the DB-touching orchestrator.
+//
+// We reuse the same chainable-stub-client pattern from recompute.test.ts so the
+// exact queries executeBatchPaste issues are exercised against in-memory
+// tables. The client supports reads (.from().select().eq()… .order().limit()
+// / .maybeSingle()), inserts, and version-guarded updates (.update().eq().eq()
+// .select().maybeSingle()). Writes mutate the in-memory fixture so subsequent
+// reads reflect them.
+// ===========================================================================
+import { executeBatchPaste } from './batch-paste';
+
+interface StubState {
+  _table: string | null;
+  _filters: Array<{ col: string; val: any }>;
+  _orders: Array<{ col: string; ascending: boolean }>;
+  _limit: number | null;
+  _single: boolean;
+}
+
+/**
+ * Build a chainable stub client. Adapted from recompute.test.ts, with one extra
+ * knob: `conflictUpdateIds` — a set of metric_evaluations row `id`s whose
+ * version-guarded update should match 0 rows (modeling a concurrent version
+ * bump), so upsertMetricEvaluation throws MatrixMetricConflictError. Used to
+ * drive the partial-success test.
+ */
+function makeStubClient(
+  tables: Record<string, any[]>,
+  opts: { conflictUpdateIds?: Set<string> } = {},
+) {
+  const records: Record<string, Array<Record<string, unknown>>> = {};
+  for (const [k, v] of Object.entries(tables)) {
+    records[k] = v.map((row) => ({ ...row }));
+  }
+
+  const resolveSelect = (state: StubState): Promise<{ data: any; error: any }> => {
+    let rows = (records[state._table!] || []).filter((r) =>
+      state._filters.every((f) => r[f.col] === f.val),
+    );
+    if (state._orders.length > 0) {
+      rows = [...rows].sort((a, b) => {
+        for (const { col, ascending } of state._orders) {
+          const av = a[col] as unknown;
+          const bv = b[col] as unknown;
+          if (av === bv) continue;
+          const cmp = String(av) < String(bv) ? -1 : 1;
+          return ascending ? cmp : -cmp;
+        }
+        return 0;
+      });
+    }
+    if (state._limit != null) rows = rows.slice(0, state._limit);
+    const data = state._single ? (rows[0] || null) : rows;
+    return Promise.resolve({ data, error: null });
+  };
+
+  const api = {
+    select() { return this; },
+    eq(this: StubState, col: string, val: any) { this._filters.push({ col, val }); return this; },
+    order(this: StubState, col: string, opts: any) {
+      this._orders.push({ col, ascending: opts.ascending });
+      return this;
+    },
+    limit(this: StubState, n: number) { this._limit = n; return this; },
+    maybeSingle(this: StubState) { this._single = true; return resolveSelect(this); },
+    then(this: StubState, onFulfilled: any, onRejected?: any) {
+      return resolveSelect(this).then(onFulfilled, onRejected);
+    },
+  };
+
+  const newState = (): StubState => ({
+    _table: null,
+    _filters: [],
+    _orders: [],
+    _limit: null,
+    _single: false,
+  });
+
+  const build = (table: string) => {
+    const state: StubState & Record<string, any> = { ...newState(), ...api, _table: table };
+    const insertApi = {
+      insert(row: Record<string, unknown>) {
+        const rec = { ...row };
+        records[table] = records[table] || [];
+        records[table].push(rec);
+        return Promise.resolve({ data: [rec], error: null });
+      },
+      update(row: Record<string, unknown>) {
+        const filters: Array<{ col: string; val: any }> = [];
+        let matched: Record<string, unknown>[] = [];
+        const apply = () => {
+          const arr = records[table] || [];
+          matched = arr.filter((r) => filters.every((f) => r[f.col] === f.val));
+          // Conflict simulation: when a matched row's `id` is in the configured
+          // conflict set, model a "version guard matched 0 rows" outcome so
+          // upsertMetricEvaluation throws MatrixMetricConflictError (mirrors a
+          // concurrent version bump between read and write).
+          if (opts.conflictUpdateIds && table === 'metric_evaluations') {
+            const idFilter = filters.find((f) => f.col === 'id');
+            if (
+              idFilter && matched.length > 0 &&
+              opts.conflictUpdateIds.has(String(idFilter.val))
+            ) {
+              matched = [];
+              return;
+            }
+          }
+          for (const r of matched) Object.assign(r, row);
+        };
+        const updateChain = {
+          eq(col: string, val: unknown) { filters.push({ col, val }); return this; },
+          select() {
+            return {
+              maybeSingle() {
+                apply();
+                return Promise.resolve({ data: matched[0] ?? null, error: null });
+              },
+            };
+          },
+          then(onFulfilled: any, onRejected?: any) {
+            apply();
+            return Promise.resolve({ data: null, error: null }).then(onFulfilled, onRejected);
+          },
+        };
+        return updateChain;
+      },
+      ...api,
+    };
+    return Object.assign(state, insertApi);
+  };
+
+  const root = { from(t: string) { return build(t); } };
+  return { root, records };
+}
+
+/** Batch-paste fixture: one assembly + section g1 with two items (r1, r2). */
+function batchPasteFixtures(): Record<string, any[]> {
+  return {
+    comparison_assemblies: [
+      { id: 'a1', matrix_role: 'data_matrix', matrix_schema_version_id: 'sv1' },
+    ],
+    comparison_item_nodes: [
+      { id: 'g1', assembly_id: 'a1', parent_id: null, node_type: 'section', sort_order: 0, config: {} },
+      { id: 'r1', assembly_id: 'a1', parent_id: 'g1', node_type: 'item', sort_order: 0, config: { subject_key: 'aperture_160' } },
+      { id: 'r2', assembly_id: 'a1', parent_id: 'g1', node_type: 'item', sort_order: 1, config: { subject_key: 'aperture_120' } },
+    ],
+    matrix_dimension_bindings: [
+      { schema_version_id: 'sv1', dimension_key: 'ingredient_weight', column_group: 'observed', editable: true, sort_order: 0, value_kind: 'number', unit_code: 'g' },
+      { schema_version_id: 'sv1', dimension_key: 'juice_weight', column_group: 'observed', editable: true, sort_order: 1, value_kind: 'number', unit_code: 'g' },
+      { schema_version_id: 'sv1', dimension_key: 'juice_yield', column_group: 'calculated', editable: false, sort_order: 2, value_kind: 'number', unit_code: '%' },
+    ],
+    matrix_formula_definitions: [
+      {
+        id: 'fd_yield',
+        schema_version_id: 'sv1',
+        output_dimension_key: 'juice_yield',
+        formula_dsl: 'ROUND(SELF("juice_weight") / SELF("ingredient_weight"), 4)',
+        dependency_json: ['juice_weight', 'ingredient_weight'],
+        scope: 'row',
+        formula_version: 'v1',
+        status: 'published',
+      },
+    ],
+    metric_evaluations: [],
+    matrix_calculation_runs: [],
+  };
+}
+
+async function executionMain() {
+  // --- Happy path: 2 commands on row r1 → both succeed, juice_yield ≈ 0.4683 --
+  {
+    const { root, records } = makeStubClient(batchPasteFixtures());
+    const result = await executeBatchPaste(root, 'a1', {
+      clientOperationId: 'op_happy',
+      baseVersion: 1,
+      anchor: { rowId: 'r1', dimensionKey: 'ingredient_weight' },
+      commands: [
+        { type: 'setMetric', rowId: 'r1', dimensionKey: 'ingredient_weight', value: 1193.1, unitCode: 'g' },
+        { type: 'setMetric', rowId: 'r1', dimensionKey: 'juice_weight', value: 558.7, unitCode: 'g' },
+      ],
+    }, { actorId: 'u1' });
+
+    assert.equal(result.status, 'succeeded', `expected succeeded, got ${result.status}`);
+    assert.equal(result.results.length, 2);
+    assert.ok(result.results.every((r: any) => r.status === 'succeeded'));
+    const jy = result.authoritativeCalculations.find((c: any) => c.metricKey === 'juice_yield');
+    assert.ok(jy, 'juice_yield missing from authoritative calculations');
+    assert.ok(
+      Math.abs((jy as any).value - 0.4683) < 1e-6,
+      `juice_yield expected ≈ 0.4683, got ${(jy as any).value}`,
+    );
+    // One calculation run was inserted (deduped by row → r1 only).
+    assert.equal(records.matrix_calculation_runs.length, 1, 'expected exactly one calculation run');
+    assert.equal(records.matrix_calculation_runs[0]!.trace_id, 'op_happy');
+  }
+
+  // --- Partial success: second command hits a version conflict ---------------
+  {
+    const fixtures = batchPasteFixtures();
+    // Pre-seed (r1, juice_weight) at version 5 so the update path is taken.
+    // Configure the stub so the version-guarded update on this row's id matches
+    // 0 rows → upsertMetricEvaluation throws MatrixMetricConflictError.
+    fixtures.metric_evaluations = [
+      { id: 'me_jw_seed', cell_id: 'r1', metric_key: 'juice_weight', value_kind: 'number', numeric_value: 100, unit_code: 'g', input_state: 'valid', calculation_mode: 'manual', version: 5 },
+    ];
+    const { root, records } = makeStubClient(fixtures, {
+      conflictUpdateIds: new Set(['me_jw_seed']),
+    });
+    const result = await executeBatchPaste(root, 'a1', {
+      clientOperationId: 'op_partial',
+      baseVersion: 1,
+      anchor: { rowId: 'r1', dimensionKey: 'ingredient_weight' },
+      commands: [
+        { type: 'setMetric', rowId: 'r1', dimensionKey: 'ingredient_weight', value: 1193.1, unitCode: 'g' },
+        { type: 'setMetric', rowId: 'r1', dimensionKey: 'juice_weight', value: 558.7, unitCode: 'g' },
+      ],
+    }, { actorId: 'u1' });
+
+    assert.equal(result.status, 'partially_succeeded', `expected partially_succeeded, got ${result.status}`);
+    assert.equal(result.results.length, 2);
+    assert.equal(result.results[0]!.status, 'succeeded', 'ingredient_weight should succeed');
+    assert.equal(result.results[1]!.status, 'conflict', 'juice_weight should conflict');
+    assert.equal(result.results[1]!.error!.code, 'MATRIX_METRIC_VERSION_CONFLICT');
+    assert.equal(result.results[1]!.error!.latestVersion, 5);
+    // Only the succeeded row (r1) is recomputed.
+    assert.equal(records.matrix_calculation_runs.length, 1, 'expected one run for the succeeded row');
+  }
+
+  // --- Idempotency: same clientOperationId twice → no new run on second call -
+  {
+    const { root, records } = makeStubClient(batchPasteFixtures());
+
+    const first = await executeBatchPaste(root, 'a1', {
+      clientOperationId: 'op_idem',
+      baseVersion: 1,
+      anchor: { rowId: 'r1', dimensionKey: 'ingredient_weight' },
+      commands: [
+        { type: 'setMetric', rowId: 'r1', dimensionKey: 'ingredient_weight', value: 1193.1, unitCode: 'g' },
+        { type: 'setMetric', rowId: 'r1', dimensionKey: 'juice_weight', value: 558.7, unitCode: 'g' },
+      ],
+    }, { actorId: 'u1' });
+    const runsAfterFirst = records.matrix_calculation_runs.length;
+
+    const second = await executeBatchPaste(root, 'a1', {
+      clientOperationId: 'op_idem',  // same id
+      baseVersion: 1,
+      anchor: { rowId: 'r1', dimensionKey: 'ingredient_weight' },
+      commands: [
+        { type: 'setMetric', rowId: 'r1', dimensionKey: 'ingredient_weight', value: 1193.1, unitCode: 'g' },
+      ],
+    }, { actorId: 'u1' });
+
+    assert.equal(second.operationId, 'op_idem');
+    assert.equal(
+      records.matrix_calculation_runs.length,
+      runsAfterFirst,
+      'idempotent re-call must not insert another run',
+    );
+    // First call produced a normal result; second is a minimal confirmation.
+    assert.ok(first.authoritativeCalculations.length > 0, 'first call should produce calcs');
+    assert.ok(second.warnings.length > 0, 'second call should carry an idempotency warning');
+  }
+
+  console.log('batch-paste execution tests passed');
+}
+
+executionMain().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
