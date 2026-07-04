@@ -13,7 +13,7 @@
  * SQL or Drizzle — `getSupabaseClient()` returns that shape in both cloud and
  * self-hosted modes.
  */
-import type { DimensionBinding, FormulaDefinition, MatrixSchemaJson } from './types';
+import type { DimensionBinding, FormulaDefinition, MatrixSchemaJson, ResultStatusOption } from './types';
 
 // ---------------------------------------------------------------------------
 // Read DTO types
@@ -64,6 +64,11 @@ export interface MatrixReadProjection {
     name: string;
     dimensions: DimensionBinding[];
     formulas: FormulaDefinition[];
+    /**
+     * Schema-declared result-status options (overrides the platform default).
+     * Undefined when the schema leaves the default in place.
+     */
+    resultStatusOptions?: ResultStatusOption[];
   };
   permissions: { canEditRows: boolean; canEditObservedMetrics: boolean; canEditFormula: boolean };
   viewport: { totalGroups: number; totalRows: number };
@@ -194,6 +199,28 @@ function mapFormula(f: Row): FormulaDefinition {
     scope: f.scope === 'group' ? 'group' : 'row',
     formulaVersion: String(f.formula_version ?? ''),
   };
+}
+
+/**
+ * Coerce a raw schema_json `resultStatusOptions` value into the typed shape.
+ * Returns undefined for anything that isn't a non-empty array of {value,label}
+ * pairs so the cell renderer safely falls back to the platform default rather
+ * than crashing on a malformed blob.
+ */
+function normalizeResultStatusOptions(
+  raw: unknown,
+): ResultStatusOption[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const out: ResultStatusOption[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const value = (item as Row).value;
+    const label = (item as Row).label;
+    if (typeof value !== 'string' || typeof label !== 'string') continue;
+    if (value === '') continue;
+    out.push({ value, label });
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -355,6 +382,10 @@ export async function buildMatrixReadProjection(
       name: String(schemaJson.title ?? assembly.name ?? ''),
       dimensions,
       formulas,
+      // Pass through schema-declared result-status options (undefined → caller
+      // applies the platform default). Validates the shape defensively so a
+      // malformed blob can't crash the cell renderer.
+      resultStatusOptions: normalizeResultStatusOptions(schemaJson.resultStatusOptions),
     },
     permissions,
     viewport: { totalGroups: sections.length, totalRows },

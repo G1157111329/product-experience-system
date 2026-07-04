@@ -45,6 +45,11 @@ export interface MatrixSchemaAxis {
   levels: MatrixSchemaAxisLevel[];
 }
 
+export interface ResultStatusOption {
+  value: string;
+  label: string;
+}
+
 export interface MatrixSchemaJson {
   schemaKey: string;
   version: number;
@@ -52,4 +57,20 @@ export interface MatrixSchemaJson {
   axes: MatrixSchemaAxis[];
   dimensions: DimensionBinding[];
   formulas: FormulaDefinition[];
+  /**
+   * Optional override for the result-status (效果结论) select options.
+   *
+   * Result status is a platform-level concept (the 效果结论 slot exists on every
+   * data matrix regardless of schema), so a fixed platform default applies when
+   * this field is absent (see DEFAULT_RESULT_STATUS_OPTIONS in matrix-cell.tsx).
+   * A schema MAY declare its own status values here — e.g. a schema whose
+   * business domain uses 不同结论语义 (合格/不合格, pass/fail, A/B/C, …). When
+   * present, these options fully replace the platform default; they are not
+   * merged. Note this is intentionally NOT a dimension: dimensions describe
+   * measured/calculated metrics, whereas result status is a slot on the row.
+   *
+   * Do NOT hardcode business-specific status values in the UI — read them from
+   * the schema (with the platform default as fallback).
+   */
+  resultStatusOptions?: ResultStatusOption[];
 }

@@ -674,7 +674,11 @@ export function MatrixInputView({ taskId, taskName }: MatrixInputViewProps) {
 
   return (
     <div className="flex min-w-0 flex-col gap-0">
-      <RecordContextBar focusedRow={focusedRow} schemaName={projection.schema.name} />
+      <RecordContextBar
+        focusedRow={focusedRow}
+        schemaName={projection.schema.name}
+        resultStatusOptions={projection.schema.resultStatusOptions}
+      />
       <MatrixToolbar
         onCreateGroup={handleCreateGroup}
         creatingGroup={creatingGroup}
@@ -695,6 +699,7 @@ export function MatrixInputView({ taskId, taskName }: MatrixInputViewProps) {
           collapsedGroups={collapsedGroups}
           onToggleGroup={handleToggleGroup}
           handlers={sharedHandlers}
+          resultStatusOptions={projection.schema.resultStatusOptions}
         />
       </div>
       <div className="md:hidden">
@@ -708,6 +713,7 @@ export function MatrixInputView({ taskId, taskName }: MatrixInputViewProps) {
           collapsedGroups={collapsedGroups}
           onToggleGroup={handleToggleGroup}
           handlers={sharedHandlers}
+          resultStatusOptions={projection.schema.resultStatusOptions}
         />
       </div>
       <div className="px-3 py-1.5 text-[10px] text-muted-foreground">

@@ -37,7 +37,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
-import type { DimensionBinding, ValueKind } from '@/lib/matrix/types';
+import type { DimensionBinding, ResultStatusOption, ValueKind } from '@/lib/matrix/types';
 import type {
   MatrixMetricReadValue,
   MatrixReadRow,
@@ -48,15 +48,57 @@ import type { MetricValue } from '@/lib/matrix/formula-engine';
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-/** Result-status options shared by <ResultSlotCell> + the context bar. */
-export const RESULT_STATUS_OPTIONS = [
+/**
+ * Platform-level default result-status options for the 效果结论 (result) slot.
+ *
+ * Result status options are platform-level semantics (the 效果结论 slot exists
+ * on every data matrix regardless of schema), but a schema CAN override them
+ * via `MatrixSchemaJson.resultStatusOptions`. Do NOT hardcode business-specific
+ * status values here — read them from the schema, with this constant as the
+ * fallback when the schema doesn't declare its own.
+ *
+ * Kept as a writable array (not `as const`) so callers can pass it straight
+ * into a prop typed `ResultStatusOption[]`.
+ */
+export const DEFAULT_RESULT_STATUS_OPTIONS: ResultStatusOption[] = [
   { value: '达标', label: '达标' },
   { value: '待观察', label: '待观察' },
   { value: '不达标', label: '不达标' },
   { value: '不适用', label: '不适用' },
-] as const;
+];
 
-/** Issue severity level → tailwind dot color. 一类=红 二类=琥珀 三类=muted. */
+/**
+ * Back-compat alias for the previous export name. Some callers (e.g. the
+ * context bar) just want the default set; new callers should prefer the
+ * explicitly-named `DEFAULT_RESULT_STATUS_OPTIONS` to make the fallback intent
+ * clear, or compute effective options via {@link effectiveResultStatusOptions}.
+ */
+export const RESULT_STATUS_OPTIONS = DEFAULT_RESULT_STATUS_OPTIONS;
+
+/**
+ * Resolve the effective result-status options: schema-declared options win,
+ * otherwise the platform default applies. Returns a stable reference when the
+ * schema supplies nothing so downstream `useMemo`/render equality holds.
+ */
+export function effectiveResultStatusOptions(
+  schemaOptions?: ResultStatusOption[],
+): ResultStatusOption[] {
+  return schemaOptions && schemaOptions.length > 0
+    ? schemaOptions
+    : DEFAULT_RESULT_STATUS_OPTIONS;
+}
+
+/**
+ * Issue severity level → tailwind dot color.
+ *
+ * NOTE: issue severity (一类/二类/三类) is a PLATFORM-LEVEL issue taxonomy
+ * (see the issues domain / `issues.level` column), NOT a matrix-schema-driven
+ * dimension. It is intentionally NOT overridable via the matrix schema — unlike
+ * result-status options, severity classifications belong to the issue-tracking
+ * domain and are shared across all issue surfaces (matrix cells, issue rows,
+ * reports). Do not confuse this map with schema-driven dimension enums, and do
+ * not add a schema override for it.
+ */
 const SEVERITY_DOT_CLASS: Record<string, string> = {
   一类: 'bg-red-500',
   二类: 'bg-amber-500',
@@ -217,10 +259,17 @@ export function ResultSlotCell({
   row,
   onChange,
   busy,
+  resultStatusOptions,
 }: {
   row: MatrixReadRow;
   onChange: (patch: { status?: string; summary?: string }) => void;
   busy: boolean;
+  /**
+   * Schema-declared result-status options. When omitted (or empty), the
+   * platform default {@link DEFAULT_RESULT_STATUS_OPTIONS} applies. Threaded
+   * down from <MatrixInputView> via projection.schema.resultStatusOptions.
+   */
+  resultStatusOptions?: ResultStatusOption[];
 }) {
   const [summary, setSummary] = useState(row.slots.result.summary ?? '');
   // Reset the draft when the authoritative summary changes (refetch / 409 revert).
@@ -229,6 +278,9 @@ export function ResultSlotCell({
   }, [row.slots.result.summary]);
 
   const { schedule, flush } = useDebouncedSave((v) => onChange({ summary: v }));
+
+  // Schema options override the platform default; see DEFAULT_RESULT_STATUS_OPTIONS.
+  const options = effectiveResultStatusOptions(resultStatusOptions);
 
   return (
     <div className="flex min-w-0 flex-col gap-1 p-1.5">
@@ -241,7 +293,7 @@ export function ResultSlotCell({
           <SelectValue placeholder="结论" />
         </SelectTrigger>
         <SelectContent>
-          {RESULT_STATUS_OPTIONS.map((o) => (
+          {options.map((o) => (
             <SelectItem key={o.value} value={o.value} className="text-xs">
               {o.label}
             </SelectItem>

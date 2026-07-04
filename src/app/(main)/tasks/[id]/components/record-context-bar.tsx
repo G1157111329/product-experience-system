@@ -10,24 +10,29 @@
  */
 import { Table2 } from 'lucide-react';
 import type { MatrixReadRow } from '@/lib/matrix/projection';
-import { RESULT_STATUS_OPTIONS } from './matrix-cell';
+import type { ResultStatusOption } from '@/lib/matrix/types';
+import { effectiveResultStatusOptions } from './matrix-cell';
 
 interface RecordContextBarProps {
   /** The row the user last focused/edited, or null when none. */
   focusedRow: MatrixReadRow | null;
   /** Optional schema name to lead the bar with. */
   schemaName?: string;
+  /** Schema-declared result-status options (undefined → platform default). */
+  resultStatusOptions?: ResultStatusOption[];
 }
 
-function statusLabel(status?: string): string | null {
+function statusLabel(status: string | undefined, options: ResultStatusOption[]): string | null {
   if (!status) return null;
-  return RESULT_STATUS_OPTIONS.find((o) => o.value === status)?.label ?? status;
+  return options.find((o) => o.value === status)?.label ?? status;
 }
 
-export function RecordContextBar({ focusedRow, schemaName }: RecordContextBarProps) {
+export function RecordContextBar({ focusedRow, schemaName, resultStatusOptions }: RecordContextBarProps) {
   const subjectLabel = focusedRow?.subject.label;
   const subjectKey = focusedRow?.subject.key;
-  const status = statusLabel(focusedRow?.slots.result.status);
+  // Schema options override the platform default (see matrix-cell.tsx).
+  const options = effectiveResultStatusOptions(resultStatusOptions);
+  const status = statusLabel(focusedRow?.slots.result.status, options);
   const process = focusedRow?.slots.process.note?.trim();
 
   const crumbs: string[] = [];

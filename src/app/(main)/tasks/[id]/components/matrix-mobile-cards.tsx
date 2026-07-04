@@ -38,7 +38,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
-import type { DimensionBinding } from '@/lib/matrix/types';
+import type { DimensionBinding, ResultStatusOption } from '@/lib/matrix/types';
 import type {
   MatrixReadGroup,
   MatrixReadRow,
@@ -68,6 +68,8 @@ interface MatrixMobileCardsProps {
   onToggleGroup: (groupId: string) => void;
   /** Identical handler set the desktop grid receives. */
   handlers: MatrixVirtualGridHandlers;
+  /** Schema-declared result-status options (undefined → platform default). */
+  resultStatusOptions?: ResultStatusOption[];
 }
 
 /**
@@ -86,6 +88,7 @@ export function MatrixMobileCards({
   collapsedGroups,
   onToggleGroup,
   handlers,
+  resultStatusOptions,
 }: MatrixMobileCardsProps) {
   if (projection.groups.length === 0) {
     return (
@@ -109,6 +112,7 @@ export function MatrixMobileCards({
           collapsed={collapsedGroups.has(group.id)}
           onToggleGroup={onToggleGroup}
           handlers={handlers}
+          resultStatusOptions={resultStatusOptions}
         />
       ))}
     </div>
@@ -129,6 +133,7 @@ interface MobileGroupCardProps {
   collapsed: boolean;
   onToggleGroup: (id: string) => void;
   handlers: MatrixVirtualGridHandlers;
+  resultStatusOptions?: ResultStatusOption[];
 }
 
 function MobileGroupCard({
@@ -141,6 +146,7 @@ function MobileGroupCard({
   collapsed,
   onToggleGroup,
   handlers,
+  resultStatusOptions,
 }: MobileGroupCardProps) {
   return (
     <section className="overflow-hidden rounded-lg border bg-card shadow-xs">
@@ -192,6 +198,7 @@ function MobileGroupCard({
               optimistic={optimistic}
               busyCells={busyCells}
               handlers={handlers}
+              resultStatusOptions={resultStatusOptions}
             />
           ))}
         </div>
@@ -212,6 +219,7 @@ interface MobileRowCardProps {
   optimistic: Record<string, OptimisticMetric>;
   busyCells: Record<string, boolean>;
   handlers: MatrixVirtualGridHandlers;
+  resultStatusOptions?: ResultStatusOption[];
 }
 
 function MobileRowCard({
@@ -222,6 +230,7 @@ function MobileRowCard({
   optimistic,
   busyCells,
   handlers,
+  resultStatusOptions,
 }: MobileRowCardProps) {
   const [metricTab, setMetricTab] = useState<MetricTab>('observed');
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -264,6 +273,7 @@ function MobileRowCard({
             <ResultSlotCell
               row={row}
               busy={slotBusy}
+              resultStatusOptions={resultStatusOptions}
               onChange={(patch) =>
                 handlers.onSlotChange(row.id, { result: patch })
               }

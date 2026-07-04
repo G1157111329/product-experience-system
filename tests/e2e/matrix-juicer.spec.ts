@@ -2,6 +2,23 @@ import { expect, test, type APIResponse, type Page } from '@playwright/test';
 import { loginForE2E } from './auth-session';
 
 /**
+ * JUICER SCHEMA GOLDEN-SAMPLE ACCEPTANCE TEST (AT-11/12/13).
+ *
+ * The hardcoded field names below (ingredient_weight, juice_weight, juice_yield,
+ * 食物重量, 出汁重量, 出汁率含渣, 160mm, etc.) and the expected value 0.4683 are
+ * NOT platform defaults. They come from the juicer aperture schema seeded by
+ * `pnpm seed:matrix-schema` (see src/lib/matrix/schema-bootstrap.ts).
+ *
+ * The data-matrix UI itself is schema-driven and renders whatever dimensions
+ * the applied MatrixSchemaVersion declares — see matrix-schema-driven.spec.ts
+ * for a test that exercises a completely different schema. This file is locked
+ * to the juicer sample because AT-11/12/13 verify the juicer business case
+ * end-to-end. If you change the juicer schema, update these constants; if you
+ * add a new business schema, write a new spec file rather than overloading
+ * this one.
+ */
+
+/**
  * Data Matrix Input View — juicer end-to-end smoke (Task 14).
  *
  * Covers the three acceptance scenarios that depend on a running app + DB:
@@ -22,10 +39,52 @@ import { loginForE2E } from './auth-session';
 const account = process.env.E2E_ACCOUNT || 'dockeradmin';
 const password = process.env.E2E_PASSWORD || 'DockerLocal2026';
 
+// ---------------------------------------------------------------------------
+// Juicer golden-sample constants.
+//
+// Every value below is tied to the juicer aperture schema
+// (JUICER_APERTURE_SCHEMA in src/lib/matrix/schema-bootstrap.ts, seeded by
+// `pnpm seed:matrix-schema`). None of these are platform defaults. They are
+// extracted here as named constants so the single source of truth is obvious
+// and so a schema change can be updated in one place. See the file-level
+// guardrail comment above for why these are NOT to be generalised.
+// ---------------------------------------------------------------------------
+
+/** schemaKey of the seeded juicer schema (schema-bootstrap.ts). */
 const JUICER_SCHEMA_KEY = 'juicer_aperture_comparison';
 
-// Juicer observed inputs and the expected row-scoped calculation.
-// juice_yield = ROUND(juice_weight / ingredient_weight, 4) = 0.4683.
+// --- Dimension keys (schema-bootstrap.ts → dimensions[].dimensionKey) ---
+/** Observed input: weight of the food ingredient fed into the juicer (g). */
+const DIM_INGREDIENT_WEIGHT = 'ingredient_weight';
+/** Observed input: weight of the extracted juice including pulp (g). */
+const DIM_JUICE_WEIGHT = 'juice_weight';
+/** Calculated output: juice_yield = ROUND(juice_weight / ingredient_weight, 4). */
+const DIM_JUICE_YIELD = 'juice_yield';
+
+// --- Display names (schema-bootstrap.ts → dimensions[].displayName) ---
+/** Column header for ingredient_weight (食物重量). */
+const DISPLAY_INGREDIENT_WEIGHT = '食物重量';
+/** Column header for juice_weight (出汁重量). */
+const DISPLAY_JUICE_WEIGHT = '出汁重量';
+/** Column header for the calculated juice_yield (出汁率含渣). */
+const DISPLAY_JUICE_YIELD = '出汁率含渣';
+
+// --- Result-status option exercised by AT-12 (platform default, not juicer) ---
+/** A platform-default result-status value picked in the result slot (AT-12). */
+const RESULT_STATUS_FAIL = '不达标';
+
+// --- Row subject under test (test-created, arbitrary aperture label) ---
+/**
+ * Subject key/label for the test row. "160mm" is the aperture scenario label
+ * created by the test setup (NOT a schema value) — it identifies the row in
+ * the grid. Any unique label would do; this one mirrors a real aperture spec.
+ */
+const ROW_SUBJECT = '160mm';
+
+// --- Juicer observed inputs + the expected row-scoped calculation ---
+// juice_yield = ROUND(juice_weight / ingredient_weight, 4)
+//             = ROUND(558.7 / 1193.1, 4) = 0.4683.
+// See schema-bootstrap.ts formula for `juice_yield`.
 const INGREDIENT_WEIGHT = 1193.1;
 const JUICE_WEIGHT = 558.7;
 const EXPECTED_JUICE_YIELD = 0.4683;
@@ -159,7 +218,7 @@ test.describe.serial('Data Matrix juicer end-to-end (AT-11/12/13)', () => {
 
     const row = await ensureJson<{ rowId: string }>(
       await request.post(`/api/task-matrices/${ctx.assemblyId}/rows`, {
-        data: { groupId: ctx.groupId, subjectKey: '160mm', subjectLabel: '160mm' },
+        data: { groupId: ctx.groupId, subjectKey: ROW_SUBJECT, subjectLabel: ROW_SUBJECT },
       }),
       'create matrix row',
     );
@@ -171,9 +230,9 @@ test.describe.serial('Data Matrix juicer end-to-end (AT-11/12/13)', () => {
       groups: Array<{ rows: Array<{ id: string }> }>;
     }>(await request.get(`/api/task-matrices/${ctx.assemblyId}`), 'read matrix projection');
     const dimensionKeys = projection.schema.dimensions.map((d) => d.dimensionKey);
-    expect(dimensionKeys, 'juicer schema should bind ingredient_weight').toContain('ingredient_weight');
-    expect(dimensionKeys, 'juicer schema should bind juice_weight').toContain('juice_weight');
-    expect(dimensionKeys, 'juicer schema should bind the calculated juice_yield').toContain('juice_yield');
+    expect(dimensionKeys, 'juicer schema should bind ingredient_weight').toContain(DIM_INGREDIENT_WEIGHT);
+    expect(dimensionKeys, 'juicer schema should bind juice_weight').toContain(DIM_JUICE_WEIGHT);
+    expect(dimensionKeys, 'juicer schema should bind the calculated juice_yield').toContain(DIM_JUICE_YIELD);
 
     // Touch the task page once so the serverless function is warm for the UI tests.
     await page.goto(`/tasks/${ctx.taskId}?tab=matrix`);
@@ -193,17 +252,18 @@ test.describe.serial('Data Matrix juicer end-to-end (AT-11/12/13)', () => {
 
     // The matrix grid is lazy-fetched; wait for the row's subject label to show.
     await expect(page.getByText('数据矩阵').first()).toBeVisible();
-    await expect(page.getByRole('cell', { name: '160mm' })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole('cell', { name: ROW_SUBJECT })).toBeVisible({ timeout: 20_000 });
 
-    // The 160mm row is the only row in the group.
-    const dataRow = page.getByRole('row').filter({ hasText: '160mm' }).first();
+    // The test row is the only row in the group.
+    const dataRow = page.getByRole('row').filter({ hasText: ROW_SUBJECT }).first();
 
     // The observed columns render in schema sortOrder: 耗时(0) 食物重量(1) 出汁重量(2)
     // …. 耗时 is ALSO an <input type="number">, so nth(0)/nth(1) would be wrong.
     // Instead, resolve each input by the position of its column header, which
     // stays correct if dimensions are reordered or hidden via the column chooser.
-    const ingredientInput = await inputForColumn(page, dataRow, '食物重量');
-    const juiceInput = await inputForColumn(page, dataRow, '出汁重量');
+    // (DISPLAY_* names come from the juicer schema — see constants above.)
+    const ingredientInput = await inputForColumn(page, dataRow, DISPLAY_INGREDIENT_WEIGHT);
+    const juiceInput = await inputForColumn(page, dataRow, DISPLAY_JUICE_WEIGHT);
     await ingredientInput.fill(String(INGREDIENT_WEIGHT));
     await juiceInput.fill(String(JUICE_WEIGHT));
 
@@ -229,7 +289,7 @@ test.describe.serial('Data Matrix juicer end-to-end (AT-11/12/13)', () => {
           const cell = projection.groups
             .flatMap((g) => g.rows)
             .find((r) => r.id === rowId)
-            ?.metrics?.juice_yield;
+            ?.metrics?.[DIM_JUICE_YIELD];
           return cell?.value;
         },
         { message: 'juice_yield should recompute to ≈0.4683', timeout: 30_000, intervals: [1_000, 2_000, 5_000] },
@@ -239,8 +299,8 @@ test.describe.serial('Data Matrix juicer end-to-end (AT-11/12/13)', () => {
 
     // DOM assertion: the calculated 出汁率含渣 cell (read-only <span>) renders
     // the recomputed value formatted to 4 decimals (displayFormat.decimals=4).
-    const yieldCell = dataRow.getByTitle('出汁率含渣');
-    await expect(yieldCell).toContainText('0.4683', { timeout: 15_000 });
+    const yieldCell = dataRow.getByTitle(DISPLAY_JUICE_YIELD);
+    await expect(yieldCell).toContainText(String(EXPECTED_JUICE_YIELD), { timeout: 15_000 });
   });
 
   // -------------------------------------------------------------------------
@@ -253,16 +313,18 @@ test.describe.serial('Data Matrix juicer end-to-end (AT-11/12/13)', () => {
 
     await page.goto(`/tasks/${taskId}?tab=matrix`);
     await expectAppLoaded(page);
-    await expect(page.getByRole('cell', { name: '160mm' })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole('cell', { name: ROW_SUBJECT })).toBeVisible({ timeout: 20_000 });
 
-    const dataRow = page.getByRole('row').filter({ hasText: '160mm' }).first();
+    const dataRow = page.getByRole('row').filter({ hasText: ROW_SUBJECT }).first();
 
-    // The 效果结论 column renders a shadcn Select; open it and pick 不达标.
-    // The trigger is the first combobox-like button inside the row's result cell.
+    // The 效果结论 column renders a shadcn Select; open it and pick 不达标
+    // (RESULT_STATUS_FAIL — one of the platform-default result-status options;
+    // see DEFAULT_RESULT_STATUS_OPTIONS in matrix-cell.tsx). The trigger is the
+    // first combobox-like button inside the row's result cell.
     const resultTrigger = dataRow.getByRole('combobox').first();
     await expect(resultTrigger).toBeVisible();
     await resultTrigger.click();
-    await page.getByRole('option', { name: '不达标' }).click();
+    await page.getByRole('option', { name: RESULT_STATUS_FAIL }).click();
 
     // Confirm via the API that the result_status slot persisted (last-write-wins).
     await expect
@@ -279,9 +341,9 @@ test.describe.serial('Data Matrix juicer end-to-end (AT-11/12/13)', () => {
           const row = projection.groups.flatMap((g) => g.rows).find((r) => r.id === rowId);
           return row?.slots.result.status ?? null;
         },
-        { message: 'result_status should persist as 不达标', timeout: 15_000 },
+        { message: `result_status should persist as ${RESULT_STATUS_FAIL}`, timeout: 15_000 },
       )
-      .toBe('不达标');
+      .toBe(RESULT_STATUS_FAIL);
 
     // Evidence picker smoke: the 证据 column's cell opens the 选择素材 dialog.
     const evidenceButton = dataRow.getByRole('button', { name: /证据/ }).first();
@@ -305,14 +367,14 @@ test.describe.serial('Data Matrix juicer end-to-end (AT-11/12/13)', () => {
 
     await page.goto(`/tasks/${taskId}?tab=matrix`);
     await expectAppLoaded(page);
-    await expect(page.getByRole('cell', { name: '160mm' })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole('cell', { name: ROW_SUBJECT })).toBeVisible({ timeout: 20_000 });
 
-    const dataRow = page.getByRole('row').filter({ hasText: '160mm' }).first();
+    const dataRow = page.getByRole('row').filter({ hasText: ROW_SUBJECT }).first();
 
     // (a) DOM: the 出汁率含渣 calculated cell renders a read-only <span> and
     // contains no <input>/<textarea>/<select> — there is nothing to type into.
-    await expect(page.getByRole('columnheader', { name: /出汁率含渣/ })).toBeVisible();
-    const yieldCell = dataRow.getByTitle('出汁率含渣');
+    await expect(page.getByRole('columnheader', { name: new RegExp(DISPLAY_JUICE_YIELD) })).toBeVisible();
+    const yieldCell = dataRow.getByTitle(DISPLAY_JUICE_YIELD);
     await expect(yieldCell).toBeVisible();
     await expect(
       yieldCell.locator('input, textarea, select'),
@@ -323,7 +385,8 @@ test.describe.serial('Data Matrix juicer end-to-end (AT-11/12/13)', () => {
     // MATRIX_CALCULATED_VALUE_READONLY sentinel — the authoritative guard that
     // makes the read-only DOM trustworthy (a determined client could otherwise
     // craft a PATCH). 409 is the documented contract (route.ts).
-    const writeAttempt = await request.patch(`/api/matrix-rows/${rowId}/metrics/juice_yield`, {
+    // DIM_JUICE_YIELD is the juicer schema's calculated dimension.
+    const writeAttempt = await request.patch(`/api/matrix-rows/${rowId}/metrics/${DIM_JUICE_YIELD}`, {
       data: { value: 0.9999 },
     });
     expect(writeAttempt.status(), 'direct calculated-cell PATCH must be rejected').toBe(409);

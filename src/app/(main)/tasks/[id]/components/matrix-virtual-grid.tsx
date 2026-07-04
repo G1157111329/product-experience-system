@@ -26,7 +26,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import type { DimensionBinding } from '@/lib/matrix/types';
+import type { DimensionBinding, ResultStatusOption } from '@/lib/matrix/types';
 import type { MatrixReadGroup, MatrixReadProjection, MatrixReadRow } from '@/lib/matrix/projection';
 import {
   CalculatedMetricCell,
@@ -83,6 +83,8 @@ interface MatrixVirtualGridProps {
   collapsedGroups: Set<string>;
   onToggleGroup: (groupId: string) => void;
   handlers: MatrixVirtualGridHandlers;
+  /** Schema-declared result-status options (undefined → platform default). */
+  resultStatusOptions?: ResultStatusOption[];
 }
 
 export function MatrixVirtualGrid({
@@ -95,6 +97,7 @@ export function MatrixVirtualGrid({
   collapsedGroups,
   onToggleGroup,
   handlers,
+  resultStatusOptions,
 }: MatrixVirtualGridProps) {
   const tableMinWidth =
     STICKY_OFFSETS.body +
@@ -128,6 +131,7 @@ export function MatrixVirtualGrid({
               onToggleGroup={onToggleGroup}
               handlers={handlers}
               stickyCellClass={stickyCellClass}
+              resultStatusOptions={resultStatusOptions}
             />
           ))}
           {projection.groups.length === 0 && (
@@ -233,6 +237,7 @@ function GroupBlock({
   onToggleGroup,
   handlers,
   stickyCellClass,
+  resultStatusOptions,
 }: {
   group: MatrixReadGroup;
   taskId: string;
@@ -244,6 +249,7 @@ function GroupBlock({
   onToggleGroup: (id: string) => void;
   handlers: MatrixVirtualGridHandlers;
   stickyCellClass: (left: number, z?: string) => string;
+  resultStatusOptions?: ResultStatusOption[];
 }) {
   const totalCols = 4 + observedDimensions.length + calculatedDimensions.length + 4;
 
@@ -295,6 +301,7 @@ function GroupBlock({
             busyCells={busyCells}
             handlers={handlers}
             stickyCellClass={stickyCellClass}
+            resultStatusOptions={resultStatusOptions}
           />
         ))}
     </Fragment>
@@ -315,6 +322,7 @@ function MatrixDataRow({
   busyCells,
   handlers,
   stickyCellClass,
+  resultStatusOptions,
 }: {
   row: MatrixReadRow;
   index: number;
@@ -325,6 +333,7 @@ function MatrixDataRow({
   busyCells: Record<string, boolean>;
   handlers: MatrixVirtualGridHandlers;
   stickyCellClass: (left: number, z?: string) => string;
+  resultStatusOptions?: ResultStatusOption[];
 }) {
   const slotBusy = busyCells[`${row.id}:slot`] ?? false;
 
@@ -390,6 +399,7 @@ function MatrixDataRow({
         <ResultSlotCell
           row={row}
           busy={slotBusy}
+          resultStatusOptions={resultStatusOptions}
           onChange={(patch) => handlers.onSlotChange(row.id, { result: patch })}
         />
       </TableCell>
