@@ -52,21 +52,36 @@ export interface BatchPasteResult {
   warnings: string[];
 }
 
-export type BatchValidationError =
+export type BatchLevelValidationError =
   | { valid: true }
-  | { valid: false; code: 'MATRIX_BATCH_INVALID_SHAPE' | 'MATRIX_BATCH_ANCHOR_INVALID' | 'MATRIX_BATCH_COMMAND_OUT_OF_RANGE' | 'MATRIX_BATCH_LIMIT_EXCEEDED'; message?: string };
+  | { valid: false; code: 'MATRIX_BATCH_INVALID_SHAPE' | 'MATRIX_BATCH_ANCHOR_INVALID' | 'MATRIX_BATCH_LIMIT_EXCEEDED'; message?: string };
+
+export interface PerCommandValidationError {
+  index: number;
+  code: 'MATRIX_BATCH_COMMAND_OUT_OF_RANGE' | 'MATRIX_CALCULATED_VALUE_READONLY';
+  message: string;
+}
 
 export interface ValidationContext {
   observedSortOrder: string[];   // dimension_keys of observed+editable columns in sort_order
   groupRows: string[];            // row ids of the anchor's group in sort_order ascending
+  /**
+   * All dimension keys in the schema (observed + calculated), in any order.
+   * Used by {@link validateCommandGeometry} to distinguish a *calculated*
+   * column (→ MATRIX_CALCULATED_VALUE_READONLY) from a truly *unknown* key
+   * (→ MATRIX_BATCH_COMMAND_OUT_OF_RANGE). Optional: when omitted, every
+   * non-observed key is reported as OUT_OF_RANGE (the historical behavior).
+   */
+  allDimensionKeys?: string[];
 }
 
 /**
- * Pure-function validation of the request shape, anchor, and command geometry
- * against the schema's observed-dimension order and the anchor's group rows.
- * Does NOT touch the DB.
+ * Batch-level validation: anchor existence/observability, command shape, and
+ * the cell-count limit. If this fails, the WHOLE batch is rejected (no
+ * commands run) — these are not per-command partial-success failures. Pure,
+ * does NOT touch the DB.
  */
-export function validateBatchRequest(req: BatchPasteRequest, ctx: ValidationContext): BatchValidationError {
+export function validateBatchLevel(req: BatchPasteRequest, ctx: ValidationContext): BatchLevelValidationError {
   if (!req.anchor || !req.anchor.rowId || !req.anchor.dimensionKey) {
     return { valid: false, code: 'MATRIX_BATCH_INVALID_SHAPE', message: 'anchor 缺失' };
   }
@@ -86,27 +101,62 @@ export function validateBatchRequest(req: BatchPasteRequest, ctx: ValidationCont
   if (req.commands.length > BATCH_LIMIT) {
     return { valid: false, code: 'MATRIX_BATCH_LIMIT_EXCEEDED', message: `粘贴超出 ${BATCH_LIMIT} 单元格上限` };
   }
+  return { valid: true };
+}
 
-  for (const cmd of req.commands) {
+/**
+ * Per-command geometry validation. Returns an error for EACH command that is
+ * out of range (non-observed column, column before anchor, row in a different
+ * group, row before anchor) or targets a calculated column. Commands NOT in
+ * the returned list are geometry-valid and should proceed to the write layer.
+ *
+ * Unlike {@link validateBatchLevel}, this is partial-success: failing commands
+ * are reported individually and do NOT block the other commands in the same
+ * request. Non-observed columns that ARE known schema dimensions (calculated,
+ * via `ctx.allDimensionKeys`) get `MATRIX_CALCULATED_VALUE_READONLY`; observed-
+ * but-mispositioned columns and truly-unknown keys get
+ * `MATRIX_BATCH_COMMAND_OUT_OF_RANGE`.
+ *
+ * Assumes {@link validateBatchLevel} already passed, so the anchor is valid
+ * and `anchorColIdx`/`anchorRowIdx` are >= 0. Pure, does NOT touch the DB.
+ */
+export function validateCommandGeometry(req: BatchPasteRequest, ctx: ValidationContext): PerCommandValidationError[] {
+  const anchorColIdx = ctx.observedSortOrder.indexOf(req.anchor.dimensionKey);
+  const anchorRowIdx = ctx.groupRows.indexOf(req.anchor.rowId);
+  const errors: PerCommandValidationError[] = [];
+  for (let i = 0; i < req.commands.length; i++) {
+    const cmd = req.commands[i];
     if (cmd.type !== 'setMetric') {
-      return { valid: false, code: 'MATRIX_BATCH_INVALID_SHAPE', message: `不支持的命令类型 ${cmd.type}` };
+      errors.push({ index: i, code: 'MATRIX_BATCH_COMMAND_OUT_OF_RANGE', message: `不支持的命令类型 ${cmd.type}` });
+      continue;
     }
     const cmdColIdx = ctx.observedSortOrder.indexOf(cmd.dimensionKey);
     if (cmdColIdx < 0) {
-      return { valid: false, code: 'MATRIX_BATCH_COMMAND_OUT_OF_RANGE', message: `命令列 ${cmd.dimensionKey} 不是原始指标` };
+      // Not an observed+editable column. Distinguish a *calculated* column
+      // (a known schema dimension → read-only) from a truly *unknown* key
+      // (→ out of range) using ctx.allDimensionKeys when provided.
+      if (ctx.allDimensionKeys?.includes(cmd.dimensionKey)) {
+        errors.push({ index: i, code: 'MATRIX_CALCULATED_VALUE_READONLY', message: `命令列 ${cmd.dimensionKey} 是计算指标，不可编辑` });
+      } else {
+        errors.push({ index: i, code: 'MATRIX_BATCH_COMMAND_OUT_OF_RANGE', message: `命令列 ${cmd.dimensionKey} 不是原始指标` });
+      }
+      continue;
     }
     if (cmdColIdx < anchorColIdx) {
-      return { valid: false, code: 'MATRIX_BATCH_COMMAND_OUT_OF_RANGE', message: `命令列 ${cmd.dimensionKey} 在 anchor 之前` };
+      errors.push({ index: i, code: 'MATRIX_BATCH_COMMAND_OUT_OF_RANGE', message: `命令列 ${cmd.dimensionKey} 在 anchor 之前` });
+      continue;
     }
     const cmdRowIdx = ctx.groupRows.indexOf(cmd.rowId);
     if (cmdRowIdx < 0) {
-      return { valid: false, code: 'MATRIX_BATCH_COMMAND_OUT_OF_RANGE', message: `命令行 ${cmd.rowId} 不在当前组内（跨组禁止）` };
+      errors.push({ index: i, code: 'MATRIX_BATCH_COMMAND_OUT_OF_RANGE', message: `命令行 ${cmd.rowId} 不在当前组内（跨组禁止）` });
+      continue;
     }
     if (cmdRowIdx < anchorRowIdx) {
-      return { valid: false, code: 'MATRIX_BATCH_COMMAND_OUT_OF_RANGE', message: `命令行 ${cmd.rowId} 在 anchor 之前` };
+      errors.push({ index: i, code: 'MATRIX_BATCH_COMMAND_OUT_OF_RANGE', message: `命令行 ${cmd.rowId} 在 anchor 之前` });
+      continue;
     }
   }
-  return { valid: true };
+  return errors;
 }
 
 // ---------------------------------------------------------------------------
@@ -205,19 +255,45 @@ export async function executeBatchPaste(
     .filter((n) => String(n.parent_id) === groupId && ['item', 'condition'].includes(String(n.node_type)))
     .map((n) => String(n.id));
 
-  // 5. Geometry validation (pure — reuse validateBatchRequest).
-  const validation = validateBatchRequest(req, { observedSortOrder, groupRows });
-  if (!validation.valid) {
-    return failedResult(req, validation.code, validation.message);
+  // 5. Batch-level validation (anchor/shape/limit — rejects the WHOLE batch).
+  //    These are not per-command partial-success failures: a bad anchor or an
+  //    over-limit batch cannot be salvaged command-by-command, so the whole
+  //    request is rejected before any write.
+  const allDimensionKeys = Array.from(bindingByKey.keys());
+  const batchLevel = validateBatchLevel(req, { observedSortOrder, groupRows, allDimensionKeys });
+  if (!batchLevel.valid) {
+    return failedResult(req, batchLevel.code, batchLevel.message);
   }
 
-  // 6. Per-command write. Partial success: each command is isolated in its own
-  //    try/catch so a conflict or invalid value on one cell does NOT block the
-  //    others. UpsertMetricInput is constructed cleanly per value_kind (no casts):
-  //    the input field is set, the other two value slots are null.
+  // 6. Per-command geometry validation — partial success. Only the commands
+  //    that fail geometry (calculated column, cross-group, before-anchor,
+  //    unknown key) are rejected; the rest proceed to the write layer. A
+  //    calculated column among valid observed commands no longer fails the
+  //    whole batch — it fails just that one command (AT-20).
+  const geometryErrors = validateCommandGeometry(req, { observedSortOrder, groupRows, allDimensionKeys });
+  const geometryErrorByIndex = new Map(geometryErrors.map((e) => [e.index, e]));
+
+  // 7. Per-command write. Partial success: commands that failed geometry are
+  //    marked failed UP FRONT (before any write) and skipped; the rest are
+  //    isolated in their own try/catch so a conflict or invalid value on one
+  //    cell does NOT block the others. UpsertMetricInput is constructed cleanly
+  //    per value_kind (no casts): the input field is set, the other two value
+  //    slots are null.
   const results: BatchCommandResult[] = [];
   for (let i = 0; i < req.commands.length; i++) {
     const cmd = req.commands[i];
+    const geoErr = geometryErrorByIndex.get(i);
+    if (geoErr) {
+      results.push({
+        index: i, status: 'validation_failed',
+        rowId: cmd.rowId, dimensionKey: cmd.dimensionKey,
+        error: { code: geoErr.code, message: geoErr.message },
+      });
+      continue;
+    }
+    // Defense-in-depth: geometry validation already filtered non-observed /
+    // non-editable columns, but keep this belt-and-braces check so a future
+    // schema change can't sneak a calculated write past the orchestrator.
     const binding = bindingByKey.get(cmd.dimensionKey);
     if (!binding || binding.column_group !== 'observed' || binding.editable === false) {
       results.push({
@@ -320,7 +396,7 @@ export async function executeBatchPaste(
     }
   }
 
-  // 7. 集中重算: dedupe the rows that had at least one succeeded command and
+  // 8. 集中重算: dedupe the rows that had at least one succeeded command and
   //    recompute each ONCE (not once per command). recomputeAffected is itself
   //    idempotent on (instance, input_version_hash, formula_version_hash) and
   //    writes the run with trace_id = clientOperationId, which is what step 2's
@@ -368,7 +444,7 @@ export async function executeBatchPaste(
     }
   }
 
-  // 8. Compose the top-level status from per-command outcomes. If any recompute
+  // 9. Compose the top-level status from per-command outcomes. If any recompute
   //    failed, force partially_succeeded even if all per-command writes
   //    succeeded — the authoritative values are incomplete.
   const succeededCount = results.filter((r) => r.status === 'succeeded').length;

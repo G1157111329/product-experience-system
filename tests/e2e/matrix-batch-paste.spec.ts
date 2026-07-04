@@ -308,30 +308,21 @@ test.describe.serial('Matrix batch paste (AT-19~22)', () => {
   });
 
   // -------------------------------------------------------------------------
-  // AT-20 — paste including a calculated column is rejected.
+  // AT-20 — paste including a calculated column → partial success.
   //
-  // SPEC VS IMPLEMENTATION NOTE: the task spec anticipated this returning
-  // `partially_succeeded` with the calculated-column command failing
-  // `MATRIX_CALCULATED_VALUE_READONLY` while the observed command succeeded.
-  // That per-command outcome is UNREACHABLE against the current backend:
-  // `executeBatchPaste` runs the geometry pre-check `validateBatchRequest`
-  // (batch-paste.ts step 5) BEFORE any per-command write. A calculated
-  // dimensionKey (`juice_yield`) is absent from `observedSortOrder`, so
-  // `indexOf` returns -1 and trips `MATRIX_BATCH_COMMAND_OUT_OF_RANGE` —
-  // `failedResult` then marks ALL commands validation_failed with status
-  // `failed`, and the route maps that code to HTTP 422. The per-command
-  // `MATRIX_CALCULATED_VALUE_READONLY` branch (batch-paste.ts L222-229) is
-  // effectively dead code for the juicer schema because `observedSortOrder`
-  // already excludes `editable === false` dimensions (L187).
+  // A batch with one observed command (ingredient_weight) and one calculated
+  // command (juice_yield) no longer fails the WHOLE batch: the geometry
+  // validation is per-command partial-success. The observed command succeeds,
+  // the calculated command fails MATRIX_CALCULATED_VALUE_READONLY (it is a
+  // known schema dimension but not an observed/editable column), and the
+  // batch returns partially_succeeded with HTTP 200.
   //
-  // The "calculated cell is read-only" guarantee is therefore asserted here
-  // through the path the backend ACTUALLY exposes (geometry pre-check → 422
-  // + MATRIX_BATCH_COMMAND_OUT_OF_RANGE), and is additionally covered for a
-  // direct single-cell write by matrix-juicer.spec.ts AT-13 (PATCH → 409
-  // MATRIX_CALCULATED_VALUE_READONLY). This test asserts the real contract
-  // rather than the unreachable specced one so it is green against a live DB.
+  // (Previously the geometry pre-check rejected the whole batch at 422 with
+  // MATRIX_BATCH_COMMAND_OUT_OF_RANGE for every command — the specced
+  // partially_succeeded path was unreachable dead code. That is fixed by the
+  // split of validateBatchRequest into validateBatchLevel + validateCommandGeometry.)
   // -------------------------------------------------------------------------
-  test('AT-20 batch including calculated column is rejected at the geometry pre-check', async () => {
+  test('AT-20 batch with calculated column partially succeeds (observed ok, calculated readonly)', async () => {
     test.skip(!sharedRequest || !ctx.row1Id, 'beforeAll did not provision an authenticated session + rows');
     const request = sharedRequest!;
     const { assemblyId, row1Id } = ctx;
@@ -348,14 +339,29 @@ test.describe.serial('Matrix batch paste (AT-19~22)', () => {
       },
     });
 
-    // The whole batch is rejected at the geometry pre-check → HTTP 422.
-    expect(res.status(), 'AT-20 calculated-column batch should be rejected').toBe(422);
-    const body = (await res.json()) as ApiEnvelope<{ code: string }>;
-    expect(body.code, 'AT-20 envelope code should be 1').toBe(1);
+    // Partial success → HTTP 200 (the route only maps batch-LEVEL pre-check
+    // failures to 4xx; per-command failures are surfaced in result.results).
+    expect(res.status(), 'AT-20 partial-success batch should return 200').toBe(200);
+    const data = await ensureJson<{
+      status: string;
+      results: Array<{ status: string; dimensionKey: string; error?: { code: string } }>;
+    }>(res, 'AT-20 batch-commands');
+    expect(data.status, 'AT-20 batch should be partially_succeeded').toBe('partially_succeeded');
+    expect(data.results, 'AT-20 should have 2 command results').toHaveLength(2);
+
+    // The observed command succeeded.
+    const observed = data.results.find((r) => r.dimensionKey === DIM_INGREDIENT_WEIGHT);
+    expect(observed, 'AT-20 should have an ingredient_weight result').toBeTruthy();
+    expect(observed!.status, 'AT-20 observed command should succeed').toBe('succeeded');
+
+    // The calculated command failed at geometry validation (read-only).
+    const calculated = data.results.find((r) => r.dimensionKey === DIM_JUICE_YIELD);
+    expect(calculated, 'AT-20 should have a juice_yield result').toBeTruthy();
+    expect(calculated!.status, 'AT-20 calculated command should fail validation').toBe('validation_failed');
     expect(
-      body.data?.code,
-      'AT-20 should carry MATRIX_BATCH_COMMAND_OUT_OF_RANGE (calculated col is not an observed column)',
-    ).toBe('MATRIX_BATCH_COMMAND_OUT_OF_RANGE');
+      calculated!.error?.code,
+      'AT-20 calculated command should carry MATRIX_CALCULATED_VALUE_READONLY',
+    ).toBe('MATRIX_CALCULATED_VALUE_READONLY');
   });
 
   // -------------------------------------------------------------------------

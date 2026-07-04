@@ -1,14 +1,84 @@
 import assert from 'node:assert/strict';
 import {
-  validateBatchRequest,
+  validateBatchLevel,
+  validateCommandGeometry,
   type BatchCommand,
   type BatchPasteRequest,
   BATCH_LIMIT,
 } from './batch-paste';
 
 const observedOrder = ['duration', 'ingredient_weight', 'juice_weight', 'pulp_weight'];
+// All schema dimension keys (observed + calculated). juice_yield is a calculated
+// column here so we can prove validateCommandGeometry distinguishes calculated
+// (→ MATRIX_CALCULATED_VALUE_READONLY) from unknown (→ OUT_OF_RANGE).
+const allDims = [...observedOrder, 'juice_yield'];
 
-// Geometry: commands inside the anchor rectangle (same group, cols >= anchor col, rows >= anchor row)
+// ===========================================================================
+// validateBatchLevel — anchor / shape / limit. These are BATCH-LEVEL failures
+// that reject the WHOLE batch (not per-command partial success).
+// ===========================================================================
+
+// Batch-level happy path: valid anchor + non-empty commands under the limit.
+{
+  const req: BatchPasteRequest = {
+    clientOperationId: 'op1',
+    baseVersion: 1,
+    anchor: { rowId: 'r1', dimensionKey: 'ingredient_weight' },
+    commands: [
+      { type: 'setMetric', rowId: 'r1', dimensionKey: 'ingredient_weight', value: 100 },
+      { type: 'setMetric', rowId: 'r2', dimensionKey: 'ingredient_weight', value: 200 },
+    ],
+  };
+  const result = validateBatchLevel(req, { observedSortOrder: observedOrder, groupRows: ['r1', 'r2', 'r3'], allDimensionKeys: allDims });
+  assert.equal(result.valid, true);
+}
+
+// Anchor invalid: dimensionKey is not observed (it's a calculated column).
+{
+  const req: BatchPasteRequest = {
+    clientOperationId: 'op1', baseVersion: 1,
+    anchor: { rowId: 'r1', dimensionKey: 'juice_yield' },  // calculated, not in observedOrder
+    commands: [],
+  };
+  const result = validateBatchLevel(req, { observedSortOrder: observedOrder, groupRows: ['r1'], allDimensionKeys: allDims });
+  assert.equal(result.valid, false);
+  if (!result.valid) assert.equal(result.code, 'MATRIX_BATCH_ANCHOR_INVALID');
+}
+
+// Limit exceeded → whole batch rejected at batch level.
+{
+  const commands: BatchCommand[] = Array.from({ length: BATCH_LIMIT + 1 }, (_, i) => ({
+    type: 'setMetric' as const, rowId: 'r1', dimensionKey: 'ingredient_weight', value: i,
+  }));
+  const req: BatchPasteRequest = {
+    clientOperationId: 'op1', baseVersion: 1,
+    anchor: { rowId: 'r1', dimensionKey: 'ingredient_weight' },
+    commands,
+  };
+  const result = validateBatchLevel(req, { observedSortOrder: observedOrder, groupRows: ['r1'], allDimensionKeys: allDims });
+  assert.equal(result.valid, false);
+  if (!result.valid) assert.equal(result.code, 'MATRIX_BATCH_LIMIT_EXCEEDED');
+}
+
+// Empty commands → whole batch rejected at batch level (INVALID_SHAPE).
+{
+  const req: BatchPasteRequest = {
+    clientOperationId: 'op1', baseVersion: 1,
+    anchor: { rowId: 'r1', dimensionKey: 'ingredient_weight' },
+    commands: [],
+  };
+  const result = validateBatchLevel(req, { observedSortOrder: observedOrder, groupRows: ['r1'], allDimensionKeys: allDims });
+  assert.equal(result.valid, false);
+  if (!result.valid) assert.equal(result.code, 'MATRIX_BATCH_INVALID_SHAPE');
+}
+
+// ===========================================================================
+// validateCommandGeometry — per-command, PARTIAL SUCCESS. Failing commands are
+// returned individually; absent commands are geometry-valid. These do NOT
+// reject the whole batch.
+// ===========================================================================
+
+// Geometry happy path: all commands inside the anchor rectangle → no errors.
 {
   const req: BatchPasteRequest = {
     clientOperationId: 'op1',
@@ -20,76 +90,87 @@ const observedOrder = ['duration', 'ingredient_weight', 'juice_weight', 'pulp_we
       { type: 'setMetric', rowId: 'r2', dimensionKey: 'ingredient_weight', value: 200 },
     ],
   };
-  const groupRows = ['r1', 'r2', 'r3'];  // sort_order ascending
-  const result = validateBatchRequest(req, { observedSortOrder: observedOrder, groupRows });
-  assert.equal(result.valid, true);
+  const errors = validateCommandGeometry(req, { observedSortOrder: observedOrder, groupRows: ['r1', 'r2', 'r3'], allDimensionKeys: allDims });
+  assert.equal(errors.length, 0, `expected no geometry errors, got ${JSON.stringify(errors)}`);
 }
 
-// Anchor invalid: dimensionKey is not observed
-{
-  const req: BatchPasteRequest = {
-    clientOperationId: 'op1', baseVersion: 1,
-    anchor: { rowId: 'r1', dimensionKey: 'juice_yield' },  // calculated, not in observedOrder
-    commands: [],
-  };
-  const result = validateBatchRequest(req, { observedSortOrder: observedOrder, groupRows: ['r1'] });
-  assert.equal(result.valid, false);
-  if (!result.valid) assert.equal(result.code, 'MATRIX_BATCH_ANCHOR_INVALID');
-}
-
-// Command out of range: row in different group
+// Command out of range: row in a different group (only THAT command fails).
 {
   const req: BatchPasteRequest = {
     clientOperationId: 'op1', baseVersion: 1,
     anchor: { rowId: 'r1', dimensionKey: 'ingredient_weight' },
     commands: [
+      { type: 'setMetric', rowId: 'r1', dimensionKey: 'ingredient_weight', value: 100 },  // valid
       { type: 'setMetric', rowId: 'rX', dimensionKey: 'ingredient_weight', value: 100 },  // not in groupRows
     ],
   };
-  const result = validateBatchRequest(req, { observedSortOrder: observedOrder, groupRows: ['r1', 'r2'] });
-  assert.equal(result.valid, false);
-  if (!result.valid) assert.equal(result.code, 'MATRIX_BATCH_COMMAND_OUT_OF_RANGE');
+  const errors = validateCommandGeometry(req, { observedSortOrder: observedOrder, groupRows: ['r1', 'r2'], allDimensionKeys: allDims });
+  assert.equal(errors.length, 1, `expected 1 error, got ${errors.length}`);
+  assert.equal(errors[0]!.index, 1, 'the cross-group command (index 1) should fail');
+  assert.equal(errors[0]!.code, 'MATRIX_BATCH_COMMAND_OUT_OF_RANGE');
 }
 
-// Command out of range: column before anchor (跳列)
+// Command out of range: column before anchor (跳列) — only that command fails.
 {
   const req: BatchPasteRequest = {
     clientOperationId: 'op1', baseVersion: 1,
     anchor: { rowId: 'r1', dimensionKey: 'juice_weight' },  // index 2
     commands: [
-      { type: 'setMetric', rowId: 'r1', dimensionKey: 'ingredient_weight', value: 100 },  // index 1 < 2
+      { type: 'setMetric', rowId: 'r1', dimensionKey: 'juice_weight', value: 100 },      // index 2 == anchor, valid
+      { type: 'setMetric', rowId: 'r1', dimensionKey: 'ingredient_weight', value: 100 },  // index 1 < 2, before anchor
     ],
   };
-  const result = validateBatchRequest(req, { observedSortOrder: observedOrder, groupRows: ['r1'] });
-  assert.equal(result.valid, false);
-  if (!result.valid) assert.equal(result.code, 'MATRIX_BATCH_COMMAND_OUT_OF_RANGE');
+  const errors = validateCommandGeometry(req, { observedSortOrder: observedOrder, groupRows: ['r1'], allDimensionKeys: allDims });
+  assert.equal(errors.length, 1, `expected 1 error, got ${errors.length}`);
+  assert.equal(errors[0]!.index, 1, 'the before-anchor command (index 1) should fail');
+  assert.equal(errors[0]!.code, 'MATRIX_BATCH_COMMAND_OUT_OF_RANGE');
 }
 
-// Limit exceeded
-{
-  const commands: BatchCommand[] = Array.from({ length: BATCH_LIMIT + 1 }, (_, i) => ({
-    type: 'setMetric' as const, rowId: 'r1', dimensionKey: 'ingredient_weight', value: i,
-  }));
-  const req: BatchPasteRequest = {
-    clientOperationId: 'op1', baseVersion: 1,
-    anchor: { rowId: 'r1', dimensionKey: 'ingredient_weight' },
-    commands,
-  };
-  const result = validateBatchRequest(req, { observedSortOrder: observedOrder, groupRows: ['r1'] });
-  assert.equal(result.valid, false);
-  if (!result.valid) assert.equal(result.code, 'MATRIX_BATCH_LIMIT_EXCEEDED');
-}
-
-// Empty commands
+// Calculated column → MATRIX_CALCULATED_VALUE_READONLY for THAT command only;
+// the observed command in the same request has NO error (partial success).
 {
   const req: BatchPasteRequest = {
     clientOperationId: 'op1', baseVersion: 1,
     anchor: { rowId: 'r1', dimensionKey: 'ingredient_weight' },
-    commands: [],
+    commands: [
+      { type: 'setMetric', rowId: 'r1', dimensionKey: 'ingredient_weight', value: 100 },  // observed, valid
+      { type: 'setMetric', rowId: 'r1', dimensionKey: 'juice_yield', value: 0.5 },        // calculated → readonly
+    ],
   };
-  const result = validateBatchRequest(req, { observedSortOrder: observedOrder, groupRows: ['r1'] });
-  assert.equal(result.valid, false);
-  if (!result.valid) assert.equal(result.code, 'MATRIX_BATCH_INVALID_SHAPE');
+  const errors = validateCommandGeometry(req, { observedSortOrder: observedOrder, groupRows: ['r1'], allDimensionKeys: allDims });
+  assert.equal(errors.length, 1, `expected exactly 1 geometry error, got ${errors.length}`);
+  assert.equal(errors[0]!.index, 1, 'the calculated-column command (index 1) should be the only error');
+  assert.equal(errors[0]!.code, 'MATRIX_CALCULATED_VALUE_READONLY');
+}
+
+// Truly unknown column (not in allDimensionKeys) → MATRIX_BATCH_COMMAND_OUT_OF_RANGE,
+// NOT CALCULATED_VALUE_READONLY. Proves the calculated-vs-unknown distinction.
+{
+  const req: BatchPasteRequest = {
+    clientOperationId: 'op1', baseVersion: 1,
+    anchor: { rowId: 'r1', dimensionKey: 'ingredient_weight' },
+    commands: [
+      { type: 'setMetric', rowId: 'r1', dimensionKey: 'totally_unknown_key', value: 1 },
+    ],
+  };
+  const errors = validateCommandGeometry(req, { observedSortOrder: observedOrder, groupRows: ['r1'], allDimensionKeys: allDims });
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0]!.code, 'MATRIX_BATCH_COMMAND_OUT_OF_RANGE', 'unknown key must be OUT_OF_RANGE, not readonly');
+}
+
+// Backward-compat: when allDimensionKeys is OMITTED, a calculated column falls
+// back to OUT_OF_RANGE (the historical behavior before this distinction existed).
+{
+  const req: BatchPasteRequest = {
+    clientOperationId: 'op1', baseVersion: 1,
+    anchor: { rowId: 'r1', dimensionKey: 'ingredient_weight' },
+    commands: [
+      { type: 'setMetric', rowId: 'r1', dimensionKey: 'juice_yield', value: 0.5 },
+    ],
+  };
+  const errors = validateCommandGeometry(req, { observedSortOrder: observedOrder, groupRows: ['r1'] });
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0]!.code, 'MATRIX_BATCH_COMMAND_OUT_OF_RANGE', 'without allDimensionKeys, calculated falls back to OUT_OF_RANGE');
 }
 
 console.log('batch-paste validation tests passed');
@@ -362,6 +443,38 @@ async function executionMain() {
     assert.equal(result.results[1]!.error!.latestVersion, 6);
     // Only the succeeded row (r1) is recomputed.
     assert.equal(records.matrix_calculation_runs.length, 1, 'expected one run for the succeeded row');
+  }
+
+  // --- AT-20 scenario: calculated column among valid observed commands -------
+  // This is the regression the split-validation fix targets. Before the fix,
+  // `validateBatchRequest` rejected the WHOLE batch at the geometry pre-check
+  // (juice_yield absent from observedSortOrder → MATRIX_BATCH_COMMAND_OUT_OF_RANGE
+  // for every command via failedResult), so the per-command CALCULATED_VALUE_READONLY
+  // branch and the partially_succeeded status were unreachable dead code. After
+  // the fix, geometry validation is per-command: the ingredient_weight command
+  // succeeds, the juice_yield command fails MATRIX_CALCULATED_VALUE_READONLY,
+  // and the batch is partially_succeeded.
+  {
+    const { root } = makeStubClient(batchPasteFixtures());
+    const result = await executeBatchPaste(root, 'a1', {
+      clientOperationId: 'op_at20_calc',
+      baseVersion: 1,
+      anchor: { rowId: 'r1', dimensionKey: 'ingredient_weight' },
+      commands: [
+        { type: 'setMetric', rowId: 'r1', dimensionKey: 'ingredient_weight', value: 1000, unitCode: 'g' },  // observed, valid
+        { type: 'setMetric', rowId: 'r1', dimensionKey: 'juice_yield', value: 0.5 },                       // calculated → readonly
+      ],
+    }, { actorId: 'u1' });
+
+    assert.equal(result.status, 'partially_succeeded', `expected partially_succeeded, got ${result.status}`);
+    assert.equal(result.results.length, 2);
+    // The observed command succeeded.
+    assert.equal(result.results[0]!.status, 'succeeded', 'ingredient_weight (observed) should succeed');
+    assert.equal(result.results[0]!.dimensionKey, 'ingredient_weight');
+    // The calculated command failed at geometry validation, NOT written.
+    assert.equal(result.results[1]!.status, 'validation_failed', 'juice_yield (calculated) should fail validation');
+    assert.equal(result.results[1]!.dimensionKey, 'juice_yield');
+    assert.equal(result.results[1]!.error!.code, 'MATRIX_CALCULATED_VALUE_READONLY');
   }
 
   // --- Idempotency: same clientOperationId twice → no new run on second call -
