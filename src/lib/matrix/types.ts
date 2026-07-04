@@ -9,6 +9,15 @@
  * script, and the runtime matrix services.
  */
 
+/**
+ * Minimal type for the Supabase-compatible client used across matrix services.
+ * The client supports the chainable builder API: `.from(table).select(...).eq(...)...`.
+ * Typed as a Record-based structural type to avoid pulling in the full Supabase SDK.
+ */
+export type MatrixClient = {
+  from(table: string): Record<string, unknown>;
+};
+
 export type ValueKind = 'number' | 'duration' | 'text' | 'enum' | 'boolean';
 export type ColumnGroup = 'observed' | 'calculated';
 

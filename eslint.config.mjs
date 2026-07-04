@@ -19,6 +19,14 @@ const eslintConfig = defineConfig([
       'no-restricted-syntax': ['error', ...syntaxRules],
     },
   },
+  {
+    // Matrix lib files use `client: any` for the Supabase-compatible client
+    // (chainable builder API that can't be cleanly typed without the full SDK).
+    files: ['src/lib/matrix/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

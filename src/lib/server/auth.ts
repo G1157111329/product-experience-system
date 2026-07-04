@@ -4,7 +4,6 @@ import { writeSecurityAudit } from './security-audit';
 import {
   type AuthRole,
   Permission,
-  hasAllPermissions,
   hasAnyPermission,
   hasPermission,
   isValidRole,
