@@ -193,6 +193,8 @@
 | POST | `/api/matrix-schemas` | 新建模式草稿（管理员） |
 | POST | `/api/matrix-schemas/[id]/versions` | 新建版本草稿（管理员） |
 | POST | `/api/matrix-schema-versions/[id]/publish` | 编译+校验+发布模式（管理员；原子：先全量校验通过再落库） |
+| GET | `/api/matrix-schema-versions/[id]` | 读取模式版本详情（含 dimensions + formulas，admin） |
+| PUT | `/api/matrix-schema-versions/[id]/draft` | 保存模式版本草稿（dimensions + formulas，replace 策略幂等，admin，编译校验） |
 | GET | `/api/tasks/[id]/matrices` | 任务的数据矩阵实例列表 |
 | POST | `/api/tasks/[id]/matrices` | 应用模式创建实例（幂等，重复应用同一模式返回既有实例） |
 | GET | `/api/task-matrices/[id]` | 窗口化 MatrixReadProjection（分组/行/单元格/指标分页读取） |
@@ -464,6 +466,7 @@ INITIAL_ADMIN_PASSWORD=<strong-password>
 89. **已知限制**: (a) schema-publish 循环依赖检测存在自环缺口——自引用公式如 `juice_yield = SELF("juice_yield")+1` 会因 `dep !== from` 守卫跳过自身而漏检，待后续加固；(b) manual 指标写入 + recompute 之间无 DB 事务（pg-query 适配器限制），复核失败时保留手动值（有意），计算值可能短暂陈旧，API 返回 `needs_recompute: true`；(c) 并发计算单元格 upsert 仍存在窄读→守卫更新竞态窗口，比此前收窄但未完全原子（需 SELECT FOR UPDATE 才能彻底消除）。
 90. **数据矩阵 Wave 映射**: Wave 0（schema/公式引擎/迁移）与 Wave 1（实例/CRUD/投影/移动端/报告）已完成；Wave 2（受限公式构建器、模式草稿/审批、批量粘贴增强）未做；RESERVED（任意 Excel 解析、A1 自由公式、宏/VBA、自由画布单元格格式）明确不做。
 91. **批量粘贴增强 (Wave 2)**: 从 Excel 粘贴「原始指标区」到桌面 grid（移动端不开）；点选 observed+editable 单元格作错点 → Cmd/Ctrl+V → 服务端校验分两层：batch 级（anchor 存在/可观测、commands 非空、≤500 上限）失败则整批拒绝（422/400/429）；逐命令几何校验（同组、列序≥错点、行序≥错点）为 partial success——单个命令失败（如计算列 `MATRIX_CALCULATED_VALUE_READONLY`、跨组、跳列）只标记该命令，其余照常写入 → batch 末尾按行去重集中重算 → 返回逐命令成功/失败 + 权威计算结果。仅原始指标区（计算列/行标签/证据拒绝）；≤500 单元格/次（超出 429）；跨组截断到当前组末 + warning；失败格前端红色高亮 + 错误码 tooltip，可单格 PATCH 重试。复用 `upsertMetricEvaluation` + `recomputeAffected`，不新增表。幂等键 = `matrix_calculation_runs.trace_id = clientOperationId`（v1 不重放逐项结果，返回 warning 提示刷新投影）。paste 监听器只在多单元格（含 \t/\n）且目标在聚焦单元格内时触发，避免劫持 textarea/搜索框粘贴。
+92. **受限公式构建器 (Wave 2-2)**: admin 在设置面板「数据矩阵模式管理」Dialog 里通过结构化点选表单（积木块：SELF/数字/算术运算符/ROUND）组装计算列公式 + 同表单创输出列 → 保存草稿 → 发布（复用 Wave 1 编译校验 + 循环检测）。最小能力集（SELF+算术+ROUND+数字字面量），不暴露 REF/GROUP_*/IF/COALESCE（DSL 引擎支持但 UI 不开放，后续可扩）；强制结构化点选（无文本框，避免手写非法 DSL）；语义化存储（`SELF("juice_weight")` 非 A1 坐标）；草稿保存走 replace 策略幂等；admin 直接发布无审批。token 流 → DSL 转换是纯函数 `tokensToDsl`，前端预览复用 `compileFormula`/`evaluate`。
 
 ## 代码风格
 
