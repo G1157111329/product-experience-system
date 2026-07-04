@@ -131,6 +131,39 @@ export function errorCodeToText(code?: string): string {
 }
 
 /**
+ * Map a batch-paste per-command error code to a short Chinese label for the
+ * failure overlay on an observed cell. Covers the geometry/validation codes
+ * from validateBatchRequest + executeBatchPaste's per-command outcomes. Unknown
+ * codes fall back to the raw code so the user still sees something actionable.
+ */
+export function batchErrorCodeToText(code?: string): string {
+  switch (code) {
+    case 'MATRIX_BATCH_LIMIT_EXCEEDED':
+      return '粘贴超出上限';
+    case 'MATRIX_BATCH_ANCHOR_INVALID':
+      return '锚点无效';
+    case 'MATRIX_BATCH_COMMAND_OUT_OF_RANGE':
+      return '目标越界';
+    case 'MATRIX_BATCH_INVALID_SHAPE':
+      return '粘贴格式错误';
+    case 'MATRIX_CALCULATED_VALUE_READONLY':
+      return '该列不可编辑';
+    case 'MATRIX_METRIC_VERSION_CONFLICT':
+      return '该单元格已被他人修改';
+    case 'MATRIX_UNIT_INVALID':
+      return '单位无效';
+    case 'MATRIX_VALUE_INVALID':
+      return '数值无效';
+    case 'MATRIX_ROW_NOT_FOUND':
+      return '目标行不存在';
+    case 'MATRIX_VERSION_CONFLICT':
+      return '版本冲突';
+    default:
+      return code || '粘贴失败';
+  }
+}
+
+/**
  * Coerce a read DTO metric value into the engine's `MetricValue` union so the
  * optimistic EvalContext (frontend) reads inputs exactly as the authoritative
  * backend recompute does. Missing / N/A / pending → null (engine → INPUT_MISSING).
@@ -401,12 +434,22 @@ export function ObservedMetricCell({
   metric,
   onChange,
   busy,
+  failedError,
+  onClearFailure,
 }: {
   dimension: DimensionBinding;
   metric: MatrixMetricReadValue | undefined;
   /** Receives the parsed draft (null = cleared). */
   onChange: (parsed: { value?: number; durationMs?: number; text?: string } | null) => void;
   busy: boolean;
+  /**
+   * Batch-paste failure overlay for this cell. When set, the cell renders a red
+   * ring + tooltip; it clears (via {@link onClearFailure}) once the user starts
+   * editing the cell again (focus/keydown), since they are about to overwrite
+   * the failed value.
+   */
+  failedError?: { code: string; message?: string };
+  onClearFailure?: () => void;
 }) {
   // Seed the draft from the authoritative value; reset on authoritative change.
   const seed = (() => {
@@ -429,15 +472,27 @@ export function ObservedMetricCell({
 
   const unit = dimension.unitCode ? <span className="text-[10px] text-muted-foreground">{dimension.unitCode}</span> : null;
 
+  // Batch-paste failure overlay: red ring + native tooltip with the error text.
+  // Clears once the user focuses/edits the cell — they are about to overwrite
+  // the failed value, so the stale error signal should not linger.
+  const failureTitle = failedError
+    ? failedError.message || batchErrorCodeToText(failedError.code)
+    : undefined;
+  const failureClass = failedError ? 'ring-2 ring-destructive rounded' : '';
+  const clearFailure = () => {
+    if (failedError) onClearFailure?.();
+  };
+
   // enum → Select over validation.enumValues (stored as numeric).
   if (dimension.valueKind === 'enum' && dimension.validation?.enumValues?.length) {
     return (
-      <div className="min-w-0 p-1.5">
+      <div className={cn('min-w-0 p-1.5', failureClass)} title={failureTitle}>
         <Select
           value={draft}
           onValueChange={(v) => {
             setDraft(v);
             onChange(parseMetricDraft(v, 'enum'));
+            clearFailure();
           }}
           disabled={busy}
         >
@@ -457,7 +512,10 @@ export function ObservedMetricCell({
   }
 
   return (
-    <div className="flex min-w-0 items-center gap-1 p-1.5">
+    <div
+      className={cn('flex min-w-0 items-center gap-1 p-1.5', failureClass)}
+      title={failureTitle}
+    >
       <Input
         type={dimension.valueKind === 'text' ? 'text' : 'number'}
         inputMode={dimension.valueKind === 'text' ? 'text' : 'decimal'}
@@ -466,7 +524,10 @@ export function ObservedMetricCell({
         onChange={(e) => {
           setDraft(e.target.value);
           schedule(e.target.value);
+          clearFailure();
         }}
+        onFocus={clearFailure}
+        onKeyDown={clearFailure}
         onBlur={flush}
         placeholder="—"
         disabled={busy}

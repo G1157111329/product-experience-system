@@ -43,7 +43,7 @@ import {
   type EvalContext,
   type MetricValue,
 } from '@/lib/matrix/formula-engine';
-import { toMetricValue } from './matrix-cell';
+import { parseMetricDraft, toMetricValue } from './matrix-cell';
 import type { OptimisticMetric } from './matrix-cell';
 import { RecordContextBar } from './record-context-bar';
 import { MatrixMobileCards } from './matrix-mobile-cards';
@@ -336,6 +336,11 @@ export function MatrixInputView({ taskId, taskName }: MatrixInputViewProps) {
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [busyCells, setBusyCells] = useState<Record<string, boolean>>({});
   const [optimistic, setOptimistic] = useState<Record<string, OptimisticMetric>>({});
+  // Desktop paste: the focused observed cell is the paste anchor; failedCells
+  // carries per-cell batch-paste errors rendered as a red overlay. The grid
+  // reports focus via onFocusedCellChange and consumes these for the overlay.
+  const [focusedCell, setFocusedCell] = useState<{ rowId: string; dimensionKey: string } | null>(null);
+  const [failedCells, setFailedCells] = useState<Record<string, { code: string; message?: string }>>({});
   const projectionRef = useRef<MatrixReadProjection | null>(null);
   projectionRef.current = projection;
 
@@ -545,6 +550,239 @@ export function MatrixInputView({ taskId, taskName }: MatrixInputViewProps) {
     [compiled, observedDimensions, instanceId, refetchProjection],
   );
 
+  /**
+   * Batch paste (desktop only). Aligns the pasted clipboard grid against the
+   * observed-dimension sort order + the anchor's group row order, sends one
+   * POST /batch-commands, then applies authoritative values + a per-cell failure
+   * overlay. Mirrors handleMetricChange's optimistic-calc + functional-updater
+   * pattern, generalized to a region.
+   *
+   * Value coercion: the frontend sends raw clipboard values (number | string)
+   * and lets executeBatchPaste do the per-valueKind Number()/string dispatch —
+   * same boundary the single-cell PATCH relies on. Empty strings are sent so the
+   * backend can clear cells rather than write NaN.
+   */
+  const handleBatchPaste = useCallback(
+    async (
+      anchor: { rowId: string; dimensionKey: string },
+      clipboardGrid: (string | number)[][],
+    ) => {
+      const proj = projectionRef.current;
+      if (!proj || !instanceId) return;
+
+      // 1. Observed+editable dims in sort order, the anchor's group, and the
+      //    anchor's row/col indices within them. Geometry is validated again
+      //    server-side (validateBatchRequest), so this is best-effort alignment.
+      const observedDims = proj.schema.dimensions
+        .filter((d) => d.columnGroup === 'observed' && d.editable !== false)
+        .sort((a, b) => a.sortOrder - b.sortOrder);
+      const anchorColIdx = observedDims.findIndex((d) => d.dimensionKey === anchor.dimensionKey);
+      if (anchorColIdx < 0) {
+        toast.error('错点不是原始指标列');
+        return;
+      }
+      let group: MatrixReadProjection['groups'][number] | undefined;
+      for (const g of proj.groups) {
+        if (g.rows.some((r) => r.id === anchor.rowId)) {
+          group = g;
+          break;
+        }
+      }
+      if (!group) {
+        toast.error('错点行不在任何分组内');
+        return;
+      }
+      const anchorRowIdx = group.rows.findIndex((r) => r.id === anchor.rowId);
+      if (anchorRowIdx < 0) return;
+
+      // 2. Build commands by aligning the clipboard grid against observed dims +
+      //    group rows (clip may extend past the available rows/cols — those are
+      //    dropped here; the backend re-validates).
+      const commands: {
+        type: 'setMetric';
+        rowId: string;
+        dimensionKey: string;
+        value: number | string;
+      }[] = [];
+      for (let r = 0; r < clipboardGrid.length; r++) {
+        for (let c = 0; c < clipboardGrid[r].length; c++) {
+          const targetDim = observedDims[anchorColIdx + c];
+          const targetRow = group.rows[anchorRowIdx + r];
+          if (!targetDim || !targetRow) continue;
+          commands.push({
+            type: 'setMetric',
+            rowId: targetRow.id,
+            dimensionKey: targetDim.dimensionKey,
+            value: clipboardGrid[r][c],
+          });
+        }
+      }
+      if (commands.length === 0) return;
+
+      // 3. Optimistic calc preview. computeOptimistic honours a single override
+      //    per call and reads the rest of a row's observed values from its
+      //    authoritative metrics — so for a multi-cell-per-row paste we first
+      //    fold the pasted observed values into a transient projection, then run
+      //    computeOptimistic once per affected row (seeded with that row's first
+      //    pasted cell) so calculated cells preview against ALL the new inputs.
+      const commandsByRow = new Map<string, typeof commands>();
+      for (const cmd of commands) {
+        const list = commandsByRow.get(cmd.rowId) ?? [];
+        list.push(cmd);
+        commandsByRow.set(cmd.rowId, list);
+      }
+      let transient = proj;
+      const parsedByCmdKey = new Map<string, { value?: number; durationMs?: number; text?: string }>();
+      for (const cmd of commands) {
+        const dim = observedDims.find((d) => d.dimensionKey === cmd.dimensionKey)!;
+        // Reuse parseMetricDraft so the optimistic coercion matches the single-cell
+        // editor's draft→parsed path. Numbers/durations land as numbers, text as text.
+        const parsed =
+          typeof cmd.value === 'number'
+            ? dim.valueKind === 'duration'
+              ? { durationMs: cmd.value * 1000 }
+              : dim.valueKind === 'text'
+                ? { text: String(cmd.value) }
+                : { value: cmd.value }
+            : parseMetricDraft(String(cmd.value), dim.valueKind);
+        parsedByCmdKey.set(`${cmd.rowId}:${cmd.dimensionKey}`, parsed ?? {});
+        if (parsed) {
+          transient = setRowMetric(transient, cmd.rowId, cmd.dimensionKey, {
+            state: 'valid',
+            value: parsed.value,
+            durationMs: parsed.durationMs,
+            text: parsed.text,
+            unit: dim.unitCode,
+          });
+        } else {
+          transient = setRowMetric(transient, cmd.rowId, cmd.dimensionKey, {
+            state: 'missing',
+            unit: dim.unitCode,
+          });
+        }
+      }
+      const optimisticBatch: Record<string, OptimisticMetric> = {};
+      for (const [rowId, rowCmds] of commandsByRow) {
+        const first = rowCmds[0]!;
+        const firstDim = observedDims.find((d) => d.dimensionKey === first.dimensionKey)!;
+        const firstParsed = parsedByCmdKey.get(`${first.rowId}:${first.dimensionKey}`)!;
+        const override = parsedToMetricValue(firstParsed, firstDim);
+        const rowOptimistic = computeOptimistic(transient, compiled, rowId, first.dimensionKey, override);
+        Object.assign(optimisticBatch, rowOptimistic);
+      }
+      setOptimistic((cur) => ({ ...cur, ...optimisticBatch }));
+
+      // 4. POST batch-commands.
+      try {
+        const res = await fetch(`/api/task-matrices/${instanceId}/batch-commands`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            clientOperationId: `op_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            baseVersion: proj.version,
+            anchor,
+            commands,
+          }),
+        });
+        const json = (await res.json()) as ApiResponse<{
+          status: string;
+          results: Array<{
+            index: number;
+            status: string;
+            rowId: string;
+            dimensionKey: string;
+            error?: { code: string; message?: string };
+          }>;
+          authoritativeCalculations: Array<{
+            rowId: string;
+            metricKey: string;
+            value?: number;
+            unit?: string;
+            formulaVersion?: string;
+            status: string;
+            errorCode?: string;
+          }>;
+        }>;
+        if (json.code !== 0) {
+          toast.error(json.message || '批量粘贴失败');
+          setOptimistic((cur) => {
+            const next = { ...cur };
+            for (const k of Object.keys(optimisticBatch)) delete next[k];
+            return next;
+          });
+          return;
+        }
+        const data = json.data!;
+
+        // 5. Apply authoritative observed values + authoritative calculations
+        //    using the FUNCTIONAL updater (race-safe, same as handleMetricChange).
+        setProjection((prev) => {
+          if (!prev) return prev;
+          let next = prev;
+          // Apply each succeeded command's observed value authoritatively.
+          for (const r of data.results) {
+            if (r.status !== 'succeeded') continue;
+            const dim = observedDims.find((d) => d.dimensionKey === r.dimensionKey);
+            if (!dim) continue;
+            const parsed = parsedByCmdKey.get(`${r.rowId}:${r.dimensionKey}`);
+            next = setRowMetric(next, r.rowId, r.dimensionKey, {
+              state: parsed ? 'valid' : 'missing',
+              value: parsed?.value,
+              durationMs: parsed?.durationMs,
+              text: parsed?.text,
+              unit: dim.unitCode,
+            });
+          }
+          // Apply authoritative calculated values (authoritativeCalculations may
+          // also include observed cells the recompute touched; authoritativeToMetric
+          // handles the calc-failed vs valid shape).
+          for (const calc of data.authoritativeCalculations) {
+            next = setRowMetric(next, calc.rowId, calc.metricKey, authoritativeToMetric(calc));
+          }
+          return next;
+        });
+
+        // 6. Per-cell failure overlay (only non-succeeded results with an error).
+        const newFailed: Record<string, { code: string; message?: string }> = {};
+        for (const r of data.results) {
+          if (r.status !== 'succeeded' && r.error) {
+            newFailed[`${r.rowId}::${r.dimensionKey}`] = { code: r.error.code, message: r.error.message };
+          }
+        }
+        setFailedCells(newFailed);
+
+        // 7. Clear optimistic badges for every paste-touched cell + its dependent
+        //    authoritative calcs (functional updater, same pattern as handleMetricChange).
+        setOptimistic((cur) => {
+          const next = { ...cur };
+          for (const k of Object.keys(optimisticBatch)) delete next[k];
+          for (const calc of data.authoritativeCalculations) {
+            delete next[`${calc.rowId}:${calc.metricKey}`];
+          }
+          return next;
+        });
+
+        // 8. Toast feedback.
+        if (data.status === 'succeeded') {
+          toast.success(`粘贴完成：${data.results.length} 个单元格`);
+        } else if (data.status === 'partially_succeeded') {
+          const ok = data.results.filter((r) => r.status === 'succeeded').length;
+          toast.message(`粘贴部分成功：${ok}/${data.results.length}`);
+        } else {
+          toast.error('批量粘贴失败');
+        }
+      } catch {
+        toast.error('批量粘贴失败');
+        setOptimistic((cur) => {
+          const next = { ...cur };
+          for (const k of Object.keys(optimisticBatch)) delete next[k];
+          return next;
+        });
+      }
+    },
+    [compiled, instanceId],
+  );
+
   /** Create a new group via the toolbar. */
   const handleCreateGroup = useCallback(
     async (label: string, conditionSummary?: string) => {
@@ -653,11 +891,14 @@ export function MatrixInputView({ taskId, taskName }: MatrixInputViewProps) {
 
   // Shared handler bundle for both the desktop grid and the mobile cards so
   // the two views route edits through the exact same PATCH + optimistic path.
+  // onBatchPaste is desktop-only; it's omitted from the bundle passed to mobile
+  // (the grid's paste listener no-ops when onBatchPaste is absent).
   const sharedHandlers: {
     onSlotChange: typeof handleSlotChange;
     onMetricChange: typeof handleMetricChange;
     onFocusRow: (row: MatrixReadRow) => void;
     onAddRowToGroup: typeof handleAddRowToGroup;
+    onBatchPaste: typeof handleBatchPaste;
   } = {
     onSlotChange: handleSlotChange,
     onMetricChange: handleMetricChange,
@@ -670,7 +911,27 @@ export function MatrixInputView({ taskId, taskName }: MatrixInputViewProps) {
       setFocusedRow(fresh ?? row);
     },
     onAddRowToGroup: handleAddRowToGroup,
+    onBatchPaste: handleBatchPaste,
   };
+
+  // Mobile handler bundle: same as desktop MINUS onBatchPaste (mobile has no
+  // paste UX). The grid's MatrixVirtualGridHandlers type makes onBatchPaste
+  // optional, so this narrower bundle type-checks against mobile's prop.
+  const mobileHandlers: Omit<typeof sharedHandlers, 'onBatchPaste'> = {
+    onSlotChange: sharedHandlers.onSlotChange,
+    onMetricChange: sharedHandlers.onMetricChange,
+    onFocusRow: sharedHandlers.onFocusRow,
+    onAddRowToGroup: sharedHandlers.onAddRowToGroup,
+  };
+
+  const clearCellFailure = useCallback((key: string) => {
+    setFailedCells((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
 
   return (
     <div className="flex min-w-0 flex-col gap-0">
@@ -700,6 +961,10 @@ export function MatrixInputView({ taskId, taskName }: MatrixInputViewProps) {
           onToggleGroup={handleToggleGroup}
           handlers={sharedHandlers}
           resultStatusOptions={projection.schema.resultStatusOptions}
+          focusedCell={focusedCell}
+          onFocusedCellChange={setFocusedCell}
+          failedCells={failedCells}
+          onClearCellFailure={clearCellFailure}
         />
       </div>
       <div className="md:hidden">
@@ -712,8 +977,10 @@ export function MatrixInputView({ taskId, taskName }: MatrixInputViewProps) {
           busyCells={busyCells}
           collapsedGroups={collapsedGroups}
           onToggleGroup={handleToggleGroup}
-          handlers={sharedHandlers}
+          handlers={mobileHandlers}
           resultStatusOptions={projection.schema.resultStatusOptions}
+          failedCells={failedCells}
+          onClearCellFailure={clearCellFailure}
         />
       </div>
       <div className="px-3 py-1.5 text-[10px] text-muted-foreground">

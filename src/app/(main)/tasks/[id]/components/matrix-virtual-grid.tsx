@@ -21,7 +21,7 @@
  * rows; if perf bites, a follow-up can add @tanstack/react-virtual. Group band
  * rows render full-width (colSpan) above each group's rows.
  */
-import { Fragment } from 'react';
+import { Fragment, useEffect } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -69,6 +69,28 @@ export interface MatrixVirtualGridHandlers {
   onMetricChange: (row: MatrixReadRow, dimensionKey: string, commit: MetricCommit) => void;
   onFocusRow: (row: MatrixReadRow) => void;
   onAddRowToGroup: (groupId: string) => void;
+  /**
+   * Batch paste entrypoint. Optional: only the desktop grid sets this (the
+   * mobile cards omit it, since mobile has no paste UX). The grid checks for
+   * its presence before attaching the document paste listener, so mobile is
+   * unaffected.
+   */
+  onBatchPaste?: (
+    anchor: { rowId: string; dimensionKey: string },
+    clipboardGrid: (string | number)[][],
+  ) => void;
+}
+
+/** A focused observed cell — the paste anchor. */
+export interface FocusedCell {
+  rowId: string;
+  dimensionKey: string;
+}
+
+/** A batch-paste per-cell failure surfaced as an overlay. */
+export interface CellFailure {
+  code: string;
+  message?: string;
 }
 
 interface MatrixVirtualGridProps {
@@ -85,6 +107,12 @@ interface MatrixVirtualGridProps {
   handlers: MatrixVirtualGridHandlers;
   /** Schema-declared result-status options (undefined → platform default). */
   resultStatusOptions?: ResultStatusOption[];
+  /** Currently focused observed cell (paste anchor). null = none. */
+  focusedCell?: FocusedCell | null;
+  onFocusedCellChange?: (cell: FocusedCell | null) => void;
+  /** Batch-paste per-cell failures keyed by `${rowId}::${dimensionKey}`. */
+  failedCells?: Record<string, CellFailure>;
+  onClearCellFailure?: (key: string) => void;
 }
 
 export function MatrixVirtualGrid({
@@ -98,6 +126,10 @@ export function MatrixVirtualGrid({
   onToggleGroup,
   handlers,
   resultStatusOptions,
+  focusedCell,
+  onFocusedCellChange,
+  failedCells,
+  onClearCellFailure,
 }: MatrixVirtualGridProps) {
   const tableMinWidth =
     STICKY_OFFSETS.body +
@@ -108,6 +140,46 @@ export function MatrixVirtualGrid({
 
   const stickyCellClass = (left: number, z = 'z-10') =>
     cn('sticky bg-card', z);
+
+  // Document-level paste listener for multi-cell (spreadsheet-style) paste.
+  // Only attached when an onBatchPaste handler exists (mobile omits it). We
+  // intentionally restrict the interception to MULTI-cell payloads (clipboard
+  // contains a tab or a newline) so a normal single-value Ctrl+V into the
+  // focused <Input> still flows to the input's own paste behaviour. The paste
+  // anchor is `focusedCell`, which must currently be in the DOM (i.e. its row
+  // isn't collapsed/filtered out) — otherwise we no-op rather than guess a row.
+  useEffect(() => {
+    if (!handlers.onBatchPaste) return;
+    const onPaste = (e: ClipboardEvent) => {
+      if (!focusedCell || !onFocusedCellChange) return;
+      const text = e.clipboardData?.getData('text/plain') ?? '';
+      if (!text) return;
+      // Only intercept multi-cell pastes (Excel/sheets region). Single values
+      // pasted into a focused input are left to the input itself.
+      const isMultiCell = text.includes('\t') || text.includes('\n');
+      if (!isMultiCell) return;
+      const target = document.querySelector(
+        `[data-row-id="${CSS.escape(focusedCell.rowId)}"][data-dimension-key="${CSS.escape(focusedCell.dimensionKey)}"]`,
+      );
+      if (!target) return; // focused cell not rendered (collapsed/filtered)
+      e.preventDefault();
+      const rows = text.split(/\r?\n/).filter((r) => r.length > 0);
+      const grid = rows.map((r) =>
+        r.split('\t').map((cell) => {
+          const trimmed = cell.trim();
+          const n = Number(trimmed);
+          // Empty string stays a string so the backend clears the cell rather
+          // than writing NaN; finite numbers are sent as numbers, everything
+          // else (text/enum) as a string for the backend's valueKind dispatch.
+          if (trimmed === '') return '';
+          return Number.isFinite(n) ? n : cell;
+        }),
+      );
+      handlers.onBatchPaste!(focusedCell, grid);
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  }, [focusedCell, handlers, onFocusedCellChange]);
 
   return (
     <div className="w-full overflow-x-auto">
@@ -132,6 +204,10 @@ export function MatrixVirtualGrid({
               handlers={handlers}
               stickyCellClass={stickyCellClass}
               resultStatusOptions={resultStatusOptions}
+              focusedCell={focusedCell}
+              onFocusedCellChange={onFocusedCellChange}
+              failedCells={failedCells}
+              onClearCellFailure={onClearCellFailure}
             />
           ))}
           {projection.groups.length === 0 && (
@@ -238,6 +314,10 @@ function GroupBlock({
   handlers,
   stickyCellClass,
   resultStatusOptions,
+  focusedCell,
+  onFocusedCellChange,
+  failedCells,
+  onClearCellFailure,
 }: {
   group: MatrixReadGroup;
   taskId: string;
@@ -250,6 +330,10 @@ function GroupBlock({
   handlers: MatrixVirtualGridHandlers;
   stickyCellClass: (left: number, z?: string) => string;
   resultStatusOptions?: ResultStatusOption[];
+  focusedCell?: FocusedCell | null;
+  onFocusedCellChange?: (cell: FocusedCell | null) => void;
+  failedCells?: Record<string, CellFailure>;
+  onClearCellFailure?: (key: string) => void;
 }) {
   const totalCols = 4 + observedDimensions.length + calculatedDimensions.length + 4;
 
@@ -302,6 +386,10 @@ function GroupBlock({
             handlers={handlers}
             stickyCellClass={stickyCellClass}
             resultStatusOptions={resultStatusOptions}
+            focusedCell={focusedCell}
+            onFocusedCellChange={onFocusedCellChange}
+            failedCells={failedCells}
+            onClearCellFailure={onClearCellFailure}
           />
         ))}
     </Fragment>
@@ -323,6 +411,10 @@ function MatrixDataRow({
   handlers,
   stickyCellClass,
   resultStatusOptions,
+  focusedCell,
+  onFocusedCellChange,
+  failedCells,
+  onClearCellFailure,
 }: {
   row: MatrixReadRow;
   index: number;
@@ -334,6 +426,10 @@ function MatrixDataRow({
   handlers: MatrixVirtualGridHandlers;
   stickyCellClass: (left: number, z?: string) => string;
   resultStatusOptions?: ResultStatusOption[];
+  focusedCell?: FocusedCell | null;
+  onFocusedCellChange?: (cell: FocusedCell | null) => void;
+  failedCells?: Record<string, CellFailure>;
+  onClearCellFailure?: (key: string) => void;
 }) {
   const slotBusy = busyCells[`${row.id}:slot`] ?? false;
 
@@ -371,17 +467,37 @@ function MatrixDataRow({
         <span className="block truncate" title={row.subject.label}>{row.subject.label}</span>
       </TableCell>
 
-      {/* Observed metrics */}
-      {observedDimensions.map((d) => (
-        <TableCell key={d.dimensionKey} className="border-b p-0 align-top">
-          <ObservedMetricCell
-            dimension={d}
-            metric={row.metrics[d.dimensionKey]}
-            busy={busyCells[`${row.id}:${d.dimensionKey}`] ?? false}
-            onChange={(parsed) => handlers.onMetricChange(row, d.dimensionKey, { parsed })}
-          />
-        </TableCell>
-      ))}
+      {/* Observed metrics.
+          The wrapper carries data-* attrs so the document paste listener can
+          target the focused cell by rowId+dimensionKey, and an onClick that
+          records this cell as the paste anchor (without stealing focus from the
+          input below — the input keeps its native caret/focus). */}
+      {observedDimensions.map((d) => {
+        const cellKey = `${row.id}::${d.dimensionKey}`;
+        const isFocused =
+          focusedCell?.rowId === row.id && focusedCell?.dimensionKey === d.dimensionKey;
+        return (
+          <TableCell
+            key={d.dimensionKey}
+            data-row-id={row.id}
+            data-dimension-key={d.dimensionKey}
+            className={cn(
+              'border-b p-0 align-top',
+              isFocused && 'ring-2 ring-inset ring-primary/40',
+            )}
+            onClick={() => onFocusedCellChange?.({ rowId: row.id, dimensionKey: d.dimensionKey })}
+          >
+            <ObservedMetricCell
+              dimension={d}
+              metric={row.metrics[d.dimensionKey]}
+              busy={busyCells[`${row.id}:${d.dimensionKey}`] ?? false}
+              onChange={(parsed) => handlers.onMetricChange(row, d.dimensionKey, { parsed })}
+              failedError={failedCells?.[cellKey]}
+              onClearFailure={onClearCellFailure ? () => onClearCellFailure(cellKey) : undefined}
+            />
+          </TableCell>
+        );
+      })}
 
       {/* Calculated metrics */}
       {calculatedDimensions.map((d) => (

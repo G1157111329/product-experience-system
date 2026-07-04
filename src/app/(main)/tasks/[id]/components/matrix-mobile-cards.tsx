@@ -50,7 +50,7 @@ import {
   ObservedMetricCell,
 } from './matrix-cell';
 import { IssueSlotCell, ProcessSlotCell, ResultSlotCell } from './matrix-cell';
-import type { MatrixVirtualGridHandlers } from './matrix-virtual-grid';
+import type { MatrixVirtualGridHandlers, CellFailure } from './matrix-virtual-grid';
 
 interface MatrixMobileCardsProps {
   /** The full read projection (same DTO the desktop grid consumes). */
@@ -66,10 +66,13 @@ interface MatrixMobileCardsProps {
   busyCells: Record<string, boolean>;
   collapsedGroups: Set<string>;
   onToggleGroup: (groupId: string) => void;
-  /** Identical handler set the desktop grid receives. */
+  /** Identical handler set the desktop grid receives (minus onBatchPaste). */
   handlers: MatrixVirtualGridHandlers;
   /** Schema-declared result-status options (undefined → platform default). */
   resultStatusOptions?: ResultStatusOption[];
+  /** Batch-paste per-cell failures keyed by `${rowId}::${dimensionKey}`. */
+  failedCells?: Record<string, CellFailure>;
+  onClearCellFailure?: (key: string) => void;
 }
 
 /**
@@ -89,6 +92,8 @@ export function MatrixMobileCards({
   onToggleGroup,
   handlers,
   resultStatusOptions,
+  failedCells,
+  onClearCellFailure,
 }: MatrixMobileCardsProps) {
   if (projection.groups.length === 0) {
     return (
@@ -113,6 +118,8 @@ export function MatrixMobileCards({
           onToggleGroup={onToggleGroup}
           handlers={handlers}
           resultStatusOptions={resultStatusOptions}
+          failedCells={failedCells}
+          onClearCellFailure={onClearCellFailure}
         />
       ))}
     </div>
@@ -134,6 +141,8 @@ interface MobileGroupCardProps {
   onToggleGroup: (id: string) => void;
   handlers: MatrixVirtualGridHandlers;
   resultStatusOptions?: ResultStatusOption[];
+  failedCells?: Record<string, CellFailure>;
+  onClearCellFailure?: (key: string) => void;
 }
 
 function MobileGroupCard({
@@ -147,6 +156,8 @@ function MobileGroupCard({
   onToggleGroup,
   handlers,
   resultStatusOptions,
+  failedCells,
+  onClearCellFailure,
 }: MobileGroupCardProps) {
   return (
     <section className="overflow-hidden rounded-lg border bg-card shadow-xs">
@@ -199,6 +210,8 @@ function MobileGroupCard({
               busyCells={busyCells}
               handlers={handlers}
               resultStatusOptions={resultStatusOptions}
+              failedCells={failedCells}
+              onClearCellFailure={onClearCellFailure}
             />
           ))}
         </div>
@@ -220,6 +233,8 @@ interface MobileRowCardProps {
   busyCells: Record<string, boolean>;
   handlers: MatrixVirtualGridHandlers;
   resultStatusOptions?: ResultStatusOption[];
+  failedCells?: Record<string, CellFailure>;
+  onClearCellFailure?: (key: string) => void;
 }
 
 function MobileRowCard({
@@ -231,6 +246,8 @@ function MobileRowCard({
   busyCells,
   handlers,
   resultStatusOptions,
+  failedCells,
+  onClearCellFailure,
 }: MobileRowCardProps) {
   const [metricTab, setMetricTab] = useState<MetricTab>('observed');
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -320,18 +337,27 @@ function MobileRowCard({
 
           <div className="flex flex-col gap-px bg-border">
             {metricTab === 'observed' &&
-              observedDimensions.map((d) => (
-                <MetricRow key={d.dimensionKey} dimension={d}>
-                  <ObservedMetricCell
-                    dimension={d}
-                    metric={row.metrics[d.dimensionKey]}
-                    busy={busyCells[`${row.id}:${d.dimensionKey}`] ?? false}
-                    onChange={(parsed) =>
-                      handlers.onMetricChange(row, d.dimensionKey, { parsed })
-                    }
-                  />
-                </MetricRow>
-              ))}
+              observedDimensions.map((d) => {
+                const cellKey = `${row.id}::${d.dimensionKey}`;
+                return (
+                  <MetricRow key={d.dimensionKey} dimension={d}>
+                    <ObservedMetricCell
+                      dimension={d}
+                      metric={row.metrics[d.dimensionKey]}
+                      busy={busyCells[`${row.id}:${d.dimensionKey}`] ?? false}
+                      onChange={(parsed) =>
+                        handlers.onMetricChange(row, d.dimensionKey, { parsed })
+                      }
+                      failedError={failedCells?.[cellKey]}
+                      onClearFailure={
+                        onClearCellFailure
+                          ? () => onClearCellFailure(cellKey)
+                          : undefined
+                      }
+                    />
+                  </MetricRow>
+                );
+              })}
             {metricTab === 'calculated' &&
               calculatedDimensions.map((d) => (
                 <MetricRow key={d.dimensionKey} dimension={d} calculated>
@@ -365,6 +391,8 @@ function MobileRowCard({
         optimistic={optimistic}
         busyCells={busyCells}
         handlers={handlers}
+        failedCells={failedCells}
+        onClearCellFailure={onClearCellFailure}
       />
     </article>
   );
@@ -472,6 +500,8 @@ interface DimensionDrawerProps {
   optimistic: Record<string, OptimisticMetric>;
   busyCells: Record<string, boolean>;
   handlers: MatrixVirtualGridHandlers;
+  failedCells?: Record<string, CellFailure>;
+  onClearCellFailure?: (key: string) => void;
 }
 
 function DimensionDrawer({
@@ -484,6 +514,8 @@ function DimensionDrawer({
   optimistic,
   busyCells,
   handlers,
+  failedCells,
+  onClearCellFailure,
 }: DimensionDrawerProps) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -526,6 +558,13 @@ function DimensionDrawer({
                       }
                       onChange={(parsed) =>
                         handlers.onMetricChange(row, d.dimensionKey, { parsed })
+                      }
+                      failedError={failedCells?.[`${row.id}::${d.dimensionKey}`]}
+                      onClearFailure={
+                        onClearCellFailure
+                          ? () =>
+                              onClearCellFailure(`${row.id}::${d.dimensionKey}`)
+                          : undefined
                       }
                     />
                   ) : (
