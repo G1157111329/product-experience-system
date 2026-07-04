@@ -11,10 +11,14 @@ const CACHE_TTL = 25 * 60 * 1000;
 let batchQueue: { filePath: string; resolve: (url: string) => void }[] = [];
 let batchTimer: ReturnType<typeof setTimeout> | null = null;
 
-const pendingMediaDataUrl =
+export const pendingMediaDataUrl =
   `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="180" viewBox="0 0 240 180"><rect width="240" height="180" rx="10" fill="#f7f2e9"/><text x="120" y="94" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#8a735c">正在加载素材</text></svg>',
   )}`;
+
+export function isPendingMediaUrl(value: string | null | undefined): boolean {
+  return value === pendingMediaDataUrl;
+}
 
 function areUrlMapsEqual(a: Map<string, string>, b: Map<string, string>): boolean {
   if (a.size !== b.size) return false;

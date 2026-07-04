@@ -421,7 +421,13 @@ export function MaterialPicker({
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
             {filteredMaterials.map((material) => (
-              <div key={material.id} className="relative cursor-pointer" onClick={() => handleSelect(material)}>
+              <div
+                key={material.id}
+                data-testid="material-picker-item"
+                data-material-id={material.id}
+                className="relative cursor-pointer"
+                onClick={() => handleSelect(material)}
+              >
                 <MediaThumbnail url={materialUrl(material)} type={material.material_type as 'image' | 'video'} responsive />
                 <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate rounded-b-lg">
                   {material.material_type === 'video'

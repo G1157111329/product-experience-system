@@ -76,6 +76,7 @@ interface ReportData {
   id: string; title: string; product_model: string | null; status: string; version: number;
   task_id: string; created_at: string;
   content: ReportContent | null;
+  report_type?: string | null;
 }
 
 const taskFieldLabels: Record<string, string> = {
@@ -279,6 +280,210 @@ function getUnboundStepMaterials(materials: Material[] | undefined, problemPoint
   return materials.filter((material) => !boundIds.has(material.id));
 }
 
+// ── 内联矩阵渲染（从 detailModel.sections 提取 matrix block，仅渲染一次，全展开）──
+function PrintInlineMatrix({ detailModel }: { detailModel: ReportDetailModel }) {
+  const matrixBlock = detailModel.sections
+    .flatMap((s) => s.blocks || [])
+    .find((b) => b.type === 'matrix' && b.matrix);
+  if (!matrixBlock?.matrix) return null;
+  const matrix = matrixBlock.matrix;
+  const objects = matrix.objects || [];
+  const rows = matrix.rows || [];
+  if (objects.length === 0 || rows.length === 0) return null;
+
+  return (
+    <section style={{ margin: '20px 0', pageBreakInside: 'avoid' }}>
+      <h2 style={{ fontSize: '18px', color: '#0d9488', borderBottom: '2px solid #0d9488', paddingBottom: '4px', marginBottom: '12px' }}>横向对比矩阵</h2>
+      <div style={{ overflowX: 'auto', border: '1px solid #e5e7eb', borderRadius: '8px' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+          <thead>
+            <tr>
+              <th style={{ border: '1px solid #e5e7eb', background: '#f9fafb', padding: '6px', minWidth: '120px', textAlign: 'left' }}>维度/对象</th>
+              {objects.map((obj) => (
+                <th key={obj.id} style={{ border: '1px solid #e5e7eb', background: '#f9fafb', padding: '6px', textAlign: 'center', minWidth: '100px' }}>
+                  <div style={{ fontWeight: 600 }}>{obj.label}</div>
+                  {obj.subtitle && <div style={{ fontSize: '9px', color: '#6b7280', fontWeight: 400 }}>{obj.subtitle}</div>}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              // summary 行：跨列显示用户输入的 summaryText
+              if (row.rowKind === 'summary') {
+                return (
+                  <tr key={row.id} style={{ background: '#fffbeb' }}>
+                    <td colSpan={objects.length + 1} style={{ border: '1px solid #e5e7eb', padding: '6px', fontWeight: 600, verticalAlign: 'top' }}>
+                      <span style={{ fontSize: '9px', color: '#6b7280', marginRight: '6px' }}>{row.label}</span>
+                      <span style={{ whiteSpace: 'pre-wrap' }}>{row.summaryText || '—'}</span>
+                    </td>
+                  </tr>
+                );
+              }
+              return (
+              <tr key={row.id}>
+                <td style={{ border: '1px solid #e5e7eb', padding: '6px', fontWeight: 500, verticalAlign: 'top' }}>
+                  {row.group && <div style={{ fontSize: '9px', color: '#6b7280', marginBottom: '2px' }}>{row.group}</div>}
+                  {row.label}
+                </td>
+                {objects.map((obj) => {
+                  const cell = row.cells?.[obj.id];
+                  return (
+                    <td key={obj.id} style={{ border: '1px solid #e5e7eb', padding: '6px', verticalAlign: 'top' }}>
+                      {cell ? (
+                        <div style={{ lineHeight: 1.5 }}>
+                          {cell.conclusion && <div style={{ fontWeight: 600 }}>{cell.conclusion}</div>}
+                          {cell.value && <div style={{ color: '#6b7280' }}>{cell.value}</div>}
+                          {cell.score && <div style={{ color: '#6b7280' }}>{cell.score}分</div>}
+                          {cell.problems && cell.problems.length > 0 && (
+                            <ul style={{ margin: '2px 0 0', paddingLeft: '14px', color: '#dc2626' }}>
+                              {cell.problems.filter((p) => p !== cell.value).map((p, i) => <li key={i}>{p}</li>)}
+                            </ul>
+                          )}
+                          {cell.media && cell.media.length > 0 && (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', marginTop: '4px' }}>
+                              {cell.media.slice(0, 3).map((m) => (
+                                <div key={m.id} style={{ width: '48px', height: '48px', overflow: 'hidden', borderRadius: '3px', border: '1px solid #e5e7eb' }}>
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img src={m.url || ''} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span style={{ color: '#d1d5db' }}>—</span>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+// ── 单食谱列表式卡片（全展开，不分割）──
+function PrintRecipeCard({ recipe }: { recipe: Record<string, unknown> }) {
+  const name = String(recipe.name || '');
+  const recipeType = String(recipe.recipe_type || '');
+  const ingredients = String(recipe.ingredients || '');
+  const effectDesc = String(recipe.effect_description || '');
+  const effectScore = String(recipe.effect_score || '');
+  const effectAiResultRaw = recipe.effect_ai_result as Record<string, unknown> | null | undefined;
+  const effectAiSummary = effectAiResultRaw?.summary ? String(effectAiResultRaw.summary) : '';
+  const effectProblemPoint = String(recipe.effect_problem_point || '');
+  const steps = (recipe.recipe_steps || []) as Array<Record<string, unknown>>;
+  const effectMaterials = (recipe.effect_materials || []) as Array<Record<string, unknown>>;
+
+  // 实时计算步骤问题点（不依赖可能不准的 problem_count 字段）
+  const stepProblemCount = steps.reduce((sum, step) => {
+    const pps = step.problem_points as Array<{ text?: string }> | undefined;
+    if (Array.isArray(pps) && pps.length > 0) return sum + pps.filter((p) => p.text?.trim()).length;
+    return sum + (String(step.problem_point || '').trim() ? 1 : 0);
+  }, 0);
+
+  // 解析效果问题点（JSON 数组或换行文本）
+  let effectProblems: string[] = [];
+  if (effectProblemPoint) {
+    try {
+      const parsed = JSON.parse(effectProblemPoint);
+      if (Array.isArray(parsed)) {
+        effectProblems = parsed.map((p) => typeof p === 'string' ? p : String((p as Record<string, unknown>)?.text || '')).filter(Boolean);
+      } else {
+        effectProblems = [effectProblemPoint];
+      }
+    } catch {
+      effectProblems = effectProblemPoint.split('\n').map((s) => s.trim()).filter(Boolean);
+    }
+  }
+  const totalProblems = stepProblemCount + effectProblems.length;
+
+  const renderMedia = (mats: Array<Record<string, unknown>>) => {
+    if (!mats.length) return null;
+    return (
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
+        {mats.map((m) => (
+          <div key={String(m.id)} style={{ width: '60px', height: '60px', overflow: 'hidden', borderRadius: '4px', border: '1px solid #e5e7eb', background: '#f9fafb' }}>
+            {String(m.material_type || 'image') === 'image' ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={String(m.file_url || m.file_path || '')} alt={String(m.file_name || '')} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              <video src={String(m.file_url || m.file_path || '')} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <div className="print-recipe-card" style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px', marginBottom: '12px', pageBreakInside: 'avoid' }}>
+      {/* 食谱名称 + 小标签 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
+        {recipeType && <span style={{ display: 'inline-block', padding: '1px 6px', background: '#f3f4f6', borderRadius: '3px', fontSize: '10px', color: '#4b5563' }}>{recipeType}</span>}
+        <span style={{ fontWeight: 600, fontSize: '14px' }}>{name}</span>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: '4px' }}>
+          <span style={{ display: 'inline-block', padding: '1px 6px', border: '1px solid #e5e7eb', borderRadius: '3px', fontSize: '10px', color: '#6b7280' }}>{steps.length} 步骤</span>
+          {effectScore && <span style={{ display: 'inline-block', padding: '1px 6px', background: '#0d9488', color: '#fff', borderRadius: '3px', fontSize: '10px' }}>{effectScore}分</span>}
+          <span style={{ display: 'inline-block', padding: '1px 6px', border: '1px solid #e5e7eb', borderRadius: '3px', fontSize: '10px', color: totalProblems > 0 ? '#dc2626' : '#6b7280' }}>{totalProblems} 问题</span>
+        </div>
+      </div>
+
+      {/* 食材/参数 */}
+      {ingredients && <div style={{ fontSize: '11px', color: '#6b7280', marginBottom: '6px' }}>食材/参数：{ingredients}</div>}
+
+      {/* 效果评价（含素材） */}
+      {(effectDesc || effectAiSummary || effectScore) && (
+        <div style={{ marginBottom: '8px' }}>
+          <div style={{ fontSize: '11px', fontWeight: 600, color: '#0d9488', marginBottom: '2px' }}>效果评价</div>
+          {effectDesc && <div style={{ fontSize: '11px', color: '#374151', whiteSpace: 'pre-wrap' }}>{effectDesc}</div>}
+          {effectAiSummary && <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>{effectAiSummary}</div>}
+          {renderMedia(effectMaterials)}
+        </div>
+      )}
+
+      {/* 食谱步骤（全展开，不折叠） */}
+      {steps.length > 0 && (
+        <div style={{ marginBottom: '8px' }}>
+          <div style={{ fontSize: '11px', fontWeight: 600, color: '#0d9488', marginBottom: '4px' }}>食谱步骤：{steps.length}步</div>
+          {steps.map((step, idx) => {
+            const stepPps = (step.problem_points as Array<{ text: string }>) || [];
+            const stepPp = step.problem_point ? [{ text: String(step.problem_point) }] : [];
+            const pps = stepPps.length > 0 ? stepPps.filter((p) => p.text?.trim()) : stepPp;
+            const stepMats = (step.materials as Array<Record<string, unknown>>) || [];
+            return (
+              <div key={String(step.id || idx)} style={{ fontSize: '11px', padding: '4px 8px', marginBottom: '4px', background: '#f9fafb', borderRadius: '4px', border: '1px solid #f3f4f6' }}>
+                <div><span style={{ fontWeight: 600 }}>步骤{Number(step.step_number) || idx + 1}：</span>{String(step.operation || '')}</div>
+                {pps.length > 0 && (
+                  <div style={{ color: '#dc2626', marginTop: '2px' }}>
+                    {pps.map((p, i) => <div key={i}>问题点：{p.text}</div>)}
+                  </div>
+                )}
+                {stepMats.length > 0 && renderMedia(stepMats)}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 问题点（带素材） */}
+      {effectProblems.length > 0 && (
+        <div>
+          <div style={{ fontSize: '11px', fontWeight: 600, color: '#dc2626', marginBottom: '4px' }}>问题点（{effectProblems.length}条）</div>
+          {effectProblems.map((p, i) => (
+            <div key={i} style={{ fontSize: '11px', padding: '4px 8px', marginBottom: '4px', background: '#fef2f2', borderRadius: '4px', border: '1px solid #fecaca' }}>{p}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PrintMediaStrip({ materials, indent = 0 }: { materials?: Material[]; indent?: number }) {
   if (!materials?.length) return null;
   const images = materials.filter(m => m.material_type === 'image');
@@ -467,12 +672,12 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                         <span style={{ background: '#dcfce7', padding: '0 4px', borderRadius: '2px', fontWeight: 500 }}>第{reIdx + 1}次复测</span>
                         {aiResult && (
-                          <span style={{ border: '1px solid #d1d5db', padding: '0 4px', borderRadius: '2px' }}>AI评分: {aiResult.score}</span>
+                          <span style={{ border: '1px solid #d1d5db', padding: '0 4px', borderRadius: '2px' }}>评分: {aiResult.score}</span>
                         )}
                         <span style={{ color: '#9ca3af', marginLeft: 'auto' }}>{re.created_at ? new Date(String(re.created_at)).toLocaleDateString('zh-CN') : ''}</span>
                       </div>
                       {String(re.description || '') && <div style={{ marginTop: '2px' }}>{String(re.description || '')}</div>}
-                      {aiResult && aiResult.summary && <div style={{ color: '#6b7280', marginTop: '2px' }}>AI总结: {String(aiResult.summary)}</div>}
+                      {aiResult && aiResult.summary && <div style={{ color: '#6b7280', marginTop: '2px' }}>总结: {String(aiResult.summary)}</div>}
                       {reMats && reMats.length > 0 && (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
                           {reMats.filter(m => m.material_type === 'image').map((m, mi) => (
@@ -531,7 +736,7 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
                   <span style={{ fontWeight: 600, fontSize: '13px' }}>{recipe.name}</span>
                   {recipe.ingredients && <div style={{ color: '#888', fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{recipe.ingredients}</div>}
                 </div>
-                <span style={{ color: '#666', fontSize: '11px', marginLeft: 'auto', flexShrink: 0 }}>{recipe.recipe_steps?.length || 0} 步骤 | {recipe.problem_count || 0} 问题{recipe.effect_score ? ` | ${recipe.effect_score}分` : ''}</span>
+                <span style={{ color: '#666', fontSize: '11px', marginLeft: 'auto', flexShrink: 0 }}>{recipe.recipe_steps?.length || 0} 步骤 | {(() => { const sp = (recipe.recipe_steps || []).reduce((s, st) => { const pp = st.problem_points; return s + (Array.isArray(pp) && pp.length > 0 ? pp.filter((p) => p.text?.trim()).length : (st.problem_point?.trim() ? 1 : 0)); }, 0); let ep = 0; try { const p = JSON.parse(recipe.effect_problem_point || '[]'); if (Array.isArray(p)) ep = p.filter((x) => x?.text?.trim()).length; } catch { ep = recipe.effect_problem_point?.trim() ? 1 : 0; } return sp + ep; })()} 问题{recipe.effect_score ? ` | ${recipe.effect_score}分` : ''}</span>
               </div>
               {recipe.recipe_steps?.map(step => {
                 const stepMats = step.materials || [];
@@ -687,6 +892,28 @@ function ReportPrintContent() {
     fetch(`/api/reports/${reportId}`).then(r => r.json()).then(async (res) => {
       if (res.code === 0) {
         const rpt = await presignReportUrls(res.data as ReportData);
+        // 对比报告 content=null，需额外获取 task 数据和 AI 总结补充到 content
+        if (!rpt.content && rpt.task_id) {
+          try {
+            const taskRes = await fetch(`/api/reports/${reportId}/header`);
+            const taskData = await taskRes.json();
+            if (taskData.code === 0 && taskData.data?.aiSummary) {
+              rpt.content = { task: null as unknown, ai_summary: taskData.data.aiSummary, records: [], recipes: [], materials: [] } as unknown as ReportContent;
+            }
+          } catch { /* ignore */ }
+          // 通过 summary API 获取 task 信息
+          try {
+            const sumRes = await fetch(`/api/reports/${reportId}/summary`);
+            const sumData = await sumRes.json();
+            if (sumData.code === 0) {
+              if (!rpt.content) rpt.content = { ai_summary: null, records: [], recipes: [], materials: [] } as unknown as ReportContent;
+              rpt.content.task = sumData.data?.taskInfo || null;
+              if (!rpt.content.ai_summary && sumData.data?.aiSummary) {
+                rpt.content.ai_summary = sumData.data.aiSummary;
+              }
+            }
+          } catch { /* ignore */ }
+        }
         setReport(rpt);
         setSiblingReports([]);
         const detailModel = await fetchReportDetailModel(rpt.id);
@@ -828,6 +1055,23 @@ function ReportPrintContent() {
         });
       });
 
+      // 收集矩阵单元格素材（对比报告的 inline_media）
+      Object.values(detailModelsMap).forEach(dm => {
+        dm.sections?.forEach(s => {
+          s.blocks?.forEach(b => {
+            if (b.type === 'matrix' && b.matrix) {
+              b.matrix.rows?.forEach(row => {
+                Object.values(row.cells || {}).forEach(cell => {
+                  cell.media?.forEach(m => {
+                    if (m.url) allFilePaths.push(m.url);
+                  });
+                });
+              });
+            }
+          });
+        });
+      });
+
       // Also include re-evaluation materials
       Object.values(liveIssuesMap).flat().forEach(issue => {
         const reEvals = (issue as Record<string, unknown>)._reEvaluations as ReEvaluation[] | undefined;
@@ -913,9 +1157,6 @@ function ReportPrintContent() {
       content: report.content as unknown as ReportContentWithReview,
     })
     : { title: report.title, ai_summary: null, review_note: null };
-  const primaryPrintDelivery = primaryDetailModel?.printDelivery;
-  const preflightErrors = primaryPrintDelivery?.preflight.errors || [];
-  const preflightWarnings = primaryPrintDelivery?.preflight.warnings || [];
 
   return (
     <>
@@ -935,101 +1176,221 @@ function ReportPrintContent() {
         版本 V{report.version} | 状态: {report.status} | 生成时间: {formatBeijingTime(report.content?.generatedAt || report.created_at)}
       </div>
 
-      {primaryPrintDelivery && (
-        <section
-          data-testid="print-preflight-panel"
-          style={{ border: '1px solid #d1d5db', borderRadius: '8px', padding: '12px', margin: '16px 0', background: primaryPrintDelivery.preflight.ok ? '#f0fdf4' : '#fef2f2' }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
-            <div>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: primaryPrintDelivery.preflight.ok ? '#166534' : '#991b1b' }}>
-                打印预检：{primaryPrintDelivery.preflight.ok ? '可导出' : '需处理'}
-              </div>
-              <div data-testid="print-profile-label" style={{ fontSize: '12px', color: '#4b5563', marginTop: '2px' }}>
-                版式 {primaryPrintDelivery.profile.paper} {primaryPrintDelivery.profile.orientation === 'landscape' ? '横向' : '纵向'} - {primaryPrintDelivery.preflight.counts.printBlocks} 个打印模块
-              </div>
+      {/* 产品信息栏（含 report.product_model 兜底 + 单号 + 创建时间） */}
+      <section data-testid="print-product-info" style={{ border: '1px solid #d1d5db', borderRadius: '8px', padding: '14px 16px', margin: '16px 0', background: '#fff' }}>
+        <div style={{ fontSize: '14px', fontWeight: 700, color: '#0d9488', marginBottom: '10px', borderBottom: '1px solid #e5e7eb', paddingBottom: '6px' }}>产品信息</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px 16px', fontSize: '12px' }}>
+          {([
+            { label: '单号', value: task?.project_number },
+            { label: '产品型号', value: task?.product_model || report.product_model },
+            { label: '产品', value: task?.product },
+            { label: '品类', value: task?.product_category },
+            { label: '项目类型', value: task?.project_type },
+            { label: '项目阶段', value: task?.project_phase },
+            { label: '体验人', value: task?.organizer },
+            { label: '体验时间', value: formatBeijingTime(task?.test_date as string | null | undefined) },
+            { label: '创建时间', value: formatBeijingTime(report.created_at) },
+          ] as Array<{ label: string; value: unknown }>)
+            .filter((item) => item.value !== null && item.value !== undefined && String(item.value).trim() !== '')
+            .map((item) => (
+            <div key={item.label}>
+              <span style={{ color: '#6b7280' }}>{item.label}：</span>
+              <span style={{ fontWeight: 600 }}>{String(item.value)}</span>
             </div>
-            {primaryPrintDelivery.latestPdfJob && (
-              <div data-testid="print-pdf-job-status" style={{ fontSize: '12px', color: '#4b5563' }}>
-                最近PDF任务：{primaryPrintDelivery.latestPdfJob.status}
-              </div>
-            )}
+          ))}
+        </div>
+        {/* 体验目的独占一行（大量文本，避免撑高网格） */}
+        {task?.test_purpose ? (
+          <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid #f3f4f6', fontSize: '12px' }}>
+            <span style={{ color: '#6b7280' }}>体验目的：</span>
+            <span style={{ fontWeight: 600 }}>{String(task.test_purpose)}</span>
           </div>
-          {(preflightErrors.length > 0 || preflightWarnings.length > 0) && (
-            <ul style={{ margin: '10px 0 0', padding: 0, listStyle: 'none', display: 'grid', gap: '6px' }}>
-              {[...preflightErrors, ...preflightWarnings].map((item) => (
-                <li
-                  key={item.code}
-                  data-testid="print-preflight-item"
-                  style={{ border: `1px solid ${item.severity === 'error' ? '#fecaca' : '#fde68a'}`, borderRadius: '6px', padding: '8px', background: '#fff', color: item.severity === 'error' ? '#991b1b' : '#92400e', fontSize: '12px' }}
-                >
-                  <strong>{item.code}</strong> - {item.message}
-                  <div style={{ color: '#6b7280', marginTop: '2px' }}>{item.action}</div>
-                </li>
-              ))}
-            </ul>
-          )}
+        ) : null}
+      </section>
+
+      {/* 总结栏（无内容时缩小空间） */}
+      {displayReport.ai_summary ? (
+        <section style={{ margin: '16px 0', border: '1px solid #d1d5db', borderRadius: '8px', padding: '14px 16px' }}>
+          <div style={{ fontSize: '14px', fontWeight: 700, color: '#0d9488', marginBottom: '10px', borderBottom: '1px solid #e5e7eb', paddingBottom: '6px' }}>总结</div>
+          {(() => {
+            const ai = displayReport.ai_summary as Record<string, unknown>;
+            const tag = ai.tag ? String(ai.tag) : '';
+            const summary = ai.summary ? String(ai.summary) : '';
+            const strengths = Array.isArray(ai.strengths) ? (ai.strengths as string[]).filter(Boolean) : [];
+            const risks = Array.isArray(ai.risks) ? (ai.risks as string[]).filter(Boolean) : [];
+            const suggestions = Array.isArray(ai.suggestions) ? (ai.suggestions as string[]).filter(Boolean) : [];
+            return (
+              <div style={{ fontSize: '12px', lineHeight: 1.7 }}>
+                {tag && <div style={{ display: 'inline-block', padding: '2px 8px', background: '#ccfbf1', borderRadius: '4px', fontSize: '11px', marginRight: '6px', marginBottom: '6px' }}>{tag}</div>}
+                {summary && <p style={{ margin: '6px 0', color: '#374151' }}>{summary}</p>}
+                {strengths.length > 0 && (
+                  <div style={{ margin: '6px 0' }}>
+                    <span style={{ color: '#059669', fontWeight: 600 }}>主要优势：</span>
+                    {strengths.map((s, i) => <span key={i} style={{ color: '#374151' }}>{i > 0 ? '；' : ''}{s}</span>)}
+                  </div>
+                )}
+                {risks.length > 0 && (
+                  <div style={{ margin: '6px 0' }}>
+                    <span style={{ color: '#d97706', fontWeight: 600 }}>主要风险：</span>
+                    {risks.map((s, i) => <span key={i} style={{ color: '#374151' }}>{i > 0 ? '；' : ''}{s}</span>)}
+                  </div>
+                )}
+                {suggestions.length > 0 && (
+                  <div style={{ margin: '6px 0' }}>
+                    <span style={{ fontWeight: 600 }}>后续建议：</span>
+                    <ol style={{ margin: '4px 0 0 18px', padding: 0 }}>
+                      {suggestions.map((s, i) => <li key={i} style={{ color: '#374151' }}>{s}</li>)}
+                    </ol>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </section>
+      ) : (
+        <div style={{ margin: '12px 0', padding: '6px 12px', border: '1px dashed #e5e7eb', borderRadius: '6px', fontSize: '11px', color: '#999' }}>暂无总结内容</div>
+      )}
+
+      {/* 概览统计（5 项：问题点维度） */}
+      <h2 style={{ fontSize: '18px', margin: '24px 0 12px', color: '#0d9488', borderBottom: '2px solid #0d9488', paddingBottom: '4px' }}>概览统计</h2>
+      {(() => {
+        const sensoryCnt = allLiveIssues.filter((i) => (i as Record<string, unknown>).source_type === 'record_fail').length;
+        const funcCnt = allLiveIssues.filter((i) => (i as Record<string, unknown>).source_type === 'recipe_problem' && !(i as Record<string, unknown>).source_assembly_id).length;
+        const cmpCnt = allLiveIssues.filter((i) => (i as Record<string, unknown>).source_type === 'recipe_problem' && (i as Record<string, unknown>).source_assembly_id).length;
+        const rectified = allLiveIssues.filter((i) => {
+          const st = String((i as Record<string, unknown>).status || '');
+          return st === 'verified_closed' || st === '已验证' || st === '已整改';
+        }).length;
+        const rate = allLiveIssues.length > 0 ? Math.round((rectified / allLiveIssues.length) * 100) : 0;
+        const stats5 = [
+          { label: '问题点总数', value: allLiveIssues.length, color: '#1a1a1a' },
+          { label: '五感体验问题', value: sensoryCnt, color: '#d97706' },
+          { label: '功能效果问题', value: funcCnt, color: '#ea580c' },
+          { label: '对比问题', value: cmpCnt, color: '#7c3aed' },
+          { label: '整改率', value: `${rate}%`, color: '#059669' },
+        ];
+        return (
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', margin: '12px 0 20px' }}>
+            {stats5.map((s) => (
+              <div key={s.label} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px', textAlign: 'center', minWidth: '110px', flex: 1 }}>
+                <div style={{ fontSize: '24px', fontWeight: 'bold', color: s.color }}>{s.value}</div>
+                <div style={{ fontSize: '11px', color: '#666', marginTop: '4px' }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+
+      {/* 问题点栏（分行展开 + 素材；五感/功能/对比统一格式） */}
+      {allLiveIssues.length > 0 && (
+        <section style={{ margin: '20px 0', pageBreakInside: 'avoid' }}>
+          <h2 style={{ fontSize: '18px', color: '#0d9488', borderBottom: '2px solid #0d9488', paddingBottom: '4px', marginBottom: '12px' }}>问题点</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {allLiveIssues.map((issue) => {
+              const iss = issue as Record<string, unknown>;
+              const level = String(iss.level || '三类');
+              const levelColor = level === '一类' ? '#dc2626' : level === '二类' ? '#d97706' : '#2563eb';
+              const sourceType = String(iss.source_type || '');
+              const sourceLabel = sourceType === 'recipe_problem' ? (iss.source_assembly_id ? '对比项' : '食谱/功能') : sourceType === 'record_fail' ? '五感体验' : '其他';
+              const status = String(iss.status || '');
+              const statusMap: Record<string, string> = { open: '待整改', triaged: '待整改', assigned: '整改中', rectifying: '整改中', pending_verification: '待验证', verified_closed: '已整改', waived: '不整改', reopened: '待整改', '待整改': '待整改', '整改中': '整改中', '已验证': '已整改', '已整改': '已整改', '不整改': '不整改' };
+              const statusLabel = statusMap[status] || status || '待整改';
+              // 解析描述分行
+              const descLines = String(iss.description || '').split('\n').filter(Boolean);
+              const descMap: Record<string, string> = {};
+              for (const line of descLines) { const idx = line.indexOf('：'); if (idx > 0) descMap[line.slice(0, idx)] = line.slice(idx + 1); }
+              const mats = (iss.materials as Array<Record<string, unknown>>) || [];
+              const objText = descMap['对象'] || '';
+              const projText = descMap['项目'] || '';
+              const detailText = descMap['细项'] || '';
+              const problemText = descMap['问题'] || String(iss.title || '');
+              return (
+                <div key={String(iss.id)} className="print-issue-row" style={{ border: '1px solid #e5e7eb', borderRadius: '6px', padding: '10px 12px', fontSize: '12px', pageBreakInside: 'avoid' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '6px' }}>
+                    <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 700, color: '#fff', background: levelColor }}>{level}</span>
+                    <span style={{ display: 'inline-block', padding: '1px 6px', border: '1px solid #d1d5db', borderRadius: '3px', fontSize: '10px', color: '#4b5563' }}>{sourceLabel}</span>
+                    <span style={{ flex: 1, minWidth: 0, fontWeight: 500 }}>{String(iss.title || '')}</span>
+                    <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', background: '#f3f4f6', color: '#374151' }}>{statusLabel}</span>
+                  </div>
+                  {/* 分行展开 */}
+                  {objText && <div style={{ color: '#6b7280' }}>对象：{objText}</div>}
+                  {projText && <div style={{ color: '#6b7280' }}>项目：{projText}</div>}
+                  {detailText && <div style={{ color: '#6b7280' }}>细项：{detailText}</div>}
+                  <div style={{ color: '#6b7280' }}>问题：{problemText}</div>
+                  {(() => {
+                    const descStr = iss.description ? String(iss.description) : '';
+                    if (!objText && descStr && descStr !== problemText) {
+                      return <div style={{ color: '#6b7280' }}>{descStr}</div>;
+                    }
+                    return null;
+                  })()}
+                  {/* 素材 */}
+                  {mats.length > 0 && (
+                    <div style={{ marginTop: '4px' }}>
+                      <span style={{ color: '#6b7280' }}>素材：</span>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
+                        {mats.map((m) => (
+                          <div key={String(m.id)} style={{ width: '60px', height: '60px', overflow: 'hidden', borderRadius: '4px', border: '1px solid #e5e7eb', background: '#f9fafb' }}>
+                            {String(m.material_type || 'image') === 'image' ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={String(m.file_url || m.file_path || '')} alt={String(m.file_name || '')} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            ) : (
+                              <video src={String(m.file_url || m.file_path || '')} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </section>
       )}
 
-      {/* Overall Stats */}
-      <h2 style={{ fontSize: '18px', margin: '24px 0 12px', color: '#0d9488', borderBottom: '2px solid #0d9488', paddingBottom: '4px' }}>概览统计</h2>
-      <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', margin: '16px 0' }}>
-        {[
-          { label: '检查项总数', value: totalRecords.length, color: '#1a1a1a' },
-          { label: '合格', value: totalPass, color: '#059669' },
-          { label: '不合格', value: totalFail, color: '#dc2626' },
-          { label: '问题整改', value: allLiveIssues.length, color: '#d97706' },
-          { label: '食谱/功能问题', value: totalRecipePC, color: '#ea580c' },
-        ].map((stat) => (
-          <div key={stat.label} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px', textAlign: 'center', minWidth: '120px', flex: 1 }}>
-            <div style={{ fontSize: '28px', fontWeight: 'bold', color: stat.color }}>{stat.value}</div>
-            <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>{stat.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Report sections with dividers */}
+      {/* 报告分区（按型号+阶段区隔，重复则加时间）+ 内联矩阵/功能效果（单食谱列表式，全展开） */}
       {allReports.map((rpt, idx) => {
         const rptTask = rpt.content?.task as Record<string, unknown> | undefined;
-        const rptPhase = rptTask?.project_phase as string | undefined;
-        const rptDate = rptTask?.test_date as string | undefined;
-        const rptType = rptTask?.project_type as string | undefined;
+        const rptPhase = (rptTask?.project_phase as string) || '';
+        const rptModel = (rptTask?.product_model as string) || rpt.product_model || '';
+        const rptDate = rptTask?.test_date ? formatBeijingTime(rptTask.test_date as string).slice(0, 10) : '';
+        // 合并标题：型号+阶段；若与前一份型号+阶段重复则加时间
+        const phaseModel = [rptPhase, rptModel].filter(Boolean).join(' - ') || rpt.title;
+        const prevSameKey = idx > 0 ? (() => {
+          const prev = allReports[idx - 1];
+          const prevTask = prev.content?.task as Record<string, unknown> | undefined;
+          const prevKey = [(prevTask?.project_phase as string) || '', (prevTask?.product_model as string) || prev.product_model || ''].filter(Boolean).join(' - ');
+          return prevKey === [rptPhase, rptModel].filter(Boolean).join(' - ');
+        })() : false;
+        const sectionTitle = prevSameKey && rptDate ? `${phaseModel}（${rptDate}）` : phaseModel;
+        const rptRecipes = ((rpt.content?.recipes || []) as unknown as Array<Record<string, unknown>>);
+        const rptSnapshot = detailModelsMap[rpt.id];
         return (
-          <div key={rpt.id}>
-            {/* Divider between reports */}
+          <div key={rpt.id} className="print-report-card" style={{ pageBreakInside: 'avoid' }}>
+            {/* 合并分割线 + 标题（型号+阶段，重复加时间） */}
             {idx > 0 && (
-              <div style={{ margin: '32px 0', borderTop: '2px dashed #0d9488', paddingTop: '12px' }}>
-                <div style={{ fontSize: '16px', fontWeight: 600, color: '#0d9488', marginBottom: '4px' }}>
-                  {rptPhase && <span style={{ display: 'inline-block', padding: '2px 8px', background: '#ccfbf1', borderRadius: '4px', fontSize: '12px', marginRight: '8px' }}>{rptPhase}</span>}
-                  {rpt.title}
-                  {rptDate && <span style={{ color: '#666', fontWeight: 400, marginLeft: '8px', fontSize: '12px' }}>({rptDate})</span>}
-                </div>
-                <div style={{ fontSize: '11px', color: '#888' }}>
-                  以下为独立报告内容，与上方报告以分割线区分{rptType ? ` | 项目类型: ${rptType}` : ''}
-                </div>
+              <div style={{ margin: '32px 0 12px', borderTop: '2px dashed #0d9488', paddingTop: '12px' }}>
+                <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#0d9488' }}>{sectionTitle}</h2>
               </div>
             )}
-            {/* First report header */}
             {idx === 0 && isMerged && (
-              <div style={{ margin: '24px 0 12px' }}>
-                <h2 style={{ fontSize: '18px', color: '#0d9488', borderBottom: '2px solid #0d9488', paddingBottom: '4px' }}>
-                  {rptPhase && <span style={{ display: 'inline-block', padding: '2px 8px', background: '#ccfbf1', borderRadius: '4px', fontSize: '12px', marginRight: '8px' }}>{rptPhase}</span>}
-                  {rpt.title}
-                  {rptDate && <span style={{ color: '#666', fontWeight: 400, marginLeft: '8px', fontSize: '12px' }}>({rptDate})</span>}
-                </h2>
-              </div>
+              <h2 style={{ fontSize: '16px', margin: '20px 0 12px', color: '#0d9488', borderBottom: '2px solid #0d9488', paddingBottom: '4px' }}>{sectionTitle}</h2>
             )}
-            {!isMerged && idx === 0 && (
-              <h2 style={{ fontSize: '18px', margin: '24px 0 12px', color: '#0d9488', borderBottom: '2px solid #0d9488', paddingBottom: '4px' }}>{rpt.title}</h2>
+
+            {/* 横向对比矩阵（仅对比报告，仅渲染一次，不重复） */}
+            {rpt.report_type === 'comparison_report' && rptSnapshot && (
+              <PrintInlineMatrix detailModel={rptSnapshot} />
             )}
-            {detailModelsMap[rpt.id] && (
-              <ReportPrintSectionBlocks sections={detailModelsMap[rpt.id].sections} />
-            )}
-            {(!detailModelsMap[rpt.id] || printParityMode) && (
-              <div data-testid="print-legacy-content" data-display-weight={detailModelsMap[rpt.id] ? 'parity' : 'fallback'}>
-                <PrintReportSection report={rpt} liveIssues={liveIssuesMap[rpt.id] || []} />
-              </div>
+
+            {/* 功能效果（单食谱列表式，全展开） */}
+            {rptRecipes.length > 0 && (
+              <section style={{ margin: '20px 0' }}>
+                <h2 style={{ fontSize: '18px', color: '#0d9488', borderBottom: '2px solid #0d9488', paddingBottom: '4px', marginBottom: '12px' }}>功能效果</h2>
+                {rptRecipes.map((recipe) => (
+                  <PrintRecipeCard key={String(recipe.id)} recipe={recipe} />
+                ))}
+              </section>
             )}
           </div>
         );
@@ -1111,7 +1472,15 @@ function ReportPrintContent() {
             overflow-wrap: anywhere !important;
           }
         }
-        @page { size: A4; margin: 20mm; }
+        @page { size: A4 landscape; margin: 12mm; }
+        /* 打印时确保所有折叠区块展开 */
+        @media print {
+          .print-container details { open: true; }
+          .print-container details > summary { display: none !important; }
+          .print-container details[style*="display: none"],
+          .print-container [data-collapsed="true"] { display: block !important; }
+          tr, td, th, .print-recipe-card, .print-issue-row { page-break-inside: avoid; }
+        }
       `}</style>
     </div>
     </>

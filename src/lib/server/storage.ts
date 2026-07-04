@@ -276,4 +276,46 @@ export function isNginxAccelRedirect(): boolean {
   return NGINX_UPLOADS_INTERNAL.length > 0;
 }
 
+/**
+ * 读取本地图片文件并转为 base64 data URL（供 AI 视觉模型使用）。
+ * 对超过 500KB 的图片，用系统 ImageMagick (convert) 压缩到最长边 800px / JPEG 70% 质量后再转 base64。
+ * 压缩后单张约 50-150KB（base64≈70-200KB），3张约 600KB——适配通用 AI API 10MB 限制。
+ * @param key - 素材的 storage key（file_path）
+ * @returns data URL 字符串，文件不存在/非图片/压缩失败时返回 null
+ */
+export async function readLocalImageAsDataUrl(key: string): Promise<string | null> {
+  if (isS3Driver()) return null;
+  try {
+    const filePath = resolveLocalFilePath(key);
+    const stats = await stat(filePath);
+    const contentType = getLocalContentType(key);
+    if (!contentType.startsWith('image/')) return null;
+
+    // 小图（<500KB）直接转 base64
+    if (stats.size <= 500 * 1024) {
+      const buffer = await readFile(filePath);
+      return `data:${contentType};base64,${buffer.toString('base64')}`;
+    }
+
+    // 大图：用 ImageMagick 压缩到最长边 800px JPEG 70%
+    const { execFile } = await import('child_process');
+    const { promisify } = await import('util');
+    const execFileAsync = promisify(execFile);
+    const tmpPath = `${filePath}.ai_compress.jpg`;
+    await execFileAsync('convert', [
+      filePath,
+      '-resize', '800x800>',   // 最长边缩到800px（>表示只缩小不放大）
+      '-quality', '70',         // JPEG 质量70%
+      '-strip',                 // 去除 EXIF 等元数据
+      tmpPath,
+    ], { timeout: 10000 });
+    const compressed = await readFile(tmpPath);
+    // 清理临时文件
+    await unlink(tmpPath).catch(() => {});
+    return `data:image/jpeg;base64,${compressed.toString('base64')}`;
+  } catch {
+    return null;
+  }
+}
+
 export { LOCAL_PUBLIC_BASE_PATH, LOCAL_PROTECTED_BASE_PATH, LOCAL_UPLOAD_DIR, S3_BUCKET, STORAGE_DRIVER };

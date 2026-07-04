@@ -22,9 +22,12 @@ function sameOrigin(request: NextRequest, value: string | null) {
   if (!value) return true;
   try {
     const incoming = new URL(value);
-    const host = request.headers.get('x-forwarded-host') || request.headers.get('host');
-    const proto = request.headers.get('x-forwarded-proto') || request.nextUrl.protocol.replace(':', '');
-    return incoming.host === host && incoming.protocol.replace(':', '') === proto;
+    // 优先用反代传递的 host，兼容 Nginx 转发场景
+    const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || '';
+    // 只比较 host，不比较 protocol（HTTP/HTTPS 混合部署、反代场景 proto 经常不一致）
+    // 同时兼容 host 带不带端口的差异
+    const normalizeHost = (h: string) => h.replace(/^www\./, '').toLowerCase();
+    return normalizeHost(incoming.host) === normalizeHost(host);
   } catch {
     return false;
   }

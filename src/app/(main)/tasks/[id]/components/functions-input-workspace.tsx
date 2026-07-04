@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, type ReactNode } from 'react';
-import { ChefHat, ClipboardList, GripVertical, Pencil, Plus, Star, Trash2 } from 'lucide-react';
+import { ChefHat, ClipboardList, GripVertical, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -184,8 +184,27 @@ export function FunctionsInputWorkspace({
                     <Badge variant={recipe.effect_description ? 'secondary' : 'outline'} className="text-[10px]">
                       {recipe.effect_description ? '有效果评价' : '缺效果评价'}
                     </Badge>
-                    <Badge variant={(recipe.problem_count || 0) > 0 ? 'destructive' : 'outline'} className="justify-center text-[10px]">
-                      {recipe.problem_count || 0} 问题
+                    <Badge
+                      variant={(() => {
+                        const stepPPs = (recipe.recipe_steps || []).reduce((sum, step) => {
+                          const pps = step.problem_points;
+                          if (Array.isArray(pps) && pps.length > 0) return sum + pps.filter((p) => p.text?.trim()).length;
+                          return sum + (step.problem_point?.trim() ? 1 : 0);
+                        }, 0);
+                        const effectPPs = recipe.effect_problem_points?.filter((p) => p.text?.trim()).length || 0;
+                        return (stepPPs + effectPPs) > 0 ? 'destructive' : 'outline';
+                      })()}
+                      className="justify-center text-[10px]"
+                    >
+                      {(() => {
+                        const stepPPs = (recipe.recipe_steps || []).reduce((sum, step) => {
+                          const pps = step.problem_points;
+                          if (Array.isArray(pps) && pps.length > 0) return sum + pps.filter((p) => p.text?.trim()).length;
+                          return sum + (step.problem_point?.trim() ? 1 : 0);
+                        }, 0);
+                        const effectPPs = recipe.effect_problem_points?.filter((p) => p.text?.trim()).length || 0;
+                        return stepPPs + effectPPs;
+                      })()} 问题
                     </Badge>
                     {recipe.effect_score && <Badge className="justify-center text-[10px]">{recipe.effect_score} 分</Badge>}
                   </div>
@@ -287,26 +306,6 @@ export function FunctionsInputWorkspace({
                   </div>
                 ))}
               </div>
-            </div>
-
-            <div className="rounded-lg border bg-card p-3 shadow-sm">
-              <div className="mb-3 flex items-center gap-2">
-                <Star className="h-4 w-4 text-primary" />
-                <h3 className="text-sm font-semibold">效果/出品评价</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => onBindingTargetChange({ type: 'recipe_effect', id: selectedRecipe.id, label: '当前效果评价' })}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => void bindDroppedMaterial(event, { recipe_id: selectedRecipe.id })}
-                className="w-full rounded-md border bg-background p-3 text-left hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <div className="whitespace-pre-wrap text-sm">{selectedRecipe.effect_description || '暂无效果描述'}</div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Badge variant="outline">{selectedRecipe.effect_materials?.length || 0} 个效果素材</Badge>
-                  {selectedRecipe.effect_score && <Badge>{selectedRecipe.effect_score} 分</Badge>}
-                </div>
-              </button>
             </div>
 
             {renderEffectEditor?.(selectedRecipe)}

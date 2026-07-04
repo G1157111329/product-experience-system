@@ -11,7 +11,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { usePresignedUrls } from '@/lib/use-presigned-url';
+import { isPendingMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import { toast } from 'sonner';
 import {
   FilterBar,
@@ -38,6 +38,8 @@ type RecipeLibrarySectionProps = {
   isAdmin: boolean;
 };
 
+type StepMaterial = { id: string; file_url: string; file_path?: string; material_type: string; file_name: string };
+
 export const RecipeLibrarySection = forwardRef<RecipeSectionRef, RecipeLibrarySectionProps>(
 function RecipeLibrarySection({ categories, isAdmin }, ref) {
   const [recipes, setRecipes] = useState<RecipeLibItem[]>([]);
@@ -63,7 +65,7 @@ function RecipeLibrarySection({ categories, isAdmin }, ref) {
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   // Step materials map
-  const [stepMaterials, setStepMaterials] = useState<Record<string, Array<{ id: string; file_url: string; file_path?: string; material_type: string; file_name: string }>>>({});
+  const [stepMaterials, setStepMaterials] = useState<Record<string, StepMaterial[]>>({});
 
   // Flatten all step materials for presigned URL resolution
   const flatStepMaterials = Object.values(stepMaterials).flat();
@@ -92,7 +94,7 @@ function RecipeLibrarySection({ categories, isAdmin }, ref) {
     const data = await res.json();
     if (data.code === 0) {
       setDetailSteps(data.data || []);
-      const matMap: Record<string, Array<{ id: string; file_url: string; material_type: string; file_name: string }>> = {};
+      const matMap: Record<string, StepMaterial[]> = {};
       for (const step of (data.data || [])) {
         if (step.id) {
           const mRes = await fetch(`/api/materials?recipe_library_step_id=${step.id}&limit=50`);
@@ -349,11 +351,16 @@ function RecipeLibrarySection({ categories, isAdmin }, ref) {
                                 {step.id && stepMaterials[step.id] && stepMaterials[step.id].length > 0 && (
                                   <div className="flex gap-2 flex-wrap pl-8">
                                     {stepMaterials[step.id].map(mat => {
-                                      const resolvedUrl = presignedUrls.get(mat.id) || mat.file_url;
+                                      const resolvedUrl = presignedUrls.get(mat.id) || mat.file_url || mat.file_path || '';
+                                      const isPendingVideo = mat.material_type === 'video' && isPendingMediaUrl(resolvedUrl);
                                       return (
                                       <div key={mat.id} className="relative group w-16 h-16 rounded border overflow-hidden">
                                         {mat.material_type === 'video' ? (
-                                          <video src={resolvedUrl} className="w-full h-full object-cover" preload="metadata" />
+                                          isPendingVideo ? (
+                                            <div className="flex h-full w-full items-center justify-center bg-muted text-[10px] text-muted-foreground">加载中</div>
+                                          ) : (
+                                            <video src={resolvedUrl} className="w-full h-full object-cover" preload="metadata" />
+                                          )
                                         ) : (
                                           <img src={resolvedUrl} alt={mat.file_name} className="w-full h-full object-cover" />
                                         )}

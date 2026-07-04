@@ -134,6 +134,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       data: { intent, suggestions: dedupeSuggestions(merged), errors },
     }, { status: 500 });
   }
+  if (!hasResults) {
+    return NextResponse.json({
+      code: 1,
+      message: 'AI未返回可用体验方案，请重试或检查 Prompt 模板与任务基础信息。',
+      data: { intent, suggestions: dedupeSuggestions(merged) },
+    });
+  }
 
   return NextResponse.json({
     code: 0,

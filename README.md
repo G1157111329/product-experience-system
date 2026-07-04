@@ -160,6 +160,25 @@ NODE_ENV=production PORT=5000 pnpm start
 8. 将 `public/uploads` 挂载到持久化磁盘目录；使用 S3 模式时确认 bucket、访问密钥和生命周期策略。
 9. 完成登录、素材上传、报告生成、分享、导出和审计日志查询回归。
 
+### 当前生产实例备注
+
+截至 2026-06-29，当前生产实例部署在 `118.25.178.78`，应用目录为 `/home/ubuntu/product-experience-system`，由 PM2 进程 `product-experience-system` 管理。外部访问入口为 `http://118.25.178.78:5000`；当前 Node 应用进程监听 `PORT=5001`，由服务器本机的 5000 入口转发访问。生产环境变量以 PM2 当前进程环境为准，不依赖仓库中的 `.env.local`。
+
+本次 V3.1.1/Wave 1 增量部署已验证：
+
+- `pnpm ts-check` 和 `pnpm build` 在本地通过。
+- 生产 PM2 进程重启后在线。
+- `http://127.0.0.1:5001/login`、`/reports`、`/dashboard` 返回 200。
+- `http://127.0.0.1:5001/api/v1/dictionaries/project_phase_dict` 返回 200，且字典值为正常中文。
+- `project_phase_dict`、`issue_status_dict`、`task_status_dict`、`report_status_dict`、`issue_severity_dict`、`sla_policy_dict`、`report_view_configs`、`report_outline_sections`、`report_action_items`、`ai_runs`、`outbox_events` 等 V3/Wave1 表已存在。
+- 生产库当前 `reports` 为 0 条，因此 `report_outline_sections` 和 `report_action_items` 回填为 0 条属于正常结果。
+
+部署注意：
+
+- 远端非交互 shell 中优先使用 `npx pnpm@9.0.0 ...`，避免 `pnpm` 不在 PATH。
+- 生产构建必须有 `.next/BUILD_ID` 和 `dist/server.js`。如果远端 `next build` 长时间卡住，不要重启 PM2 到缺失 `.next/BUILD_ID` 的目录；可先在本地完成 `pnpm build`，再上传 `.next` 运行产物和 `dist/server.js` 做恢复。
+- 每次替换运行产物前保留 `/home/ubuntu/deploy-backups/` 下的回滚包，并完成 `curl` 健康检查后再声明部署完成。
+
 ## Docker 本地测试模拟环境
 
 Docker 仅用于本地模拟生产运行环境，方便验证构建、PostgreSQL 初始化、持久化上传目录和生产环境变量门禁。实际服务器上线仍可继续使用现有的 Node.js + PostgreSQL + 反向代理部署方式，不要求改成 Docker。

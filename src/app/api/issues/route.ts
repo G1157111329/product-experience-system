@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessTask, canReadReport, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
+import { createIssueOccurrence } from '@/lib/server/issue-lifecycle';
+import { normalizeIssueStatus } from '@/lib/server/issue-state-machine';
 
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
@@ -27,7 +29,7 @@ export async function GET(request: NextRequest) {
     if (!(await canReadReport(client, user, source_report_id))) return forbidden();
     query = query.eq('source_report_id', source_report_id);
   }
-  if (status) query = query.eq('status', status);
+  if (status) query = query.eq('status', normalizeIssueStatus(status));
   if (severity) query = query.eq('level', severity);
   if (keyword) query = query.ilike('title', `%${keyword}%`);
   if (task_ids) {
@@ -55,6 +57,12 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   if (!body.task_id || !(await canAccessTask(client, user, body.task_id))) return forbidden();
 
+  const { data: task } = await client
+    .from('experience_tasks')
+    .select('project_phase')
+    .eq('id', body.task_id)
+    .maybeSingle();
+
   const { data, error } = await client.from('issues').insert({
     task_id: body.task_id,
     record_id: body.record_id || null,
@@ -75,9 +83,22 @@ export async function POST(request: NextRequest) {
     responsible_dept: body.responsible_dept || null,
     responsible_person: body.responsible_person || null,
     plan_complete_date: body.plan_complete_date || null,
-    status: '待整改',
+    status: 'open',
   }).select().single();
 
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
+
+  if (data?.id) {
+    await createIssueOccurrence(client, {
+      issueId: data.id,
+      reportId: body.source_report_id || null,
+      taskId: body.task_id,
+      projectPhase: task?.project_phase ?? null,
+      occurredOn: new Date().toISOString().slice(0, 10),
+      occurrenceNote: body.description || null,
+      evidenceRefs: body.evidence_refs || null,
+    });
+  }
+
   return NextResponse.json({ code: 0, message: '创建成功', data });
 }

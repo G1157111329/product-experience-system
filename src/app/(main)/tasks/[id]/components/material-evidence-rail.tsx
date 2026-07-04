@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { useImagePreview } from '@/components/image-preview';
 import { cn } from '@/lib/utils';
-import { usePresignedUrls } from '@/lib/use-presigned-url';
+import { isPendingMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import type { EvidenceBindingTarget, Material, MaterialEvidenceFilter } from '../types';
 
 type MaterialEvidenceRailProps = {
@@ -46,6 +46,10 @@ function matchesFilter(material: Material, filter: MaterialEvidenceFilter) {
   if (filter === 'functions') return Boolean(material.recipe_step_id);
   if (filter === 'effect') return Boolean(material.recipe_id);
   return true;
+}
+
+function getMaterialPreviewUrl(material: Material, displayUrl: string) {
+  return isPendingMediaUrl(displayUrl) ? (material.file_path || material.file_url || '') : displayUrl;
 }
 
 export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange, embedded = false, compact = false }: MaterialEvidenceRailProps) {
@@ -169,7 +173,8 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
   return (
     <section className={cn(embedded ? 'space-y-3' : 'rounded-lg border bg-card p-3 shadow-sm')}>
       <PreviewComponent />
-      <div className={cn('flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between', compact && '2xl:flex-row')}>
+      {/* 嵌入窄侧栏时始终保持纵向：标题在上，按钮在下，避免按钮块覆盖“素材证据”标题 */}
+      <div className="flex flex-col gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="whitespace-nowrap text-sm font-semibold">素材证据</h2>
@@ -198,18 +203,18 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
             </Button>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-2">
-            <Button variant="outline" size="sm" onClick={() => cameraImageRef.current?.click()} disabled={uploading} className="whitespace-nowrap">
-              <Camera className="mr-1.5 h-4 w-4" />拍照
+          <div className="grid min-w-0 grid-cols-2 gap-2">
+            <Button variant="outline" size="sm" onClick={() => cameraImageRef.current?.click()} disabled={uploading} className="min-w-0 justify-center whitespace-nowrap px-2">
+              <Camera className="mr-1 h-4 w-4 shrink-0" />拍照
             </Button>
-            <Button variant="outline" size="sm" onClick={() => cameraVideoRef.current?.click()} disabled={uploading} className="whitespace-nowrap">
-              <Video className="mr-1.5 h-4 w-4" />录像
+            <Button variant="outline" size="sm" onClick={() => cameraVideoRef.current?.click()} disabled={uploading} className="min-w-0 justify-center whitespace-nowrap px-2">
+              <Video className="mr-1 h-4 w-4 shrink-0" />录像
             </Button>
-            <Button variant="outline" size="sm" onClick={() => imageInputRef.current?.click()} disabled={uploading} className="whitespace-nowrap">
-              <ImageIcon className="mr-1.5 h-4 w-4" />相册图片
+            <Button variant="outline" size="sm" onClick={() => imageInputRef.current?.click()} disabled={uploading} className="min-w-0 justify-center whitespace-nowrap px-2">
+              <ImageIcon className="mr-1 h-4 w-4 shrink-0" />相册图片
             </Button>
-            <Button variant="outline" size="sm" onClick={() => videoInputRef.current?.click()} disabled={uploading} className="whitespace-nowrap">
-              <Film className="mr-1.5 h-4 w-4" />相册视频
+            <Button variant="outline" size="sm" onClick={() => videoInputRef.current?.click()} disabled={uploading} className="min-w-0 justify-center whitespace-nowrap px-2">
+              <Film className="mr-1 h-4 w-4 shrink-0" />相册视频
             </Button>
           </div>
         )}
@@ -245,7 +250,9 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
           ) : (
             filteredMaterials.map((material) => {
               const selected = selectedIds.includes(material.id);
-              const resolvedUrl = presignedUrls.get(material.id) || material.file_url;
+              const resolvedUrl = presignedUrls.get(material.id) || material.file_url || material.file_path || '';
+              const previewUrl = getMaterialPreviewUrl(material, resolvedUrl);
+              const isPendingVideo = material.material_type === 'video' && isPendingMediaUrl(resolvedUrl);
               return (
                 <button
                   key={material.id}
@@ -257,7 +264,7 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
                     event.dataTransfer.effectAllowed = 'copy';
                   }}
                   onClick={() => toggleSelected(material.id)}
-                  onDoubleClick={() => open(resolvedUrl)}
+                  onDoubleClick={() => { if (previewUrl) open(previewUrl); }}
                   className={cn(
                     'group relative h-24 w-32 shrink-0 overflow-hidden rounded-lg border text-left transition',
                     selected ? 'border-primary ring-2 ring-primary/30' : 'border-border hover:border-primary/60'
@@ -267,7 +274,11 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
                     <img src={resolvedUrl} alt={material.file_name} loading="lazy" className="h-full w-full object-cover" />
                   ) : (
                     <>
-                      <video src={resolvedUrl} className="h-full w-full object-cover" muted preload="metadata" />
+                      {isPendingVideo ? (
+                        <div className="flex h-full w-full items-center justify-center bg-muted text-[10px] text-muted-foreground">加载中</div>
+                      ) : (
+                        <video src={resolvedUrl} className="h-full w-full object-cover" muted preload="metadata" />
+                      )}
                       <div className="absolute inset-0 flex items-center justify-center bg-black/20">
                         <Play className="h-5 w-5 fill-white text-white" />
                       </div>

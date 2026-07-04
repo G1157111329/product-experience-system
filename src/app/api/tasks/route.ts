@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json();
 
-  let taskName = body.task_name;
+  let taskName = typeof body.task_name === 'string' ? body.task_name.trim() : '';
   if (!taskName || !taskName.trim()) {
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     taskName = `${body.product_category || ''}${body.product || ''}${body.product_model || ''}${body.project_type || ''}${dateStr}${body.organizer ? '-' + body.organizer : ''}`;

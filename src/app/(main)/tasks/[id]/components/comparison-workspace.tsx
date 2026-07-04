@@ -431,11 +431,15 @@ export function ComparisonWorkspace({
     }
   };
 
-  const syncCellMedia = async (cellId: string, ids: string[]) => {
+  const syncCellMedia = async (cellId: string, ids: string[], optimisticMaterials?: Material[]) => {
+    const previousMaterials = cellMediaById[cellId] || [];
+    if (optimisticMaterials) {
+      setCellMediaById((current) => ({ ...current, [cellId]: optimisticMaterials }));
+    }
     setCellMediaSavingId(cellId);
     try {
       const res = await fetch(`/api/comparison-cells/${cellId}/media`, {
-        method: 'PUT',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ material_ids: ids }),
       });
@@ -445,8 +449,16 @@ export function ComparisonWorkspace({
         setCellMediaById((current) => ({ ...current, [cellId]: next }));
         toast.success('素材已关联到矩阵单元格');
       } else {
+        if (optimisticMaterials) {
+          setCellMediaById((current) => ({ ...current, [cellId]: previousMaterials }));
+        }
         toast.error(data.message || '素材关联失败');
       }
+    } catch {
+      if (optimisticMaterials) {
+        setCellMediaById((current) => ({ ...current, [cellId]: previousMaterials }));
+      }
+      toast.error('素材关联失败');
     } finally {
       setCellMediaSavingId('');
     }
@@ -494,7 +506,7 @@ export function ComparisonWorkspace({
             comparisonCellId={cell.id}
             selectedIds={cellMedia.map((material) => material.id)}
             initialMaterials={cellMedia}
-            onSelectionChange={(ids) => void syncCellMedia(cell.id, ids)}
+            onSelectionChange={(ids, materials) => void syncCellMedia(cell.id, ids, materials)}
             selectedPreviewSize="sm"
           />
         </div>

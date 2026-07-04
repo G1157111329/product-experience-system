@@ -68,10 +68,20 @@ export function AgentPresetPanel({
       const nextResult = data.data as AgentPresetResponse;
       const warnings = (data.data as Record<string, unknown>)?.warnings as string[] | undefined;
       if (mode === 'senses') {
-        setStandardSuggestions(nextResult.suggestions.standards || []);
+        const standards = nextResult.suggestions.standards || [];
+        if (standards.length === 0) {
+          toast.error('AI未返回可用五感体验建议，请重试或检查任务基础信息。');
+          return;
+        }
+        setStandardSuggestions(standards);
         toast.success(warnings?.length ? `已生成，但有部分失败: ${warnings.join('; ')}` : 'AI五感体验建议已生成');
       } else {
-        setRecipeSuggestions(nextResult.suggestions.recipes || []);
+        const recipes = nextResult.suggestions.recipes || [];
+        if (recipes.length === 0) {
+          toast.error('AI未返回可用食谱/功能建议，请重试或检查任务基础信息。');
+          return;
+        }
+        setRecipeSuggestions(recipes);
         setExpandedRecipes([]);
         toast.success(warnings?.length ? `已生成，但有部分失败: ${warnings.join('; ')}` : '食谱功能探索已生成');
       }

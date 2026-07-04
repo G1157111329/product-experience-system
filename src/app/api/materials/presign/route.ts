@@ -68,8 +68,15 @@ export async function POST(request: NextRequest) {
     const requestedPaths = Array.isArray(paths) ? paths : file_paths;
     const sharedTaskId = user ? null : await resolveSharedTaskId(client, share_token);
     const readableReportTaskId = user ? await resolveReadableReportTaskId(client, user, report_id) : null;
-    if (!user && !sharedTaskId) {
-      return NextResponse.json({ code: 1, message: '未登录' }, { status: 401 });
+
+    // local + public access 模式下，素材通过 /uploads/ 静态目录公开访问，无需鉴权
+    // 这样分享页（未登录）也能正常加载素材，避免裂图
+    const isLocalPublicAccess = process.env.LOCAL_UPLOAD_PUBLIC_ACCESS !== 'protected'
+      && process.env.STORAGE_DRIVER !== 's3';
+    if (!isLocalPublicAccess) {
+      if (!user && !sharedTaskId) {
+        return NextResponse.json({ code: 1, message: '未登录' }, { status: 401 });
+      }
     }
 
     if (!requestedPaths || !Array.isArray(requestedPaths) || requestedPaths.length === 0) {
@@ -80,6 +87,16 @@ export async function POST(request: NextRequest) {
     const urlMap: Record<string, string> = {};
 
     for (const path of limitedPaths) {
+      // local + public 模式：直接生成公开 URL，跳过素材归属鉴权（静态目录本就公开）
+      if (isLocalPublicAccess) {
+        try {
+          urlMap[path] = await generatePresignedUrl({ key: path, expireTime: 30 * 60 });
+        } catch (err) {
+          console.error('[presign] Failed for path:', path, err);
+        }
+        continue;
+      }
+
       const material = await findMaterialByPath(client, path);
       if (!material) continue;
 

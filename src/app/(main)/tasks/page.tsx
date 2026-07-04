@@ -20,6 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/lib/auth-context';
 import { getErrorMessage, readJsonResponse } from '@/lib/http';
+import { useDictLabels } from '@/hooks/useDictionary';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import {
@@ -91,6 +92,7 @@ async function readApiJson<T = unknown>(response: Response): Promise<T> {
 export default function TasksPage() {
   const router = useRouter();
   const { user, isAdmin } = useAuth();
+  const projectPhases = useDictLabels('project_phase_dict');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -280,9 +282,9 @@ export default function TasksPage() {
               </DialogHeader>
               <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <Label>任务名称 *</Label>
+                  <Label>任务名称</Label>
                   <Input
-                    placeholder="如：PBJ-F10U1新品体验"
+                    placeholder="可不填，系统会按品类/产品/型号/项目类型/日期/组织者自动生成"
                     value={form.task_name}
                     onChange={(event) => setForm({ ...form, task_name: event.target.value })}
                   />
@@ -371,7 +373,7 @@ export default function TasksPage() {
                   <div className="space-y-1.5">
                     <Label>项目阶段 *</Label>
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                      {['手板研究', '试制阶段', '试产阶段', '量产阶段'].map((phase) => (
+                      {projectPhases.map((phase) => (
                         <button
                           key={phase}
                           type="button"
@@ -421,7 +423,6 @@ export default function TasksPage() {
                   className="w-full"
                   disabled={
                     creating ||
-                    !form.task_name ||
                     !form.product_category ||
                     !form.product ||
                     !form.project_type ||

@@ -14,11 +14,19 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
-import { usePresignedUrls } from '@/lib/use-presigned-url';
+import { isPendingMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import { toast } from 'sonner';
 import { useImagePreview } from '@/components/image-preview';
 import { MaterialPicker } from '@/components/material-picker';
 import type { Recipe, RecipeStep, Material, RecipeLibRef } from '../types';
+
+function getMaterialDisplayUrl(material: Material, presignedUrls: Map<string, string>) {
+  return presignedUrls.get(material.id) || material.file_url || material.file_path || '';
+}
+
+function getMaterialPreviewUrl(material: Material, displayUrl: string) {
+  return isPendingMediaUrl(displayUrl) ? (material.file_path || material.file_url || '') : displayUrl;
+}
 
 export function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onStatusUpdate: () => void }) {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
@@ -595,21 +603,30 @@ export function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onSta
                       })()}
                       {step.materials && step.materials.length > 0 && (
                         <div className="flex gap-1.5 ml-7 flex-wrap">
-                          {step.materials.map((mat) => (
-                            <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border cursor-pointer"
-                              onClick={(e) => { e.stopPropagation(); open(presignedUrls.get(mat.id) || mat.file_url); }}>
-                              {mat.material_type === 'image' ? (
-                                <img src={presignedUrls.get(mat.id) || mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center bg-muted relative">
-                                  <video src={presignedUrls.get(mat.id) || mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
-                                  <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                                    <Play className="h-4 w-4 text-white fill-white" />
+                          {step.materials.map((mat) => {
+                            const displayUrl = getMaterialDisplayUrl(mat, presignedUrls);
+                            const previewUrl = getMaterialPreviewUrl(mat, displayUrl);
+                            const isPendingVideo = mat.material_type === 'video' && isPendingMediaUrl(displayUrl);
+                            return (
+                              <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border cursor-pointer"
+                                onClick={(e) => { e.stopPropagation(); if (previewUrl) open(previewUrl); }}>
+                                {mat.material_type === 'image' ? (
+                                  <img src={displayUrl} alt={mat.file_name} className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center bg-muted relative">
+                                    {isPendingVideo ? (
+                                      <span className="text-[10px] text-muted-foreground">加载中</span>
+                                    ) : (
+                                      <video src={displayUrl} className="w-full h-full object-cover" muted preload="metadata" />
+                                    )}
+                                    <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                                      <Play className="h-4 w-4 text-white fill-white" />
+                                    </div>
                                   </div>
-                                </div>
-                              )}
-                            </div>
-                          ))}
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -935,21 +952,30 @@ export function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onSta
               <div className="space-y-1.5">
                 <Label>当前关联素材</Label>
                 <div className="flex gap-1.5 flex-wrap">
-                  {editingStep.materials.map((mat) => (
-                    <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border cursor-pointer"
-                      onClick={() => open(presignedUrls.get(mat.id) || mat.file_url)}>
-                      {mat.material_type === 'image' ? (
-                        <img src={presignedUrls.get(mat.id) || mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center bg-muted relative">
-                          <video src={presignedUrls.get(mat.id) || mat.file_url} className="w-full h-full object-cover" muted preload="metadata" />
-                          <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                            <Play className="h-4 w-4 text-white fill-white" />
+                  {editingStep.materials.map((mat) => {
+                    const displayUrl = getMaterialDisplayUrl(mat, presignedUrls);
+                    const previewUrl = getMaterialPreviewUrl(mat, displayUrl);
+                    const isPendingVideo = mat.material_type === 'video' && isPendingMediaUrl(displayUrl);
+                    return (
+                      <div key={mat.id} className="w-14 h-14 rounded-md overflow-hidden border border-border cursor-pointer"
+                        onClick={() => { if (previewUrl) open(previewUrl); }}>
+                        {mat.material_type === 'image' ? (
+                          <img src={displayUrl} alt={mat.file_name} className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center bg-muted relative">
+                            {isPendingVideo ? (
+                              <span className="text-[10px] text-muted-foreground">加载中</span>
+                            ) : (
+                              <video src={displayUrl} className="w-full h-full object-cover" muted preload="metadata" />
+                            )}
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                              <Play className="h-4 w-4 text-white fill-white" />
+                            </div>
                           </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

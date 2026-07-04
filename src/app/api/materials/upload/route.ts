@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generatePresignedUrl, uploadFile } from '@/lib/server/storage';
+import { generatePresignedUrl, LOCAL_UPLOAD_DIR, STORAGE_DRIVER, uploadFile } from '@/lib/server/storage';
+import { faststartRemux } from '@/lib/server/video';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessAssembly, canAccessTask, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { checkSharedRateLimit } from '@/lib/server/rate-limit';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
 import { allocateEditedCopyFileName, allocateMaterialFileName } from '@/lib/material-naming';
 import { Readable } from 'stream';
+import path from 'path';
 import type { ReadableStream as NodeReadableStream } from 'stream/web';
 
 export const maxDuration = 120;
@@ -292,6 +294,15 @@ export async function POST(request: NextRequest) {
 
     if (!fileKey) {
       return NextResponse.json({ code: 1, message: '文件上传失败' }, { status: 500 });
+    }
+
+    // Faststart remux for video files: move moov atom to beginning
+    // so browsers can load metadata without seeking to end of file
+    if (materialType === 'video' && STORAGE_DRIVER !== 's3') {
+      const videoPath = path.join(LOCAL_UPLOAD_DIR, fileKey);
+      faststartRemux(videoPath).catch(err =>
+        console.warn('[upload] faststart background task failed:', err)
+      );
     }
 
     const { data, error } = await client.from('materials').insert({

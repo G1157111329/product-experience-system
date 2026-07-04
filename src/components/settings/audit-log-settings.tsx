@@ -151,7 +151,7 @@ export function AuditLogSettings({ open, onOpenChange }: AuditLogSettingsProps) 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-6xl overflow-hidden p-0">
+      <DialogContent className="max-h-[90vh] w-[calc(100vw-1rem)] max-w-none overflow-hidden p-0 sm:!w-[min(1180px,calc(100vw-2rem))] sm:!max-w-[1180px]">
         <DialogHeader className="border-b px-5 py-4">
           <DialogTitle className="flex items-center gap-2">
             <ShieldCheck className="h-5 w-5" /> 日志管理
@@ -161,10 +161,10 @@ export function AuditLogSettings({ open, onOpenChange }: AuditLogSettingsProps) 
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid max-h-[calc(90vh-5.5rem)] min-h-0 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_18rem]">
-          <div className="@container min-w-0 overflow-y-auto px-5 py-4">
-            <div className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/20 p-3 @2xl:grid-cols-3 @4xl:grid-cols-4">
-              <div className="col-span-2 @2xl:col-span-3 @4xl:col-span-2">
+        <div className="flex max-h-[calc(90vh-5.5rem)] min-h-0 flex-col overflow-hidden lg:grid lg:grid-cols-[minmax(0,1fr)_20rem]">
+          <div className="min-w-0 overflow-y-auto px-5 py-4">
+            <div className="grid grid-cols-1 gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="sm:col-span-2 xl:col-span-2">
                 <Label className="text-xs">关键词</Label>
                 <Input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="动作、账号、对象、路径" className="mt-1 h-9" />
               </div>
@@ -211,7 +211,7 @@ export function AuditLogSettings({ open, onOpenChange }: AuditLogSettingsProps) 
                 <Label className="text-xs">结束日期</Label>
                 <Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="mt-1 h-9" />
               </div>
-              <div className="col-span-2 flex flex-wrap items-end gap-2 @2xl:col-span-3 @4xl:col-span-4">
+              <div className="flex flex-wrap items-end gap-2 sm:col-span-2 xl:col-span-4">
                 <Button type="button" className="h-9" onClick={fetchLogs} disabled={loading}>
                   {loading ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-1.5 h-4 w-4" />}
                   查询
@@ -226,7 +226,7 @@ export function AuditLogSettings({ open, onOpenChange }: AuditLogSettingsProps) 
             </div>
 
             <div className="mt-4 overflow-hidden rounded-lg border">
-              <div className="hidden gap-3 border-b bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground @3xl:grid @3xl:grid-cols-[8rem_minmax(0,1fr)_6rem_7rem]">
+              <div className="hidden gap-3 border-b bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[9rem_minmax(0,1fr)_6rem_8rem]">
                 <span>时间</span>
                 <span>事件</span>
                 <span>结果</span>
@@ -239,11 +239,11 @@ export function AuditLogSettings({ open, onOpenChange }: AuditLogSettingsProps) 
                     type="button"
                     onClick={() => setSelected(log)}
                     className={cn(
-                      'grid w-full grid-cols-1 gap-1 px-3 py-3 text-left text-xs hover:bg-muted/40 @3xl:grid-cols-[8rem_minmax(0,1fr)_6rem_7rem] @3xl:gap-3',
+                      'grid w-full grid-cols-1 gap-1 px-3 py-3 text-left text-xs hover:bg-muted/40 md:grid-cols-[9rem_minmax(0,1fr)_6rem_8rem] md:gap-3',
                       selected?.id === log.id && 'bg-muted/60',
                     )}
                   >
-                    <span className="text-muted-foreground">{formatDateTime(log.created_at)}</span>
+                    <span className="text-muted-foreground md:whitespace-nowrap">{formatDateTime(log.created_at)}</span>
                     <span className="min-w-0">
                       <span className="block truncate font-medium">{actionLabels[log.action] || log.action}</span>
                       <span className="mt-0.5 block truncate text-muted-foreground">{log.request_method || '-'} {log.request_path || '-'}</span>
@@ -261,7 +261,7 @@ export function AuditLogSettings({ open, onOpenChange }: AuditLogSettingsProps) 
             </div>
           </div>
 
-          <aside className="min-h-0 border-t bg-muted/15 p-4 lg:border-l lg:border-t-0">
+          <aside className="max-h-72 min-h-0 overflow-y-auto border-t bg-muted/15 p-4 lg:max-h-none lg:border-l lg:border-t-0">
             <p className="text-sm font-medium">事件详情</p>
             {selected ? (
               <div className="mt-3 space-y-3 text-xs">

@@ -22,7 +22,12 @@ export { platformUsers, platformAuditRequests, platformCategories, platformProdu
   comparisonAssemblies, comparisonObjects, comparisonItemNodes, comparisonMatrixCells,
   metricDefinitions, metricFormulaVersions, metricThresholdRules, metricEvaluations,
   comparisonAiResults, reportSnapshots, pdfGenerationJobs, excelImportJobs,
-  excelImportTemplates } from './shared/schema';
+  excelImportTemplates,
+  projectPhaseDict, issueStatusDict, taskStatusDict, reportStatusDict,
+  issueSeverityDict, slaPolicyDict,
+  reportViewConfigs, reportOutlineSections, reportActionItems, exportJobs,
+  renderProfiles, reportPrintBlocks, issueOccurrences, rectificationActions,
+  verifications, reportSummaries, aiRuns, outboxEvents, notifications } from './shared/schema';
 
 function getSupabaseUrl(): string | undefined {
   return process.env.NEXT_PUBLIC_SUPABASE_URL;

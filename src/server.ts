@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'http';
 import { resolve, sep } from 'path';
 import { parse } from 'url';
 import next from 'next';
+import { applyNoStorePageHeaders, isHtmlPageRequest } from './lib/server/page-cache';
 import { validateProductionStartupSecurity } from './lib/server/startup-security';
 import {
   createLocalFileReadStream,
@@ -36,6 +37,15 @@ function getStaticContentType(pathname: string) {
   if (pathname.endsWith('.woff')) return 'font/woff';
   if (pathname.endsWith('.woff2')) return 'font/woff2';
   return 'application/octet-stream';
+}
+
+function enforceNoStoreForHtmlPage(req: IncomingMessage, res: ServerResponse) {
+  if (!req.url) return;
+
+  const parsedUrl = parse(req.url);
+  const pathname = parsedUrl.pathname || '';
+  if (!isHtmlPageRequest(req.method, pathname, req.headers.accept)) return;
+  applyNoStorePageHeaders(res);
 }
 
 async function tryServeNextStatic(req: IncomingMessage, res: ServerResponse) {
@@ -181,6 +191,7 @@ app.prepare().then(() => {
     try {
       if (await tryServeNextStatic(req, res)) return;
       if (await tryServeLocalUpload(req, res)) return;
+      enforceNoStoreForHtmlPage(req, res);
       const parsedUrl = parse(req.url!, true);
       await handle(req, res, parsedUrl);
     } catch (err) {

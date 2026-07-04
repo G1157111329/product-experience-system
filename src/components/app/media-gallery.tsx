@@ -2,7 +2,7 @@
 
 import type { KeyboardEvent } from 'react';
 import { useImagePreview } from '@/components/image-preview';
-import { toPublicMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
+import { isPendingMediaUrl, toPublicMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import { cn } from '@/lib/utils';
 
 interface Material {
@@ -65,6 +65,7 @@ function MediaThumbnail({
           : 'h-20 w-20';
 
   const isImagePlaceholder = url.startsWith('data:image/');
+  const isPendingVideo = type === 'video' && isPendingMediaUrl(url);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!onClick) return;
@@ -96,7 +97,7 @@ function MediaThumbnail({
       onKeyDown={handleKeyDown}
       onKeyUp={handleKeyUp}
     >
-      {type === 'video' && !isImagePlaceholder ? (
+      {type === 'video' && !isImagePlaceholder && !isPendingVideo ? (
         <>
           <video
             src={url}
@@ -114,6 +115,10 @@ function MediaThumbnail({
             </svg>
           </div>
         </>
+      ) : isPendingVideo ? (
+        <div className="flex h-full w-full items-center justify-center bg-muted text-[10px] text-muted-foreground">
+          加载中
+        </div>
       ) : (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -187,12 +192,13 @@ export function MediaGallery({
       <div className={cn('grid min-w-0', gridCols, gap, className)}>
         {materials.map((mat) => {
           const resolvedUrl = presignedMap.get(mat.id) || getInitialMediaUrl(mat);
+          const previewUrl = isPendingMediaUrl(resolvedUrl) ? (mat.file_path || mat.file_url || resolvedUrl) : resolvedUrl;
           return (
             <MediaThumbnail
               key={mat.id}
               url={resolvedUrl}
               type={mat.material_type === 'video' ? 'video' : 'image'}
-              onClick={() => open(resolvedUrl)}
+              onClick={() => open(previewUrl)}
               size={size}
               responsive={responsive}
             />

@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS experience_tasks (
   status VARCHAR(20) NOT NULL DEFAULT '待执行',     -- 待执行/进行中/已完成
   assigned_to VARCHAR(200),
   selected_standards JSONB,
+  owner_id VARCHAR(36),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -209,6 +210,13 @@ CREATE INDEX IF NOT EXISTS issues_severity_idx ON issues(severity);
 CREATE INDEX IF NOT EXISTS issues_source_type_idx ON issues(source_type);
 CREATE INDEX IF NOT EXISTS issues_created_at_idx ON issues(created_at);
 
+-- 对比矩阵溯源字段：将矩阵单元格问题点关联回矩阵（幂等迁移）
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS source_assembly_id VARCHAR(36);
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS source_cell_id VARCHAR(36);
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS source_item_node_id VARCHAR(36);
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS source_object_id VARCHAR(36);
+CREATE INDEX IF NOT EXISTS issues_source_assembly_id_idx ON issues(source_assembly_id);
+
 -- ============================================================
 -- 10. 问题复评估表
 -- ============================================================
@@ -238,6 +246,7 @@ CREATE TABLE IF NOT EXISTS recipes (
   effect_score VARCHAR(20),                          -- AI综合评分
   effect_problem_point TEXT,                         -- 效果问题点（JSON数组格式）
   effect_ai_result JSONB,                           -- AI四维评价完整结果
+  effect_status VARCHAR(20),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -606,6 +615,7 @@ ALTER TABLE experience_tasks ADD COLUMN IF NOT EXISTS task_mode VARCHAR(20) NOT 
 ALTER TABLE experience_tasks ADD COLUMN IF NOT EXISTS comparison_intent TEXT;
 ALTER TABLE experience_tasks ADD COLUMN IF NOT EXISTS comparison_layout_type VARCHAR(40);
 ALTER TABLE experience_tasks ADD COLUMN IF NOT EXISTS comparison_source VARCHAR(40);
+ALTER TABLE experience_tasks ADD COLUMN IF NOT EXISTS owner_id VARCHAR(36);
 CREATE INDEX IF NOT EXISTS experience_tasks_task_mode_idx ON experience_tasks(task_mode);
 
 -- reports 新增 7 字段（V2.3 统一报告资产）
@@ -628,6 +638,8 @@ ALTER TABLE materials ADD COLUMN IF NOT EXISTS media_display_order INTEGER DEFAU
 ALTER TABLE materials ADD COLUMN IF NOT EXISTS media_role VARCHAR(40);
 CREATE INDEX IF NOT EXISTS materials_comparison_cell_id_idx ON materials(comparison_cell_id);
 CREATE INDEX IF NOT EXISTS materials_comparison_assembly_id_idx ON materials(comparison_assembly_id);
+
+ALTER TABLE recipes ADD COLUMN IF NOT EXISTS effect_status VARCHAR(20);
 
 -- ------------------------------------------------------------
 -- V2.3-B 对比组装新表（13 张）

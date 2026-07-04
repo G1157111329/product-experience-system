@@ -6,6 +6,7 @@ import {
   getLocalContentType,
   isNginxAccelRedirect,
   NGINX_UPLOADS_INTERNAL,
+  statLocalFile,
   STORAGE_DRIVER,
   verifyLocalMediaToken,
 } from '@/lib/server/storage';
@@ -25,6 +26,37 @@ async function findMaterialByPath(client: ReturnType<typeof getSupabaseClient>, 
     .eq('file_url', path)
     .maybeSingle();
   return byFileUrl;
+}
+
+function parseRange(range: string | null, fileSize: number) {
+  if (!range) return null;
+  const match = range.match(/^bytes=(\d*)-(\d*)$/);
+  if (!match) return { invalid: true as const };
+
+  const [, startText, endText] = match;
+  if (!startText && !endText) return { invalid: true as const };
+
+  let start: number;
+  let end: number;
+
+  if (!startText) {
+    const suffixLength = Number(endText);
+    if (!Number.isFinite(suffixLength) || suffixLength <= 0) return { invalid: true as const };
+    start = Math.max(fileSize - suffixLength, 0);
+    end = fileSize - 1;
+  } else {
+    start = Number(startText);
+    end = endText ? Number(endText) : fileSize - 1;
+  }
+
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= fileSize) {
+    return { invalid: true as const };
+  }
+
+  return {
+    start,
+    end: Math.min(end, fileSize - 1),
+  };
 }
 
 export async function GET(
@@ -54,6 +86,10 @@ export async function GET(
   }
 
   try {
+    const fileStat = await statLocalFile(fileKey);
+    const contentType = getLocalContentType(fileKey);
+    const cacheControl = hasValidToken ? 'private, max-age=300' : 'no-store';
+
     if (isNginxAccelRedirect()) {
       const encodedKey = fileKey.split('/').map(encodeURIComponent).join('/');
       const internalPath = `${NGINX_UPLOADS_INTERNAL}/${encodedKey}`;
@@ -61,8 +97,38 @@ export async function GET(
         status: 200,
         headers: {
           'X-Accel-Redirect': internalPath,
-          'Content-Type': getLocalContentType(fileKey),
-          'Cache-Control': hasValidToken ? 'private, max-age=300' : 'no-store',
+          'Content-Type': contentType,
+          'Cache-Control': cacheControl,
+          'Accept-Ranges': 'bytes',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
+
+    const range = parseRange(request.headers.get('range'), fileStat.size);
+    if (range?.invalid) {
+      return new NextResponse(null, {
+        status: 416,
+        headers: {
+          'Content-Range': `bytes */${fileStat.size}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Type': contentType,
+          'Cache-Control': cacheControl,
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
+
+    if (range) {
+      const body = Readable.toWeb(createLocalFileReadStream(fileKey, { start: range.start, end: range.end })) as ReadableStream<Uint8Array>;
+      return new NextResponse(body, {
+        status: 206,
+        headers: {
+          'Content-Type': contentType,
+          'Content-Length': String(range.end - range.start + 1),
+          'Content-Range': `bytes ${range.start}-${range.end}/${fileStat.size}`,
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': cacheControl,
           'X-Content-Type-Options': 'nosniff',
         },
       });
@@ -71,8 +137,10 @@ export async function GET(
     const body = Readable.toWeb(createLocalFileReadStream(fileKey)) as ReadableStream<Uint8Array>;
     return new NextResponse(body, {
       headers: {
-        'Content-Type': getLocalContentType(fileKey),
-        'Cache-Control': hasValidToken ? 'private, max-age=300' : 'no-store',
+        'Content-Type': contentType,
+        'Content-Length': String(fileStat.size),
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': cacheControl,
         'X-Content-Type-Options': 'nosniff',
       },
     });

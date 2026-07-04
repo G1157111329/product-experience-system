@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { useDictLabels } from '@/hooks/useDictionary';
 import type { TaskDetail, CategoryWithProducts } from '../types';
 import { statusConfig } from '../types';
 
@@ -41,7 +42,7 @@ export function BasicInfoTab({ task, onRefresh }: { task: TaskDetail; onRefresh:
   const selectedCategoryData = categories.find(c => c.name === form.product_category);
   const availableProducts = selectedCategoryData?.products || [];
   const projectTypes = ['ODM', 'OEM', '竞品研究', '自研', '前期研究', '改型降本优化', '海外产品'];
-  const projectPhases = ['手板研究', '试制阶段', '试产阶段', '量产阶段'];
+  const projectPhases = useDictLabels('project_phase_dict');
 
   const handleSave = async () => {
     if (saving) return;

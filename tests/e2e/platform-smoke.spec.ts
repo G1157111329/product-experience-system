@@ -89,10 +89,29 @@ test('comparison authoring saves inline cell text in an existing task', async ({
   expect(matrixPayload.code, matrixPayload.message || 'comparison matrix API should succeed').toBe(0);
   const targetCell = matrixPayload.data?.cells?.[0];
   expect(targetCell?.id, 'Golden comparison matrix should include cells').toBeTruthy();
+  const selectableMaterialId = 'golden-task-comparison-mat-1';
+
+  const resetMediaResponse = await page.request.post(`/api/comparison-cells/${targetCell.id}/media`, {
+    data: { material_ids: [] },
+  });
+  expect(resetMediaResponse.ok(), 'comparison cell media reset should return 2xx').toBeTruthy();
 
   await page.goto('/tasks/golden-task-comparison?tab=comparison');
   await expect(page.locator('textarea').first(), 'inline matrix cell editor should be visible').toBeVisible();
   await expect(page.locator('button:has(svg.lucide-save)').first(), 'inline matrix save button should be visible').toBeVisible();
+
+  await page.getByRole('button', { name: /选择素材/ }).first().click();
+  const materialDialog = page.getByRole('dialog', { name: /选择素材/ });
+  await expect(materialDialog, 'comparison cell material picker dialog should open').toBeVisible();
+  await materialDialog.locator(`[data-testid="material-picker-item"][data-material-id="${selectableMaterialId}"]`).click();
+  await expect(page.getByText(/已选\s*1\s*项/).first(), 'selected media count should update immediately after clicking a gallery image').toBeVisible();
+
+  await expect.poll(async () => {
+    const mediaResponse = await page.request.get(`/api/comparison-cells/${targetCell.id}/media`);
+    const mediaPayload = await mediaResponse.json();
+    const materials = mediaPayload.data?.materials || [];
+    return materials.some((material: { id?: string }) => material.id === selectableMaterialId);
+  }, { message: 'selected gallery image should persist on the comparison cell' }).toBe(true);
 
   const marker = `E2E inline effect ${Date.now()}`;
   await page.locator('textarea').first().fill(marker);

@@ -3,16 +3,22 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
+import {
+  applyTransition,
+  getAvailableTransitions,
+  normalizeIssueStatus,
+  type IssueStatus,
+} from '@/lib/server/issue-state-machine';
 import { PageShell, pageActionButtonClass, pageFilterSelectClass } from '@/components/app';
 import { fetchJson, getErrorMessage } from '@/lib/http';
 import { toast } from 'sonner';
 import { IssueRectificationDialog } from '@/components/issues/issue-rectification-dialog';
+import { useDictLabels } from '@/hooks/useDictionary';
 
 interface Issue {
   id: string; title: string; product_model: string | null;
@@ -35,9 +41,28 @@ interface ReportGroup {
   issues: Issue[];
 }
 
-const STATUS_LIST = ['待整改', '整改中', '已验证', '不整改'];
-const LEVEL_LIST = ['一类', '二类', '三类'];
+// V4.0 8-state colors: keys are both English codes (API) and Chinese labels (UI dict).
+const STATUS_CODE_TO_LABEL: Record<IssueStatus, string> = {
+  open: '待分派',
+  triaged: '已分派',
+  assigned: '已指派',
+  rectifying: '整改中',
+  pending_verification: '待验证',
+  verified_closed: '已验证关闭',
+  waived: '不整改',
+  reopened: '已重开',
+};
+
 const STATUS_COLORS: Record<string, string> = {
+  open: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+  triaged: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+  assigned: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+  rectifying: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+  pending_verification: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
+  verified_closed: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+  waived: 'bg-muted text-muted-foreground',
+  reopened: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400',
+  // 兼容旧中文 label
   '待整改': 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
   '整改中': 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
   '已验证': 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
@@ -50,6 +75,8 @@ const LEVEL_COLORS: Record<string, string> = {
 };
 
 export default function IssuesPage() {
+  const statusList = useDictLabels('issue_status_dict');
+  const levelList = useDictLabels('issue_severity_dict');
   const [issues, setIssues] = useState<Issue[]>([]);
   const [reports, setReports] = useState<{ id: string; title: string; task_id: string; created_at: string; content: Record<string, unknown> }[]>([]);
   const [reportGroups, setReportGroups] = useState<ReportGroup[]>([]);
@@ -58,7 +85,7 @@ export default function IssuesPage() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterLevel, setFilterLevel] = useState('all');
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, role } = useAuth();
   const [userTaskIds, setUserTaskIds] = useState<string[]>([]);
 
   // Fetch current user's task IDs (for non-admin filtering)
@@ -146,7 +173,7 @@ export default function IssuesPage() {
                   source_report_id: report.id,
                   source_type: 'record_fail',
                   description: [record.check_requirement, record.check_standard, record.problem_description].filter(Boolean).join('\n'),
-                  status: '待整改',
+                  status: 'open',
                 }),
               });
               needRefetch = true;
@@ -184,7 +211,7 @@ export default function IssuesPage() {
                     source_report_id: report.id,
                     source_type: 'recipe_problem',
                     description: stepDesc,
-                    status: '待整改',
+                    status: 'open',
                   }),
                 });
                 needRefetch = true;
@@ -222,29 +249,18 @@ export default function IssuesPage() {
     setReportGroups(Object.values(groups).sort((a, b) => b.created_at.localeCompare(a.created_at)));
   }, [issues, filterStatus, filterLevel]);
 
-  const handleStatusChange = async (issueId: string, newStatus: string) => {
+  const handleStatusChange = async (issueId: string, newStatus: string, transition?: string) => {
+    const body: Record<string, unknown> = { status: newStatus };
+    if (transition) body.transition = transition;
     const res = await fetch(`/api/issues/${issueId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     if (data.code === 0) {
       setIssues(prev => prev.map(i => i.id === issueId ? { ...i, status: newStatus } : i));
       if (selectedIssue?.id === issueId) setSelectedIssue(prev => prev ? { ...prev, status: newStatus } : prev);
-    }
-  };
-
-  const handleLevelChange = async (issueId: string, newLevel: string) => {
-    const res = await fetch(`/api/issues/${issueId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ level: newLevel }),
-    });
-    const data = await res.json();
-    if (data.code === 0) {
-      setIssues(prev => prev.map(i => i.id === issueId ? { ...i, level: newLevel } : i));
-      if (selectedIssue?.id === issueId) setSelectedIssue(prev => prev ? { ...prev, level: newLevel } : prev);
     }
   };
 
@@ -284,9 +300,9 @@ export default function IssuesPage() {
   };
 
   const totalIssues = issues.length;
-  const pendingCount = issues.filter(i => i.status === '待整改').length;
-  const inProgressCount = issues.filter(i => i.status === '整改中').length;
-  const verifiedCount = issues.filter(i => i.status === '已验证').length;
+  const pendingCount = issues.filter(i => ['open', 'triaged', '待整改'].includes(i.status)).length;
+  const inProgressCount = issues.filter(i => ['rectifying', 'assigned', 'pending_verification', '整改中', '已指派', '待验证'].includes(i.status)).length;
+  const verifiedCount = issues.filter(i => ['verified_closed', '已验证关闭', '已验证'].includes(i.status)).length;
 
   return (
     <PageShell size="wide" className="space-y-4 sm:space-y-6">
@@ -324,14 +340,14 @@ export default function IssuesPage() {
           <SelectTrigger className={pageFilterSelectClass}><SelectValue placeholder="状态" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部状态</SelectItem>
-            {STATUS_LIST.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+            {statusList.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={filterLevel} onValueChange={setFilterLevel}>
           <SelectTrigger className={pageFilterSelectClass}><SelectValue placeholder="等级" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部等级</SelectItem>
-            {LEVEL_LIST.map(l => <SelectItem key={l} value={l}>{l}</SelectItem>)}
+            {levelList.map(l => <SelectItem key={l} value={l}>{l}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>
@@ -365,14 +381,28 @@ export default function IssuesPage() {
                         <Badge variant="outline" className="text-[10px] shrink-0">食谱/功能</Badge>
                       )}
                       <span className="text-sm flex-1 min-w-0 truncate">{issue.title}</span>
-                      <div className="grid w-full shrink-0 grid-cols-4 gap-1 sm:flex sm:w-auto" onClick={(e) => e.stopPropagation()}>
-                        {STATUS_LIST.map(s => (
-                          <button key={s} onClick={() => handleStatusChange(issue.id, s)}
-                            className={cn('min-h-8 rounded px-2 py-1.5 text-[11px] transition-colors sm:min-h-7 sm:flex-none sm:px-2 sm:py-1 lg:min-w-14',
-                              issue.status === s ? STATUS_COLORS[s] + ' font-medium' : 'text-muted-foreground hover:bg-muted/50')}>
-                            {s}
-                          </button>
-                        ))}
+                      <div className="flex w-full shrink-0 flex-wrap gap-1 sm:w-auto" onClick={(e) => e.stopPropagation()}>
+                        {(() => {
+                          const currentStatus = normalizeIssueStatus(issue.status);
+                          return getAvailableTransitions(currentStatus, role).map((t) => {
+                            const target = applyTransition(currentStatus, t);
+                            const targetLabel = STATUS_CODE_TO_LABEL[target] || target;
+                            return (
+                              <button
+                                key={t}
+                                onClick={() => handleStatusChange(issue.id, target, t)}
+                                className={cn(
+                                  'min-h-8 rounded px-2 py-1.5 text-[11px] transition-colors sm:min-h-7 sm:flex-none sm:px-2 sm:py-1 lg:min-w-14',
+                                  issue.status === target
+                                    ? STATUS_COLORS[target] + ' font-medium'
+                                    : 'text-muted-foreground hover:bg-muted/50'
+                                )}
+                              >
+                                {targetLabel}
+                              </button>
+                            );
+                          });
+                        })()}
                       </div>
                     </div>
                   ))}

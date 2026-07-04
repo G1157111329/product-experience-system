@@ -102,10 +102,23 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     // Build content parts
     const contentParts: MessageContentPart[] = [];
-    contentParts.push({ type: 'text', text: userPromptText });
-
-    // Add image materials (presign S3 keys to http URLs for AI vision model)
+    // 获取可用图片（base64 或 URL），超过限制的图片被跳过
     const imageUrls = await getImageUrlsForAI(materials);
+
+    // 根据是否有图片调整提示语
+    const imageCount = materials.filter((m: { material_type?: string }) => m.material_type === 'image').length;
+    const hasImages = imageUrls.length > 0;
+    if (imageCount > 0 && !hasImages) {
+      // 有图片素材但因过大无法传输，告知 AI 基于文本描述评价
+      contentParts.push({
+        type: 'text',
+        text: userPromptText + `\n\n注：本食谱/功能有 ${imageCount} 张效果图片素材，但图片尺寸过大无法传输。请基于以上文字描述（效果评价、食材参数、已知问题点）进行综合评价。`,
+      });
+    } else {
+      contentParts.push({ type: 'text', text: userPromptText });
+    }
+
+    // Add image materials
     for (const url of imageUrls) {
       contentParts.push({
         type: 'image_url' as const,

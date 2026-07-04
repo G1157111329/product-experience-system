@@ -1,8 +1,9 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode, useMemo } from 'react';
+import { type AuthRole, type Permission, getRolePermissions, hasPermission } from '@/lib/server/rbac';
 
-type UserRole = 'admin' | 'user';
+type UserRole = AuthRole;
 type AuthStatus = 'loading' | 'authenticated' | 'anonymous' | 'unavailable';
 
 interface UserInfo {
@@ -16,6 +17,14 @@ interface AuthContextType {
   user: UserInfo | null;
   role: UserRole;
   isAdmin: boolean;
+  isTaskOwner: boolean;
+  isReviewer: boolean;
+  isProductManager: boolean;
+  isExecutiveViewer: boolean;
+  isExecutor: boolean;
+  isRectificationOwner: boolean;
+  permissions: Set<string>;
+  hasPermission: (perm: string) => boolean;
   authStatus: AuthStatus;
   authError: string | null;
   setRole: (role: UserRole) => void;
@@ -28,8 +37,16 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
-  role: 'user',
+  role: 'executor',
   isAdmin: false,
+  isTaskOwner: false,
+  isReviewer: false,
+  isProductManager: false,
+  isExecutiveViewer: false,
+  isExecutor: false,
+  isRectificationOwner: false,
+  permissions: new Set(),
+  hasPermission: () => false,
   authStatus: 'loading',
   authError: null,
   setRole: () => {},
@@ -42,7 +59,7 @@ const AuthContext = createContext<AuthContextType>({
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserInfo | null>(null);
-  const [role, setRoleState] = useState<UserRole>('user');
+  const [role, setRoleState] = useState<UserRole>('executor');
   const [isLoading, setIsLoading] = useState(true);
   const [authStatus, setAuthStatus] = useState<AuthStatus>('loading');
   const [authError, setAuthError] = useState<string | null>(null);
@@ -59,7 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearUser = useCallback(() => {
     userRef.current = null;
     setUser(null);
-    setRoleState('user');
+    setRoleState('executor');
     setAuthStatus('anonymous');
     setAuthError(null);
   }, []);
@@ -123,6 +140,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [applyUser, clearUser]);
 
   useEffect(() => {
+    // 分享页（/reports/share/*）是公开只读页面，跳过鉴权请求，避免 401 噪音和误判
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/reports/share/')) {
+      setIsLoading(false);
+      return;
+    }
     void refreshUser();
   }, [refreshUser]);
 
@@ -138,11 +160,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setRoleState(newRole);
   }, []);
 
+  const { permissions, checkPermission } = useMemo(() => {
+    const perms = new Set<string>(getRolePermissions(role));
+    return {
+      permissions: perms,
+      checkPermission: (perm: string) => hasPermission(role, perm as Permission),
+    };
+  }, [role]);
+
   return (
     <AuthContext.Provider value={{
       user,
       role,
       isAdmin: role === 'admin',
+      isTaskOwner: role === 'task_owner',
+      isReviewer: role === 'reviewer',
+      isProductManager: role === 'product_manager',
+      isExecutiveViewer: role === 'executive_viewer',
+      isExecutor: role === 'executor',
+      isRectificationOwner: role === 'rectification_owner',
+      permissions,
+      hasPermission: checkPermission,
       authStatus,
       authError,
       setRole,

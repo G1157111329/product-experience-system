@@ -82,6 +82,10 @@ const builtinSkillTemplates: SkillTemplate[] = getDefaultSkillDefinitions().map(
   },
 }));
 
+const builtinSkillTemplateByKey = new Map(
+  builtinSkillTemplates.map((template) => [template.skill_key, template])
+);
+
 export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenChange: (value: boolean) => void }) {
   const { user } = useAuth();
   const [models, setModels] = useState<ModelConfig[]>([]);
@@ -193,14 +197,16 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
   };
 
   const openPromptEditor = (template: SkillTemplate) => {
+    const fallback = builtinSkillTemplateByKey.get(template.skill_key)?.active_version;
+    const activeVersion = template.active_version;
     setEditingSkill({
       ...template,
-      active_version: template.active_version || {
-        id: '',
-        version: 0,
-        system_prompt: '',
-        user_prompt_template: '',
-        output_schema: {},
+      active_version: {
+        id: activeVersion?.id || '',
+        version: activeVersion?.version || fallback?.version || 0,
+        system_prompt: activeVersion?.system_prompt?.trim() || fallback?.system_prompt || '',
+        user_prompt_template: activeVersion?.user_prompt_template?.trim() || fallback?.user_prompt_template || getDefaultUserPromptTemplate(template.skill_key),
+        output_schema: activeVersion?.output_schema || fallback?.output_schema || {},
       },
     });
   };
@@ -236,13 +242,15 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
     if (!user?.id || !editingSkill?.active_version) return;
     const version = editingSkill.active_version;
     // 自动生成 user_prompt_template：优先使用用户自定义，否则从默认模板获取
-    const userPromptTemplate = version.user_prompt_template || getDefaultUserPromptTemplate(editingSkill.skill_key);
+    const fallback = builtinSkillTemplateByKey.get(editingSkill.skill_key)?.active_version;
+    const systemPrompt = version.system_prompt.trim() || fallback?.system_prompt || '';
+    const userPromptTemplate = version.user_prompt_template.trim() || fallback?.user_prompt_template || getDefaultUserPromptTemplate(editingSkill.skill_key);
     const res = await fetch('/api/ai/skill-templates', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...(editingSkill.is_builtin_draft ? { skill_key: editingSkill.skill_key } : { template_id: editingSkill.id }),
-        system_prompt: version.system_prompt,
+        system_prompt: systemPrompt,
         user_prompt_template: userPromptTemplate,
         output_schema: version.output_schema || {},
         notes: '管理员调整模板',

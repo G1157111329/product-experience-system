@@ -1,13 +1,24 @@
 import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { writeSecurityAudit } from './security-audit';
+import {
+  type AuthRole,
+  Permission,
+  hasAllPermissions,
+  hasAnyPermission,
+  hasPermission,
+  isValidRole,
+} from './rbac';
 
 export const SESSION_COOKIE_NAME = 'xp_session';
 export const SESSION_MAX_AGE_SECONDS = 8 * 60 * 60;
 export const PERSISTENT_SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 export const SESSION_REFRESH_THRESHOLD_SECONDS = 60 * 60;
 
-export type AuthRole = 'admin' | 'user';
+export type { AuthRole };
+
+// 旧 user 角色，迁移后废弃
+export type LegacyAuthRole = 'admin' | 'user';
 
 export interface AuthUser {
   id: string;
@@ -58,6 +69,10 @@ interface TokenPayload {
   persistent?: boolean;
 }
 
+function isTokenRoleValid(role: unknown): role is AuthRole {
+  return typeof role === 'string' && isValidRole(role);
+}
+
 interface TokenOptions {
   secret?: string;
   now?: number;
@@ -92,8 +107,16 @@ function getSessionSecret() {
   throw new Error('AUTH_SESSION_SECRET is required in production');
 }
 
-function shouldUseSecureSessionCookie() {
+export function shouldUseSecureSessionCookie() {
+  if (process.env.AUTH_COOKIE_SECURE === 'true') return true;
   if (process.env.AUTH_COOKIE_SECURE === 'false') return false;
+
+  const publicBaseUrl = process.env.PUBLIC_APP_URL
+    || process.env.NEXT_PUBLIC_APP_URL
+    || process.env.PUBLIC_MEDIA_BASE_URL
+    || '';
+  if (publicBaseUrl.startsWith('http://')) return false;
+
   return process.env.NODE_ENV === 'production';
 }
 
@@ -145,7 +168,7 @@ export function verifySessionTokenClaims(token: string | undefined | null, optio
     const payload = JSON.parse(fromBase64Url(encodedPayload)) as Partial<TokenPayload>;
     const nowSeconds = Math.floor((options.now ?? Date.now()) / 1000);
     if (payload.v !== 1 || !payload.sub || !payload.account || !payload.name) return null;
-    if (payload.role !== 'admin' && payload.role !== 'user') return null;
+    if (!isTokenRoleValid(payload.role)) return null;
     if (!payload.exp || payload.exp <= nowSeconds) return null;
     return {
       id: payload.sub,
@@ -257,13 +280,14 @@ export async function getCurrentUser(request: NextRequest, client: ClientLike): 
     .maybeSingle();
 
   if (!user || user.status !== 'approved') return null;
-  if (user.role !== 'admin' && user.role !== 'user') return null;
+  const dbRole = user.role as string;
+  if (!isValidRole(dbRole)) return null;
 
   return {
     id: String(user.id),
     account: String(user.account),
     name: String(user.name),
-    role: user.role,
+    role: dbRole,
   };
 }
 
@@ -292,7 +316,7 @@ export async function requireAdmin(request: NextRequest, client: ClientLike): Pr
     });
     return unauthorized();
   }
-  if (user.role !== 'admin') {
+  if (!hasPermission(user.role, Permission.SYSTEM_ADMIN)) {
     await writeSecurityAudit(client, {
       request,
       actor: user,
@@ -307,25 +331,55 @@ export async function requireAdmin(request: NextRequest, client: ClientLike): Pr
 
 export async function canAccessTask(client: ClientLike, user: AuthUser, taskId: string) {
   if (user.role === 'admin') return true;
+  if (hasPermission(user.role, Permission.TASK_EDIT_ALL)) return true;
+
   const { data: task } = await client
     .from('experience_tasks')
-    .select('id, created_by')
+    .select('id, created_by, owner_id')
     .eq('id', taskId)
     .maybeSingle();
-  return Boolean(task && task.created_by === user.id);
+  return Boolean(task && (task.created_by === user.id || task.owner_id === user.id));
+}
+
+export async function canReadTask(client: ClientLike, user: AuthUser, taskId: string) {
+  if (await canAccessTask(client, user, taskId)) return true;
+  if (hasAnyPermission(user.role, [
+    Permission.TASK_VIEW_ALL,
+    Permission.REPORT_VIEW_ALL,
+    Permission.ISSUE_VIEW_ALL,
+  ])) {
+    const { data: task } = await client
+      .from('experience_tasks')
+      .select('id')
+      .eq('id', taskId)
+      .maybeSingle();
+    return Boolean(task);
+  }
+  return false;
 }
 
 export async function getTaskOwnerId(client: ClientLike, taskId: string) {
   const { data: task } = await client
     .from('experience_tasks')
-    .select('id, created_by')
+    .select('id, owner_id, created_by')
     .eq('id', taskId)
     .maybeSingle();
-  return task?.created_by ? String(task.created_by) : null;
+  return task?.owner_id ? String(task.owner_id) : task?.created_by ? String(task.created_by) : null;
+}
+
+export async function isTaskOwner(client: ClientLike, user: AuthUser, taskId: string) {
+  const { data: task } = await client
+    .from('experience_tasks')
+    .select('id, owner_id, created_by')
+    .eq('id', taskId)
+    .maybeSingle();
+  return Boolean(task && (task.owner_id === user.id || task.created_by === user.id));
 }
 
 export async function canAccessReport(client: ClientLike, user: AuthUser, reportId: string) {
   if (user.role === 'admin') return true;
+  if (hasPermission(user.role, Permission.REPORT_VIEW_ALL)) return true;
+
   const { data: report } = await client
     .from('reports')
     .select('id, task_id')
@@ -339,10 +393,11 @@ export async function canReadReport(client: ClientLike, user: AuthUser, reportId
   if (user.role === 'admin') return true;
   const { data: report } = await client
     .from('reports')
-    .select('id')
+    .select('id, task_id')
     .eq('id', reportId)
     .maybeSingle();
-  return Boolean(report);
+  if (!report?.task_id) return false;
+  return canReadTask(client, user, String(report.task_id));
 }
 
 export async function canAccessMaterial(client: ClientLike, user: AuthUser, materialId: string) {
@@ -380,6 +435,8 @@ export async function canAccessRecipeStep(client: ClientLike, user: AuthUser, st
 
 export async function canAccessIssue(client: ClientLike, user: AuthUser, issueId: string) {
   if (user.role === 'admin') return true;
+  if (hasPermission(user.role, Permission.ISSUE_VIEW_ALL)) return true;
+
   const { data: issue } = await client
     .from('issues')
     .select('id, task_id')
@@ -441,6 +498,40 @@ export async function canAccessAssembly(client: ClientLike, user: AuthUser, asse
 export async function canReadAssembly(client: ClientLike, user: AuthUser, assemblyId: string) {
   if (user.role === 'admin') return true;
   return canAccessAssembly(client, user, assemblyId);
+}
+
+// V4.0 问题生命周期权限检查（基于角色 + 状态机）
+export function canTriageIssue(role: AuthRole): boolean {
+  return hasPermission(role, Permission.ISSUE_TRIAGE);
+}
+
+export function canAssignIssue(role: AuthRole): boolean {
+  return hasPermission(role, Permission.ISSUE_ASSIGN);
+}
+
+export function canRectifyIssue(role: AuthRole): boolean {
+  return hasPermission(role, Permission.ISSUE_RECTIFY);
+}
+
+export function canVerifyIssue(role: AuthRole): boolean {
+  return hasPermission(role, Permission.ISSUE_VERIFY);
+}
+
+export function canWaiveIssue(role: AuthRole): boolean {
+  return hasPermission(role, Permission.ISSUE_WAIVE);
+}
+
+export function canReopenIssue(role: AuthRole): boolean {
+  return hasPermission(role, Permission.ISSUE_REOPEN);
+}
+
+export async function isIssueOwner(client: ClientLike, user: AuthUser, issueId: string) {
+  const { data: issue } = await client
+    .from('issues')
+    .select('id, responsible_person')
+    .eq('id', issueId)
+    .maybeSingle();
+  return Boolean(issue?.responsible_person === user.name || issue?.responsible_person === user.account);
 }
 
 export function isAuthResponse(value: unknown): value is NextResponse {

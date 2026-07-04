@@ -31,6 +31,7 @@ interface InvokeOptions {
 
 export interface ResolvedAIConfig {
   provider: string;
+  supportsVision: boolean;
   model: string;
   temperature: number;
   maxTokens: number;
@@ -85,6 +86,7 @@ export async function resolveAIConfig(
     return {
       provider: String(activeModel.provider || 'custom'),
       model: String(activeModel.model || defaultModel),
+      supportsVision: Boolean(activeModel.supports_vision),
       temperature: normalizeTemperature(activeModel.temperature, defaultTemperature),
       maxTokens: normalizePositiveInt(activeModel.max_tokens ?? activeModel.maxTokens, maxTokens),
       customApiUrl: normalizeChatCompletionsUrl(String(activeModel.custom_api_url || activeModel.customApiUrl || DEFAULT_API_URL)),
@@ -102,6 +104,7 @@ export async function resolveAIConfig(
   return {
     provider: String(legacyValue.provider || 'custom'),
     model: String(legacyValue.model || defaultModel),
+    supportsVision: true, // legacy: assume vision supported
     temperature: normalizeTemperature(legacyValue.temperature, defaultTemperature),
     maxTokens,
     customApiUrl: normalizeChatCompletionsUrl(String(legacyValue.custom_api_url || DEFAULT_API_URL)),
@@ -115,7 +118,7 @@ export async function invokeConfiguredAI({
   defaultModel = DEFAULT_MODEL,
   defaultTemperature = 0.5,
   maxTokens = 2400,
-  timeoutMs = 60000,
+  timeoutMs = 120000,
 }: InvokeOptions): Promise<string> {
   const aiConfig = await resolveAIConfig(client, { defaultModel, defaultTemperature, maxTokens });
   const model = aiConfig.model;
@@ -148,6 +151,7 @@ export async function invokeConfiguredAI({
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'network error';
+    const isTimeout = message.includes('timeout') || message.includes('aborted') || message.includes('Timeout');
     await writeSecurityAudit(client, {
       action: 'ai.invoke',
       outcome: 'failed',
@@ -155,6 +159,9 @@ export async function invokeConfiguredAI({
       targetId: aiHost,
       metadata: { model, reason: message.slice(0, 200) },
     });
+    if (isTimeout) {
+      throw new Error(`AI服务响应超时(${timeoutMs / 1000}秒)，模型「${model}」处理时间过长或服务不可达，请稍后重试或检查AI配置`);
+    }
     throw new Error(`AI服务连接失败: ${message}`);
   }
 
@@ -166,8 +173,61 @@ export async function invokeConfiguredAI({
       targetId: aiHost,
       metadata: { model, status: response.status },
     });
+    // Vision call failed, retry without image parts if present
+    const hasImageParts = messages.some(m => Array.isArray(m.content) ? m.content.some((c: MessageContentPart) => c.type === "image_url") : false);
+    if (hasImageParts) {
+      await writeSecurityAudit(client, {
+        action: "ai.invoke",
+        outcome: "failed",
+        targetType: "ai_endpoint",
+        targetId: aiHost,
+        metadata: { model, status: response.status, reason: "vision_fallback_retry" },
+      });
+      // Retry without image parts
+      const textOnlyMessages = messages.map(m => {
+        if (Array.isArray(m.content)) {
+          const textParts = m.content.filter((c: MessageContentPart) => c.type === "text");
+          return { ...m, content: textParts.length === 1 ? textParts[0].text : textParts };
+        }
+        return m;
+      });
+      const retryRes = await fetch(apiUrl, {
+        method: "POST",
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({ model, messages: textOnlyMessages, temperature, max_tokens: aiConfig.maxTokens }),
+      });
+      if (retryRes.ok) {
+        const retryResult = await retryRes.json();
+        await writeSecurityAudit(client, {
+          action: "ai.invoke",
+          outcome: "success",
+          targetType: "ai_endpoint",
+          targetId: aiHost,
+          metadata: { model, maxTokens: aiConfig.maxTokens, fallback: "text_only" },
+        });
+        return retryResult.choices?.[0]?.message?.content || "";
+      }
+      await writeSecurityAudit(client, {
+        action: "ai.invoke",
+        outcome: "failed",
+        targetType: "ai_endpoint",
+        targetId: aiHost,
+        metadata: { model, status: retryRes.status, reason: "text_only_retry_failed" },
+      });
+    }
+    await writeSecurityAudit(client, {
+      action: "ai.invoke",
+      outcome: "failed",
+      targetType: "ai_endpoint",
+      targetId: aiHost,
+      metadata: { model, status: response.status },
+    });
     throw new Error(`AI服务调用失败(${response.status})`);
-  }
+    }
 
   const result = await response.json();
   await writeSecurityAudit(client, {
@@ -250,13 +310,40 @@ export async function getImageUrlsForAI(
   const imageMaterials = materials.filter(m => m.material_type === 'image');
   if (imageMaterials.length === 0) return [];
 
-  const presignedMap = await presignMaterialUrls(imageMaterials);
+  // 对 local 存储的图片，优先读取文件转 base64 data URL（大图用 ImageMagick 压缩）
+  // 限制最多5张图片（压缩后每张约100KB base64≈130KB，5张约650KB）
+  const maxImages = 5;
+  const result: string[] = [];
 
-  return imageMaterials.map(mat => {
+  for (const mat of imageMaterials.slice(0, maxImages)) {
     const path = mat.file_path || mat.file_url;
-    if (path && !path.startsWith('http')) {
-      return presignedMap.get(path) || path;
+    if (!path) continue;
+
+    // 如果已经是完整 HTTP URL（S3 模式或已签名），直接用
+    if (path.startsWith('http')) {
+      result.push(path);
+      continue;
     }
-    return path || '';
-  }).filter(Boolean);
+
+    // local 模式：尝试读取文件转 base64
+    try {
+      const { readLocalImageAsDataUrl } = await import('@/lib/server/storage');
+      const dataUrl = await readLocalImageAsDataUrl(path);
+      if (dataUrl) {
+        result.push(dataUrl);
+      } else {
+        // 文件读取失败，回退到 presigned URL
+        const url = await generatePresignedUrl({ key: path, expireTime: 86400, absoluteUrl: true });
+        if (url) result.push(url);
+      }
+    } catch {
+      // 回退到 presigned URL
+      try {
+        const url = await generatePresignedUrl({ key: path, expireTime: 86400, absoluteUrl: true });
+        if (url) result.push(url);
+      } catch { /* skip */ }
+    }
+  }
+
+  return result;
 }

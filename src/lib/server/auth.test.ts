@@ -3,6 +3,7 @@ import {
   PERSISTENT_SESSION_MAX_AGE_SECONDS,
   SESSION_COOKIE_NAME,
   checkRateLimit,
+  shouldUseSecureSessionCookie,
   signSessionToken,
   verifySessionToken,
   verifySessionTokenClaims,
@@ -51,5 +52,28 @@ assert.equal(verifyPassword('strong-password', hashedPassword), true);
 assert.equal(verifyPassword('wrong-password', hashedPassword), false);
 assert.equal(passwordNeedsRehash(hashedPassword), false);
 assert.equal(passwordNeedsRehash('719c8bb11f2bc01f0e6d3b15f03a3800070bc87f108a31312bebc8a3d44ae5bb'), true);
+
+const originalNodeEnv = process.env.NODE_ENV;
+const originalAuthCookieSecure = process.env.AUTH_COOKIE_SECURE;
+const originalPublicMediaBaseUrl = process.env.PUBLIC_MEDIA_BASE_URL;
+const mutableEnv = process.env as Record<string, string | undefined>;
+
+mutableEnv.NODE_ENV = 'production';
+delete mutableEnv.AUTH_COOKIE_SECURE;
+mutableEnv.PUBLIC_MEDIA_BASE_URL = 'http://118.25.178.78:5000';
+assert.equal(shouldUseSecureSessionCookie(), false);
+
+mutableEnv.PUBLIC_MEDIA_BASE_URL = 'https://example.com';
+assert.equal(shouldUseSecureSessionCookie(), true);
+
+mutableEnv.AUTH_COOKIE_SECURE = 'false';
+assert.equal(shouldUseSecureSessionCookie(), false);
+
+if (originalNodeEnv === undefined) delete mutableEnv.NODE_ENV;
+else mutableEnv.NODE_ENV = originalNodeEnv;
+if (originalAuthCookieSecure === undefined) delete mutableEnv.AUTH_COOKIE_SECURE;
+else mutableEnv.AUTH_COOKIE_SECURE = originalAuthCookieSecure;
+if (originalPublicMediaBaseUrl === undefined) delete mutableEnv.PUBLIC_MEDIA_BASE_URL;
+else mutableEnv.PUBLIC_MEDIA_BASE_URL = originalPublicMediaBaseUrl;
 
 console.log('server auth tests passed');

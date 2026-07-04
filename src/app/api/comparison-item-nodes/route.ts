@@ -55,23 +55,39 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ code: 1, message: '无权访问' }, { status: 403 });
   }
 
-  // 计算 sort_order（追加到末尾）和 depth
-  const { data: existing } = await client
-    .from('comparison_item_nodes')
-    .select('sort_order, depth')
-    .eq('assembly_id', body.assembly_id)
-    .order('sort_order', { ascending: false })
-    .maybeSingle();
-  const nextSort = (existing?.sort_order ?? -1) + 1;
-
+  // 计算 sort_order：按 parent_id 分组，取同父节点中 item 类型（非 summary）的最大 sort_order +1
+  // 新细项排在同类 item 末尾、summary 之前；新 summary 排在所有 item 之后
   let depth = typeof body.depth === 'number' ? body.depth : 0;
+  let nextSort: number;
   if (body.parent_id) {
     const { data: parent } = await client
       .from('comparison_item_nodes')
-      .select('depth')
+      .select('depth, sort_order')
       .eq('id', body.parent_id)
       .maybeSingle();
     depth = (parent?.depth ?? -1) + 1;
+    // 取同一 parent_id 下、同类型范围的最大 sort_order
+    const isItemType = ['item', 'condition', 'metric', 'process_node', 'issue_group'].includes(body.node_type);
+    const typeFilter = isItemType ? ['item', 'condition', 'metric', 'process_node', 'issue_group'] : [body.node_type];
+    const { data: siblings } = await client
+      .from('comparison_item_nodes')
+      .select('sort_order')
+      .eq('assembly_id', body.assembly_id)
+      .eq('parent_id', body.parent_id)
+      .in('node_type', typeFilter)
+      .order('sort_order', { ascending: false })
+      .maybeSingle();
+    nextSort = (siblings?.sort_order ?? parent?.sort_order ?? -1) + 1;
+  } else {
+    // 顶层节点（section）：取全局最大 sort_order +1
+    const { data: existing } = await client
+      .from('comparison_item_nodes')
+      .select('sort_order')
+      .eq('assembly_id', body.assembly_id)
+      .is('parent_id', null)
+      .order('sort_order', { ascending: false })
+      .maybeSingle();
+    nextSort = (existing?.sort_order ?? -1) + 1;
   }
 
   const insertRow: Record<string, unknown> = {
