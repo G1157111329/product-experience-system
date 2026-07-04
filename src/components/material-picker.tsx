@@ -238,6 +238,46 @@ export function MaterialPicker({
     }
   };
 
+  const handlePaste = useCallback((e: ClipboardEvent) => {
+    // Only handle when the dialog is open.
+    if (!isOpen) return;
+
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    const imageFiles: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (!file) continue;
+        // Assign a proper filename — the upload API validates extension from file.name.
+        // Clipboard images are typically image/png; preserve the original type.
+        const ext = file.type === 'image/jpeg' ? 'jpg'
+          : file.type === 'image/gif' ? 'gif'
+          : file.type === 'image/webp' ? 'webp'
+          : 'png';  // default to png
+        const timestamp = Date.now();
+        const namedFile = new File([file], `pasted-${timestamp}-${i}.${ext}`, { type: file.type });
+        imageFiles.push(namedFile);
+      }
+    }
+
+    if (imageFiles.length === 0) return;  // not an image paste — let native handling proceed
+
+    e.preventDefault();  // prevent native paste into any input/textarea
+    void uploadFiles(imageFiles);
+  }, [isOpen, uploadFiles]);
+
+  // Mount/unmount the paste listener. Listener is on `document` because clipboard
+  // paste events fire on the focused element, which may be inside or outside the
+  // Dialog DOM; the `isOpen` guard inside handlePaste ensures it only acts when
+  // the dialog is visible. Same pattern the matrix grid uses.
+  useEffect(() => {
+    document.addEventListener('paste', handlePaste);
+    return () => document.removeEventListener('paste', handlePaste);
+  }, [handlePaste]);
+
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     await uploadFiles(Array.from(event.target.files || []));
   };
@@ -411,6 +451,9 @@ export function MaterialPicker({
   const renderDialogBody = () => (
     <div className="space-y-3">
       {renderUploadActions()}
+      <p className="text-[11px] text-muted-foreground text-center pt-1">
+        也可以直接粘贴图片 (Ctrl/Cmd+V)
+      </p>
       <ScrollArea className="h-[50vh]">
         {loading ? (
           <div className="flex items-center justify-center py-8">
