@@ -26,7 +26,7 @@ export interface RecomputeInput {
   /** Dimension key that just changed (for logging/hash). */
   triggeredDimensionKey: string;
   traceId: string;
-  triggerType?: 'api_save' | 'api_recalculate' | 'snapshot_build';
+  triggerType?: 'api_save' | 'api_recalculate' | 'snapshot_build' | 'batch_paste';
 }
 
 export interface RecomputeUpdate {
@@ -522,7 +522,7 @@ async function loadRowMetrics(client: any, rowId: string): Promise<Row[]> {
  * read-then-update-or-insert: read the existing row by (cell_id, metric_key),
  * then UPDATE (bumping version) or INSERT (version 1) as appropriate.
  */
-interface UpsertMetricInput {
+export interface UpsertMetricInput {
   cellId: string;
   metricKey: string;
   valueKind: string;
@@ -537,7 +537,7 @@ interface UpsertMetricInput {
   errorCode: string | null;
 }
 
-async function upsertMetricEvaluation(client: any, input: UpsertMetricInput): Promise<void> {
+export async function upsertMetricEvaluation(client: any, input: UpsertMetricInput): Promise<void> {
   const { data: existingRaw, error: readErr } = await client
     .from('metric_evaluations')
     .select('id, version')
