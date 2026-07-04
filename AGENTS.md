@@ -202,6 +202,7 @@
 | PATCH | `/api/matrix-rows/[id]` | 修改行元数据（对象/规格/排序） |
 | PATCH | `/api/matrix-rows/[id]/slots` | 三槽位（效果结论/过程记录；关联问题由问题模块管理） |
 | PATCH | `/api/matrix-rows/[id]/metrics/[dimensionKey]` | 写原始指标 + 服务端复核计算（同一引擎复核，返回 needs_recompute） |
+| POST | `/api/task-matrices/[id]/batch-commands` | 批量粘贴原始指标（≤500 单元格，部分成功+逐项错误，batch 末尾集中重算；点选错点决定起点；跨组截断；移动端不开放） |
 
 ## 构建与运行
 
@@ -462,6 +463,7 @@ INITIAL_ADMIN_PASSWORD=<strong-password>
 88. **报告投影冻结**: 生成报告时将 data_matrix 投影完整冻结写入 `report_snapshots.snapshot_json.matrix_projection`，而不是仅存 instance_id，避免后续 schema 变更或数据修改导致报告内容漂移。
 89. **已知限制**: (a) schema-publish 循环依赖检测存在自环缺口——自引用公式如 `juice_yield = SELF("juice_yield")+1` 会因 `dep !== from` 守卫跳过自身而漏检，待后续加固；(b) manual 指标写入 + recompute 之间无 DB 事务（pg-query 适配器限制），复核失败时保留手动值（有意），计算值可能短暂陈旧，API 返回 `needs_recompute: true`；(c) 并发计算单元格 upsert 仍存在窄读→守卫更新竞态窗口，比此前收窄但未完全原子（需 SELECT FOR UPDATE 才能彻底消除）。
 90. **数据矩阵 Wave 映射**: Wave 0（schema/公式引擎/迁移）与 Wave 1（实例/CRUD/投影/移动端/报告）已完成；Wave 2（受限公式构建器、模式草稿/审批、批量粘贴增强）未做；RESERVED（任意 Excel 解析、A1 自由公式、宏/VBA、自由画布单元格格式）明确不做。
+91. **批量粘贴增强 (Wave 2)**: 从 Excel 粘贴「原始指标区」到桌面 grid（移动端不开）；点选 observed+editable 单元格作错点 → Cmd/Ctrl+V → 服务端几何校验（同组、列序≥错点、行序≥错点）→ 逐命令写入（partial success，沿用 pg-query 无事务限制）→ batch 末尾按行去重集中重算 → 返回逐命令成功/失败 + 权威计算结果。仅原始指标区（计算列/行标签/证据拒绝）；≤500 单元格/次（超出 429）；跨组截断到当前组末 + warning；失败格前端红色高亮 + 错误码 tooltip，可单格 PATCH 重试。复用 `upsertMetricEvaluation` + `recomputeAffected`，不新增表。幂等键 = `matrix_calculation_runs.trace_id = clientOperationId`（v1 不重放逐项结果，返回 warning 提示刷新投影）。paste 监听器只在多单元格（含 \t/\n）且目标在聚焦单元格内时触发，避免劫持 textarea/搜索框粘贴。
 
 ## 代码风格
 
