@@ -151,17 +151,27 @@ export function MatrixVirtualGrid({
   useEffect(() => {
     if (!handlers.onBatchPaste) return;
     const onPaste = (e: ClipboardEvent) => {
-      if (!focusedCell || !onFocusedCellChange) return;
+      if (!handlers.onBatchPaste || !focusedCell) return;
       const text = e.clipboardData?.getData('text/plain') ?? '';
       if (!text) return;
       // Only intercept multi-cell pastes (Excel/sheets region). Single values
       // pasted into a focused input are left to the input itself.
       const isMultiCell = text.includes('\t') || text.includes('\n');
       if (!isMultiCell) return;
-      const target = document.querySelector(
+      // Only intercept when the paste is happening INSIDE the focused observed
+      // cell itself. Without this guard, `focusedCell` is never cleared after
+      // the first click on an observed cell, so every subsequent multi-line/tab
+      // paste ANYWHERE on the page (过程记录/效果结论 textareas, toolbar search,
+      // document body) would be hijacked into the grid as metric values — a
+      // silent data-integrity hazard. By checking `e.target.closest(...)`,
+      // pastes whose target is a different element fall through to native
+      // behaviour.
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const inFocusedCell = target.closest(
         `[data-row-id="${CSS.escape(focusedCell.rowId)}"][data-dimension-key="${CSS.escape(focusedCell.dimensionKey)}"]`,
       );
-      if (!target) return; // focused cell not rendered (collapsed/filtered)
+      if (!inFocusedCell) return; // paste target is elsewhere — let native handle it
       e.preventDefault();
       const rows = text.split(/\r?\n/).filter((r) => r.length > 0);
       const grid = rows.map((r) =>
@@ -179,7 +189,7 @@ export function MatrixVirtualGrid({
     };
     document.addEventListener('paste', onPaste);
     return () => document.removeEventListener('paste', onPaste);
-  }, [focusedCell, handlers, onFocusedCellChange]);
+  }, [focusedCell, handlers]);
 
   return (
     <div className="w-full overflow-x-auto">
