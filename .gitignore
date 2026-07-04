@@ -106,3 +106,12 @@ Desktop.ini
 .coze-logs
 .cozeproj/reduction
 .superpowers/
+
+# Tooling / caches / large binaries (not for git)
+.codex/
+__pycache__/
+output/
+docs/*.docx
+docs/*.xlsx
+scripts/ssh-*.py
+deploy-prod.py
