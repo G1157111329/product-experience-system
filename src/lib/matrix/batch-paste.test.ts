@@ -115,20 +115,35 @@ interface StubState {
 }
 
 /**
- * Build a chainable stub client. Adapted from recompute.test.ts, with one extra
- * knob: `conflictUpdateIds` — a set of metric_evaluations row `id`s whose
- * version-guarded update should match 0 rows (modeling a concurrent version
- * bump), so upsertMetricEvaluation throws MatrixMetricConflictError. Used to
- * drive the partial-success test.
+ * Build a chainable stub client. Adapted from recompute.test.ts.
+ *
+ * Fix I1: the stub's `update()` path now honors a `version` filter when present
+ * on `metric_evaluations`, mirroring the real `upsertMetricEvaluation` guard
+ * `.eq('id', …).eq('version', prevVersion)`. Combined with the `bumpOnUpdateIds`
+ * knob, this lets a conflict be produced through the REAL failure signal (the
+ * version guard matching 0 rows because a concurrent write bumped the version),
+ * rather than a synthetic shortcut that ignores the version dimension.
  */
 function makeStubClient(
   tables: Record<string, any[]>,
-  opts: { conflictUpdateIds?: Set<string> } = {},
+  opts: {
+    /**
+     * metric_evaluations row `id`s whose version should be bumped the FIRST time
+     * a guarded update targets them. This models a concurrent write that lands
+     * AFTER the orchestrator's upsert read version N but BEFORE its
+     * `.eq('version', N)` guarded update runs — so the guard matches 0 rows and
+     * upsertMetricEvaluation throws MatrixMetricConflictError. (Fix I1.)
+     */
+    bumpOnUpdateIds?: Set<string>;
+  } = {},
 ) {
   const records: Record<string, Array<Record<string, unknown>>> = {};
   for (const [k, v] of Object.entries(tables)) {
     records[k] = v.map((row) => ({ ...row }));
   }
+  // Track which rows we've already bumped so the bump happens once (a real
+  // concurrent write bumps once; subsequent retries would see the new version).
+  const bumpedIds = new Set<string>();
 
   const resolveSelect = (state: StubState): Promise<{ data: any; error: any }> => {
     let rows = (records[state._table!] || []).filter((r) =>
@@ -188,18 +203,36 @@ function makeStubClient(
         const apply = () => {
           const arr = records[table] || [];
           matched = arr.filter((r) => filters.every((f) => r[f.col] === f.val));
-          // Conflict simulation: when a matched row's `id` is in the configured
-          // conflict set, model a "version guard matched 0 rows" outcome so
-          // upsertMetricEvaluation throws MatrixMetricConflictError (mirrors a
-          // concurrent version bump between read and write).
-          if (opts.conflictUpdateIds && table === 'metric_evaluations') {
+          // Fix I1: honor a `version` filter on metric_evaluations exactly like
+          // the real upsertMetricEvaluation guard `.eq('version', prevVersion)`.
+          // This is what makes the guarded update match 0 rows when a concurrent
+          // write has bumped the row's version — the real conflict signal.
+          const versionFilter = filters.find((f: any) => f.col === 'version');
+          if (table === 'metric_evaluations' && versionFilter !== undefined) {
+            matched = matched.filter((r: any) => Number(r.version) === Number(versionFilter.val));
+          }
+          // Model a concurrent write: if this row's id is configured to be
+          // bumped AND the orchestrator is making its first guarded-update
+          // attempt on it, bump the version now (before Object.assign applies
+          // the new payload). The version filter above then excludes the row,
+          // so matched becomes [] and upsertMetricEvaluation throws the conflict.
+          if (opts.bumpOnUpdateIds && table === 'metric_evaluations' && matched.length > 0) {
             const idFilter = filters.find((f) => f.col === 'id');
+            const vFilter = filters.find((f: any) => f.col === 'version');
             if (
-              idFilter && matched.length > 0 &&
-              opts.conflictUpdateIds.has(String(idFilter.val))
+              idFilter && vFilter &&
+              opts.bumpOnUpdateIds.has(String(idFilter.val)) &&
+              !bumpedIds.has(String(idFilter.val))
             ) {
-              matched = [];
-              return;
+              bumpedIds.add(String(idFilter.val));
+              for (const r of records[table]) {
+                if (String(r.id) === String(idFilter.val)) {
+                  r.version = Number(r.version) + 1;
+                }
+              }
+              // Re-apply the version filter after the bump → the bumped row no
+              // longer matches the guard → matched = [] → conflict.
+              matched = matched.filter((r: any) => Number(r.version) === Number(vFilter.val));
             }
           }
           for (const r of matched) Object.assign(r, row);
@@ -292,16 +325,23 @@ async function executionMain() {
   }
 
   // --- Partial success: second command hits a version conflict ---------------
+  // Fix I1: this models the REAL failure mode. upsertMetricEvaluation reads
+  // (r1, juice_weight) at version 5; a concurrent write bumps it to 6 before the
+  // guarded update runs; the update `.eq('id', me_jw_seed).eq('version', 5)`
+  // matches 0 rows → upsertMetricEvaluation throws MatrixMetricConflictError.
+  // The stub's `bumpOnUpdateIds` knob simulates the concurrent bump the FIRST
+  // time a guarded update targets that id; the version filter (now honored by
+  // the stub) is what makes matched=0. This proves the conflict is produced by
+  // the version guard, not a synthetic shortcut that ignores version.
   {
     const fixtures = batchPasteFixtures();
-    // Pre-seed (r1, juice_weight) at version 5 so the update path is taken.
-    // Configure the stub so the version-guarded update on this row's id matches
-    // 0 rows → upsertMetricEvaluation throws MatrixMetricConflictError.
+    // Pre-seed (r1, juice_weight) at version 5 so the update path is taken
+    // (existing.id present → guarded update, not insert).
     fixtures.metric_evaluations = [
       { id: 'me_jw_seed', cell_id: 'r1', metric_key: 'juice_weight', value_kind: 'number', numeric_value: 100, unit_code: 'g', input_state: 'valid', calculation_mode: 'manual', version: 5 },
     ];
     const { root, records } = makeStubClient(fixtures, {
-      conflictUpdateIds: new Set(['me_jw_seed']),
+      bumpOnUpdateIds: new Set(['me_jw_seed']),
     });
     const result = await executeBatchPaste(root, 'a1', {
       clientOperationId: 'op_partial',
@@ -318,7 +358,8 @@ async function executionMain() {
     assert.equal(result.results[0]!.status, 'succeeded', 'ingredient_weight should succeed');
     assert.equal(result.results[1]!.status, 'conflict', 'juice_weight should conflict');
     assert.equal(result.results[1]!.error!.code, 'MATRIX_METRIC_VERSION_CONFLICT');
-    assert.equal(result.results[1]!.error!.latestVersion, 5);
+    // After the concurrent bump, the readback sees the bumped version (6).
+    assert.equal(result.results[1]!.error!.latestVersion, 6);
     // Only the succeeded row (r1) is recomputed.
     assert.equal(records.matrix_calculation_runs.length, 1, 'expected one run for the succeeded row');
   }

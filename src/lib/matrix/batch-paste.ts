@@ -146,15 +146,23 @@ export async function executeBatchPaste(
   }
   const schemaVersionId = String(assembly.matrix_schema_version_id);
 
+  // Fix I3: baseVersion is accepted for forward-compat. projection.version is
+  // hardcoded to 1 in v1 (spec §8.5), so there's no 409 here yet. When Wave 2
+  // wires real projection versioning, add the optimistic-concurrency check:
+  //   if (req.baseVersion !== <assembly.version>) → 409.
+
   // 2. Idempotency: a prior run with trace_id === clientOperationId means the
   //    batch was already applied. (recomputeAffected writes runs with
   //    trace_id = clientOperationId.) v1 returns a minimal confirmation rather
   //    than replaying per-command results (that needs a results snapshot,
-  //    deferred).
+  //    deferred). Fix M3: scope the check to trigger_type='batch_paste' so it
+  //    doesn't false-positive on runs from other operations (api_save,
+  //    api_recalculate) that might happen to share a trace_id.
   const { data: existingRun, error: idemErr } = await client.from('matrix_calculation_runs')
     .select('id')
     .eq('matrix_instance_id', assemblyId)
     .eq('trace_id', req.clientOperationId)
+    .eq('trigger_type', 'batch_paste')
     .maybeSingle();
   if (idemErr) throw new Error(idemErr.message || '幂等查询失败');
   if (existingRun) {
@@ -270,20 +278,37 @@ export async function executeBatchPaste(
       });
     } catch (err) {
       if (err instanceof MatrixMetricConflictError) {
-        const { data: latest } = await client.from('metric_evaluations')
+        // Fix C2: destructure the readback error and handle it. A conflict was
+        // detected (the version-guarded update matched 0 rows) but if the
+        // subsequent readback of the latest version/value ALSO fails, we still
+        // mark conflict — just without latestVersion/latestValue, with a message
+        // explaining the readback failed. Previously the readback error was
+        // swallowed, silently dropping the failure signal (Wave-1 bug pattern).
+        const { data: latest, error: latestErr } = await client.from('metric_evaluations')
           .select('version,numeric_value,duration_ms,text_value')
           .eq('cell_id', cmd.rowId)
           .eq('metric_key', cmd.dimensionKey)
           .maybeSingle();
-        results.push({
-          index: i, status: 'conflict',
-          rowId: cmd.rowId, dimensionKey: cmd.dimensionKey,
-          error: {
-            code: 'MATRIX_METRIC_VERSION_CONFLICT',
-            latestVersion: latest?.version,
-            latestValue: latest?.numeric_value ?? latest?.duration_ms ?? latest?.text_value,
-          },
-        });
+        if (latestErr) {
+          results.push({
+            index: i, status: 'conflict',
+            rowId: cmd.rowId, dimensionKey: cmd.dimensionKey,
+            error: {
+              code: 'MATRIX_METRIC_VERSION_CONFLICT',
+              message: '冲突后读取最新值失败：' + (latestErr.message || ''),
+            },
+          });
+        } else {
+          results.push({
+            index: i, status: 'conflict',
+            rowId: cmd.rowId, dimensionKey: cmd.dimensionKey,
+            error: {
+              code: 'MATRIX_METRIC_VERSION_CONFLICT',
+              latestVersion: latest?.version,
+              latestValue: latest?.numeric_value ?? latest?.duration_ms ?? latest?.text_value,
+            },
+          });
+        }
       } else {
         const code = (err instanceof Error && err.message) || 'MATRIX_VALUE_INVALID';
         results.push({
@@ -305,35 +330,55 @@ export async function executeBatchPaste(
   ));
   const authoritativeCalculations: AuthoritativeCalc[] = [];
   const calculationRunIds: string[] = [];
+  // Fix C1: each row's recompute is isolated in its own try/catch so a failure
+  // on row N cannot discard per-command results, authoritative values, or run
+  // ids collected for earlier rows (the write path is partial-success). Failures
+  // are surfaced in `warnings` and force the top-level status to
+  // partially_succeeded — authoritative values for the failed row are stale
+  // until the next recompute, so the caller must be told.
+  const recomputeFailures: string[] = [];
   for (const rowId of affectedRowIds) {
-    const recompute = await recomputeAffected({
-      client,
-      assemblyId,
-      schemaVersionId,
-      triggeredRowId: rowId,
-      triggeredDimensionKey: '<batch>',
-      traceId: req.clientOperationId,
-      triggerType: 'batch_paste',
-    });
-    for (const u of recompute.updated) {
-      authoritativeCalculations.push({
-        rowId: u.rowId,
-        metricKey: u.metricKey,
-        value: u.value,
-        formulaVersion: u.formulaVersion,
-        status: u.status,
-        errorCode: u.errorCode,
+    try {
+      const recompute = await recomputeAffected({
+        client,
+        assemblyId,
+        schemaVersionId,
+        triggeredRowId: rowId,
+        triggeredDimensionKey: '<batch>',
+        traceId: req.clientOperationId,
+        triggerType: 'batch_paste',
       });
+      for (const u of recompute.updated) {
+        authoritativeCalculations.push({
+          rowId: u.rowId,
+          metricKey: u.metricKey,
+          value: u.value,
+          formulaVersion: u.formulaVersion,
+          status: u.status,
+          errorCode: u.errorCode,
+        });
+      }
+      calculationRunIds.push(recompute.runId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'unknown recompute error';
+      recomputeFailures.push(`行 ${rowId} 重算失败：${msg}`);
+      // The per-command writes for this row already committed; authoritative
+      // values for this row will be stale until the next recompute. Surfaced in
+      // warnings so the caller knows authoritative values are incomplete.
     }
-    calculationRunIds.push(recompute.runId);
   }
 
-  // 8. Compose the top-level status from per-command outcomes.
+  // 8. Compose the top-level status from per-command outcomes. If any recompute
+  //    failed, force partially_succeeded even if all per-command writes
+  //    succeeded — the authoritative values are incomplete.
   const succeededCount = results.filter((r) => r.status === 'succeeded').length;
-  const status: BatchPasteResult['status'] =
+  let status: BatchPasteResult['status'] =
     succeededCount === results.length ? 'succeeded'
     : succeededCount === 0 ? 'failed'
     : 'partially_succeeded';
+  if (recomputeFailures.length > 0 && status === 'succeeded') {
+    status = 'partially_succeeded';
+  }
 
   return {
     operationId: req.clientOperationId,
@@ -341,7 +386,7 @@ export async function executeBatchPaste(
     results,
     authoritativeCalculations,
     calculationRunIds,
-    warnings: [],
+    warnings: recomputeFailures,
   };
 }
 
