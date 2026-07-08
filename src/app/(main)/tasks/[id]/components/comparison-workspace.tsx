@@ -12,6 +12,8 @@ import { Label } from '@/components/ui/label';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
+import { InlineEditable } from '@/components/inline-editable';
+import { patchInlineValue } from '@/lib/inline-save-helpers';
 
 type ComparisonAssembly = {
   id: string;
@@ -134,6 +136,14 @@ function isMatrixCellNode(node: ComparisonItemNode) {
   return MATRIX_CELL_NODE_TYPES.has(node.node_type || 'item');
 }
 
+function nodeSortOrder(node: ComparisonItemNode) {
+  return typeof node.sort_order === 'number' ? node.sort_order : 0;
+}
+
+function sortNodesByOrder(nodes: ComparisonItemNode[]) {
+  return [...nodes].sort((a, b) => nodeSortOrder(a) - nodeSortOrder(b));
+}
+
 function summaryTextOf(node: ComparisonItemNode) {
   const config = node.config || {};
   return String(config.summary_text || config.summary || '').trim();
@@ -175,6 +185,36 @@ export function ComparisonWorkspace({
       items: nodes.filter(isMatrixCellNode).length,
       summaries: nodes.filter(isSummaryNode).length,
     };
+  }, [matrix?.item_nodes]);
+
+  const orderedItemNodes = useMemo(() => {
+    const nodes = sortNodesByOrder(matrix?.item_nodes || []);
+    const sectionNodes = nodes.filter(isSectionNode);
+    if (sectionNodes.length === 0) return nodes;
+
+    const emitted = new Set<string>();
+    const result: ComparisonItemNode[] = [];
+    for (const section of sectionNodes) {
+      result.push(section);
+      emitted.add(section.id);
+
+      const children = nodes.filter((node) => node.parent_id === section.id && !isSummaryNode(node));
+      for (const child of sortNodesByOrder(children)) {
+        result.push(child);
+        emitted.add(child.id);
+      }
+
+      const summaries = nodes.filter((node) => node.parent_id === section.id && isSummaryNode(node));
+      for (const summary of sortNodesByOrder(summaries)) {
+        result.push(summary);
+        emitted.add(summary.id);
+      }
+    }
+
+    for (const node of nodes) {
+      if (!emitted.has(node.id)) result.push(node);
+    }
+    return result;
   }, [matrix?.item_nodes]);
 
   const tableMinWidth = Math.max(720, LEFT_COLUMN_WIDTH + Math.max(1, matrix?.objects.length || 1) * OBJECT_COLUMN_WIDTH);
@@ -408,11 +448,12 @@ export function ComparisonWorkspace({
     }
     setSavingCellId(cell.id);
     try {
+      // effect_summary 已由 InlineEditable 自动保存（PATCH /api/v1/inline-values），
+      // 此处仅提交过程记录 / 问题点 / 评分 / 结论标签，避免覆盖已自动保存的文本。
       const res = await fetch(`/api/comparison-cells/${cell.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          effect_summary: draft.effect_summary.trim() || null,
           process_notes: textareaToList(draft.process_notes_text),
           problem_points: textareaToList(draft.problem_points_text),
           manual_score: draft.manual_score.trim() || null,
@@ -512,12 +553,12 @@ export function ComparisonWorkspace({
         </div>
 
         <div className="space-y-2">
-          <Textarea
-            value={draft.effect_summary}
-            onChange={(event) => updateCellDraft(cell.id, 'effect_summary', event.target.value)}
-            rows={3}
+          <InlineEditable.Textarea
+            value={cell.effect_summary ?? ''}
             placeholder="输入效果结论"
-            className="min-h-20 resize-y text-xs"
+            rows={3}
+            onSave={async (v) => patchInlineValue('comparison_matrix_cell', cell.id, 'effect_summary', v)}
+            inputClassName="min-h-20 resize-y text-xs"
           />
           <Textarea
             value={draft.process_notes_text}
@@ -708,7 +749,7 @@ export function ComparisonWorkspace({
                 </TableHeader>
                 <TableBody>
                   {renderAddSectionRow()}
-                  {matrix.item_nodes.map((node) => {
+                  {orderedItemNodes.map((node) => {
                     if (isSectionNode(node)) {
                       return (
                         <Fragment key={node.id}>

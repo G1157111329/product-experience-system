@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Wrench, Plus, Pencil, Trash2, Play, GripVertical, Sparkles, Save, Star, X } from 'lucide-react';
+import { Wrench, Plus, Pencil, Trash2, Play, GripVertical, Sparkles, Star, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -18,6 +18,8 @@ import { isPendingMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import { toast } from 'sonner';
 import { useImagePreview } from '@/components/image-preview';
 import { MaterialPicker } from '@/components/material-picker';
+import { InlineEditable } from '@/components/inline-editable';
+import { patchInlineValue } from '@/lib/inline-save-helpers';
 import type { Recipe, RecipeStep, Material, RecipeLibRef } from '../types';
 
 function getMaterialDisplayUrl(material: Material, presignedUrls: Map<string, string>) {
@@ -72,8 +74,8 @@ export function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onSta
   const presignedUrls = usePresignedUrls(allMaterials);
 
   // ── Effect evaluation states ──
-  const [effectDesc, setEffectDesc] = useState<Record<string, string>>({});
-  const [effectProblem, setEffectProblem] = useState<Record<string, string>>({});
+  // effect_description / effect_problem_point 已改为 InlineEditable 自动保存，
+  // 这里仅保留附件素材选择状态与 AI 评价状态。
   const [effectMaterialIds, setEffectMaterialIds] = useState<Record<string, string[]>>({});
   const [effectSaving, setEffectSaving] = useState<Record<string, boolean>>({});
   const [aiEvaluating, setAiEvaluating] = useState<Record<string, boolean>>({});
@@ -415,27 +417,24 @@ export function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onSta
     }
   };
 
-  // ── Save effect evaluation ──
+  // ── Save effect evaluation (materials only) ──
+  // 效果描述 / 问题点已由 InlineEditable 自动保存；此处仅持久化附件素材。
   const handleSaveEffect = async (recipe: Recipe) => {
     setEffectSaving(prev => ({ ...prev, [recipe.id]: true }));
     try {
-      const desc = effectDesc[recipe.id] ?? recipe.effect_description ?? '';
-      const pp = effectProblem[recipe.id] ?? recipe.effect_problem_point ?? '';
       const matIds = effectMaterialIds[recipe.id] ?? (recipe.effect_materials || []).map(m => m.id);
       const res = await fetch(`/api/recipes/${recipe.id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: recipe.name, ingredients: recipe.ingredients,
           recipe_type: recipe.recipe_type, problem_count: recipe.problem_count,
-          effect_description: desc,
-          effect_problem_point: pp,
           effect_material_ids: matIds,
         }),
       });
       const data = await res.json();
       if (data.code === 0) {
         fetchRecipes();
-        toast.success('效果评价已保存');
+        toast.success('素材已保存');
       } else toast.error(data.message);
     } finally {
       setEffectSaving(prev => ({ ...prev, [recipe.id]: false }));
@@ -444,7 +443,7 @@ export function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onSta
 
   // ── AI evaluate effect ──
   const handleAiEvaluate = async (recipe: Recipe) => {
-    // Save first
+    // 先保存附件素材（文本字段已自动保存）
     await handleSaveEffect(recipe);
     setAiEvaluating(prev => ({ ...prev, [recipe.id]: true }));
     try {
@@ -459,6 +458,23 @@ export function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onSta
       } else toast.error(data.message);
     } finally {
       setAiEvaluating(prev => ({ ...prev, [recipe.id]: false }));
+    }
+  };
+
+  // Delete AI evaluation
+  const handleDeleteAiEval = async (recipe: Recipe) => {
+    try {
+      const res = await fetch(`/api/recipes/${recipe.id}/ai-evaluate`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data.code === 0) {
+        setAiResult(prev => { const next = { ...prev }; delete next[recipe.id]; return next; });
+        fetchRecipes();
+        toast.success('AI评价已删除');
+      } else toast.error(data.message);
+    } catch {
+      toast.error('删除失败');
     }
   };
 
@@ -649,20 +665,20 @@ export function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onSta
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-xs">评价描述</Label>
-                      <Textarea
+                      <InlineEditable.Textarea
+                        value={recipe.effect_description ?? ''}
                         placeholder="描述该食谱/功能的效果和出品表现..."
-                        value={effectDesc[recipe.id] ?? recipe.effect_description ?? ''}
-                        onChange={(e) => setEffectDesc(prev => ({ ...prev, [recipe.id]: e.target.value }))}
                         rows={3}
+                        onSave={async (v) => patchInlineValue('function_effect_record', recipe.id, 'effect_description', v)}
                       />
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-xs">问题点</Label>
-                      <Textarea
+                      <InlineEditable.Textarea
+                        value={recipe.effect_problem_point ?? ''}
                         placeholder="记录效果评价中发现的问题..."
-                        value={effectProblem[recipe.id] ?? recipe.effect_problem_point ?? ''}
-                        onChange={(e) => setEffectProblem(prev => ({ ...prev, [recipe.id]: e.target.value }))}
                         rows={2}
+                        onSave={async (v) => patchInlineValue('function_effect_record', recipe.id, 'effect_problem_point', v)}
                       />
                     </div>
                     <div className="space-y-1.5">
@@ -687,8 +703,11 @@ export function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onSta
                           <div className="flex items-center gap-2">
                             <Sparkles className="h-3.5 w-3.5 text-primary" />
                             <span className="text-xs font-medium">AI评价结果</span>
+                            <Button variant="ghost" size="icon" className="h-6 w-6 ml-auto text-muted-foreground hover:text-destructive" onClick={() => handleDeleteAiEval(recipe)} title="删除AI评价">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
                             {aiScore && (
-                              <Badge className={`text-[10px] ml-auto ${Number(aiScore) >= 8 ? 'bg-emerald-600' : Number(aiScore) >= 6 ? 'bg-blue-600' : Number(aiScore) >= 4 ? 'bg-amber-600' : 'bg-red-600'} text-white`}>
+                              <Badge className={`text-[10px] ${Number(aiScore) >= 8 ? 'bg-emerald-600' : Number(aiScore) >= 6 ? 'bg-blue-600' : Number(aiScore) >= 4 ? 'bg-amber-600' : 'bg-red-600'} text-white`}>
                                 {aiScore}分/10分
                               </Badge>
                             )}
@@ -703,12 +722,12 @@ export function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onSta
                       <Button variant="outline" size="sm" className="flex-1"
                         onClick={() => handleSaveEffect(recipe)}
                         disabled={effectSaving[recipe.id]}>
-                        <Save className="h-3.5 w-3.5 mr-1" />
-                        {effectSaving[recipe.id] ? '保存中...' : '保存评价'}
+                        <Sparkles className="h-3.5 w-3.5 mr-1" />
+                        {effectSaving[recipe.id] ? '保存中...' : '保存素材'}
                       </Button>
                       <Button size="sm" className="flex-1"
                         onClick={() => handleAiEvaluate(recipe)}
-                        disabled={aiEvaluating[recipe.id] || (!effectDesc[recipe.id] && !recipe.effect_description && (!effectMaterialIds[recipe.id]?.length && !recipe.effect_materials?.length))}>
+                        disabled={aiEvaluating[recipe.id] || (!recipe.effect_description && (!effectMaterialIds[recipe.id]?.length && !recipe.effect_materials?.length))}>
                         <Sparkles className="h-3.5 w-3.5 mr-1" />
                         {aiEvaluating[recipe.id] ? 'AI评价中...' : 'AI总结评分'}
                       </Button>

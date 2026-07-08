@@ -5,11 +5,12 @@ import { Pencil } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useDictLabels } from '@/hooks/useDictionary';
+import { InlineEditable } from '@/components/inline-editable';
+import { patchInlineValue } from '@/lib/inline-save-helpers';
 import type { TaskDetail, CategoryWithProducts } from '../types';
 import { statusConfig } from '../types';
 
@@ -44,13 +45,21 @@ export function BasicInfoTab({ task, onRefresh }: { task: TaskDetail; onRefresh:
   const projectTypes = ['ODM', 'OEM', '竞品研究', '自研', '前期研究', '改型降本优化', '海外产品'];
   const projectPhases = useDictLabels('project_phase_dict');
 
+  // task_name / test_purpose / test_method 已改为 InlineEditable 自动保存，
+  // 此处仅提交下拉/按钮类复杂字段，避免用陈旧 form 覆盖已自动保存的文本字段。
+  const INLINE_FIELDS = new Set(['task_name', 'test_purpose', 'test_method']);
+
   const handleSave = async () => {
     if (saving) return;
     setSaving(true);
     try {
+      const payload: Record<string, string> = {};
+      for (const [k, v] of Object.entries(form)) {
+        if (!INLINE_FIELDS.has(k)) payload[k] = v;
+      }
       const res = await fetch(`/api/tasks/${task.id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (data.code === 0) {
@@ -62,19 +71,19 @@ export function BasicInfoTab({ task, onRefresh }: { task: TaskDetail; onRefresh:
   };
 
   const fields = [
-    { label: '任务名称', key: 'task_name' as const, type: 'text' },
-    { label: '产品品类', key: 'product_category' as const, type: 'category' },
-    { label: '产品', key: 'product' as const, type: 'product' },
-    { label: '产品型号', key: 'product_model' as const, type: 'text' },
-    { label: '项目单号', key: 'project_number' as const, type: 'text' },
-    { label: '项目类型', key: 'project_type' as const, type: 'project_type' },
-    { label: '项目阶段', key: 'project_phase' as const, type: 'project_phase' },
-    { label: '体验时间', key: 'test_date' as const, type: 'date' },
-    { label: '组织人', key: 'organizer' as const, type: 'text' },
-    { label: '目标人群', key: 'target_user' as const, type: 'text' },
-    { label: '体验目的', key: 'test_purpose' as const, type: 'textarea' },
-    { label: '体验方法', key: 'test_method' as const, type: 'textarea' },
-    { label: '状态', key: 'status' as const, type: 'status' },
+    { label: '任务名称', key: 'task_name' as const, type: 'inline-text' as const },
+    { label: '产品品类', key: 'product_category' as const, type: 'category' as const },
+    { label: '产品', key: 'product' as const, type: 'product' as const },
+    { label: '产品型号', key: 'product_model' as const, type: 'text' as const },
+    { label: '项目单号', key: 'project_number' as const, type: 'text' as const },
+    { label: '项目类型', key: 'project_type' as const, type: 'project_type' as const },
+    { label: '项目阶段', key: 'project_phase' as const, type: 'project_phase' as const },
+    { label: '体验时间', key: 'test_date' as const, type: 'date' as const },
+    { label: '组织人', key: 'organizer' as const, type: 'text' as const },
+    { label: '目标人群', key: 'target_user' as const, type: 'text' as const },
+    { label: '体验目的', key: 'test_purpose' as const, type: 'inline-textarea' as const },
+    { label: '体验方法', key: 'test_method' as const, type: 'inline-textarea' as const },
+    { label: '状态', key: 'status' as const, type: 'status' as const },
   ];
 
   return (
@@ -95,10 +104,34 @@ export function BasicInfoTab({ task, onRefresh }: { task: TaskDetail; onRefresh:
         {fields.map((field) => (
           <div key={field.key} className="flex gap-4">
             <span className="text-xs text-muted-foreground w-20 shrink-0">{field.label}</span>
-            {editing ? (
+            {/* InlineEditable 字段：无论是否处于编辑模式都支持点击即编辑 + 自动保存 */}
+            {field.type === 'inline-text' && (
+              <div className="flex-1 min-w-0">
+                <InlineEditable.Text
+                  value={task[field.key] ?? ''}
+                  placeholder={`输入${field.label}...`}
+                  onSave={async (v) => patchInlineValue('report_summary', task.id, field.key, v)}
+                  className="w-full"
+                  inputClassName="h-7 text-sm"
+                />
+              </div>
+            )}
+            {field.type === 'inline-textarea' && (
+              <div className="flex-1 min-w-0">
+                <InlineEditable.Textarea
+                  value={task[field.key] ?? ''}
+                  placeholder={`输入${field.label}...`}
+                  rows={2}
+                  onSave={async (v) => patchInlineValue('report_summary', task.id, field.key, v)}
+                  className="w-full"
+                  inputClassName="text-sm"
+                />
+              </div>
+            )}
+            {/* 复杂字段（下拉/按钮）：仅在编辑模式下可改 */}
+            {editing && field.type !== 'inline-text' && field.type !== 'inline-textarea' ? (
               <div className="flex-1 min-w-0">
                 {field.type === 'text' && <Input value={form[field.key]} onChange={(e) => setForm({ ...form, [field.key]: e.target.value })} className="h-7 text-sm" />}
-                {field.type === 'textarea' && <Textarea value={form[field.key]} onChange={(e) => setForm({ ...form, [field.key]: e.target.value })} rows={2} className="text-sm" />}
                 {field.type === 'date' && <Input type="date" value={form[field.key]} onChange={(e) => setForm({ ...form, [field.key]: e.target.value })} className="h-7 text-sm" />}
                 {field.type === 'category' && (
                   <Select value={form.product_category} onValueChange={(v) => setForm({ ...form, product_category: v, product: '' })}>
@@ -135,7 +168,8 @@ export function BasicInfoTab({ task, onRefresh }: { task: TaskDetail; onRefresh:
                   </Select>
                 )}
               </div>
-            ) : (
+            ) : null}
+            {!editing && field.type !== 'inline-text' && field.type !== 'inline-textarea' && (
               <span className="text-sm break-all">{field.key === 'project_phase' && task.project_type !== '自研' ? '-' : (String(task[field.key as keyof TaskDetail] ?? '-') )}</span>
             )}
           </div>
