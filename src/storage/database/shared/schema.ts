@@ -459,6 +459,11 @@ export const materials = pgTable("materials", {
 	videoCoverPath: text("video_cover_path"),
 	mediaDisplayOrder: integer("media_display_order").default(0),
 	mediaRole: varchar("media_role", { length: 40 }),
+	// V3.1.2.4 §9 (ADR-04) — MaterialAsset state machine + project scoping.
+	// Columns added at SQL level by migration 0005; declared here for typed access.
+	status: varchar("status", { length: 30 }).default('uploaded').notNull(),
+	projectId: varchar("project_id", { length: 36 }),
+	lastBindSuggestion: jsonb("last_bind_suggestion"),
 }, (table) => [
 	index("materials_recipe_step_id_idx").using("btree", table.recipeStepId.asc().nullsLast().op("text_ops")),
 	index("materials_record_id_idx").using("btree", table.recordId.asc().nullsLast().op("text_ops")),
