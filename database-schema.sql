@@ -189,6 +189,16 @@ CREATE TABLE IF NOT EXISTS issues (
   source VARCHAR(50),
   source_report_id VARCHAR(36),
   source_type VARCHAR(20),                          -- record_fail / recipe_problem
+  severity_code VARCHAR(40),
+  module_code VARCHAR(80),
+  due_at TIMESTAMPTZ,
+  first_seen_at TIMESTAMPTZ,
+  last_seen_at TIMESTAMPTZ,
+  version INTEGER NOT NULL DEFAULT 1,
+  source_assembly_id VARCHAR(36),
+  source_cell_id VARCHAR(36),
+  source_item_node_id VARCHAR(36),
+  source_object_id VARCHAR(36),
   description TEXT,
   is_improve BOOLEAN,
   no_improve_reason TEXT,
@@ -198,7 +208,7 @@ CREATE TABLE IF NOT EXISTS issues (
   plan_complete_date DATE,
   actual_complete_date DATE,
   is_closed BOOLEAN DEFAULT false,
-  status VARCHAR(20) NOT NULL DEFAULT '待整改',     -- 待整改/整改中/已验证/不整改
+  status VARCHAR(20) NOT NULL DEFAULT '待整改',
   verification_note TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
@@ -208,6 +218,9 @@ CREATE INDEX IF NOT EXISTS issues_task_id_idx ON issues(task_id);
 CREATE INDEX IF NOT EXISTS issues_status_idx ON issues(status);
 CREATE INDEX IF NOT EXISTS issues_severity_idx ON issues(severity);
 CREATE INDEX IF NOT EXISTS issues_source_type_idx ON issues(source_type);
+CREATE INDEX IF NOT EXISTS issues_severity_code_idx ON issues(severity_code);
+CREATE INDEX IF NOT EXISTS issues_due_at_idx ON issues(due_at);
+CREATE INDEX IF NOT EXISTS issues_source_assembly_id_idx ON issues(source_assembly_id);
 CREATE INDEX IF NOT EXISTS issues_created_at_idx ON issues(created_at);
 
 -- 对比矩阵溯源字段：将矩阵单元格问题点关联回矩阵（幂等迁移）
@@ -299,6 +312,14 @@ CREATE INDEX IF NOT EXISTS materials_recipe_library_step_id_idx ON materials(rec
 CREATE INDEX IF NOT EXISTS materials_recipe_id_idx ON materials(recipe_id);
 CREATE INDEX IF NOT EXISTS materials_issue_id_idx ON materials(issue_id);
 CREATE INDEX IF NOT EXISTS materials_re_evaluation_id_idx ON materials(re_evaluation_id);
+
+-- V2.3 对比组装与媒体标准化字段（向下兼容）
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS comparison_cell_id VARCHAR(36);
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS comparison_assembly_id VARCHAR(36);
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS normalized_thumb_path TEXT;
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS video_cover_path TEXT;
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS media_display_order INTEGER DEFAULT 0;
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS media_role VARCHAR(40);
 
 -- ============================================================
 -- 14. 报告模板表
@@ -615,8 +636,14 @@ ALTER TABLE experience_tasks ADD COLUMN IF NOT EXISTS task_mode VARCHAR(20) NOT 
 ALTER TABLE experience_tasks ADD COLUMN IF NOT EXISTS comparison_intent TEXT;
 ALTER TABLE experience_tasks ADD COLUMN IF NOT EXISTS comparison_layout_type VARCHAR(40);
 ALTER TABLE experience_tasks ADD COLUMN IF NOT EXISTS comparison_source VARCHAR(40);
+ALTER TABLE experience_tasks ADD COLUMN IF NOT EXISTS task_no VARCHAR(60);
+ALTER TABLE experience_tasks ADD COLUMN IF NOT EXISTS source_task_ids JSONB DEFAULT '[]';
+ALTER TABLE experience_tasks ADD COLUMN IF NOT EXISTS source_report_ids JSONB DEFAULT '[]';
+ALTER TABLE experience_tasks ADD COLUMN IF NOT EXISTS reviewer_id VARCHAR(36);
 ALTER TABLE experience_tasks ADD COLUMN IF NOT EXISTS owner_id VARCHAR(36);
+ALTER TABLE experience_tasks ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;
 CREATE INDEX IF NOT EXISTS experience_tasks_task_mode_idx ON experience_tasks(task_mode);
+CREATE INDEX IF NOT EXISTS experience_tasks_task_no_idx ON experience_tasks(task_no);
 
 -- reports 新增 7 字段（V2.3 统一报告资产）
 ALTER TABLE reports ADD COLUMN IF NOT EXISTS report_type VARCHAR(40) NOT NULL DEFAULT 'single_report';
@@ -626,8 +653,14 @@ ALTER TABLE reports ADD COLUMN IF NOT EXISTS assembly_id VARCHAR(36);
 ALTER TABLE reports ADD COLUMN IF NOT EXISTS snapshot_id VARCHAR(36);
 ALTER TABLE reports ADD COLUMN IF NOT EXISTS layout_profile VARCHAR(80);
 ALTER TABLE reports ADD COLUMN IF NOT EXISTS ai_confirmation_status VARCHAR(20) DEFAULT 'pending';
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS report_no VARCHAR(80);
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS report_scope_type VARCHAR(60);
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS owner_id VARCHAR(36);
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS reviewer_id VARCHAR(36);
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS reports_report_type_idx ON reports(report_type);
 CREATE INDEX IF NOT EXISTS reports_assembly_id_idx ON reports(assembly_id);
+CREATE INDEX IF NOT EXISTS reports_report_no_idx ON reports(report_no);
 
 -- materials 新增 6 字段（V2.3 对比单元格关联与媒体标准化）
 ALTER TABLE materials ADD COLUMN IF NOT EXISTS comparison_cell_id VARCHAR(36);
@@ -893,6 +926,764 @@ CREATE TABLE IF NOT EXISTS excel_import_templates (
 CREATE INDEX IF NOT EXISTS excel_import_templates_type_idx ON excel_import_templates(template_type);
 CREATE INDEX IF NOT EXISTS excel_import_templates_recommended_idx ON excel_import_templates(is_recommended);
 
+-- 问题生命周期过程表（报告问题 Tab 依赖）
+CREATE TABLE IF NOT EXISTS issue_occurrences (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  issue_id VARCHAR(36) NOT NULL,
+  report_id VARCHAR(36),
+  task_id VARCHAR(36),
+  project_phase VARCHAR(40),
+  occurred_on DATE,
+  occurrence_note TEXT,
+  evidence_refs JSONB DEFAULT '[]',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS issue_occurrences_issue_idx ON issue_occurrences(issue_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS issue_occurrences_report_idx ON issue_occurrences(report_id);
+CREATE INDEX IF NOT EXISTS issue_occurrences_phase_idx ON issue_occurrences(project_phase);
+
+CREATE TABLE IF NOT EXISTS rectification_actions (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  issue_id VARCHAR(36) NOT NULL,
+  action_plan TEXT NOT NULL,
+  responsible_person VARCHAR(80),
+  responsible_dept VARCHAR(80),
+  plan_complete_date DATE,
+  actual_complete_date DATE,
+  status VARCHAR(20) NOT NULL DEFAULT 'planned',
+  note TEXT,
+  created_by VARCHAR(36),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS rectification_actions_issue_idx ON rectification_actions(issue_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS rectification_actions_status_idx ON rectification_actions(status);
+
+CREATE TABLE IF NOT EXISTS verifications (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  rectification_action_id VARCHAR(36) NOT NULL REFERENCES rectification_actions(id) ON DELETE CASCADE,
+  issue_id VARCHAR(36) NOT NULL,
+  result VARCHAR(20) NOT NULL,
+  note TEXT,
+  verified_by VARCHAR(36),
+  verified_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  evidence_refs JSONB DEFAULT '[]',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS verifications_action_idx ON verifications(rectification_action_id, verified_at DESC);
+CREATE INDEX IF NOT EXISTS verifications_issue_idx ON verifications(issue_id);
+
+-- 数据矩阵输入视图：schema 注册、版本、维度、公式、计算审计
+CREATE TABLE IF NOT EXISTS matrix_schemas (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  schema_key VARCHAR(100) NOT NULL UNIQUE,
+  name VARCHAR(200) NOT NULL,
+  product_category VARCHAR(100),
+  experience_type_allowlist JSONB DEFAULT '[]',
+  status VARCHAR(20) NOT NULL DEFAULT 'draft',
+  latest_published_version_id VARCHAR(36),
+  owner_id VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS matrix_schema_versions (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  schema_id VARCHAR(36) NOT NULL REFERENCES matrix_schemas(id) ON DELETE CASCADE,
+  version_no INTEGER NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'draft',
+  schema_json JSONB NOT NULL,
+  checksum VARCHAR(80),
+  published_at TIMESTAMPTZ,
+  published_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  effective_from TIMESTAMPTZ,
+  effective_to TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(schema_id, version_no)
+);
+
+CREATE TABLE IF NOT EXISTS matrix_dimension_bindings (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  schema_version_id VARCHAR(36) NOT NULL REFERENCES matrix_schema_versions(id) ON DELETE CASCADE,
+  dimension_key VARCHAR(100) NOT NULL,
+  display_name VARCHAR(200) NOT NULL,
+  column_group VARCHAR(20) NOT NULL,
+  value_kind VARCHAR(20) NOT NULL,
+  unit_code VARCHAR(40),
+  metric_definition_id VARCHAR(36) REFERENCES metric_definitions(id) ON DELETE SET NULL,
+  required BOOLEAN DEFAULT FALSE,
+  editable BOOLEAN DEFAULT TRUE,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  display_format_json JSONB DEFAULT '{}',
+  validation_rule_json JSONB DEFAULT '{}',
+  UNIQUE(schema_version_id, dimension_key)
+);
+
+CREATE TABLE IF NOT EXISTS matrix_formula_definitions (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  schema_version_id VARCHAR(36) NOT NULL REFERENCES matrix_schema_versions(id) ON DELETE CASCADE,
+  output_dimension_key VARCHAR(100) NOT NULL,
+  formula_dsl TEXT NOT NULL,
+  compiled_ast JSONB,
+  dependency_json JSONB,
+  scope VARCHAR(20) NOT NULL DEFAULT 'row',
+  formula_version VARCHAR(40) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'draft',
+  UNIQUE(schema_version_id, output_dimension_key)
+);
+
+CREATE TABLE IF NOT EXISTS matrix_calculation_runs (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  matrix_instance_id VARCHAR(36) NOT NULL REFERENCES comparison_assemblies(id) ON DELETE CASCADE,
+  trigger_type VARCHAR(20) NOT NULL,
+  input_version_hash VARCHAR(80) NOT NULL,
+  formula_version_hash VARCHAR(80) NOT NULL,
+  status VARCHAR(20) NOT NULL,
+  error_code VARCHAR(60),
+  error_detail_sanitized TEXT,
+  computed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  trace_id VARCHAR(60)
+);
+CREATE INDEX IF NOT EXISTS matrix_calculation_runs_instance_idx ON matrix_calculation_runs(matrix_instance_id);
+
+ALTER TABLE comparison_assemblies
+  ADD COLUMN IF NOT EXISTS matrix_schema_version_id VARCHAR(36) REFERENCES matrix_schema_versions(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS matrix_role VARCHAR(20) NOT NULL DEFAULT 'comparison',
+  ADD COLUMN IF NOT EXISTS comparability_status VARCHAR(20) DEFAULT 'unknown';
+
+ALTER TABLE metric_evaluations
+  ADD COLUMN IF NOT EXISTS value_kind VARCHAR(20),
+  ADD COLUMN IF NOT EXISTS numeric_value NUMERIC(18,6),
+  ADD COLUMN IF NOT EXISTS text_value TEXT,
+  ADD COLUMN IF NOT EXISTS duration_ms BIGINT,
+  ADD COLUMN IF NOT EXISTS unit_code VARCHAR(40),
+  ADD COLUMN IF NOT EXISTS input_state VARCHAR(20) DEFAULT 'valid',
+  ADD COLUMN IF NOT EXISTS calculation_mode VARCHAR(20),
+  ADD COLUMN IF NOT EXISTS formula_definition_id VARCHAR(36),
+  ADD COLUMN IF NOT EXISTS source_run_id VARCHAR(36) REFERENCES matrix_calculation_runs(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS error_code VARCHAR(60),
+  ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1;
+
+
+-- ============================================================
+-- Data Matrix V2: 任务级用户自设计模型 (PRD V3.1 §3.4–3.8)
+-- 新增 V2 运行时实例表（当前 UI 使用），替代 V1 schema 注册表用于运行时
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS task_matrices (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_id VARCHAR(36) NOT NULL REFERENCES experience_tasks(id) ON DELETE CASCADE,
+  name VARCHAR(100) NOT NULL,
+  description VARCHAR(500),
+  status VARCHAR(20) NOT NULL DEFAULT 'designing'
+    CHECK (status IN ('designing','active','review_locked','completed','archived')),
+  current_design_version_id VARCHAR(36),
+  comparability_status VARCHAR(20) DEFAULT 'not_applicable'
+    CHECK (comparability_status IN ('not_applicable','pending','comparable','partially_comparable','not_comparable')),
+  comparability_statement TEXT,
+  created_by VARCHAR(36) NOT NULL REFERENCES platform_users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+  version INTEGER DEFAULT 1 NOT NULL,
+  archived_at TIMESTAMPTZ,
+  archived_reason TEXT,
+  UNIQUE (task_id, name)
+);
+CREATE INDEX IF NOT EXISTS task_matrices_task_id_idx ON task_matrices(task_id);
+CREATE INDEX IF NOT EXISTS task_matrices_created_by_idx ON task_matrices(created_by);
+CREATE INDEX IF NOT EXISTS task_matrices_status_idx ON task_matrices(status);
+
+CREATE TABLE IF NOT EXISTS matrix_design_versions (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  matrix_id VARCHAR(36) NOT NULL REFERENCES task_matrices(id) ON DELETE CASCADE,
+  version_no INTEGER NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'draft'
+    CHECK (status IN ('draft','confirmed','superseded','retired')),
+  design_hash VARCHAR(128),
+  created_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  confirmed_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  confirmed_at TIMESTAMPTZ,
+  change_type VARCHAR(30) NOT NULL DEFAULT 'initial'
+    CHECK (change_type IN ('initial','safe_addition','safe_presentation_change')),
+  change_reason TEXT,
+  created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+  UNIQUE (matrix_id, version_no)
+);
+CREATE INDEX IF NOT EXISTS matrix_design_versions_matrix_id_idx ON matrix_design_versions(matrix_id);
+
+CREATE TABLE IF NOT EXISTS matrix_sections (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  design_version_id VARCHAR(36) NOT NULL REFERENCES matrix_design_versions(id) ON DELETE CASCADE,
+  name VARCHAR(100) NOT NULL,
+  scope VARCHAR(10) NOT NULL CHECK (scope IN ('row','group','matrix')),
+  description TEXT,
+  sort_order INTEGER DEFAULT 0 NOT NULL,
+  is_collapsible BOOLEAN DEFAULT TRUE,
+  default_expanded BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+  UNIQUE (design_version_id, scope, name)
+);
+CREATE INDEX IF NOT EXISTS matrix_sections_design_version_id_idx ON matrix_sections(design_version_id);
+
+CREATE TABLE IF NOT EXISTS matrix_field_definitions (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  design_version_id VARCHAR(36) NOT NULL REFERENCES matrix_design_versions(id) ON DELETE CASCADE,
+  section_id VARCHAR(36) NOT NULL REFERENCES matrix_sections(id) ON DELETE CASCADE,
+  scope VARCHAR(10) NOT NULL CHECK (scope IN ('row','group','matrix')),
+  label VARCHAR(100) NOT NULL,
+  field_kind VARCHAR(20) NOT NULL
+    CHECK (field_kind IN ('manual_value','formula','evidence_slot','issue_slot')),
+  data_type VARCHAR(30) NOT NULL
+    CHECK (data_type IN ('short_text','long_text','number','percentage','duration',
+      'single_select','multi_select','boolean','date_time',
+      'calculated_number','calculated_percentage','calculated_duration',
+      'image_slot','video_slot','file_slot','issue_slot')),
+  required_mode VARCHAR(30) DEFAULT 'optional'
+    CHECK (required_mode IN ('optional','required','required_when_condition_met')),
+  unit_text VARCHAR(40),
+  decimal_places INTEGER DEFAULT 2,
+  min_value NUMERIC(18,6),
+  max_value NUMERIC(18,6),
+  enum_options JSONB DEFAULT '[]',
+  formula_expression TEXT,
+  result_status_mapping JSONB DEFAULT '{}',
+  evidence_max_count INTEGER DEFAULT 1,
+  evidence_allowed_types JSONB DEFAULT '["image","video"]',
+  visible_on_desktop BOOLEAN DEFAULT TRUE,
+  visible_on_mobile BOOLEAN DEFAULT TRUE,
+  visible_in_report BOOLEAN DEFAULT TRUE,
+  sort_order INTEGER DEFAULT 0 NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+  UNIQUE (design_version_id, scope, label)
+);
+CREATE INDEX IF NOT EXISTS matrix_field_definitions_dv_idx ON matrix_field_definitions(design_version_id);
+CREATE INDEX IF NOT EXISTS matrix_field_definitions_section_idx ON matrix_field_definitions(section_id);
+
+CREATE TABLE IF NOT EXISTS matrix_groups (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  matrix_id VARCHAR(36) NOT NULL REFERENCES task_matrices(id) ON DELETE CASCADE,
+  name VARCHAR(200) NOT NULL,
+  sort_order INTEGER DEFAULT 0 NOT NULL,
+  completion_status VARCHAR(20) DEFAULT 'pending'
+    CHECK (completion_status IN ('pending','in_progress','completed','skipped')),
+  created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS matrix_groups_matrix_id_idx ON matrix_groups(matrix_id);
+
+CREATE TABLE IF NOT EXISTS matrix_rows (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  group_id VARCHAR(36) NOT NULL REFERENCES matrix_groups(id) ON DELETE CASCADE,
+  matrix_id VARCHAR(36) NOT NULL REFERENCES task_matrices(id) ON DELETE CASCADE,
+  label VARCHAR(300) NOT NULL,
+  sort_order INTEGER DEFAULT 0 NOT NULL,
+  completion_status VARCHAR(20) DEFAULT 'pending'
+    CHECK (completion_status IN ('pending','in_progress','completed','skipped')),
+  version INTEGER DEFAULT 1 NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS matrix_rows_group_id_idx ON matrix_rows(group_id);
+CREATE INDEX IF NOT EXISTS matrix_rows_matrix_id_idx ON matrix_rows(matrix_id);
+
+CREATE TABLE IF NOT EXISTS matrix_field_values (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  row_id VARCHAR(36) NOT NULL REFERENCES matrix_rows(id) ON DELETE CASCADE,
+  field_definition_id VARCHAR(36) NOT NULL REFERENCES matrix_field_definitions(id) ON DELETE CASCADE,
+  value_state VARCHAR(20) DEFAULT 'missing'
+    CHECK (value_state IN ('missing','not_tested','not_applicable','pending_input','filled','calculation_failed')),
+  numeric_value NUMERIC(18,6),
+  text_value TEXT,
+  duration_ms BIGINT,
+  boolean_value BOOLEAN,
+  date_time_value TIMESTAMPTZ,
+  enum_value VARCHAR(200),
+  unit_code VARCHAR(40),
+  calculation_mode VARCHAR(20) CHECK (calculation_mode IN ('manual','computed')),
+  formula_definition_id VARCHAR(36),
+  formula_version VARCHAR(40),
+  source_calculation_run_id VARCHAR(36),
+  error_code VARCHAR(60),
+  version INTEGER DEFAULT 1 NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+  UNIQUE (row_id, field_definition_id)
+);
+CREATE INDEX IF NOT EXISTS matrix_field_values_row_id_idx ON matrix_field_values(row_id);
+CREATE INDEX IF NOT EXISTS matrix_field_values_fd_idx ON matrix_field_values(field_definition_id);
+
+CREATE TABLE IF NOT EXISTS matrix_narratives (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  scope VARCHAR(10) NOT NULL CHECK (scope IN ('group','matrix')),
+  matrix_id VARCHAR(36) REFERENCES task_matrices(id) ON DELETE CASCADE,
+  group_id VARCHAR(36) REFERENCES matrix_groups(id) ON DELETE CASCADE,
+  narrative_key VARCHAR(50) NOT NULL DEFAULT 'summary',
+  content TEXT,
+  created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS matrix_narratives_matrix_id_idx ON matrix_narratives(matrix_id);
+CREATE INDEX IF NOT EXISTS matrix_narratives_group_id_idx ON matrix_narratives(group_id);
+CREATE UNIQUE INDEX IF NOT EXISTS matrix_narratives_scope_key_idx
+ON matrix_narratives (
+  scope,
+  COALESCE(matrix_id, '00000000-0000-0000-0000-000000000000'),
+  COALESCE(group_id, '00000000-0000-0000-0000-000000000000'),
+  narrative_key
+);
+
+-- Extend formula_definitions and calculation_runs for V2 model
+ALTER TABLE matrix_formula_definitions
+  ADD COLUMN IF NOT EXISTS field_definition_id VARCHAR(36) REFERENCES matrix_field_definitions(id) ON DELETE CASCADE;
+ALTER TABLE matrix_formula_definitions
+  ALTER COLUMN schema_version_id DROP NOT NULL;
+ALTER TABLE matrix_calculation_runs
+  ADD COLUMN IF NOT EXISTS task_matrix_id VARCHAR(36) REFERENCES task_matrices(id) ON DELETE CASCADE;
+ALTER TABLE matrix_calculation_runs
+  ALTER COLUMN matrix_instance_id DROP NOT NULL;
+
+-- Feature flag for data matrix V2
+INSERT INTO platform_settings (key, value)
+VALUES ('feature_flag_task_matrix', '{"task_matrix_enabled":true,"matrix_runtime_designer_enabled":true,"matrix_formula_enabled":true,"matrix_mobile_enabled":true,"matrix_batch_paste_enabled":true,"matrix_report_projection_enabled":true,"matrix_structural_revision_enabled":true}'::jsonb)
+ON CONFLICT (key) DO NOTHING;
+
 -- ============================================================
 -- V2.3 索引与外键结束
+-- ============================================================
+
+-- ============================================================
+-- PRD V3.1.2.4 — Dynamic Matrix V3 + MaterialAsset + Hermes Agent
+-- Migrations 0004-0007 consolidated. All tables idempotent.
+-- ADR-01: V3 matrix model (9 tables); V2 cold-retained.
+-- ADR-03: Full Hermes Agent + WeCom (企微).
+-- ADR-04: material_links polymorphic binding + materials status.
+-- ============================================================
+
+-- ---- 0004: V3 dynamic matrix tables ----
+CREATE TABLE IF NOT EXISTS matrix_view_definitions (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  matrix_id VARCHAR(36) NOT NULL REFERENCES task_matrices(id) ON DELETE CASCADE,
+  version_no INT NOT NULL,
+  max_hierarchy_level INT NOT NULL DEFAULT 3,
+  left_frozen_column_count INT NOT NULL DEFAULT 5,
+  formula_mode VARCHAR(40) NOT NULL DEFAULT 'relative_cell_reference',
+  style_mode VARCHAR(40) NOT NULL DEFAULT 'basic_text_style',
+  status VARCHAR(20) NOT NULL DEFAULT 'draft',
+  design_hash VARCHAR(128),
+  confirmed_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  confirmed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (matrix_id, version_no)
+);
+CREATE INDEX IF NOT EXISTS matrix_view_definitions_matrix_id_idx ON matrix_view_definitions(matrix_id);
+
+CREATE TABLE IF NOT EXISTS matrix_hierarchy_nodes (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  matrix_id VARCHAR(36) NOT NULL REFERENCES task_matrices(id) ON DELETE CASCADE,
+  parent_id VARCHAR(36) REFERENCES matrix_hierarchy_nodes(id) ON DELETE CASCADE,
+  level INT NOT NULL CHECK (level IN (1,2,3)),
+  node_label VARCHAR(200) NOT NULL,
+  node_type VARCHAR(20) NOT NULL CHECK (node_type IN ('level_1','level_2','level_3')),
+  sort_order INT NOT NULL DEFAULT 0,
+  rowspan_cache INT,
+  created_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  archived_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS mhn_matrix_id_idx ON matrix_hierarchy_nodes(matrix_id);
+CREATE INDEX IF NOT EXISTS mhn_parent_id_idx ON matrix_hierarchy_nodes(parent_id);
+CREATE INDEX IF NOT EXISTS mhn_level_idx ON matrix_hierarchy_nodes(level);
+CREATE UNIQUE INDEX IF NOT EXISTS mhn_active_unique_idx
+  ON matrix_hierarchy_nodes (matrix_id, COALESCE(parent_id,''), level, node_label)
+  WHERE archived_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS matrix_leaf_rows (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  matrix_id VARCHAR(36) NOT NULL REFERENCES task_matrices(id) ON DELETE CASCADE,
+  level_1_node_id VARCHAR(36) NOT NULL REFERENCES matrix_hierarchy_nodes(id) ON DELETE CASCADE,
+  level_2_node_id VARCHAR(36) REFERENCES matrix_hierarchy_nodes(id) ON DELETE SET NULL,
+  level_3_node_id VARCHAR(36) REFERENCES matrix_hierarchy_nodes(id) ON DELETE SET NULL,
+  visible_row_index INT NOT NULL DEFAULT 0,
+  group_row_index INT NOT NULL DEFAULT 0,
+  status VARCHAR(20) NOT NULL DEFAULT 'active',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  archived_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS mlr_matrix_id_idx ON matrix_leaf_rows(matrix_id);
+CREATE INDEX IF NOT EXISTS mlr_l1_idx ON matrix_leaf_rows(level_1_node_id);
+CREATE INDEX IF NOT EXISTS mlr_l2_idx ON matrix_leaf_rows(level_2_node_id);
+CREATE INDEX IF NOT EXISTS mlr_l3_idx ON matrix_leaf_rows(level_3_node_id);
+CREATE INDEX IF NOT EXISTS mlr_visible_idx ON matrix_leaf_rows(matrix_id, visible_row_index);
+
+CREATE TABLE IF NOT EXISTS matrix_column_definitions (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  matrix_id VARCHAR(36) NOT NULL REFERENCES task_matrices(id) ON DELETE CASCADE,
+  column_zone VARCHAR(40) NOT NULL CHECK (column_zone IN (
+    'hierarchy','primary_media','comparison_category','detail_dimension',
+    'calculation_dimension','effect_media','evaluation','issue_point'
+  )),
+  zone_role VARCHAR(20) NOT NULL DEFAULT 'A',
+  column_label VARCHAR(100) NOT NULL,
+  data_type VARCHAR(30) NOT NULL CHECK (data_type IN (
+    'text','long_text','number','duration','percentage','temperature','volume',
+    'image_slot','media_slot','formula','issue_point'
+  )),
+  unit_text VARCHAR(30),
+  display_order INT NOT NULL DEFAULT 0,
+  desktop_width_px INT NOT NULL DEFAULT 140,
+  min_width_px INT DEFAULT 80,
+  max_width_px INT DEFAULT 480,
+  is_pinned BOOLEAN NOT NULL DEFAULT false,
+  is_required BOOLEAN NOT NULL DEFAULT false,
+  show_in_report BOOLEAN NOT NULL DEFAULT true,
+  max_media_count INT,
+  result_format VARCHAR(20),
+  decimal_places INT DEFAULT 2,
+  created_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  archived_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS mcd_matrix_id_idx ON matrix_column_definitions(matrix_id);
+CREATE INDEX IF NOT EXISTS mcd_zone_idx ON matrix_column_definitions(column_zone);
+CREATE INDEX IF NOT EXISTS mcd_order_idx ON matrix_column_definitions(matrix_id, display_order);
+
+CREATE TABLE IF NOT EXISTS matrix_cell_values (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  matrix_id VARCHAR(36) NOT NULL REFERENCES task_matrices(id) ON DELETE CASCADE,
+  leaf_row_id VARCHAR(36) NOT NULL REFERENCES matrix_leaf_rows(id) ON DELETE CASCADE,
+  column_id VARCHAR(36) NOT NULL REFERENCES matrix_column_definitions(id) ON DELETE CASCADE,
+  value_text TEXT,
+  value_number DECIMAL(18,6),
+  value_duration_seconds INT,
+  value_percentage DECIMAL(10,4),
+  display_text TEXT,
+  value_state VARCHAR(30) NOT NULL DEFAULT 'empty' CHECK (value_state IN (
+    'empty','filled','invalid','calculation_pending','calculation_failed','archived'
+  )),
+  error_code VARCHAR(60),
+  version INT NOT NULL DEFAULT 1,
+  updated_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (matrix_id, leaf_row_id, column_id)
+);
+CREATE INDEX IF NOT EXISTS mcv_matrix_row_idx ON matrix_cell_values(matrix_id, leaf_row_id);
+CREATE INDEX IF NOT EXISTS mcv_column_idx ON matrix_cell_values(column_id);
+CREATE INDEX IF NOT EXISTS mcv_state_idx ON matrix_cell_values(value_state);
+
+CREATE TABLE IF NOT EXISTS matrix_cell_styles (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  matrix_id VARCHAR(36) NOT NULL REFERENCES task_matrices(id) ON DELETE CASCADE,
+  target_type VARCHAR(30) NOT NULL CHECK (target_type IN ('column_header','cell','narrative_block')),
+  target_id VARCHAR(36) NOT NULL,
+  font_color_token VARCHAR(30),
+  font_size_token VARCHAR(10) CHECK (font_size_token IS NULL OR font_size_token IN ('xs','sm','md','lg','xl')),
+  bold BOOLEAN NOT NULL DEFAULT false,
+  italic BOOLEAN NOT NULL DEFAULT false,
+  updated_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (matrix_id, target_type, target_id)
+);
+CREATE INDEX IF NOT EXISTS mcs_matrix_target_idx ON matrix_cell_styles(matrix_id, target_type, target_id);
+
+CREATE TABLE IF NOT EXISTS matrix_formula_definitions_v3 (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  matrix_id VARCHAR(36) NOT NULL REFERENCES task_matrices(id) ON DELETE CASCADE,
+  column_id VARCHAR(36) NOT NULL REFERENCES matrix_column_definitions(id) ON DELETE CASCADE,
+  expression_display TEXT NOT NULL,
+  expression_ast JSONB NOT NULL,
+  reference_mode VARCHAR(40) NOT NULL DEFAULT 'relative_by_visible_row',
+  apply_scope VARCHAR(20) NOT NULL DEFAULT 'matrix' CHECK (apply_scope IN ('matrix','level_1_group')),
+  result_format VARCHAR(20) NOT NULL DEFAULT 'number',
+  decimal_places INT NOT NULL DEFAULT 2,
+  status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active','invalid','archived')),
+  created_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS mfd3_matrix_id_idx ON matrix_formula_definitions_v3(matrix_id);
+CREATE INDEX IF NOT EXISTS mfd3_column_id_idx ON matrix_formula_definitions_v3(column_id);
+
+CREATE TABLE IF NOT EXISTS matrix_formula_runs_v3 (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  formula_id VARCHAR(36) NOT NULL REFERENCES matrix_formula_definitions_v3(id) ON DELETE CASCADE,
+  matrix_id VARCHAR(36) NOT NULL,
+  leaf_row_id VARCHAR(36) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('success','pending','failed')),
+  result_value DECIMAL(18,6),
+  error_code VARCHAR(60),
+  dependency_snapshot JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS mfr3_formula_id_idx ON matrix_formula_runs_v3(formula_id);
+CREATE INDEX IF NOT EXISTS mfr3_matrix_row_idx ON matrix_formula_runs_v3(matrix_id, leaf_row_id);
+
+CREATE TABLE IF NOT EXISTS matrix_narrative_blocks (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  matrix_id VARCHAR(36) NOT NULL REFERENCES task_matrices(id) ON DELETE CASCADE,
+  block_type VARCHAR(30) NOT NULL CHECK (block_type IN (
+    'summary','note','formula_note','method_note','limitation_note'
+  )),
+  scope VARCHAR(20) NOT NULL DEFAULT 'matrix' CHECK (scope IN ('matrix','level_1_group')),
+  scope_node_id VARCHAR(36) REFERENCES matrix_hierarchy_nodes(id) ON DELETE CASCADE,
+  content TEXT,
+  ai_suggestion_id VARCHAR(36),
+  show_in_report BOOLEAN NOT NULL DEFAULT true,
+  sort_order INT NOT NULL DEFAULT 0,
+  updated_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS mnb_matrix_scope_idx ON matrix_narrative_blocks(matrix_id, scope);
+CREATE INDEX IF NOT EXISTS mnb_node_idx ON matrix_narrative_blocks(scope_node_id);
+
+ALTER TABLE task_matrices ADD COLUMN IF NOT EXISTS current_view_definition_id VARCHAR(36);
+ALTER TABLE task_matrices DROP CONSTRAINT IF EXISTS tm_view_def_fkey;
+ALTER TABLE task_matrices ADD CONSTRAINT tm_view_def_fkey
+  FOREIGN KEY (current_view_definition_id) REFERENCES matrix_view_definitions(id) ON DELETE SET NULL;
+
+-- ---- 0005: MaterialAsset + matrix_issue_points ----
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'uploaded';
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS project_id VARCHAR(36);
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS last_bind_suggestion JSONB;
+
+DO $$
+BEGIN
+  UPDATE materials SET status = 'bound'
+  WHERE status = 'uploaded'
+    AND (record_id IS NOT NULL OR task_id IS NOT NULL OR recipe_step_id IS NOT NULL
+         OR recipe_library_step_id IS NOT NULL OR recipe_id IS NOT NULL
+         OR issue_id IS NOT NULL OR re_evaluation_id IS NOT NULL
+         OR comparison_cell_id IS NOT NULL OR comparison_assembly_id IS NOT NULL);
+  UPDATE materials SET status = 'unassigned'
+  WHERE status = 'uploaded'
+    AND record_id IS NULL AND task_id IS NULL AND recipe_step_id IS NULL
+    AND recipe_library_step_id IS NULL AND recipe_id IS NULL
+    AND issue_id IS NULL AND re_evaluation_id IS NULL
+    AND comparison_cell_id IS NULL AND comparison_assembly_id IS NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS materials_status_idx ON materials(status);
+CREATE INDEX IF NOT EXISTS materials_project_id_idx ON materials(project_id);
+
+CREATE TABLE IF NOT EXISTS material_links (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  material_id VARCHAR(36) NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+  target_type VARCHAR(40) NOT NULL,
+  target_id VARCHAR(36) NOT NULL,
+  binding_method VARCHAR(30) NOT NULL DEFAULT 'click_select' CHECK (binding_method IN (
+    'click_select','drag_attach','upload_at_slot','wecom_ingest','agent_suggested'
+  )),
+  bound_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  bound_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  version INT NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (material_id, target_type, target_id)
+);
+CREATE INDEX IF NOT EXISTS ml_material_id_idx ON material_links(material_id);
+CREATE INDEX IF NOT EXISTS ml_target_idx ON material_links(target_type, target_id);
+
+CREATE TABLE IF NOT EXISTS matrix_issue_points (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  matrix_id VARCHAR(36) NOT NULL REFERENCES task_matrices(id) ON DELETE CASCADE,
+  leaf_row_id VARCHAR(36) NOT NULL REFERENCES matrix_leaf_rows(id) ON DELETE CASCADE,
+  column_id VARCHAR(36) NOT NULL REFERENCES matrix_column_definitions(id) ON DELETE CASCADE,
+  issue_text TEXT NOT NULL,
+  linked_issue_id VARCHAR(36) REFERENCES issues(id) ON DELETE SET NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'text' CHECK (status IN ('text','converted')),
+  created_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS mip_matrix_id_idx ON matrix_issue_points(matrix_id);
+CREATE INDEX IF NOT EXISTS mip_leaf_row_idx ON matrix_issue_points(leaf_row_id);
+
+-- ---- 0006: Hermes Agent + WeCom tables ----
+CREATE TABLE IF NOT EXISTS agent_instances (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id VARCHAR(36) NOT NULL DEFAULT 'default',
+  name VARCHAR(100) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN (
+    'draft','active','paused','maintenance','frozen','archived'
+  )),
+  model_config_id VARCHAR(36) REFERENCES ai_model_configs(id) ON DELETE SET NULL,
+  bound_user_id VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  description TEXT,
+  max_active_conversations INT DEFAULT 5,
+  created_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ai_tenant_status_idx ON agent_instances(tenant_id, status);
+CREATE INDEX IF NOT EXISTS ai_bound_user_idx ON agent_instances(bound_user_id);
+
+CREATE TABLE IF NOT EXISTS agent_run_snapshot_configs (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_instance_id VARCHAR(36) NOT NULL REFERENCES agent_instances(id) ON DELETE CASCADE,
+  base_url_snapshot TEXT NOT NULL,
+  model_name_snapshot VARCHAR(200) NOT NULL,
+  api_key_ref VARCHAR(36) NOT NULL,
+  captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS arsc_instance_idx ON agent_run_snapshot_configs(agent_instance_id);
+
+CREATE TABLE IF NOT EXISTS agent_memory_namespaces (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  namespace_key VARCHAR(200) NOT NULL UNIQUE,
+  tenant_id VARCHAR(36) NOT NULL DEFAULT 'default',
+  agent_instance_id VARCHAR(36) NOT NULL REFERENCES agent_instances(id) ON DELETE CASCADE,
+  binding_id VARCHAR(36),
+  scope_config JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS amn_instance_idx ON agent_memory_namespaces(agent_instance_id);
+
+CREATE TABLE IF NOT EXISTS conversations (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id VARCHAR(36) NOT NULL DEFAULT 'default',
+  agent_instance_id VARCHAR(36) NOT NULL REFERENCES agent_instances(id) ON DELETE CASCADE,
+  platform_user_id VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  wecom_user_id VARCHAR(100),
+  project_id VARCHAR(36),
+  task_id VARCHAR(36),
+  memory_namespace_id VARCHAR(36) REFERENCES agent_memory_namespaces(id) ON DELETE SET NULL,
+  title VARCHAR(200),
+  status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active','closed','archived')),
+  last_event_id BIGINT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS conv_agent_idx ON conversations(agent_instance_id);
+CREATE INDEX IF NOT EXISTS conv_user_idx ON conversations(platform_user_id);
+CREATE INDEX IF NOT EXISTS conv_task_idx ON conversations(task_id);
+CREATE INDEX IF NOT EXISTS conv_status_idx ON conversations(status);
+
+CREATE TABLE IF NOT EXISTS conversation_messages (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id VARCHAR(36) NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  role VARCHAR(20) NOT NULL CHECK (role IN ('user','assistant','tool','system')),
+  content TEXT,
+  tool_call_id VARCHAR(100),
+  tool_name VARCHAR(100),
+  event_seq BIGINT NOT NULL,
+  model_name VARCHAR(200),
+  tokens_used INT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS cm_conv_seq_idx ON conversation_messages(conversation_id, event_seq);
+
+CREATE TABLE IF NOT EXISTS agent_runs (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id VARCHAR(36) NOT NULL DEFAULT 'default',
+  agent_instance_id VARCHAR(36) NOT NULL REFERENCES agent_instances(id) ON DELETE CASCADE,
+  conversation_id VARCHAR(36) REFERENCES conversations(id) ON DELETE SET NULL,
+  memory_namespace_id VARCHAR(36),
+  trigger VARCHAR(40) NOT NULL DEFAULT 'manual' CHECK (trigger IN (
+    'manual','matrix_summary','report_draft','wecom_ingest','material_bind_suggestion'
+  )),
+  status VARCHAR(20) NOT NULL DEFAULT 'running' CHECK (status IN ('running','succeeded','failed')),
+  model_config_snapshot JSONB,
+  input_summary TEXT,
+  output_summary TEXT,
+  error_code VARCHAR(60),
+  trace_id VARCHAR(60) NOT NULL UNIQUE,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS ar_instance_idx ON agent_runs(agent_instance_id);
+CREATE INDEX IF NOT EXISTS ar_status_idx ON agent_runs(status);
+
+CREATE TABLE IF NOT EXISTS agent_suggestion_blocks (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_run_id VARCHAR(36) NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+  block_type VARCHAR(40) NOT NULL,
+  payload JSONB NOT NULL,
+  status VARCHAR(30) NOT NULL DEFAULT 'pending' CHECK (status IN (
+    'pending','accepted','edited_then_accepted','rejected','expired'
+  )),
+  target_entity_type VARCHAR(60),
+  target_entity_id VARCHAR(36),
+  edited_payload JSONB,
+  decided_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  decided_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS asb_run_idx ON agent_suggestion_blocks(agent_run_id);
+CREATE INDEX IF NOT EXISTS asb_status_idx ON agent_suggestion_blocks(status);
+
+CREATE TABLE IF NOT EXISTS wecom_bindings (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  platform_user_id VARCHAR(36) NOT NULL REFERENCES platform_users(id) ON DELETE CASCADE,
+  wecom_user_id VARCHAR(100) NOT NULL,
+  wecom_corp_id VARCHAR(100),
+  agent_instance_id VARCHAR(36) REFERENCES agent_instances(id) ON DELETE SET NULL,
+  project_scope JSONB,
+  status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active','frozen','unbound')),
+  bound_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (wecom_user_id, wecom_corp_id)
+);
+CREATE INDEX IF NOT EXISTS wb_platform_user_idx ON wecom_bindings(platform_user_id);
+
+CREATE TABLE IF NOT EXISTS wecom_media_ingest_jobs (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  wecom_msg_id VARCHAR(100) NOT NULL,
+  wecom_media_id VARCHAR(200) NOT NULL,
+  media_type VARCHAR(20) NOT NULL CHECK (media_type IN ('image','video','text')),
+  wecom_binding_id VARCHAR(36),
+  expires_at TIMESTAMPTZ NOT NULL,
+  download_status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (download_status IN (
+    'pending','downloading','downloaded','failed','dead_letter'
+  )),
+  retry_count INT NOT NULL DEFAULT 0,
+  max_retries INT NOT NULL DEFAULT 12,
+  last_error TEXT,
+  last_retry_at TIMESTAMPTZ,
+  material_id VARCHAR(36) REFERENCES materials(id) ON DELETE SET NULL,
+  detected_project_id VARCHAR(36),
+  detected_task_id VARCHAR(36),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS wmij_status_idx ON wecom_media_ingest_jobs(download_status);
+CREATE INDEX IF NOT EXISTS wmij_expires_idx ON wecom_media_ingest_jobs(expires_at);
+
+CREATE TABLE IF NOT EXISTS agent_skill_bindings (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_instance_id VARCHAR(36) NOT NULL REFERENCES agent_instances(id) ON DELETE CASCADE,
+  skill_template_id VARCHAR(36) NOT NULL REFERENCES agent_skill_templates(id) ON DELETE CASCADE,
+  is_enabled BOOLEAN NOT NULL DEFAULT true,
+  overridden_system_prompt TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (agent_instance_id, skill_template_id)
+);
+
+-- ---- 0007: Feature flags V3.1.2.4 ----
+INSERT INTO platform_settings (key, value)
+VALUES (
+  'feature_flag_v3_1_2_4',
+  '{
+    "matrix_tab_state_enabled": true,
+    "task_matrix_enabled": false,
+    "dynamic_matrix_excel_like_view_enabled": false,
+    "dynamic_matrix_formula_enabled": false,
+    "dynamic_matrix_cell_style_enabled": false,
+    "inline_edit_enabled": false,
+    "autosave_enabled": false,
+    "material_staging_enabled": false,
+    "hermes_agent_gateway_enabled": false,
+    "wecom_material_ingest_enabled": false
+  }'::jsonb
+)
+ON CONFLICT (key) DO NOTHING;
+
+-- ============================================================
+-- PRD V3.1.2.4 表结构结束
 -- ============================================================

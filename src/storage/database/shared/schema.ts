@@ -1,4 +1,4 @@
-﻿import { pgTable, serial, timestamp, varchar, jsonb, boolean, index, foreignKey, integer, text, unique, date, bigint, numeric } from "drizzle-orm/pg-core"
+import { pgTable, serial, timestamp, varchar, jsonb, boolean, index, foreignKey, integer, text, unique, date, bigint, numeric, smallint } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 import type { AnyPgColumn } from "drizzle-orm/pg-core"
 
@@ -1019,7 +1019,8 @@ export const matrixSchemaVersions = pgTable("matrix_schema_versions", {
 // Matrix dimension bindings (columns/rows per schema version)
 export const matrixDimensionBindings = pgTable("matrix_dimension_bindings", {
 	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
-	schemaVersionId: varchar("schema_version_id", { length: 36 }).notNull(),
+	schemaVersionId: varchar("schema_version_id", { length: 36 }),
+  fieldDefinitionId: varchar("field_definition_id", { length: 36 }),
 	dimensionKey: varchar("dimension_key", { length: 100 }).notNull(),
 	displayName: varchar("display_name", { length: 200 }).notNull(),
 	columnGroup: varchar("column_group", { length: 20 }).notNull(),
@@ -1048,7 +1049,8 @@ export const matrixDimensionBindings = pgTable("matrix_dimension_bindings", {
 // Matrix formula definitions (DSL-based calculated dimensions per schema version)
 export const matrixFormulaDefinitions = pgTable("matrix_formula_definitions", {
 	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
-	schemaVersionId: varchar("schema_version_id", { length: 36 }).notNull(),
+	schemaVersionId: varchar("schema_version_id", { length: 36 }),
+  fieldDefinitionId: varchar("field_definition_id", { length: 36 }),
 	outputDimensionKey: varchar("output_dimension_key", { length: 100 }).notNull(),
 	formulaDsl: text("formula_dsl").notNull(),
 	compiledAst: jsonb("compiled_ast"),
@@ -1057,7 +1059,7 @@ export const matrixFormulaDefinitions = pgTable("matrix_formula_definitions", {
 	formulaVersion: varchar("formula_version", { length: 40 }).notNull(),
 	status: varchar("status", { length: 20 }).default('draft').notNull(),
 }, (table) => [
-	unique("matrix_formula_definitions_version_output_key").on(table.schemaVersionId, table.outputDimensionKey),
+	
 	foreignKey({
 			columns: [table.schemaVersionId],
 			foreignColumns: [matrixSchemaVersions.id],
@@ -1068,7 +1070,8 @@ export const matrixFormulaDefinitions = pgTable("matrix_formula_definitions", {
 // Matrix calculation runs (audit trail of formula evaluations per matrix instance)
 export const matrixCalculationRuns = pgTable("matrix_calculation_runs", {
 	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
-	matrixInstanceId: varchar("matrix_instance_id", { length: 36 }).notNull(),
+	matrixInstanceId: varchar("matrix_instance_id", { length: 36 }),
+  taskMatrixId: varchar("task_matrix_id", { length: 36 }),
 	triggerType: varchar("trigger_type", { length: 20 }).notNull(),
 	inputVersionHash: varchar("input_version_hash", { length: 80 }).notNull(),
 	formulaVersionHash: varchar("formula_version_hash", { length: 80 }).notNull(),
@@ -1180,4 +1183,593 @@ export const excelImportTemplates = pgTable("excel_import_templates", {
 		foreignColumns: [platformUsers.id],
 		name: "excel_import_templates_created_by_fkey"
 	}).onDelete("set null"),
+]);
+
+// ============================================================
+// Data Matrix V2: task_matrices user-designed model (PRD V3.1 §3.4–3.8)
+// Runtime task-matrix instances. Schema-registry tables (matrix_schemas etc.)
+// remain for Wave 2 reusable-design-library.
+// ============================================================
+
+// Main matrix per task (PRD §3.4)
+export const taskMatrices = pgTable("task_matrices", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  taskId: varchar("task_id", { length: 36 }).notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  description: varchar("description", { length: 500 }),
+  status: varchar("status", { length: 20 }).default('designing').notNull(),
+  currentDesignVersionId: varchar("current_design_version_id", { length: 36 }),
+  comparabilityStatus: varchar("comparability_status", { length: 20 }).default('not_applicable'),
+  comparabilityStatement: text("comparability_statement"),
+  createdBy: varchar("created_by", { length: 36 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  version: integer("version").default(1).notNull(),
+  archivedAt: timestamp("archived_at", { withTimezone: true, mode: 'string' }),
+  archivedReason: text("archived_reason"),
+}, (table) => [
+  unique("task_matrices_task_name_key").on(table.taskId, table.name),
+  index("task_matrices_task_id_idx").using("btree", table.taskId.asc().nullsLast().op("text_ops")),
+  index("task_matrices_created_by_idx").using("btree", table.createdBy.asc().nullsLast().op("text_ops")),
+  index("task_matrices_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.taskId], foreignColumns: [experienceTasks.id], name: "task_matrices_task_id_fkey" }).onDelete("cascade"),
+  foreignKey({ columns: [table.createdBy], foreignColumns: [platformUsers.id], name: "task_matrices_created_by_fkey" }).onDelete("set null"),
+]);
+
+// Design versions (PRD §3.5)
+export const matrixDesignVersions = pgTable("matrix_design_versions", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  matrixId: varchar("matrix_id", { length: 36 }).notNull(),
+  versionNo: integer("version_no").notNull(),
+  status: varchar("status", { length: 20 }).default('draft').notNull(),
+  designHash: varchar("design_hash", { length: 128 }),
+  createdBy: varchar("created_by", { length: 36 }),
+  confirmedBy: varchar("confirmed_by", { length: 36 }),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true, mode: 'string' }),
+  changeType: varchar("change_type", { length: 30 }).default('initial').notNull(),
+  changeReason: text("change_reason"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  unique("matrix_design_versions_matrix_version_key").on(table.matrixId, table.versionNo),
+  index("matrix_design_versions_matrix_id_idx").using("btree", table.matrixId.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.matrixId], foreignColumns: [taskMatrices.id], name: "mdv_matrix_id_fkey" }).onDelete("cascade"),
+  foreignKey({ columns: [table.createdBy], foreignColumns: [platformUsers.id], name: "mdv_created_by_fkey" }).onDelete("set null"),
+  foreignKey({ columns: [table.confirmedBy], foreignColumns: [platformUsers.id], name: "mdv_confirmed_by_fkey" }).onDelete("set null"),
+]);
+
+// Field sections / partitions (PRD §3.6.1)
+export const matrixSections = pgTable("matrix_sections", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  designVersionId: varchar("design_version_id", { length: 36 }).notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  scope: varchar("scope", { length: 10 }).notNull(),
+  description: text("description"),
+  sortOrder: integer("sort_order").default(0).notNull(),
+  isCollapsible: boolean("is_collapsible").default(true),
+  defaultExpanded: boolean("default_expanded").default(true),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  unique("matrix_sections_dv_scope_name_key").on(table.designVersionId, table.scope, table.name),
+  index("matrix_sections_dv_idx").using("btree", table.designVersionId.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.designVersionId], foreignColumns: [matrixDesignVersions.id], name: "ms_design_version_id_fkey" }).onDelete("cascade"),
+]);
+
+// Field definitions (PRD §3.7)
+export const matrixFieldDefinitions = pgTable("matrix_field_definitions", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  designVersionId: varchar("design_version_id", { length: 36 }).notNull(),
+  sectionId: varchar("section_id", { length: 36 }).notNull(),
+  scope: varchar("scope", { length: 10 }).notNull(),
+  label: varchar("label", { length: 100 }).notNull(),
+  fieldKind: varchar("field_kind", { length: 20 }).notNull(),
+  dataType: varchar("data_type", { length: 30 }).notNull(),
+  requiredMode: varchar("required_mode", { length: 30 }).default('optional'),
+  unitText: varchar("unit_text", { length: 30 }),
+  displayFormat: varchar("display_format", { length: 20 }).default('plain_number'),
+  decimalPlaces: smallint("decimal_places").default(1),
+  minValue: numeric("min_value", { precision: 18, scale: 4 }),
+  maxValue: numeric("max_value", { precision: 18, scale: 4 }),
+  allowNotTested: boolean("allow_not_tested").default(true),
+  allowNotApplicable: boolean("allow_not_applicable").default(true),
+  showInDesktopGrid: boolean("show_in_desktop_grid").default(true),
+  showInMobileCard: boolean("show_in_mobile_card").default(false),
+  showInReport: boolean("show_in_report").default(true),
+  reportPriority: varchar("report_priority", { length: 10 }).default('secondary'),
+  enumOptions: jsonb("enum_options"),
+  isResultStatusField: boolean("is_result_status_field").default(false),
+  resultStatusMapping: jsonb("result_status_mapping"),
+  requiredCondition: jsonb("required_condition"),
+  maxMediaCount: smallint("max_media_count").default(10),
+  allowedMediaTypes: jsonb("allowed_media_types").default('["image","video"]'),
+  isCriticalEvidence: boolean("is_critical_evidence").default(false),
+  uploadInstructions: text("upload_instructions"),
+  sortOrder: integer("sort_order").default(0).notNull(),
+  isArchived: boolean("is_archived").default(false),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  index("mfd_dv_idx").using("btree", table.designVersionId.asc().nullsLast().op("text_ops")),
+  index("mfd_section_idx").using("btree", table.sectionId.asc().nullsLast().op("text_ops")),
+  index("mfd_kind_idx").using("btree", table.fieldKind.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.designVersionId], foreignColumns: [matrixDesignVersions.id], name: "mfd_design_version_id_fkey" }).onDelete("cascade"),
+  foreignKey({ columns: [table.sectionId], foreignColumns: [matrixSections.id], name: "mfd_section_id_fkey" }).onDelete("cascade"),
+]);
+
+// Groups within a matrix (PRD §3.3)
+export const matrixGroups = pgTable("matrix_groups", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  matrixId: varchar("matrix_id", { length: 36 }).notNull(),
+  groupLabel: varchar("group_label", { length: 200 }).notNull(),
+  description: text("description"),
+  sortOrder: integer("sort_order").default(0).notNull(),
+  isArchived: boolean("is_archived").default(false),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  unique("matrix_groups_matrix_label_key").on(table.matrixId, table.groupLabel),
+  index("matrix_groups_matrix_id_idx").using("btree", table.matrixId.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.matrixId], foreignColumns: [taskMatrices.id], name: "mg_matrix_id_fkey" }).onDelete("cascade"),
+]);
+
+// Rows within groups (PRD §3.3)
+export const matrixRows = pgTable("matrix_rows", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  groupId: varchar("group_id", { length: 36 }).notNull(),
+  matrixId: varchar("matrix_id", { length: 36 }).notNull(),
+  rowLabel: varchar("row_label", { length: 200 }).notNull(),
+  description: text("description"),
+  sortOrder: integer("sort_order").default(0).notNull(),
+  completionStatus: varchar("completion_status", { length: 20 }).default('pending'),
+  testInvalidReason: text("test_invalid_reason"),
+  isArchived: boolean("is_archived").default(false),
+  version: integer("version").default(1).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  unique("matrix_rows_group_label_key").on(table.groupId, table.rowLabel),
+  index("matrix_rows_group_id_idx").using("btree", table.groupId.asc().nullsLast().op("text_ops")),
+  index("matrix_rows_matrix_id_idx").using("btree", table.matrixId.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.groupId], foreignColumns: [matrixGroups.id], name: "mr_group_id_fkey" }).onDelete("cascade"),
+  foreignKey({ columns: [table.matrixId], foreignColumns: [taskMatrices.id], name: "mr_matrix_id_fkey" }).onDelete("cascade"),
+]);
+
+// Field values per row (PRD §3.8)
+export const matrixFieldValues = pgTable("matrix_field_values", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  rowId: varchar("row_id", { length: 36 }).notNull(),
+  fieldDefinitionId: varchar("field_definition_id", { length: 36 }).notNull(),
+  valueState: varchar("value_state", { length: 20 }).default('missing'),
+  numericValue: numeric("numeric_value", { precision: 18, scale: 6 }),
+  textValue: text("text_value"),
+  durationMs: bigint("duration_ms", { mode: 'number' }),
+  booleanValue: boolean("boolean_value"),
+  dateTimeValue: timestamp("date_time_value", { withTimezone: true, mode: 'string' }),
+  enumValue: varchar("enum_value", { length: 200 }),
+  unitCode: varchar("unit_code", { length: 40 }),
+  calculationMode: varchar("calculation_mode", { length: 20 }),
+  formulaDefinitionId: varchar("formula_definition_id", { length: 36 }),
+  formulaVersion: varchar("formula_version", { length: 40 }),
+  sourceCalculationRunId: varchar("source_calculation_run_id", { length: 36 }),
+  errorCode: varchar("error_code", { length: 60 }),
+  version: integer("version").default(1).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  unique("matrix_field_values_row_field_key").on(table.rowId, table.fieldDefinitionId),
+  index("mfv_row_id_idx").using("btree", table.rowId.asc().nullsLast().op("text_ops")),
+  index("mfv_fd_idx").using("btree", table.fieldDefinitionId.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.rowId], foreignColumns: [matrixRows.id], name: "mfv_row_id_fkey" }).onDelete("cascade"),
+  foreignKey({ columns: [table.fieldDefinitionId], foreignColumns: [matrixFieldDefinitions.id], name: "mfv_fd_fkey" }).onDelete("cascade"),
+]);
+
+// Narratives: group-level and matrix-level (PRD §3.3)
+export const matrixNarratives = pgTable("matrix_narratives", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  scope: varchar("scope", { length: 10 }).notNull(),
+  matrixId: varchar("matrix_id", { length: 36 }),
+  groupId: varchar("group_id", { length: 36 }),
+  narrativeKey: varchar("narrative_key", { length: 50 }).default('summary').notNull(),
+  content: text("content"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  index("mn_matrix_id_idx").using("btree", table.matrixId.asc().nullsLast().op("text_ops")),
+  index("mn_group_id_idx").using("btree", table.groupId.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.matrixId], foreignColumns: [taskMatrices.id], name: "mn_matrix_id_fkey" }).onDelete("cascade"),
+  foreignKey({ columns: [table.groupId], foreignColumns: [matrixGroups.id], name: "mn_group_id_fkey" }).onDelete("cascade"),
+]);
+
+// ============================================================
+// Data Matrix V3: dynamic Excel-like user-designed model (PRD V3.1.2.4 §8)
+// 3-level hierarchy + merged row headers + column zones + cell styles +
+// A1 cell-reference formulas + summary/note narrative blocks.
+// V2 tables above are cold-retained for legacy read-only compatibility.
+// ============================================================
+
+// Extend task_matrices with current_view_definition_id
+// (added via migration 0004; declared here for type access)
+// Note: taskMatrices table already declared above; the column is added
+// at SQL level. Drizzle type is augmented via a view table below for typed access.
+
+export const matrixViewDefinitions = pgTable("matrix_view_definitions", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  matrixId: varchar("matrix_id", { length: 36 }).notNull(),
+  versionNo: integer("version_no").notNull(),
+  maxHierarchyLevel: integer("max_hierarchy_level").default(3).notNull(),
+  leftFrozenColumnCount: integer("left_frozen_column_count").default(5).notNull(),
+  formulaMode: varchar("formula_mode", { length: 40 }).default('relative_cell_reference').notNull(),
+  styleMode: varchar("style_mode", { length: 40 }).default('basic_text_style').notNull(),
+  status: varchar("status", { length: 20 }).default('draft').notNull(),
+  designHash: varchar("design_hash", { length: 128 }),
+  confirmedBy: varchar("confirmed_by", { length: 36 }),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true, mode: 'string' }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  unique("matrix_view_definitions_matrix_version_key").on(table.matrixId, table.versionNo),
+  index("matrix_view_definitions_matrix_id_idx").using("btree", table.matrixId.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.matrixId], foreignColumns: [taskMatrices.id], name: "mvd_matrix_id_fkey" }).onDelete("cascade"),
+  foreignKey({ columns: [table.confirmedBy], foreignColumns: [platformUsers.id], name: "mvd_confirmed_by_fkey" }).onDelete("set null"),
+]);
+
+export const matrixHierarchyNodes = pgTable("matrix_hierarchy_nodes", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  matrixId: varchar("matrix_id", { length: 36 }).notNull(),
+  parentId: varchar("parent_id", { length: 36 }),
+  level: integer("level").notNull(),
+  nodeLabel: varchar("node_label", { length: 200 }).notNull(),
+  nodeType: varchar("node_type", { length: 20 }).notNull(),
+  sortOrder: integer("sort_order").default(0).notNull(),
+  rowspanCache: integer("rowspan_cache"),
+  createdBy: varchar("created_by", { length: 36 }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  archivedAt: timestamp("archived_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+  index("mhn_matrix_id_idx").using("btree", table.matrixId.asc().nullsLast().op("text_ops")),
+  index("mhn_parent_id_idx").using("btree", table.parentId.asc().nullsLast().op("text_ops")),
+  index("mhn_level_idx").using("btree", table.level.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.matrixId], foreignColumns: [taskMatrices.id], name: "mhn_matrix_id_fkey" }).onDelete("cascade"),
+  // self-reference: parent_id -> matrix_hierarchy_nodes.id. Enforced at SQL layer
+  // (migration 0004 section 2); declared here without typed foreignColumns to avoid
+  // TS7022 self-referential initializer error.
+]);
+
+export const matrixLeafRows = pgTable("matrix_leaf_rows", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  matrixId: varchar("matrix_id", { length: 36 }).notNull(),
+  level1NodeId: varchar("level_1_node_id", { length: 36 }).notNull(),
+  level2NodeId: varchar("level_2_node_id", { length: 36 }),
+  level3NodeId: varchar("level_3_node_id", { length: 36 }),
+  visibleRowIndex: integer("visible_row_index").default(0).notNull(),
+  groupRowIndex: integer("group_row_index").default(0).notNull(),
+  status: varchar("status", { length: 20 }).default('active').notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  archivedAt: timestamp("archived_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+  index("mlr_matrix_id_idx").using("btree", table.matrixId.asc().nullsLast().op("text_ops")),
+  index("mlr_l1_idx").using("btree", table.level1NodeId.asc().nullsLast().op("text_ops")),
+  index("mlr_l2_idx").using("btree", table.level2NodeId.asc().nullsLast().op("text_ops")),
+  index("mlr_l3_idx").using("btree", table.level3NodeId.asc().nullsLast().op("text_ops")),
+  index("mlr_visible_idx").using("btree", table.matrixId.asc().nullsLast().op("text_ops"), table.visibleRowIndex.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.matrixId], foreignColumns: [taskMatrices.id], name: "mlr_matrix_id_fkey" }).onDelete("cascade"),
+  foreignKey({ columns: [table.level1NodeId], foreignColumns: [matrixHierarchyNodes.id], name: "mlr_l1_fkey" }).onDelete("cascade"),
+  foreignKey({ columns: [table.level2NodeId], foreignColumns: [matrixHierarchyNodes.id], name: "mlr_l2_fkey" }).onDelete("set null"),
+  foreignKey({ columns: [table.level3NodeId], foreignColumns: [matrixHierarchyNodes.id], name: "mlr_l3_fkey" }).onDelete("set null"),
+]);
+
+export const matrixColumnDefinitions = pgTable("matrix_column_definitions", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  matrixId: varchar("matrix_id", { length: 36 }).notNull(),
+  columnZone: varchar("column_zone", { length: 40 }).notNull(),
+  zoneRole: varchar("zone_role", { length: 20 }).default('A').notNull(),
+  columnLabel: varchar("column_label", { length: 100 }).notNull(),
+  dataType: varchar("data_type", { length: 30 }).notNull(),
+  unitText: varchar("unit_text", { length: 30 }),
+  displayOrder: integer("display_order").default(0).notNull(),
+  desktopWidthPx: integer("desktop_width_px").default(140).notNull(),
+  minWidthPx: integer("min_width_px").default(80),
+  maxWidthPx: integer("max_width_px").default(480),
+  isPinned: boolean("is_pinned").default(false).notNull(),
+  isRequired: boolean("is_required").default(false).notNull(),
+  showInReport: boolean("show_in_report").default(true).notNull(),
+  maxMediaCount: integer("max_media_count"),
+  resultFormat: varchar("result_format", { length: 20 }),
+  decimalPlaces: integer("decimal_places").default(2),
+  createdBy: varchar("created_by", { length: 36 }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  archivedAt: timestamp("archived_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+  index("mcd_matrix_id_idx").using("btree", table.matrixId.asc().nullsLast().op("text_ops")),
+  index("mcd_zone_idx").using("btree", table.columnZone.asc().nullsLast().op("text_ops")),
+  index("mcd_order_idx").using("btree", table.matrixId.asc().nullsLast().op("text_ops"), table.displayOrder.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.matrixId], foreignColumns: [taskMatrices.id], name: "mcd_matrix_id_fkey" }).onDelete("cascade"),
+]);
+
+export const matrixCellValues = pgTable("matrix_cell_values", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  matrixId: varchar("matrix_id", { length: 36 }).notNull(),
+  leafRowId: varchar("leaf_row_id", { length: 36 }).notNull(),
+  columnId: varchar("column_id", { length: 36 }).notNull(),
+  valueText: text("value_text"),
+  valueNumber: numeric("value_number", { precision: 18, scale: 6 }),
+  valueDurationSeconds: integer("value_duration_seconds"),
+  valuePercentage: numeric("value_percentage", { precision: 10, scale: 4 }),
+  displayText: text("display_text"),
+  valueState: varchar("value_state", { length: 30 }).default('empty').notNull(),
+  errorCode: varchar("error_code", { length: 60 }),
+  version: integer("version").default(1).notNull(),
+  updatedBy: varchar("updated_by", { length: 36 }),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  unique("matrix_cell_values_row_col_key").on(table.matrixId, table.leafRowId, table.columnId),
+  index("mcv_matrix_row_idx").using("btree", table.matrixId.asc().nullsLast().op("text_ops"), table.leafRowId.asc().nullsLast().op("text_ops")),
+  index("mcv_column_idx").using("btree", table.columnId.asc().nullsLast().op("text_ops")),
+  index("mcv_state_idx").using("btree", table.valueState.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.matrixId], foreignColumns: [taskMatrices.id], name: "mcv_matrix_id_fkey" }).onDelete("cascade"),
+  foreignKey({ columns: [table.leafRowId], foreignColumns: [matrixLeafRows.id], name: "mcv_leaf_row_fkey" }).onDelete("cascade"),
+  foreignKey({ columns: [table.columnId], foreignColumns: [matrixColumnDefinitions.id], name: "mcv_column_fkey" }).onDelete("cascade"),
+]);
+
+export const matrixCellStyles = pgTable("matrix_cell_styles", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  matrixId: varchar("matrix_id", { length: 36 }).notNull(),
+  targetType: varchar("target_type", { length: 30 }).notNull(),
+  targetId: varchar("target_id", { length: 36 }).notNull(),
+  fontColorToken: varchar("font_color_token", { length: 30 }),
+  fontSizeToken: varchar("font_size_token", { length: 10 }),
+  bold: boolean("bold").default(false).notNull(),
+  italic: boolean("italic").default(false).notNull(),
+  updatedBy: varchar("updated_by", { length: 36 }),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  unique("matrix_cell_styles_target_key").on(table.matrixId, table.targetType, table.targetId),
+  index("mcs_matrix_target_idx").using("btree", table.matrixId.asc().nullsLast().op("text_ops"), table.targetType.asc().nullsLast().op("text_ops"), table.targetId.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.matrixId], foreignColumns: [taskMatrices.id], name: "mcs_matrix_id_fkey" }).onDelete("cascade"),
+]);
+
+export const matrixFormulaDefinitionsV3 = pgTable("matrix_formula_definitions_v3", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  matrixId: varchar("matrix_id", { length: 36 }).notNull(),
+  columnId: varchar("column_id", { length: 36 }).notNull(),
+  expressionDisplay: text("expression_display").notNull(),
+  expressionAst: jsonb("expression_ast").notNull(),
+  referenceMode: varchar("reference_mode", { length: 40 }).default('relative_by_visible_row').notNull(),
+  applyScope: varchar("apply_scope", { length: 20 }).default('matrix').notNull(),
+  resultFormat: varchar("result_format", { length: 20 }).default('number').notNull(),
+  decimalPlaces: integer("decimal_places").default(2).notNull(),
+  status: varchar("status", { length: 20 }).default('active').notNull(),
+  createdBy: varchar("created_by", { length: 36 }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  index("mfd3_matrix_id_idx").using("btree", table.matrixId.asc().nullsLast().op("text_ops")),
+  index("mfd3_column_id_idx").using("btree", table.columnId.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.matrixId], foreignColumns: [taskMatrices.id], name: "mfd3_matrix_id_fkey" }).onDelete("cascade"),
+  foreignKey({ columns: [table.columnId], foreignColumns: [matrixColumnDefinitions.id], name: "mfd3_column_id_fkey" }).onDelete("cascade"),
+]);
+
+export const matrixFormulaRunsV3 = pgTable("matrix_formula_runs_v3", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  formulaId: varchar("formula_id", { length: 36 }).notNull(),
+  matrixId: varchar("matrix_id", { length: 36 }).notNull(),
+  leafRowId: varchar("leaf_row_id", { length: 36 }).notNull(),
+  status: varchar("status", { length: 20 }).default('pending').notNull(),
+  resultValue: numeric("result_value", { precision: 18, scale: 6 }),
+  errorCode: varchar("error_code", { length: 60 }),
+  dependencySnapshot: jsonb("dependency_snapshot"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  index("mfr3_formula_id_idx").using("btree", table.formulaId.asc().nullsLast().op("text_ops")),
+  index("mfr3_matrix_row_idx").using("btree", table.matrixId.asc().nullsLast().op("text_ops"), table.leafRowId.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.formulaId], foreignColumns: [matrixFormulaDefinitionsV3.id], name: "mfr3_formula_id_fkey" }).onDelete("cascade"),
+]);
+
+export const matrixNarrativeBlocks = pgTable("matrix_narrative_blocks", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  matrixId: varchar("matrix_id", { length: 36 }).notNull(),
+  blockType: varchar("block_type", { length: 30 }).notNull(),
+  scope: varchar("scope", { length: 20 }).default('matrix').notNull(),
+  scopeNodeId: varchar("scope_node_id", { length: 36 }),
+  content: text("content"),
+  aiSuggestionId: varchar("ai_suggestion_id", { length: 36 }),
+  showInReport: boolean("show_in_report").default(true).notNull(),
+  sortOrder: integer("sort_order").default(0).notNull(),
+  updatedBy: varchar("updated_by", { length: 36 }),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  index("mnb_matrix_scope_idx").using("btree", table.matrixId.asc().nullsLast().op("text_ops"), table.scope.asc().nullsLast().op("text_ops")),
+  index("mnb_node_idx").using("btree", table.scopeNodeId.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.matrixId], foreignColumns: [taskMatrices.id], name: "mnb_matrix_id_fkey" }).onDelete("cascade"),
+  foreignKey({ columns: [table.scopeNodeId], foreignColumns: [matrixHierarchyNodes.id], name: "mnb_node_fkey" }).onDelete("cascade"),
+]);
+
+export const matrixIssuePoints = pgTable("matrix_issue_points", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  matrixId: varchar("matrix_id", { length: 36 }).notNull(),
+  leafRowId: varchar("leaf_row_id", { length: 36 }).notNull(),
+  columnId: varchar("column_id", { length: 36 }).notNull(),
+  issueText: text("issue_text").notNull(),
+  linkedIssueId: varchar("linked_issue_id", { length: 36 }),
+  status: varchar("status", { length: 20 }).default('text').notNull(),
+  createdBy: varchar("created_by", { length: 36 }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  index("mip_matrix_id_idx").using("btree", table.matrixId.asc().nullsLast().op("text_ops")),
+  index("mip_leaf_row_idx").using("btree", table.leafRowId.asc().nullsLast().op("text_ops")),
+  index("mip_linked_issue_idx").using("btree", table.linkedIssueId.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.matrixId], foreignColumns: [taskMatrices.id], name: "mip_matrix_id_fkey" }).onDelete("cascade"),
+  foreignKey({ columns: [table.leafRowId], foreignColumns: [matrixLeafRows.id], name: "mip_leaf_row_fkey" }).onDelete("cascade"),
+  foreignKey({ columns: [table.columnId], foreignColumns: [matrixColumnDefinitions.id], name: "mip_column_fkey" }).onDelete("cascade"),
+]);
+
+// ============================================================
+// MaterialAsset: material_links polymorphic binding + materials status
+// PRD V3.1.2.4 §9 (ADR-04)
+// ============================================================
+
+export const materialLinks = pgTable("material_links", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  materialId: varchar("material_id", { length: 36 }).notNull(),
+  targetType: varchar("target_type", { length: 40 }).notNull(),
+  targetId: varchar("target_id", { length: 36 }).notNull(),
+  bindingMethod: varchar("binding_method", { length: 30 }).default('click_select').notNull(),
+  boundBy: varchar("bound_by", { length: 36 }),
+  boundAt: timestamp("bound_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  version: integer("version").default(1).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  unique("material_links_material_target_key").on(table.materialId, table.targetType, table.targetId),
+  index("ml_material_id_idx").using("btree", table.materialId.asc().nullsLast().op("text_ops")),
+  index("ml_target_idx").using("btree", table.targetType.asc().nullsLast().op("text_ops"), table.targetId.asc().nullsLast().op("text_ops")),
+  index("ml_bound_by_idx").using("btree", table.boundBy.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.materialId], foreignColumns: [materials.id], name: "ml_material_id_fkey" }).onDelete("cascade"),
+]);
+
+// ============================================================
+// Hermes Agent Runtime + WeCom (PRD V3.1.2.4 §11, §12) — ADR-03
+// Reuses ai_model_configs (no hermes_* config columns).
+// ============================================================
+
+export const agentInstances = pgTable("agent_instances", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  tenantId: varchar("tenant_id", { length: 36 }).default('default').notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  status: varchar("status", { length: 20 }).default('draft').notNull(),
+  modelConfigId: varchar("model_config_id", { length: 36 }),
+  boundUserId: varchar("bound_user_id", { length: 36 }),
+  description: text("description"),
+  maxActiveConversations: integer("max_active_conversations").default(5),
+  createdBy: varchar("created_by", { length: 36 }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  index("ai_tenant_status_idx").using("btree", table.tenantId.asc().nullsLast().op("text_ops"), table.status.asc().nullsLast().op("text_ops")),
+  index("ai_bound_user_idx").using("btree", table.boundUserId.asc().nullsLast().op("text_ops")),
+]);
+
+export const conversations = pgTable("conversations", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  tenantId: varchar("tenant_id", { length: 36 }).default('default').notNull(),
+  agentInstanceId: varchar("agent_instance_id", { length: 36 }).notNull(),
+  platformUserId: varchar("platform_user_id", { length: 36 }),
+  wecomUserId: varchar("wecom_user_id", { length: 100 }),
+  projectId: varchar("project_id", { length: 36 }),
+  taskId: varchar("task_id", { length: 36 }),
+  memoryNamespaceId: varchar("memory_namespace_id", { length: 36 }),
+  title: varchar("title", { length: 200 }),
+  status: varchar("status", { length: 20 }).default('active').notNull(),
+  lastEventId: bigint("last_event_id", { mode: 'number' }).default(0).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  index("conv_agent_idx").using("btree", table.agentInstanceId.asc().nullsLast().op("text_ops")),
+  index("conv_user_idx").using("btree", table.platformUserId.asc().nullsLast().op("text_ops")),
+  index("conv_task_idx").using("btree", table.taskId.asc().nullsLast().op("text_ops")),
+  index("conv_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.agentInstanceId], foreignColumns: [agentInstances.id], name: "conv_agent_fkey" }).onDelete("cascade"),
+]);
+
+export const conversationMessages = pgTable("conversation_messages", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  conversationId: varchar("conversation_id", { length: 36 }).notNull(),
+  role: varchar("role", { length: 20 }).notNull(),
+  content: text("content"),
+  toolCallId: varchar("tool_call_id", { length: 100 }),
+  toolName: varchar("tool_name", { length: 100 }),
+  eventSeq: bigint("event_seq", { mode: 'number' }).notNull(),
+  modelName: varchar("model_name", { length: 200 }),
+  tokensUsed: integer("tokens_used"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  index("cm_conv_seq_idx").using("btree", table.conversationId.asc().nullsLast().op("text_ops"), table.eventSeq.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.conversationId], foreignColumns: [conversations.id], name: "cm_conv_fkey" }).onDelete("cascade"),
+]);
+
+export const agentRuns = pgTable("agent_runs", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  tenantId: varchar("tenant_id", { length: 36 }).default('default').notNull(),
+  agentInstanceId: varchar("agent_instance_id", { length: 36 }).notNull(),
+  conversationId: varchar("conversation_id", { length: 36 }),
+  memoryNamespaceId: varchar("memory_namespace_id", { length: 36 }),
+  trigger: varchar("trigger", { length: 40 }).default('manual').notNull(),
+  status: varchar("status", { length: 20 }).default('running').notNull(),
+  modelConfigSnapshot: jsonb("model_config_snapshot"),
+  inputSummary: text("input_summary"),
+  outputSummary: text("output_summary"),
+  errorCode: varchar("error_code", { length: 60 }),
+  traceId: varchar("trace_id", { length: 60 }).notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  completedAt: timestamp("completed_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+  unique("agent_runs_trace_id_key").on(table.traceId),
+  index("ar_instance_idx").using("btree", table.agentInstanceId.asc().nullsLast().op("text_ops")),
+  index("ar_conv_idx").using("btree", table.conversationId.asc().nullsLast().op("text_ops")),
+  index("ar_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.agentInstanceId], foreignColumns: [agentInstances.id], name: "ar_instance_fkey" }).onDelete("cascade"),
+  foreignKey({ columns: [table.conversationId], foreignColumns: [conversations.id], name: "ar_conv_fkey" }).onDelete("set null"),
+]);
+
+export const agentSuggestionBlocks = pgTable("agent_suggestion_blocks", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  agentRunId: varchar("agent_run_id", { length: 36 }).notNull(),
+  blockType: varchar("block_type", { length: 40 }).notNull(),
+  payload: jsonb("payload").notNull(),
+  status: varchar("status", { length: 30 }).default('pending').notNull(),
+  targetEntityType: varchar("target_entity_type", { length: 60 }),
+  targetEntityId: varchar("target_entity_id", { length: 36 }),
+  editedPayload: jsonb("edited_payload"),
+  decidedBy: varchar("decided_by", { length: 36 }),
+  decidedAt: timestamp("decided_at", { withTimezone: true, mode: 'string' }),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: 'string' }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  index("asb_run_idx").using("btree", table.agentRunId.asc().nullsLast().op("text_ops")),
+  index("asb_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.agentRunId], foreignColumns: [agentRuns.id], name: "asb_run_fkey" }).onDelete("cascade"),
+]);
+
+export const wecomBindings = pgTable("wecom_bindings", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  platformUserId: varchar("platform_user_id", { length: 36 }).notNull(),
+  wecomUserId: varchar("wecom_user_id", { length: 100 }).notNull(),
+  wecomCorpId: varchar("wecom_corp_id", { length: 100 }),
+  agentInstanceId: varchar("agent_instance_id", { length: 36 }),
+  projectScope: jsonb("project_scope"),
+  status: varchar("status", { length: 20 }).default('active').notNull(),
+  boundBy: varchar("bound_by", { length: 36 }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  unique("wecom_bindings_user_corp_key").on(table.wecomUserId, table.wecomCorpId),
+  index("wb_platform_user_idx").using("btree", table.platformUserId.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.platformUserId], foreignColumns: [platformUsers.id], name: "wb_platform_user_fkey" }).onDelete("cascade"),
+  foreignKey({ columns: [table.agentInstanceId], foreignColumns: [agentInstances.id], name: "wb_agent_fkey" }).onDelete("set null"),
+]);
+
+export const wecomMediaIngestJobs = pgTable("wecom_media_ingest_jobs", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  wecomMsgId: varchar("wecom_msg_id", { length: 100 }).notNull(),
+  wecomMediaId: varchar("wecom_media_id", { length: 200 }).notNull(),
+  mediaType: varchar("media_type", { length: 20 }).notNull(),
+  wecomBindingId: varchar("wecom_binding_id", { length: 36 }),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: 'string' }).notNull(),
+  downloadStatus: varchar("download_status", { length: 20 }).default('pending').notNull(),
+  retryCount: integer("retry_count").default(0).notNull(),
+  maxRetries: integer("max_retries").default(12).notNull(),
+  lastError: text("last_error"),
+  lastRetryAt: timestamp("last_retry_at", { withTimezone: true, mode: 'string' }),
+  materialId: varchar("material_id", { length: 36 }),
+  detectedProjectId: varchar("detected_project_id", { length: 36 }),
+  detectedTaskId: varchar("detected_task_id", { length: 36 }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  index("wmij_status_idx").using("btree", table.downloadStatus.asc().nullsLast().op("text_ops")),
+  index("wmij_expires_idx").using("btree", table.expiresAt.asc().nullsLast().op("text_ops")),
+  index("wmij_binding_idx").using("btree", table.wecomBindingId.asc().nullsLast().op("text_ops")),
 ]);

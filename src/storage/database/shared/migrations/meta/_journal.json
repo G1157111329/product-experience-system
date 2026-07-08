@@ -1,27 +1,62 @@
-{
-  "version": "7",
-  "dialect": "postgresql",
-  "entries": [
-    {
-      "idx": 0,
-      "version": "7",
-      "when": 1782692768223,
-      "tag": "0000_dict_tables_v3_1_1",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1782699399639,
-      "tag": "0001_v3_contract_tables",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1782700000000,
-      "tag": "0002_matrix_input_tables",
-      "breakpoints": true
-    }
-  ]
+﻿{
+    "version":  "7",
+    "dialect":  "postgresql",
+    "entries":  [
+                    {
+                        "idx":  0,
+                        "version":  "7",
+                        "when":  1782692768223,
+                        "tag":  "0000_dict_tables_v3_1_1",
+                        "breakpoints":  true
+                    },
+                    {
+                        "idx":  1,
+                        "version":  "7",
+                        "when":  1782699399639,
+                        "tag":  "0001_v3_contract_tables",
+                        "breakpoints":  true
+                    },
+                    {
+                        "idx":  2,
+                        "version":  "7",
+                        "when":  1782700000000,
+                        "tag":  "0002_matrix_input_tables",
+                        "breakpoints":  true
+                    },
+                    {
+                        "idx":  3,
+                        "breakpoints":  true,
+                        "when":  1783304600614,
+                        "version":  "7",
+                        "tag":  "0003_task_matrix_model"
+                    },
+                    {
+                        "idx":  4,
+                        "breakpoints":  true,
+                        "when":  1783900000001,
+                        "version":  "7",
+                        "tag":  "0004_dynamic_matrix_v3_tables"
+                    },
+                    {
+                        "idx":  5,
+                        "breakpoints":  true,
+                        "when":  1783900000002,
+                        "version":  "7",
+                        "tag":  "0005_material_asset_and_matrix_issues"
+                    },
+                    {
+                        "idx":  6,
+                        "breakpoints":  true,
+                        "when":  1783900000003,
+                        "version":  "7",
+                        "tag":  "0006_hermes_agent_tables"
+                    },
+                    {
+                        "idx":  7,
+                        "breakpoints":  true,
+                        "when":  1783900000004,
+                        "version":  "7",
+                        "tag":  "0007_feature_flags_v3_1_2_4"
+                    }
+                ]
 }

@@ -1,0 +1,322 @@
+/**
+ * inline-values service — dispatch layer for PATCH /api/v1/inline-values/*.
+ *
+ * PRD V3.1.2.4 §13.7. Maps (entity_type, field_id) → a field-writer that
+ * performs the optimistic-locked single-field update.
+ *
+ * Wave 0 registers the dispatch map. Each subsequent Wave registers concrete
+ * writers via {@link registerInlineHandler} / {@link registerEntityHandler}.
+ *
+ * Optimistic locking convention:
+ *   - ifMatch is the client's last-seen version (string, possibly quoted).
+ *   - Writers with a `version` column compare; mismatch => conflict.
+ *   - Tables without a version column use a timestamp-based pseudo-version.
+ */
+import { getDb } from '@/storage/database/pg-db';
+import { eq, sql } from 'drizzle-orm';
+import {
+  checkRecords,
+  recipes,
+  comparisonMatrixCells,
+  experienceTasks,
+  matrixCellValues,
+  matrixColumnDefinitions,
+  matrixHierarchyNodes,
+  matrixNarrativeBlocks,
+  matrixIssuePoints,
+} from '@/storage/database/shared/schema';
+
+export type InlineEntityType =
+  | 'record_item'
+  | 'issue'
+  | 'issue_occurrence'
+  | 'rectification_action'
+  | 'verification'
+  | 'report_summary'
+  | 'function_effect_record'
+  | 'sensory_record'
+  | 'comparison_matrix_cell'
+  | 'dynamic_matrix_cell_value'
+  | 'dynamic_matrix_column_definition'
+  | 'dynamic_matrix_hierarchy_node'
+  | 'dynamic_matrix_narrative_block'
+  | 'matrix_issue_point';
+
+export interface InlineUpdateInput {
+  entityType: InlineEntityType;
+  entityId: string;
+  fieldId: string;
+  value: unknown;
+  ifMatch?: string;
+  userId: string;
+  isAdmin: boolean;
+}
+
+export type InlineUpdateResult =
+  | { kind: 'success'; version: number | string; appliedValue: unknown }
+  | { kind: 'conflict'; serverVersion: number | string }
+  | { kind: 'not_found' }
+  | { kind: 'forbidden' }
+  | { kind: 'unsupported' };
+
+type FieldWriter = (input: InlineUpdateInput) => Promise<InlineUpdateResult>;
+
+const handlers = new Map<string, FieldWriter>();
+const entityHandlers = new Map<InlineEntityType, FieldWriter>();
+
+export function registerInlineHandler(
+  entityType: InlineEntityType,
+  fieldId: string,
+  writer: FieldWriter,
+): void {
+  handlers.set(`${entityType}:${fieldId}`, writer);
+}
+
+export function registerEntityHandler(
+  entityType: InlineEntityType,
+  writer: FieldWriter,
+): void {
+  entityHandlers.set(entityType, writer);
+}
+
+export async function handleInlineValueUpdate(
+  input: InlineUpdateInput,
+): Promise<InlineUpdateResult> {
+  const specific = handlers.get(`${input.entityType}:${input.fieldId}`);
+  if (specific) return specific(input);
+  const generic = entityHandlers.get(input.entityType);
+  if (generic) return generic(input);
+  return { kind: 'unsupported' };
+}
+
+function normalizeIfMatch(ifMatch: string | undefined): string | undefined {
+  return ifMatch ? ifMatch.replace(/"/g, '') : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Wave 0 built-in writers
+// ---------------------------------------------------------------------------
+
+// --- sensory_record (check_records) — no version column on check_records ---
+registerEntityHandler('sensory_record', async (input) => {
+  const ALLOWED = new Set([
+    'problem_description',
+    'sensory_dimension',
+    'evaluation_result',
+  ]);
+  if (!ALLOWED.has(input.fieldId)) return { kind: 'unsupported' };
+
+  const db = await getDb();
+  const result = await db
+    .update(checkRecords)
+    .set({ [input.fieldId]: input.value ?? null, updatedAt: sql`NOW()` })
+    .where(eq(checkRecords.id, input.entityId))
+    .returning({ id: checkRecords.id })
+    .execute();
+  if (result.length === 0) return { kind: 'not_found' };
+  return { kind: 'success', version: Date.now(), appliedValue: input.value };
+});
+
+// --- function_effect_record (recipes) — has version column ---
+registerEntityHandler('function_effect_record', async (input) => {
+  const ALLOWED: Record<string, boolean> = {
+    effect_description: true,
+    effect_problem_point: true,
+    name: true,
+  };
+  if (!ALLOWED[input.fieldId]) return { kind: 'unsupported' };
+  return updateVersionedRow({
+    table: recipes,
+    id: input.entityId,
+    fieldId: input.fieldId,
+    value: input.value,
+    ifMatch: normalizeIfMatch(input.ifMatch),
+  });
+});
+
+// --- comparison_matrix_cell — no version column; effect_summary is text ---
+registerEntityHandler('comparison_matrix_cell', async (input) => {
+  const ALLOWED = new Set(['effect_summary', 'process_notes_text', 'problem_points_text']);
+  if (!ALLOWED.has(input.fieldId)) return { kind: 'unsupported' };
+
+  const db = await getDb();
+  // effect_summary is a text column; process_notes/problem_points are JSONB
+  // (stored as text in the cell editor). For Wave 0 we only support effect_summary.
+  if (input.fieldId !== 'effect_summary') return { kind: 'unsupported' };
+
+  const result = await db
+    .update(comparisonMatrixCells)
+    .set({ effectSummary: (input.value as string) ?? null, updatedAt: sql`NOW()` })
+    .where(eq(comparisonMatrixCells.id, input.entityId))
+    .returning({ id: comparisonMatrixCells.id })
+    .execute();
+  if (result.length === 0) return { kind: 'not_found' };
+  return { kind: 'success', version: Date.now(), appliedValue: input.value };
+});
+
+// --- report_summary / basic info (experience_tasks) — has version column ---
+registerEntityHandler('report_summary', async (input) => {
+  // experience_tasks has no `summary` column; the closest inline-editable
+  // fields are task_name, product_model, test_purpose, test_method.
+  const ALLOWED: Record<string, boolean> = {
+    task_name: true,
+    product_model: true,
+    test_purpose: true,
+    test_method: true,
+    description: false,
+    summary: false,
+  };
+  if (!ALLOWED[input.fieldId]) return { kind: 'unsupported' };
+  return updateVersionedRow({
+    table: experienceTasks,
+    id: input.entityId,
+    fieldId: input.fieldId,
+    value: input.value,
+    ifMatch: normalizeIfMatch(input.ifMatch),
+  });
+});
+
+// --- dynamic_matrix_cell_value (V3) — optimistic lock on version ---
+registerEntityHandler('dynamic_matrix_cell_value', async (input) => {
+  const db = await getDb();
+  const existing = await db
+    .select({ id: matrixCellValues.id, version: matrixCellValues.version })
+    .from(matrixCellValues)
+    .where(eq(matrixCellValues.id, input.entityId))
+    .limit(1)
+    .execute();
+  if (existing.length === 0) return { kind: 'not_found' };
+
+  const current = existing[0];
+  const ifMatch = normalizeIfMatch(input.ifMatch);
+  if (ifMatch !== undefined && String(current.version) !== ifMatch) {
+    return { kind: 'conflict', serverVersion: current.version };
+  }
+
+  const nextVersion = current.version + 1;
+  const value = input.value;
+  const isNum = typeof value === 'number';
+  const isStr = typeof value === 'string';
+
+  await db
+    .update(matrixCellValues)
+    .set({
+      valueText: isStr ? value : null,
+      valueNumber: isNum ? String(value) : null,
+      valueState: value === null || value === '' ? 'empty' : 'filled',
+      version: nextVersion,
+      updatedBy: input.userId,
+      updatedAt: sql`NOW()`,
+    })
+    .where(eq(matrixCellValues.id, input.entityId))
+    .execute();
+
+  return { kind: 'success', version: nextVersion, appliedValue: value };
+});
+
+// --- dynamic_matrix_hierarchy_node (row/column headers) ---
+registerEntityHandler('dynamic_matrix_hierarchy_node', async (input) => {
+  if (input.fieldId !== 'node_label') return { kind: 'unsupported' };
+  return updateSimpleRow({
+    table: matrixHierarchyNodes,
+    id: input.entityId,
+    column: matrixHierarchyNodes.nodeLabel,
+    value: input.value,
+  });
+});
+
+registerEntityHandler('dynamic_matrix_column_definition', async (input) => {
+  if (input.fieldId !== 'column_label') return { kind: 'unsupported' };
+  return updateSimpleRow({
+    table: matrixColumnDefinitions,
+    id: input.entityId,
+    column: matrixColumnDefinitions.columnLabel,
+    value: input.value,
+  });
+});
+
+registerEntityHandler('dynamic_matrix_narrative_block', async (input) => {
+  if (input.fieldId !== 'content') return { kind: 'unsupported' };
+  return updateSimpleRow({
+    table: matrixNarrativeBlocks,
+    id: input.entityId,
+    column: matrixNarrativeBlocks.content,
+    value: input.value,
+  });
+});
+
+registerEntityHandler('matrix_issue_point', async (input) => {
+  if (input.fieldId !== 'issue_text') return { kind: 'unsupported' };
+  return updateSimpleRow({
+    table: matrixIssuePoints,
+    id: input.entityId,
+    column: matrixIssuePoints.issueText,
+    value: input.value,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Shared writer helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Update a single column on a versioned Drizzle table with optimistic locking.
+ * `fieldId` must match the snake_case DB column name.
+ */
+async function updateVersionedRow(opts: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  table: any;
+  id: string;
+  fieldId: string;
+  value: unknown;
+  ifMatch?: string;
+}): Promise<InlineUpdateResult> {
+  const db = await getDb();
+  const { table, id, fieldId, value, ifMatch } = opts;
+
+  const existing = await db
+    .select({ id: table.id, version: table.version })
+    .from(table)
+    .where(eq(table.id, id))
+    .limit(1)
+    .execute();
+  if (existing.length === 0) return { kind: 'not_found' };
+
+  const current = existing[0];
+  if (ifMatch !== undefined && String(current.version) !== ifMatch) {
+    return { kind: 'conflict', serverVersion: current.version };
+  }
+
+  const nextVersion = (current.version ?? 0) + 1;
+  await db
+    .update(table)
+    .set({ [fieldId]: value ?? null, version: nextVersion, updatedAt: sql`NOW()` })
+    .where(eq(table.id, id))
+    .execute();
+
+  return { kind: 'success', version: nextVersion, appliedValue: value };
+}
+
+/**
+ * Update a single column on a table without optimistic locking.
+ */
+async function updateSimpleRow(opts: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  table: any;
+  id: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  column: any;
+  value: unknown;
+}): Promise<InlineUpdateResult> {
+  const db = await getDb();
+  const { table, id, column, value } = opts;
+
+  const result = await db
+    .update(table)
+    .set({ [column.key]: value ?? null, updatedAt: sql`NOW()` })
+    .where(eq(table.id, id))
+    .returning({ id: table.id })
+    .execute();
+  if (result.length === 0) return { kind: 'not_found' };
+  return { kind: 'success', version: Date.now(), appliedValue: value };
+}
