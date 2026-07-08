@@ -42,10 +42,10 @@ interface MatrixTabStateResponse {
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: Promise<{ taskId: string }> },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const traceId = resolveTraceId(req.headers);
-  const { taskId } = await params;
+  const { id: taskId } = await params;
 
   try {
     // Auth gate — unauthenticated users see "forbidden".
