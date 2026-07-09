@@ -25,7 +25,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { InlineEditable } from '@/components/inline-editable';
-import { patchInlineValue } from '@/lib/inline-save-helpers';
+import { patchInlineValue, putMatrixCellValue } from '@/lib/inline-save-helpers';
 import type {
   V3MatrixProjection,
   V3Column,
@@ -35,6 +35,7 @@ import type {
   V3CellStyle,
   V3FormulaDefinition,
   V3CellMedia,
+  V3IssuePoint,
   ColumnZone,
 } from '@/lib/matrix/v3-types';
 import { cellKey, styleKey } from '@/lib/matrix/v3-types';
@@ -45,6 +46,7 @@ import {
   MatrixSummarySuggestionsDialog,
   type SummarySuggestion,
 } from './matrix-summary-suggestions-dialog';
+import { MatrixV3Mobile } from './matrix-v3-mobile';
 
 interface MatrixV3GridProps {
   matrixId: string;
@@ -369,8 +371,16 @@ export function MatrixV3Grid({
 
       <div className={cn('gap-3', stagingEnabled ? 'lg:grid lg:grid-cols-[1fr_200px]' : '')}>
         <div className="space-y-3 min-w-0">
-      {/* Grid */}
-      <div className="border rounded-lg overflow-auto max-h-[70vh]" style={{ minWidth: 0 }}>
+      {/* Mobile card layout (PRD §7.15) */}
+      <MatrixV3Mobile
+        matrixId={matrixId}
+        taskId={taskId}
+        projection={projection}
+        onChanged={onChanged}
+      />
+
+      {/* Desktop grid */}
+      <div className="border rounded-lg overflow-auto max-h-[70vh] hidden md:block" style={{ minWidth: 0 }}>
         <table className="border-collapse text-sm" style={{ tableLayout: 'fixed' }}>
           {/* Header */}
           <thead className="sticky top-0 z-20 bg-muted/80 backdrop-blur">
@@ -457,6 +467,11 @@ export function MatrixV3Grid({
                           column={col}
                           cell={cell}
                           media={projection.cellMedia?.[cellKey(grow.leaf.id, col.id)] ?? []}
+                          issuePoint={
+                            projection.issuePoints.find(
+                              (ip) => ip.leafRowId === grow.leaf.id && ip.columnId === col.id,
+                            ) ?? null
+                          }
                           hierarchyContext={{ level1: grow.level1, level2: grow.level2, level3: grow.level3 }}
                           mergeInfo={merges}
                           onAddLevel2={handleAddLevel2}
@@ -622,6 +637,7 @@ interface MatrixV3CellProps {
   column: V3Column;
   cell: V3CellValue | undefined;
   media: V3CellMedia[];
+  issuePoint: V3IssuePoint | null;
   hierarchyContext: { level1: V3HierarchyNode; level2: V3HierarchyNode | null; level3: V3HierarchyNode | null };
   mergeInfo?: MergeInfo;
   onAddLevel2?: (parentId: string) => void;
@@ -638,6 +654,7 @@ function MatrixV3Cell({
   column,
   cell,
   media,
+  issuePoint,
   hierarchyContext,
   mergeInfo,
   onAddLevel2,
@@ -766,20 +783,16 @@ function MatrixV3Cell({
     );
   }
 
-  // Issue point column.
+  // Issue point column — upsert matrix_issue_points then optional convert.
   if (column.columnZone === 'issue_point') {
     return (
-      <div className="px-1 py-0.5 min-h-[28px]">
-        <InlineEditable.Text
-          value={cell?.valueText ?? ''}
-          placeholder="问题点…"
-          onSave={async (v) => {
-            await patchInlineValue('matrix_issue_point', leafRowId, 'issue_text', v);
-            onChanged();
-          }}
-          inputClassName="h-7 text-xs"
-        />
-      </div>
+      <MatrixV3IssueCell
+        matrixId={matrixId}
+        leafRowId={leafRowId}
+        columnId={column.id}
+        issuePoint={issuePoint}
+        onChanged={onChanged}
+      />
     );
   }
 
@@ -788,8 +801,10 @@ function MatrixV3Cell({
     return (
       <div className="px-1 py-0.5">
         <InlineCellNumber
+          matrixId={matrixId}
           leafRowId={leafRowId}
           columnId={column.id}
+          cellId={cell?.id}
           value={cell?.valueNumber ?? ''}
           unit={column.unitText}
           onChanged={onChanged}
@@ -798,14 +813,19 @@ function MatrixV3Cell({
     );
   }
 
-  // Default: text / long_text → inline editable.
+  // Default: text / long_text → inline editable via cells PUT (creates row if missing).
   return (
     <div className="px-1 py-0.5">
       <InlineEditable.Text
         value={cell?.valueText ?? ''}
         placeholder="…"
         onSave={async (v) => {
-          await patchInlineValue('dynamic_matrix_cell_value', cellKey(leafRowId, column.id), 'value', v);
+          await putMatrixCellValue({
+            matrixId,
+            leafRowId,
+            columnId: column.id,
+            valueText: v,
+          });
           onChanged();
         }}
         inputClassName="h-7 text-xs"
@@ -815,20 +835,22 @@ function MatrixV3Cell({
 }
 
 function InlineCellNumber({
+  matrixId,
   leafRowId,
   columnId,
+  cellId,
   value,
   unit,
   onChanged,
 }: {
+  matrixId: string;
   leafRowId: string;
   columnId: string;
+  cellId?: string;
   value: string;
   unit: string | null;
   onChanged: () => void;
 }) {
-  // Use a simple controlled Input with blur-save (numeric fields benefit from
-  // explicit commit rather than debounce to avoid partial-number saves).
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
   useEffect(() => setDraft(value), [value]);
@@ -837,7 +859,18 @@ function InlineCellNumber({
     if (draft === value) return;
     setSaving(true);
     try {
-      await patchInlineValue('dynamic_matrix_cell_value', cellKey(leafRowId, columnId), 'value', draft);
+      const num = draft.trim() === '' ? null : Number(draft);
+      if (cellId && draft.trim() !== '' && !Number.isNaN(num)) {
+        await patchInlineValue('dynamic_matrix_cell_value', cellId, 'value', draft);
+      } else {
+        await putMatrixCellValue({
+          matrixId,
+          leafRowId,
+          columnId,
+          valueNumber: draft.trim() === '' || Number.isNaN(num as number) ? null : num,
+          valueText: draft.trim() === '' ? '' : undefined,
+        });
+      }
       onChanged();
     } catch {
       toast.error('保存失败');
@@ -853,12 +886,91 @@ function InlineCellNumber({
         inputMode="decimal"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={save}
+        onBlur={() => void save()}
         className="h-7 text-xs font-mono"
         disabled={saving}
       />
       {unit && <span className="text-muted-foreground text-xs whitespace-nowrap">{unit}</span>}
       {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+    </div>
+  );
+}
+
+function MatrixV3IssueCell({
+  matrixId,
+  leafRowId,
+  columnId,
+  issuePoint,
+  onChanged,
+}: {
+  matrixId: string;
+  leafRowId: string;
+  columnId: string;
+  issuePoint: V3IssuePoint | null;
+  onChanged: () => void;
+}) {
+  const [converting, setConverting] = useState(false);
+
+  const saveText = async (v: string) => {
+    if (issuePoint?.id) {
+      await patchInlineValue('matrix_issue_point', issuePoint.id, 'issue_text', v);
+    } else if (v.trim()) {
+      const res = await fetch(`/api/v1/matrices/${matrixId}/issue-points`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leafRowId, columnId, issueText: v }),
+      });
+      const json = await res.json();
+      if (json.code !== 0) throw new Error(json.message || '保存问题点失败');
+    }
+    onChanged();
+  };
+
+  const convertToIssue = async () => {
+    if (!issuePoint?.id || issuePoint.linkedIssueId) return;
+    setConverting(true);
+    try {
+      const res = await fetch(`/api/v1/matrices/${matrixId}/issue-points/${issuePoint.id}/convert`, {
+        method: 'POST',
+      });
+      const json = await res.json();
+      if (json.code !== 0) {
+        toast.error(json.message || '转问题失败');
+        return;
+      }
+      toast.success('已转为问题管理条目');
+      onChanged();
+    } catch {
+      toast.error('转问题失败');
+    } finally {
+      setConverting(false);
+    }
+  };
+
+  return (
+    <div className="px-1 py-0.5 min-h-[28px] space-y-1">
+      <InlineEditable.Text
+        value={issuePoint?.issueText ?? ''}
+        placeholder="问题点…"
+        onSave={saveText}
+        inputClassName="h-7 text-xs"
+      />
+      {issuePoint?.id && !issuePoint.linkedIssueId && (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-6 text-[10px] px-1.5"
+          disabled={converting || !issuePoint.issueText?.trim()}
+          onClick={() => void convertToIssue()}
+        >
+          {converting ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+          转问题
+        </Button>
+      )}
+      {issuePoint?.linkedIssueId && (
+        <Badge variant="secondary" className="text-[10px]">已转问题</Badge>
+      )}
     </div>
   );
 }

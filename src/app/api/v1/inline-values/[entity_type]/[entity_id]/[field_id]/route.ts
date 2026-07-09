@@ -71,7 +71,7 @@ export async function PATCH(
   }
 
   // Parse body.
-  let body: { value?: unknown };
+  let body: { value?: unknown; ifMatch?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -82,7 +82,9 @@ export async function PATCH(
     return fail(traceId, { message: '缺少 value 字段', status: 400 });
   }
 
-  const ifMatch = req.headers.get('if-match');
+  const ifMatchHeader = req.headers.get('if-match');
+  const ifMatchBody = typeof body.ifMatch === 'string' ? body.ifMatch : undefined;
+  const ifMatch = ifMatchHeader ?? ifMatchBody;
 
   try {
     const result = await handleInlineValueUpdate({

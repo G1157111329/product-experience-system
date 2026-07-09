@@ -566,18 +566,28 @@ export function ComparisonWorkspace({
       </TableCell>
       <TableCell colSpan={matrix?.objects.length || 1} className="p-2 align-top">
         <div className="rounded-md border border-amber-200 bg-background p-2">
-          <Textarea
+          <InlineEditable.Textarea
             value={summaryDrafts[node.id] ?? summaryTextOf(node)}
-            onChange={(event) => setSummaryDrafts((current) => ({ ...current, [node.id]: event.target.value }))}
             placeholder="输入针对该大类/食谱/项目的总结"
-            className="min-h-24 resize-y text-sm"
+            rows={4}
+            onSave={async (v) => {
+              setSummaryDrafts((current) => ({ ...current, [node.id]: v }));
+              const res = await fetch(`/api/comparison-item-nodes/${node.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  config: {
+                    ...(node.config || {}),
+                    summary_text: v.trim(),
+                  },
+                }),
+              });
+              const data = await res.json() as ApiResponse<unknown>;
+              if (data.code !== 0) throw new Error(data.message || '保存大类小结失败');
+              await refreshMatrix();
+            }}
+            inputClassName="min-h-24 text-sm"
           />
-          <div className="mt-2 flex justify-end">
-            <Button size="sm" onClick={() => void saveSummaryNode(node)} className="h-8 gap-1.5">
-              <Save className="h-3.5 w-3.5" />
-              保存小结
-            </Button>
-          </div>
         </div>
       </TableCell>
     </TableRow>

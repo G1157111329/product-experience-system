@@ -198,7 +198,15 @@ export function MatrixV3MediaCell({
         selectedIds={selectedIds}
         initialMaterials={initialMaterials}
         onSelectionChange={(ids) => {
-          void handleSelectionChange(ids);
+          // D column: drop videos from selection client-side.
+          const filtered = imagesOnly
+            ? ids.filter((id) => {
+                const m = initialMaterials.find((x) => x.id === id);
+                // Allow newly selected ids from picker library; server enforces image_slot.
+                return !m || m.material_type !== 'video';
+              })
+            : ids;
+          void handleSelectionChange(filtered);
         }}
       />
     </div>

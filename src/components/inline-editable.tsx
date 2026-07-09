@@ -31,6 +31,10 @@ import { useDebouncedSave, type SaveStatus } from '@/hooks/use-debounced-save';
 
 export interface InlineSaveResult {
   conflict?: boolean;
+  /** Server version when 409; used by conflict panel force-overwrite. */
+  serverVersion?: string | number;
+  /** New version after successful save. */
+  version?: string | number;
 }
 
 export interface InlineEditableBaseProps {
@@ -40,6 +44,11 @@ export interface InlineEditableBaseProps {
   placeholder?: string;
   /** Persist the new value. Return {conflict:true} for 409, throw for error. */
   onSave: (value: string) => Promise<InlineSaveResult | void>;
+  /**
+   * Optional force-save after conflict (omit If-Match). When provided, the
+   * conflict panel shows a "覆盖保存" action.
+   */
+  onForceSave?: (value: string) => Promise<InlineSaveResult | void>;
   /** Disable editing (read-only display). */
   readOnly?: boolean;
   /** Extra classes for the display wrapper. */
@@ -81,18 +90,21 @@ const STATUS_CLASS: Partial<Record<SaveStatus, string>> = {
 function SaveStatusBadge({
   status,
   onRetry,
+  onForceOverwrite,
 }: {
   status: SaveStatus;
   onRetry: () => void;
+  onForceOverwrite?: () => void;
 }) {
   if (status === 'idle') return null;
   const label = STATUS_LABEL[status];
   if (!label) return null;
   const isRetryable = status === 'error';
+  const isConflict = status === 'conflict';
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 text-xs leading-none select-none',
+        'inline-flex items-center gap-1 text-xs leading-none select-none flex-wrap',
         STATUS_CLASS[status],
       )}
       role="status"
@@ -113,6 +125,24 @@ function SaveStatusBadge({
       ) : (
         label
       )}
+      {isConflict && onForceOverwrite && (
+        <button
+          type="button"
+          onClick={onForceOverwrite}
+          className="ml-1 underline-offset-2 hover:underline font-medium"
+        >
+          覆盖保存
+        </button>
+      )}
+      {isConflict && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="underline-offset-2 hover:underline"
+        >
+          重试
+        </button>
+      )}
     </span>
   );
 }
@@ -120,6 +150,7 @@ function SaveStatusBadge({
 function useInlineEditableEngine(
   value: string,
   onSave: (value: string) => Promise<InlineSaveResult | void>,
+  onForceSave?: (value: string) => Promise<InlineSaveResult | void>,
 ) {
   const [draft, setDraft] = useState(value);
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
@@ -151,6 +182,20 @@ function useInlineEditableEngine(
     flush();
   };
 
+  const handleForceOverwrite = () => {
+    if (!onForceSave) {
+      handleRetry();
+      return;
+    }
+    setStatus('saving');
+    void onForceSave(draft)
+      .then((result) => {
+        if (result && result.conflict) setStatus('conflict');
+        else setStatus('saved');
+      })
+      .catch(() => setStatus('error'));
+  };
+
   return {
     draft,
     status,
@@ -158,6 +203,7 @@ function useInlineEditableEngine(
     handleChange,
     handleBlur,
     handleRetry,
+    handleForceOverwrite: onForceSave ? handleForceOverwrite : undefined,
     setStatus,
   };
 }
@@ -166,13 +212,14 @@ function TextImpl({
   value,
   placeholder,
   onSave,
+  onForceSave,
   readOnly,
   className,
   inputClassName,
   ariaLabel,
 }: InlineTextProps) {
-  const { draft, status, inputRef, handleChange, handleBlur, handleRetry } =
-    useInlineEditableEngine(value, onSave);
+  const { draft, status, inputRef, handleChange, handleBlur, handleRetry, handleForceOverwrite } =
+    useInlineEditableEngine(value, onSave, onForceSave);
 
   if (readOnly) {
     return (
@@ -193,7 +240,7 @@ function TextImpl({
         onBlur={handleBlur}
         className={cn('h-8', inputClassName)}
       />
-      <SaveStatusBadge status={status} onRetry={handleRetry} />
+      <SaveStatusBadge status={status} onRetry={handleRetry} onForceOverwrite={handleForceOverwrite} />
     </span>
   );
 }
@@ -202,14 +249,15 @@ function TextareaImpl({
   value,
   placeholder,
   onSave,
+  onForceSave,
   readOnly,
   className,
   inputClassName,
   ariaLabel,
   rows = 3,
 }: InlineTextareaProps) {
-  const { draft, status, inputRef, handleChange, handleBlur, handleRetry } =
-    useInlineEditableEngine(value, onSave);
+  const { draft, status, inputRef, handleChange, handleBlur, handleRetry, handleForceOverwrite } =
+    useInlineEditableEngine(value, onSave, onForceSave);
 
   if (readOnly) {
     return (
@@ -231,7 +279,7 @@ function TextareaImpl({
         onBlur={handleBlur}
         className={cn('resize-y', inputClassName)}
       />
-      <SaveStatusBadge status={status} onRetry={handleRetry} />
+      <SaveStatusBadge status={status} onRetry={handleRetry} onForceOverwrite={handleForceOverwrite} />
     </span>
   );
 }

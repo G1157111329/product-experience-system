@@ -57,6 +57,46 @@ export function AgentAssistPanel({ taskId, onClose, embedded = false }: AgentAss
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [applyingIndex, setApplyingIndex] = useState<number | null>(null);
+  const [hermesConversationId, setHermesConversationId] = useState<string | null>(null);
+  const [useHermes, setUseHermes] = useState<boolean | null>(null);
+
+  const ensureHermesConversation = async (): Promise<string | null> => {
+    if (hermesConversationId) return hermesConversationId;
+    const res = await fetch('/api/v1/agent/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ taskId, title: `任务对话 ${taskId}` }),
+    });
+    const json = await res.json();
+    if (json.code !== 0 || !json.data?.id) return null;
+    setHermesConversationId(json.data.id);
+    return json.data.id as string;
+  };
+
+  const sendViaHermes = async (question: string, nextMessages: ChatMessage[]) => {
+    const conversationId = await ensureHermesConversation();
+    if (!conversationId) {
+      setUseHermes(false);
+      return false;
+    }
+    setUseHermes(true);
+    const res = await fetch(`/api/v1/agent/conversations/${conversationId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: question }),
+    });
+    const json = await res.json();
+    if (json.code !== 0) {
+      toast.error(json.message || '助手暂不可用');
+      setMessages(nextMessages);
+      return true;
+    }
+    const reply =
+      json.data?.assistantMessage?.content?.trim() ||
+      '我没有生成有效回复，请换一种描述再试。';
+    setMessages([...nextMessages, { role: 'assistant', content: reply }]);
+    return true;
+  };
 
   const sendMessage = async () => {
     const question = input.trim();
@@ -66,6 +106,12 @@ export function AgentAssistPanel({ taskId, onClose, embedded = false }: AgentAss
     setInput('');
     setSending(true);
     try {
+      // Prefer Hermes when flag is on / conversation available; else legacy agent-chat.
+      if (useHermes !== false) {
+        const handled = await sendViaHermes(question, nextMessages);
+        if (handled) return;
+      }
+
       const res = await fetch(`/api/tasks/${taskId}/agent-chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -243,6 +243,14 @@ export async function POST(
 
       const buffer = Buffer.from(await file.arrayBuffer());
       const safeName = file.name || `upload-${Date.now()}`;
+      const materialType = inferMaterialType(safeName);
+      // D column (image_slot): reject video uploads.
+      if (column.dataType === 'image_slot' && materialType === 'video') {
+        return fail(traceId, {
+          message: '图片素材列仅支持图片，不支持视频',
+          status: 400,
+        });
+      }
       const storageKey = `${matrixId}/${leafRowId}/${columnId}/${Date.now()}-${safeName}`;
       const storedKey = await uploadFile({
         fileContent: buffer,
@@ -261,7 +269,7 @@ export async function POST(
         .insert(materials)
         .values({
           taskId: matrixRows[0]?.taskId ?? null,
-          materialType: inferMaterialType(safeName),
+          materialType,
           fileName: safeName,
           filePath: storedKey,
           fileUrl: storedKey,
@@ -290,12 +298,18 @@ export async function POST(
 
       // Verify the material exists.
       const matRows = await db
-        .select({ id: materials.id })
+        .select({ id: materials.id, materialType: materials.materialType })
         .from(materials)
         .where(eq(materials.id, body.materialId))
         .execute();
       if (matRows.length === 0) {
         return fail(traceId, { message: '素材不存在', status: 404 });
+      }
+      if (column.dataType === 'image_slot' && matRows[0].materialType === 'video') {
+        return fail(traceId, {
+          message: '图片素材列仅支持图片，不支持视频',
+          status: 400,
+        });
       }
       materialId = body.materialId;
     }
