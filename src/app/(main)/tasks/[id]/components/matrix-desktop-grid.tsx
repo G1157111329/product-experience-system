@@ -366,7 +366,7 @@ function MatrixCell({
     setSaving(true);
     setError(null);
     try {
-      let body: Record<string, unknown> = { rowVersion: row.version };
+      const body: Record<string, unknown> = { rowVersion: row.version };
 
       if (!newDraft || newDraft === '') {
         body.valueState = 'missing';

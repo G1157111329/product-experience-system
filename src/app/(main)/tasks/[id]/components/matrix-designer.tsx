@@ -347,7 +347,7 @@ export function MatrixDesigner({ matrixId, taskId, onBack, onConfirmed }: Matrix
             <div className="space-y-4">
               <h3 className="font-semibold">步骤 1/5：基础结构</h3>
               <p className="text-sm text-muted-foreground">
-                为矩阵设置分组轴（如"食材"、"产品"）和行轴（如"口径"、"批次"）名称。
+                为矩阵设置分组轴（如“食材”、“产品”）和行轴（如“口径”、“批次”）名称。
               </p>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">

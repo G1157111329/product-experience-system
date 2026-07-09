@@ -38,7 +38,7 @@ import { recomputeAffected, MatrixMetricConflictError } from '@/lib/matrix/recom
 import type { PatchMetricBody, DimensionBindingLike, EmptyBodyCheck } from '@/lib/matrix/metric-helpers';
 import { isCalculatedDimension, emptyMetricBody, versionConflict } from '@/lib/matrix/metric-helpers';
 
-type Row = Record<string, any>;
+type Row = Record<string, unknown>;
 
 /** Coerce a numeric-string/number body value to a number, or undefined. */
 function coerceNumber(v: unknown): number | undefined {

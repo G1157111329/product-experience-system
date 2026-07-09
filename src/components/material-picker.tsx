@@ -29,6 +29,14 @@ export interface Material {
   media_role?: string | null;
 }
 
+type LegacyMaterial = Material & {
+  url?: string;
+  name?: string;
+  size?: number;
+  taskId?: string;
+  task_id?: string;
+};
+
 interface MaterialPickerProps {
   taskId: string;
   open?: boolean;
@@ -138,19 +146,22 @@ export function MaterialPicker({
 
       // Map filesystem-based material objects to the Material interface expected
       // by the picker.
-      list = list.map((material: any) => ({
-        ...material,
-        material_type: material.material_type || inferMaterialType(material.url || material.name || material.file_name || ''),
-        file_url: material.url || material.file_url || '',
-        file_name: material.name || material.file_name || material.id || '',
-        file_size: material.size ?? material.file_size ?? 0,
-        task_id: material.taskId || material.task_id || taskId,
-        record_id: material.record_id ?? null,
-        recipe_step_id: material.recipe_step_id ?? null,
-        recipe_id: material.recipe_id ?? null,
-        issue_id: material.issue_id ?? null,
-        re_evaluation_id: material.re_evaluation_id ?? null,
-      }));
+      list = list.map((material) => {
+        const source = material as LegacyMaterial;
+        return {
+          ...source,
+          material_type: source.material_type || inferMaterialType(source.url || source.name || source.file_name || ''),
+          file_url: source.url || source.file_url || '',
+          file_name: source.name || source.file_name || source.id || '',
+          file_size: source.size ?? source.file_size ?? 0,
+          task_id: source.taskId || source.task_id || taskId,
+          record_id: source.record_id ?? null,
+          recipe_step_id: source.recipe_step_id ?? null,
+          recipe_id: source.recipe_id ?? null,
+          issue_id: source.issue_id ?? null,
+          re_evaluation_id: source.re_evaluation_id ?? null,
+        };
+      });
 
       if (onSelect && !onSelectionChange) {
         list = list.filter((material) => {
