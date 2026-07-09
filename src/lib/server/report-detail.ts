@@ -1,6 +1,6 @@
 import { comparisonCellFields } from '@/lib/report-comparison-fields';
 import { selectEffectEvaluationText } from '@/lib/report-content-rules';
-import { issueMaterialRows } from '@/lib/report-issue-media';
+import { issueMaterialRows, recipeIssueMaterialRows } from '@/lib/report-issue-media';
 
 type Row = Record<string, unknown>;
 
@@ -668,13 +668,15 @@ function parseProblemPoints(value: unknown): Array<{ text: string; materialIds: 
   return raw.trim() ? [{ text: raw.trim(), materialIds: [] }] : [];
 }
 
-function issueEvidenceMedia(issue: Row, recordById: Map<string, Row>, allMaterials: Row[]) {
+function issueEvidenceMedia(issue: Row, recordById: Map<string, Row>, allMaterials: Row[], recipes: Row[]) {
   const direct = issueMaterialRows(issue, allMaterials);
+  const recipeMaterials = recipeIssueMaterialRows(issue, recipes, allMaterials);
   const record = recordById.get(text(issue.record_id)) || recordById.get(text(issue.id));
   return uniqueMediaItems([
     ...mediaItems(rows(issue.materials), firstNonEmpty(issue.title, issue.check_item, issue.id)),
     ...mediaItems(rows(record?.materials), firstNonEmpty(issue.title, issue.check_item, record?.check_item, issue.id)),
     ...mediaItems(direct, firstNonEmpty(issue.title, issue.check_item, issue.id)),
+    ...mediaItems(recipeMaterials, firstNonEmpty(issue.title, issue.id)),
   ]);
 }
 
@@ -882,7 +884,7 @@ function contentSections(report: Row, content: Row, issues: Row[], materials: Ro
   const allMaterials = [...contentMaterials, ...materials];
   const recordById = new Map(records.map((record) => [text(record.id), record]));
   const issueMedia = (issue: Row) => [
-    ...issueEvidenceMedia(issue, recordById, allMaterials),
+    ...issueEvidenceMedia(issue, recordById, allMaterials, recipes),
     ...reEvaluationMedia(issue),
   ];
   const recipeStepRows = recipes.flatMap((recipe) => rows(recipe.recipe_steps).map((step) => ({
