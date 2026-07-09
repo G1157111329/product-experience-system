@@ -192,7 +192,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     await page.emulateMedia({ media: 'print' });
     // Server-side PDF render has no /api/materials/presign to call, so resolve
     // storage keys to absolute URLs now. Gray-release aware (local-then-S3).
-    await presignReportMediaUrls(detail);
+    const internalMediaBaseUrl = `http://127.0.0.1:${process.env.PORT || '5000'}`;
+    await presignReportMediaUrls(detail, { absoluteBaseUrl: internalMediaBaseUrl });
     await page.setContent(renderReportDetailPdfHtml(detail, new Date()), { waitUntil: 'domcontentloaded' });
     // Video metadata requests can keep the page globally "busy" even after every
     // printable image is ready. Wait only for images, with a bounded fallback so

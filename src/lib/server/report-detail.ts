@@ -1949,13 +1949,22 @@ function allBlockMedia(sections: ReportDetailSection[]): ReportDetailMediaItem[]
  *
  * Idempotent: skips URLs that are already http(s) or data URIs.
  */
-export async function presignReportMediaUrls(model: ReportDetailModel): Promise<void> {
+export async function presignReportMediaUrls(
+  model: ReportDetailModel,
+  options: { absoluteBaseUrl?: string } = {},
+): Promise<void> {
   const { generatePresignedUrl } = await import('@/lib/server/storage');
   const media = allBlockMedia(model.sections);
   await Promise.all(media.map(async (item) => {
     if (!item.url || item.url.startsWith('http') || item.url.startsWith('data:')) return;
     try {
-      item.url = await generatePresignedUrl({ key: item.url, expireTime: 30 * 60, absoluteUrl: true });
+      const resolvedUrl = await generatePresignedUrl({ key: item.url, expireTime: 30 * 60, absoluteUrl: true });
+      if (options.absoluteBaseUrl && resolvedUrl.startsWith('http')) {
+        const parsedUrl = new URL(resolvedUrl);
+        item.url = `${options.absoluteBaseUrl.replace(/\/+$/, '')}${parsedUrl.pathname}${parsedUrl.search}`;
+      } else {
+        item.url = resolvedUrl;
+      }
     } catch (error) {
       console.error('[report-detail] presign failed for media url:', item.url, error);
     }
