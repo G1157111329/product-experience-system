@@ -4,8 +4,8 @@ import { useState } from 'react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ChevronDown, ChevronRight, Star } from 'lucide-react';
-import { PresignedImage, PresignedVideo } from '@/components/presigned-media';
 import { selectEffectEvaluationText } from '@/lib/report-content-rules';
+import { ReportMediaPreview } from './report-media-preview';
 
 interface FunctionEffectRecipe {
   id: string;
@@ -195,12 +195,6 @@ function MediaThumb({ material }: { material: Record<string, unknown> }) {
   const name = String(material.file_name || '');
   const type = String(material.material_type || 'image');
   return (
-    <div className="h-16 w-16 overflow-hidden rounded-md border bg-muted">
-      {type === 'image' ? (
-        <PresignedImage filePath={filePath} alt={name} className="h-full w-full object-cover" />
-      ) : (
-        <PresignedVideo filePath={filePath} className="h-full w-full object-cover" />
-      )}
-    </div>
+    <ReportMediaPreview filePath={filePath} type={type} name={name} size="sm" />
   );
 }

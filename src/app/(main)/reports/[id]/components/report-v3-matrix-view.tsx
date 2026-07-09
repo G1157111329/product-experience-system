@@ -5,8 +5,8 @@
  * Consumes frozen ReportV3MatrixProjection — no live DB.
  */
 import { Badge } from '@/components/ui/badge';
-import { PresignedImage, PresignedVideo } from '@/components/presigned-media';
 import type { ReportV3MatrixProjection } from '@/lib/matrix/report-projection-v3-adapter';
+import { ReportMediaPreview } from './report-media-preview';
 
 export function ReportV3MatrixView({ projection }: { projection: ReportV3MatrixProjection }) {
   const columns = [...projection.columns].sort((a, b) => a.displayOrder - b.displayOrder);
@@ -54,22 +54,15 @@ export function ReportV3MatrixView({ projection }: { projection: ReportV3MatrixP
                       {row.cells[col.id] || ''}
                       {media.length > 0 && (
                         <div className="mt-1 flex flex-wrap gap-1">
-                          {media.map((m) =>
-                            m.materialType === 'video' && m.fileUrl ? (
-                              <PresignedVideo
-                                key={m.materialId}
-                                filePath={m.fileUrl}
-                                className="h-12 w-16 rounded object-cover"
-                              />
-                            ) : m.fileUrl ? (
-                              <PresignedImage
-                                key={m.materialId}
-                                filePath={m.fileUrl}
-                                alt={m.fileName || ''}
-                                className="h-12 w-12 rounded object-cover"
-                              />
-                            ) : null,
-                          )}
+                          {media.map((m) => m.fileUrl ? (
+                            <ReportMediaPreview
+                              key={m.materialId}
+                              filePath={m.fileUrl}
+                              type={m.materialType}
+                              name={m.fileName || ''}
+                              size="sm"
+                            />
+                          ) : null)}
                         </div>
                       )}
                     </td>

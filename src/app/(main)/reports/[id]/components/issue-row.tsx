@@ -5,8 +5,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { PresignedImage, PresignedVideo } from '@/components/presigned-media';
 import type { IssueForRectification } from '@/components/issues/issue-rectification-dialog';
+import { ReportMediaPreview } from './report-media-preview';
 
 const LEVEL_COLORS: Record<string, string> = {
   '一类': 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400',
@@ -121,13 +121,13 @@ export function IssueRow({ issue, onStatusClick }: IssueRowProps) {
               <span className="text-muted-foreground">素材：</span>
               <div className="flex flex-wrap gap-2">
                 {materials.map((mat) => (
-                  <div key={String(mat.id)} className="h-16 w-16 overflow-hidden rounded border bg-muted">
-                    {String(mat.material_type || 'image') === 'image' ? (
-                      <PresignedImage filePath={String(mat.file_path || mat.file_url || '')} alt={String(mat.file_name || '')} className="h-full w-full object-cover" />
-                    ) : (
-                      <PresignedVideo filePath={String(mat.file_path || mat.file_url || '')} className="h-full w-full object-cover" />
-                    )}
-                  </div>
+                  <ReportMediaPreview
+                    key={String(mat.id)}
+                    filePath={String(mat.file_path || mat.file_url || '')}
+                    type={String(mat.material_type || 'image')}
+                    name={String(mat.file_name || '')}
+                    size="sm"
+                  />
                 ))}
               </div>
             </div>
@@ -158,13 +158,13 @@ export function IssueRow({ issue, onStatusClick }: IssueRowProps) {
                       <span className="text-muted-foreground">整改素材：</span>
                       <div className="mt-1 flex flex-wrap gap-2">
                         {(latestReEval.materials as Array<Record<string, unknown>>).map((m) => (
-                          <div key={String(m.id)} className="h-14 w-14 overflow-hidden rounded border bg-muted">
-                            {String(m.material_type || 'image') === 'image' ? (
-                              <PresignedImage filePath={String(m.file_path || m.file_url || '')} alt={String(m.file_name || '')} className="h-full w-full object-cover" />
-                            ) : (
-                              <PresignedVideo filePath={String(m.file_path || m.file_url || '')} className="h-full w-full object-cover" />
-                            )}
-                          </div>
+                          <ReportMediaPreview
+                            key={String(m.id)}
+                            filePath={String(m.file_path || m.file_url || '')}
+                            type={String(m.material_type || 'image')}
+                            name={String(m.file_name || '')}
+                            size="sm"
+                          />
                         ))}
                       </div>
                     </div>

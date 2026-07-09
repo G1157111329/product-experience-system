@@ -5,11 +5,11 @@ import { Badge } from '@/components/ui/badge';
 import { ChevronDown, ChevronRight, Star } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
-import { PresignedImage, PresignedVideo } from '@/components/presigned-media';
 import { selectEffectEvaluationText } from '@/lib/report-content-rules';
 import type { ComparisonSnapshot } from '@/components/reports/comparison-report-view';
 import { ReportV3MatrixView, isReportV3MatrixProjection } from './report-v3-matrix-view';
 import type { ReportV3MatrixProjection } from '@/lib/matrix/report-projection-v3-adapter';
+import { ReportMediaPreview } from './report-media-preview';
 
 type Row = Record<string, unknown>;
 type MatrixMetricReadValue = {
@@ -145,14 +145,14 @@ function DataMatrixView({ projection }: { projection: MatrixReadProjection }) {
                     <td className="border-b border-r p-2 align-top">
                       <div className="mb-1 text-[10px] text-muted-foreground">证据 {row.evidence?.primaryCount ?? media.length} 条</div>
                       <div className="flex flex-wrap gap-1">
-                        {media.slice(0, 6).map((item) => (
-                          <div key={`${item.id}-${item.url}`} className="h-12 w-12 overflow-hidden rounded border bg-muted">
-                            {String(item.type || 'image').includes('video') ? (
-                              <PresignedVideo filePath={item.url} className="h-full w-full object-cover" />
-                            ) : (
-                              <PresignedImage filePath={item.url} alt={item.name} className="h-full w-full object-cover" />
-                            )}
-                          </div>
+                        {media.map((item) => (
+                          <ReportMediaPreview
+                            key={`${item.id}-${item.url}`}
+                            filePath={item.url}
+                            type={String(item.type || 'image').includes('video') ? 'video' : 'image'}
+                            name={item.name}
+                            size="sm"
+                          />
                         ))}
                       </div>
                     </td>
@@ -432,14 +432,14 @@ function MatrixCell({ cell }: { cell: Row | undefined }) {
       )}
       {allMedia.length > 0 && (
         <div className="flex flex-wrap gap-1">
-          {allMedia.slice(0, 4).map((m) => (
-            <div key={String(m.id)} className="h-12 w-12 overflow-hidden rounded border bg-muted">
-              {String(m.material_type || 'image') === 'image' ? (
-                <PresignedImage filePath={String(m.file_path || m.file_url || '')} alt={String(m.file_name || '')} className="h-full w-full object-cover" />
-              ) : (
-                <PresignedVideo filePath={String(m.file_path || m.file_url || '')} className="h-full w-full object-cover" />
-              )}
-            </div>
+          {allMedia.map((m) => (
+            <ReportMediaPreview
+              key={String(m.id)}
+              filePath={String(m.file_path || m.file_url || '')}
+              type={String(m.material_type || 'image')}
+              name={String(m.file_name || '')}
+              size="sm"
+            />
           ))}
         </div>
       )}
