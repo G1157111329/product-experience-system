@@ -3,7 +3,7 @@ type Row = Record<string, unknown>;
 export type ReportViewMode = 'read' | 'data' | 'evidence' | 'review' | 'print';
 export type ReportSectionStatus = 'ready' | 'empty' | 'warning' | 'blocked';
 export type ReportQualitySeverity = 'info' | 'warning' | 'error';
-export type ReportDetailSectionBlockType = 'summary' | 'facts' | 'list' | 'table' | 'media' | 'matrix' | 'data_matrix';
+export type ReportDetailSectionBlockType = 'summary' | 'facts' | 'list' | 'table' | 'media' | 'matrix' | 'data_matrix' | 'data_matrix_v3';
 export type ReportDetailTemplateKey =
   | 'single_report_narrative'
   | 'comparison_image_matrix'
@@ -149,6 +149,44 @@ export type ReportDetailDataMatrixProjection = {
   version?: number;
 };
 
+/**
+ * Frozen V3 excel-like matrix projection (Wave 6). Mirrors
+ * ReportV3MatrixProjection without importing the adapter module.
+ */
+export type ReportDetailDataMatrixV3Projection = {
+  projectionVersion?: 'v3';
+  matrixProjectionVersion?: 'v3';
+  matrixId: string;
+  matrixName: string;
+  frozenAt?: string;
+  hierarchy?: Array<Record<string, unknown>>;
+  columns: Array<{
+    id: string;
+    zone?: string;
+    label: string;
+    dataType?: string;
+    unitText?: string | null;
+    displayOrder?: number;
+  }>;
+  rows: Array<{
+    id: string;
+    level1Label?: string;
+    level2Label?: string | null;
+    level3Label?: string | null;
+    visibleRowIndex?: number;
+    cells: Record<string, string>;
+  }>;
+  cellMedia?: Record<string, Array<{
+    materialId: string;
+    materialType: string;
+    fileName?: string | null;
+    fileUrl?: string | null;
+  }>>;
+  narratives?: Array<{ blockType: string; content: string; showInReport?: boolean }>;
+  issuePoints?: Array<{ leafRowIndex: number; issueText: string; status: string }>;
+  summary?: { totalRows: number; totalColumns: number; filledCells: number };
+};
+
 type ReadableComparisonMatrix = ReportDetailMatrix & {
   summaryText?: string;
 };
@@ -164,6 +202,7 @@ export type ReportDetailSectionBlock = {
   media?: ReportDetailMediaItem[];
   matrix?: ReportDetailMatrix;
   dataMatrix?: ReportDetailDataMatrixProjection;
+  dataMatrixV3?: ReportDetailDataMatrixV3Projection;
   defaultCollapsed?: boolean;
   collapsedLabel?: string;
   emptyMessage?: string;
@@ -690,14 +729,36 @@ function taskDetailRows(task: Row) {
 // 渲染一个只读的数据矩阵区块。读取顺序：snapshot 冻结值优先（历史不漂移），
 // 回退到 content 中的投影。所有矩阵新增都受「投影存在」守卫，不影响既有报告类型。
 
-function dataMatrixProjectionOf(content: Row, snapshotJson: Row): ReportDetailDataMatrixProjection | null {
+function pickMatrixProjectionSource(content: Row, snapshotJson: Row): Row | null {
   const snapshotProjection = isRecord(snapshotJson.matrix_projection) ? snapshotJson.matrix_projection : null;
   const contentProjection = isRecord(content.data_matrix_projection) ? content.data_matrix_projection : null;
-  const source = snapshotProjection || contentProjection;
+  return snapshotProjection || contentProjection;
+}
+
+function dataMatrixProjectionOf(content: Row, snapshotJson: Row): ReportDetailDataMatrixProjection | null {
+  const source = pickMatrixProjectionSource(content, snapshotJson);
   if (!source || !Array.isArray(source.groups)) return null;
   // Defensive: ensure schema block exists so the section is renderable.
   if (!isRecord(source.schema)) return null;
   return source as ReportDetailDataMatrixProjection;
+}
+
+function dataMatrixV3ProjectionOf(content: Row, snapshotJson: Row): ReportDetailDataMatrixV3Projection | null {
+  const source = pickMatrixProjectionSource(content, snapshotJson);
+  if (!source) return null;
+  if (source.projectionVersion === 'v3' || source.matrixProjectionVersion === 'v3') {
+    return source as ReportDetailDataMatrixV3Projection;
+  }
+  // Shape heuristic: excel-like columns+rows without V2 groups.
+  if (
+    typeof source.matrixId === 'string' &&
+    Array.isArray(source.columns) &&
+    Array.isArray(source.rows) &&
+    !Array.isArray(source.groups)
+  ) {
+    return source as ReportDetailDataMatrixV3Projection;
+  }
+  return null;
 }
 
 function dataMatrixDimensionColumns(projection: ReportDetailDataMatrixProjection): Array<{ key: string; label: string }> {
@@ -775,6 +836,32 @@ function dataMatrixSection(projection: ReportDetailDataMatrixProjection): Report
         columns,
         rows: tableRows,
         emptyMessage: '暂无数据矩阵明细。',
+      }),
+    ]),
+  });
+}
+
+function dataMatrixV3Section(projection: ReportDetailDataMatrixV3Projection): ReportDetailSection {
+  const totalRows = projection.summary?.totalRows ?? projection.rows?.length ?? 0;
+  const totalColumns = projection.summary?.totalColumns ?? projection.columns?.length ?? 0;
+  const filledCells = projection.summary?.filledCells ?? 0;
+  return section('data_matrix', '数据矩阵', totalRows > 0 ? 'ready' : 'empty', ['矩阵概览', '矩阵投影'], {
+    count: totalRows,
+    blocks: compact([
+      block('data_matrix_v3:facts', 'facts', '矩阵概览', {
+        items: compact([
+          fact('矩阵名称', projection.matrixName),
+          fact('矩阵 ID', projection.matrixId),
+          fact('行数', totalRows),
+          fact('列数', totalColumns),
+          fact('已填单元格', filledCells),
+          fact('冻结时间', projection.frozenAt),
+        ]),
+      }),
+      block('data_matrix_v3:matrix', 'data_matrix_v3', '矩阵投影', {
+        description: '只读 V3 数据矩阵投影（Excel 风格行列）。历史报告读取冻结快照，不会随源数据漂移。',
+        dataMatrixV3: projection,
+        emptyMessage: '暂无数据矩阵行。',
       }),
     ]),
   });
@@ -1691,10 +1778,16 @@ function buildSections(report: Row, snapshot: Row | null | undefined, issues: Ro
   if (reportType === 'model_merged_report') return modelSections(report, content, snapshotJson);
   if (reportType === 'custom_merged_report') return customSections(report, content, snapshotJson);
   const sections = contentSections(report, content, issues, materials);
-  // ── 数据矩阵追加（Task 12, Sub-task B）──
+  // ── 数据矩阵追加（Task 12 / Wave 6）──
   // 仅当存在冻结快照或 content 投影时追加；既有 single_report 类型无投影时不受影响。
-  const dataMatrixProjection = dataMatrixProjectionOf(content, snapshotJson);
-  if (dataMatrixProjection) sections.push(dataMatrixSection(dataMatrixProjection));
+  // V3 优先于 V2（同一 payload 不会同时满足 groups 与 columns+rows 无 groups）。
+  const dataMatrixV3Projection = dataMatrixV3ProjectionOf(content, snapshotJson);
+  if (dataMatrixV3Projection) {
+    sections.push(dataMatrixV3Section(dataMatrixV3Projection));
+  } else {
+    const dataMatrixProjection = dataMatrixProjectionOf(content, snapshotJson);
+    if (dataMatrixProjection) sections.push(dataMatrixSection(dataMatrixProjection));
+  }
   return sections;
 }
 

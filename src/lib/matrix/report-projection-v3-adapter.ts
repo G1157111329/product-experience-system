@@ -60,6 +60,8 @@ export interface ReportV3CellMedia {
 }
 
 export interface ReportV3MatrixProjection {
+  /** Discriminator for report readers (Wave 6). */
+  matrixProjectionVersion: 'v3';
   matrixId: string;
   matrixName: string;
   frozenAt: string;
@@ -75,6 +77,19 @@ export interface ReportV3MatrixProjection {
     totalColumns: number;
     filledCells: number;
   };
+}
+
+/** True when a frozen snapshot / content payload is V3 excel-like (not V2 groups). */
+export function isFrozenV3MatrixProjection(value: unknown): value is ReportV3MatrixProjection {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  if (v.matrixProjectionVersion === 'v3') return true;
+  return (
+    typeof v.matrixId === 'string' &&
+    Array.isArray(v.columns) &&
+    Array.isArray(v.rows) &&
+    !Array.isArray(v.groups)
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +181,7 @@ export function freezeV3MatrixForReport(
   }
 
   return {
+    matrixProjectionVersion: 'v3',
     matrixId: projection.matrix.id,
     matrixName: projection.matrix.name,
     frozenAt: new Date().toISOString(),

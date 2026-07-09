@@ -16,7 +16,7 @@
  * relative fill-down is handled server-side by recompute-v3.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { Plus, Table2, Loader2, Type, Hash, Clock, Image as ImageIcon, AlertCircle, Calculator, Sparkles } from 'lucide-react';
+import { Plus, Table2, Loader2, Type, Hash, Clock, Image as ImageIcon, AlertCircle, Calculator, Sparkles, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -47,6 +47,8 @@ import {
   type SummarySuggestion,
 } from './matrix-summary-suggestions-dialog';
 import { MatrixV3Mobile } from './matrix-v3-mobile';
+import { MatrixStyleToolbar, type StyleTarget } from './matrix-style-toolbar';
+import { MatrixColumnConfigDialog, type ColumnConfigValues } from './matrix-column-config-dialog';
 
 interface MatrixV3GridProps {
   matrixId: string;
@@ -59,7 +61,16 @@ interface MatrixV3GridProps {
   stagingEnabled?: boolean;
   /** Wave 5 Hermes matrix summary. */
   hermesEnabled?: boolean;
+  /** P1 cell/column-header style toolbar. Default true. */
+  cellStyleEnabled?: boolean;
 }
+
+const CONFIGURABLE_COLUMN_ZONES = new Set<ColumnZone>([
+  'detail_dimension',
+  'calculation_dimension',
+  'evaluation',
+  'issue_point',
+]);
 
 // Zone display labels (PRD §7 / 附录 A).
 const ZONE_LABELS: Record<ColumnZone, string> = {
@@ -157,14 +168,22 @@ export function MatrixV3Grid({
   formulaEnabled = true,
   stagingEnabled = true,
   hermesEnabled = true,
+  cellStyleEnabled = true,
 }: MatrixV3GridProps) {
   const [gridRows, setGridRows] = useState<GridRow[]>([]);
   const [addingNode, setAddingNode] = useState(false);
   const [newNodeLabel, setNewNodeLabel] = useState('');
   const [showAddLevel1, setShowAddLevel1] = useState(false);
-  const [addingColumn, setAddingColumn] = useState(false);
-  const [newColumnLabel, setNewColumnLabel] = useState('');
-  const [newColumnZone, setNewColumnZone] = useState<ColumnZone>('detail_dimension');
+
+  // P1 cell style toolbar
+  const [styleTarget, setStyleTarget] = useState<StyleTarget | null>(null);
+  const [styleSaving, setStyleSaving] = useState(false);
+
+  // P1 column config dialog
+  const [columnDialogOpen, setColumnDialogOpen] = useState(false);
+  const [columnDialogMode, setColumnDialogMode] = useState<'create' | 'edit'>('create');
+  const [editingColumn, setEditingColumn] = useState<V3Column | null>(null);
+  const [columnSaving, setColumnSaving] = useState(false);
 
   // Wave 3 formula editor state
   const [formulaColumn, setFormulaColumn] = useState<V3Column | null>(null);
@@ -297,36 +316,176 @@ export function MatrixV3Grid({
     }
   }, [matrixId, onChanged]);
 
-  const handleAddColumn = useCallback(async () => {
-    if (!newColumnLabel.trim()) return;
-    setAddingColumn(true);
+  const openCreateColumnDialog = useCallback(() => {
+    setEditingColumn(null);
+    setColumnDialogMode('create');
+    setColumnDialogOpen(true);
+  }, []);
+
+  const openEditColumnDialog = useCallback((col: V3Column) => {
+    setEditingColumn(col);
+    setColumnDialogMode('edit');
+    setColumnDialogOpen(true);
+  }, []);
+
+  const handleColumnHeaderClick = useCallback(
+    (col: V3Column) => {
+      if (!cellStyleEnabled) return;
+      setStyleTarget({
+        type: 'column_header',
+        id: col.id,
+        label: col.columnLabel,
+      });
+    },
+    [cellStyleEnabled],
+  );
+
+  const handleApplyStyle = useCallback(
+    async (patch: {
+      fontColorToken?: string | null;
+      fontSizeToken?: string | null;
+      bold?: boolean;
+      italic?: boolean;
+    }) => {
+      if (!styleTarget) return;
+      const currentKey = styleKey(styleTarget.type, styleTarget.id);
+      const current = projection.styles[currentKey];
+      const merged = {
+        fontColorToken:
+          patch.fontColorToken !== undefined ? patch.fontColorToken : (current?.fontColorToken ?? null),
+        fontSizeToken:
+          patch.fontSizeToken !== undefined ? patch.fontSizeToken : (current?.fontSizeToken ?? null),
+        bold: patch.bold !== undefined ? patch.bold : (current?.bold ?? false),
+        italic: patch.italic !== undefined ? patch.italic : (current?.italic ?? false),
+      };
+      setStyleSaving(true);
+      try {
+        const res = await fetch(
+          `/api/v1/matrix-cell-styles/${styleTarget.type}/${encodeURIComponent(styleTarget.id)}`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ matrixId, ...merged }),
+          },
+        );
+        const json = await res.json();
+        if (json.code !== 0) {
+          toast.error(json.message || '保存样式失败');
+          return;
+        }
+        onChanged();
+      } catch {
+        toast.error('保存样式失败');
+      } finally {
+        setStyleSaving(false);
+      }
+    },
+    [styleTarget, projection.styles, matrixId, onChanged],
+  );
+
+  const handleCreateColumn = useCallback(
+    async (values: ColumnConfigValues) => {
+      setColumnSaving(true);
+      try {
+        const res = await fetch(`/api/v1/matrices/${matrixId}/columns`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            columnZone: values.columnZone,
+            columnLabel: values.columnLabel.trim(),
+            dataType: values.dataType,
+            unitText: values.unitText.trim() || null,
+            desktopWidthPx: values.desktopWidthPx,
+            isRequired: values.isRequired,
+            showInReport: values.showInReport,
+            decimalPlaces: values.decimalPlaces,
+          }),
+        });
+        const json = await res.json();
+        if (json.code !== 0) {
+          toast.error(json.message || '创建失败');
+          return;
+        }
+        toast.success('列已创建');
+        setColumnDialogOpen(false);
+        onChanged();
+      } catch {
+        toast.error('创建失败，请重试');
+      } finally {
+        setColumnSaving(false);
+      }
+    },
+    [matrixId, onChanged],
+  );
+
+  const handleEditColumn = useCallback(
+    async (values: ColumnConfigValues) => {
+      if (!editingColumn) return;
+      setColumnSaving(true);
+      try {
+        const res = await fetch(`/api/v1/matrix-columns/${editingColumn.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            columnLabel: values.columnLabel.trim(),
+            unitText: values.unitText.trim() || null,
+            desktopWidthPx: values.desktopWidthPx,
+            isRequired: values.isRequired,
+            showInReport: values.showInReport,
+            decimalPlaces: values.decimalPlaces,
+            dataType: values.dataType,
+          }),
+        });
+        const json = await res.json();
+        if (json.code !== 0) {
+          toast.error(json.message || '保存失败');
+          return;
+        }
+        toast.success('列配置已保存');
+        setColumnDialogOpen(false);
+        onChanged();
+      } catch {
+        toast.error('保存失败，请重试');
+      } finally {
+        setColumnSaving(false);
+      }
+    },
+    [editingColumn, onChanged],
+  );
+
+  const handleArchiveColumn = useCallback(async () => {
+    if (!editingColumn) return;
+    if (!window.confirm(`确定归档列「${editingColumn.columnLabel}」？`)) return;
+    setColumnSaving(true);
     try {
-      const res = await fetch(`/api/v1/matrices/${matrixId}/columns`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          columnZone: newColumnZone,
-          columnLabel: newColumnLabel.trim(),
-          dataType: newColumnZone === 'calculation_dimension' ? 'formula' : 'text',
-        }),
+      const res = await fetch(`/api/v1/matrix-columns/${editingColumn.id}`, {
+        method: 'DELETE',
       });
       const json = await res.json();
-      if (json.code === 0) {
-        toast.success('列已创建');
-        setNewColumnLabel('');
-        onChanged();
-      } else {
-        toast.error(json.message || '创建失败');
+      if (json.code !== 0) {
+        toast.error(json.message || '归档失败');
+        return;
       }
+      toast.success('列已归档');
+      setColumnDialogOpen(false);
+      setEditingColumn(null);
+      if (styleTarget?.type === 'column_header' && styleTarget.id === editingColumn.id) {
+        setStyleTarget(null);
+      }
+      onChanged();
     } catch {
-      toast.error('创建失败，请重试');
+      toast.error('归档失败，请重试');
     } finally {
-      setAddingColumn(false);
+      setColumnSaving(false);
     }
-  }, [matrixId, newColumnLabel, newColumnZone, onChanged]);
+  }, [editingColumn, styleTarget, onChanged]);
 
   const summaryBlock = projection.narratives.find((n) => n.blockType === 'summary');
   const noteBlocks = projection.narratives.filter((n) => n.blockType !== 'summary');
+
+  const currentStyle = styleTarget
+    ? projection.styles[styleKey(styleTarget.type, styleTarget.id)]
+    : undefined;
 
   // Empty matrix: show the "create first level_1" prompt.
   if (gridRows.length === 0 && projection.hierarchy.length === 0) {
@@ -359,6 +518,16 @@ export function MatrixV3Grid({
 
   return (
     <div className="space-y-3">
+      {cellStyleEnabled && (
+        <MatrixStyleToolbar
+          target={styleTarget}
+          current={currentStyle}
+          saving={styleSaving}
+          onApply={(patch) => void handleApplyStyle(patch)}
+          onClearSelection={() => setStyleTarget(null)}
+        />
+      )}
+
       {/* Summary bar */}
       <div className="flex items-center gap-3 text-sm text-muted-foreground flex-wrap">
         <Badge variant="secondary">{projection.summary.activeLeafRows} 行</Badge>
@@ -385,12 +554,19 @@ export function MatrixV3Grid({
           {/* Header */}
           <thead className="sticky top-0 z-20 bg-muted/80 backdrop-blur">
             <tr>
-              {allColumns.map((col) => (
+              {allColumns.map((col) => {
+                const headerStyle = projection.styles[styleKey('column_header', col.id)];
+                const isHeaderSelected =
+                  styleTarget?.type === 'column_header' && styleTarget.id === col.id;
+                return (
                 <th
                   key={col.id}
                   className={cn(
                     'border-b border-r px-2 py-1.5 text-left font-medium whitespace-nowrap',
                     frozenColumns.includes(col) && 'sticky bg-muted z-10',
+                    styleToClass(headerStyle),
+                    cellStyleEnabled && 'cursor-pointer',
+                    isHeaderSelected && 'ring-2 ring-inset ring-primary/50',
                   )}
                   style={{
                     width: col.desktopWidthPx,
@@ -398,10 +574,11 @@ export function MatrixV3Grid({
                       ? `${frozenColumnOffset(frozenColumns, col)}px`
                       : undefined,
                   }}
+                  onClick={() => handleColumnHeaderClick(col)}
                 >
                   <div className="flex items-center gap-1">
                     {zoneIcon(col.columnZone)}
-                    <span>{col.columnLabel}</span>
+                    <span className="min-w-0 truncate">{col.columnLabel}</span>
                     {col.unitText && <span className="text-muted-foreground text-xs">({col.unitText})</span>}
                     {col.columnZone === 'calculation_dimension' && formulaEnabled && (
                       <button
@@ -420,9 +597,23 @@ export function MatrixV3Grid({
                     {col.columnZone === 'calculation_dimension' && !formulaEnabled && (
                       <span className="text-[10px] font-mono text-muted-foreground">fx</span>
                     )}
+                    {CONFIGURABLE_COLUMN_ZONES.has(col.columnZone) && (
+                      <button
+                        type="button"
+                        className="inline-flex items-center text-muted-foreground hover:text-foreground ml-auto shrink-0"
+                        title="列配置"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openEditColumnDialog(col);
+                        }}
+                      >
+                        <Settings2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
                 </th>
-              ))}
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -436,6 +627,9 @@ export function MatrixV3Grid({
                     if (span === 0) return null;
                     const cell = projection.cells[cellKey(grow.leaf.id, col.id)];
                     const style = projection.styles[styleKey('cell', cellKey(grow.leaf.id, col.id))];
+                    const cellId = cellKey(grow.leaf.id, col.id);
+                    const isCellSelected =
+                      styleTarget?.type === 'cell' && styleTarget.id === cellId;
                     return (
                       <td
                         key={col.id}
@@ -444,6 +638,8 @@ export function MatrixV3Grid({
                           frozenColumns.includes(col) && 'sticky bg-background z-[1]',
                           styleToClass(style),
                           pickMode && 'cursor-crosshair hover:bg-primary/10',
+                          !pickMode && cellStyleEnabled && 'cursor-pointer',
+                          isCellSelected && 'ring-2 ring-inset ring-primary/50',
                         )}
                         style={{
                           left: frozenColumns.includes(col)
@@ -457,7 +653,14 @@ export function MatrixV3Grid({
                                 e.stopPropagation();
                                 handleCellPick(col.id, grow.leaf.visibleRowIndex);
                               }
-                            : undefined
+                            : cellStyleEnabled
+                              ? () =>
+                                  setStyleTarget({
+                                    type: 'cell',
+                                    id: cellId,
+                                    label: `${col.columnLabel} · 行${grow.leaf.visibleRowIndex}`,
+                                  })
+                              : undefined
                         }
                       >
                         <MatrixV3Cell
@@ -520,26 +723,8 @@ export function MatrixV3Grid({
           </Button>
         )}
         <div className="h-4 w-px bg-border" />
-        <Input
-          value={newColumnLabel}
-          onChange={(e) => setNewColumnLabel(e.target.value)}
-          placeholder="新列名称（如：耗时、重量、温度）"
-          className="max-w-[200px] h-8"
-          onKeyDown={(e) => e.key === 'Enter' && void handleAddColumn()}
-        />
-        <select
-          value={newColumnZone}
-          onChange={(e) => setNewColumnZone(e.target.value as ColumnZone)}
-          className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-        >
-          <option value="detail_dimension">详细对比维度</option>
-          <option value="calculation_dimension">计算列</option>
-          <option value="evaluation">效果评价</option>
-          <option value="issue_point">问题点</option>
-        </select>
-        <Button size="sm" variant="outline" onClick={() => void handleAddColumn()} disabled={addingColumn || !newColumnLabel.trim()}>
-          {addingColumn ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
-          新增列
+        <Button size="sm" variant="outline" onClick={openCreateColumnDialog}>
+          <Plus className="h-3 w-3" /> 新增列
         </Button>
       </div>
 
@@ -621,6 +806,18 @@ export function MatrixV3Grid({
         matrixId={matrixId}
         suggestions={summarySuggestions}
         onApplied={onChanged}
+      />
+
+      <MatrixColumnConfigDialog
+        open={columnDialogOpen}
+        mode={columnDialogMode}
+        initial={columnDialogMode === 'edit' ? editingColumn : undefined}
+        saving={columnSaving}
+        onOpenChange={setColumnDialogOpen}
+        onSubmit={(values) =>
+          void (columnDialogMode === 'create' ? handleCreateColumn(values) : handleEditColumn(values))
+        }
+        onArchive={columnDialogMode === 'edit' ? () => void handleArchiveColumn() : undefined}
       />
     </div>
   );

@@ -25,6 +25,7 @@ import { BrandLogo } from '@/components/brand-logo';
 import { AiAgentSettings } from '@/components/settings/ai-agent-settings';
 import { AuditLogSettings } from '@/components/settings/audit-log-settings';
 import { MatrixSchemaSettings } from '@/components/settings/matrix-schema-settings';
+import { WecomBindingsSettings } from '@/components/wecom-bindings-settings';
 import { toast } from 'sonner';
 
 const themeOptions = [
@@ -715,6 +716,7 @@ function PlatformSettingsDialog({
   onOpenAiAgent,
   onOpenAuditLog,
   onOpenMatrixSchema,
+  onOpenWecomBindings,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -723,6 +725,7 @@ function PlatformSettingsDialog({
   onOpenAiAgent: () => void;
   onOpenAuditLog: () => void;
   onOpenMatrixSchema: () => void;
+  onOpenWecomBindings: () => void;
 }) {
   const openSetting = (handler: () => void) => {
     onOpenChange(false);
@@ -753,6 +756,12 @@ function PlatformSettingsDialog({
       description: '管理数据矩阵录入页的字段模式、行列定义与默认配置。',
       icon: BarChart3,
       action: onOpenMatrixSchema,
+    },
+    {
+      title: '企微素材接入',
+      description: '绑定平台用户与企微账号，配置素材回调接入（需环境变量）。',
+      icon: Sparkles,
+      action: onOpenWecomBindings,
     },
     {
       title: '日志管理',
@@ -820,6 +829,7 @@ function UserSection({ collapsed = false }: { collapsed?: boolean }) {
   const [auditLogOpen, setAuditLogOpen] = useState(false);
   // ── Data matrix schema settings (admin-only global, stored in DB) ──
   const [matrixSchemaOpen, setMatrixSchemaOpen] = useState(false);
+  const [wecomBindingsOpen, setWecomBindingsOpen] = useState(false);
 
   useEffect(() => {
     if (profileOpen && isAdmin && user?.id) {
@@ -1046,12 +1056,14 @@ function UserSection({ collapsed = false }: { collapsed?: boolean }) {
         onOpenAiAgent={() => setAiConfigOpen(true)}
         onOpenAuditLog={() => setAuditLogOpen(true)}
         onOpenMatrixSchema={() => setMatrixSchemaOpen(true)}
+        onOpenWecomBindings={() => setWecomBindingsOpen(true)}
       />
       <CategoryProductSettings open={settingsOpen} onOpenChange={setSettingsOpen} />
       <StandardOptionsSettings open={standardOptionsOpen} onOpenChange={setStandardOptionsOpen} />
       <AiAgentSettings open={aiConfigOpen} onOpenChange={setAiConfigOpen} />
       <AuditLogSettings open={auditLogOpen} onOpenChange={setAuditLogOpen} />
       <MatrixSchemaSettings open={matrixSchemaOpen} onOpenChange={setMatrixSchemaOpen} />
+      <WecomBindingsSettings open={wecomBindingsOpen} onOpenChange={setWecomBindingsOpen} />
     </>
   );
 }
@@ -1135,6 +1147,7 @@ function MobileUserIcon() {
   const [aiConfigOpen, setAiConfigOpen] = useState(false);
   const [auditLogOpen, setAuditLogOpen] = useState(false);
   const [matrixSchemaOpen, setMatrixSchemaOpen] = useState(false);
+  const [wecomBindingsOpen, setWecomBindingsOpen] = useState(false);
 
   if (!user) return null;
   return (
@@ -1184,12 +1197,14 @@ function MobileUserIcon() {
         onOpenAiAgent={() => setAiConfigOpen(true)}
         onOpenAuditLog={() => setAuditLogOpen(true)}
         onOpenMatrixSchema={() => setMatrixSchemaOpen(true)}
+        onOpenWecomBindings={() => setWecomBindingsOpen(true)}
       />
       <CategoryProductSettings open={settingsOpen} onOpenChange={setSettingsOpen} />
       <StandardOptionsSettings open={standardOptionsOpen} onOpenChange={setStandardOptionsOpen} />
       <AiAgentSettings open={aiConfigOpen} onOpenChange={setAiConfigOpen} />
       <AuditLogSettings open={auditLogOpen} onOpenChange={setAuditLogOpen} />
       <MatrixSchemaSettings open={matrixSchemaOpen} onOpenChange={setMatrixSchemaOpen} />
+      <WecomBindingsSettings open={wecomBindingsOpen} onOpenChange={setWecomBindingsOpen} />
     </>
   );
 }

@@ -34,11 +34,12 @@ export const V3_FLAG_DEFAULTS: V3FeatureFlags = {
   taskMatrixEnabled: true,
   dynamicMatrixExcelLikeViewEnabled: true,
   dynamicMatrixFormulaEnabled: true,
-  dynamicMatrixCellStyleEnabled: false,
+  dynamicMatrixCellStyleEnabled: true,
   inlineEditEnabled: true,
   autosaveEnabled: true,
   materialStagingEnabled: true,
   hermesAgentGatewayEnabled: true,
+  // Callback + bindings APIs ship in P1; keep ingest OFF until WECOM_* creds + download client are configured.
   wecomMaterialIngestEnabled: false,
 };
 

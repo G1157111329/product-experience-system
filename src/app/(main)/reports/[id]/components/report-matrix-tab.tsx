@@ -7,6 +7,8 @@ import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { PresignedImage, PresignedVideo } from '@/components/presigned-media';
 import type { ComparisonSnapshot } from '@/components/reports/comparison-report-view';
+import { ReportV3MatrixView, isReportV3MatrixProjection } from './report-v3-matrix-view';
+import type { ReportV3MatrixProjection } from '@/lib/matrix/report-projection-v3-adapter';
 
 type Row = Record<string, unknown>;
 type MatrixMetricReadValue = {
@@ -44,9 +46,10 @@ type MatrixReadProjection = {
 };
 
 export interface MatrixData {
-  matrixType: 'multi_matrix' | 'single_waterfall' | 'data_matrix';
+  matrixType: 'multi_matrix' | 'single_waterfall' | 'data_matrix' | 'data_matrix_v3';
   matrix?: ComparisonSnapshot;
   dataMatrix?: MatrixReadProjection;
+  dataMatrixV3?: ReportV3MatrixProjection;
   waterfall?: Row[];
   emptyReason?: string;
 }
@@ -70,6 +73,10 @@ export function ReportMatrixTab({ data }: { data: MatrixData | null }) {
 
   if (data.matrixType === 'single_waterfall' && data.waterfall) {
     return <WaterfallList recipes={data.waterfall} />;
+  }
+
+  if (data.matrixType === 'data_matrix_v3' && data.dataMatrixV3 && isReportV3MatrixProjection(data.dataMatrixV3)) {
+    return <ReportV3MatrixView projection={data.dataMatrixV3} />;
   }
 
   if (data.matrixType === 'data_matrix' && data.dataMatrix) {

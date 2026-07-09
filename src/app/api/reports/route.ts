@@ -16,6 +16,19 @@ import { buildComparisonReportSnapshot, findAssemblyForTask } from '@/lib/server
 import { buildMatrixReadProjection, type MatrixReadProjection } from '@/lib/matrix/projection';
 import { getMatrixReadProjection } from '@/lib/matrix/projection-v2';
 import { adaptTaskMatrixProjectionForReport } from '@/lib/matrix/report-projection-adapter';
+import { getV3MatrixProjection } from '@/lib/matrix/projection-v3';
+import {
+  freezeV3MatrixForReport,
+  isFrozenV3MatrixProjection,
+  type ReportV3MatrixProjection,
+} from '@/lib/matrix/report-projection-v3-adapter';
+
+/** Frozen report payload: V2 groups projection or V3 excel-like freeze. */
+type ReportDataMatrixProjection = MatrixReadProjection | (ReportV3MatrixProjection & { projectionVersion?: 'v3' });
+
+type LoadedDataMatrix =
+  | { kind: 'v3'; matrixId: string; projection: ReportV3MatrixProjection & { projectionVersion: 'v3' } }
+  | { kind: 'v2'; matrixId?: string; assemblyId?: string; projection: MatrixReadProjection };
 
 /**
  * Find a data_matrix assembly linked to a task.
@@ -36,30 +49,57 @@ async function findDataMatrixAssemblyId(client: ReturnType<typeof getSupabaseCli
 }
 
 /**
- * Build a data-matrix read projection for a task, or null when the task has no
- * data_matrix assembly or the projection load fails. Failures are non-fatal —
- * a data-matrix projection error must never block report generation.
+ * Load task matrix for report freeze. Prefer V3 when current_view_definition_id
+ * is set; otherwise keep the existing V2 adapt path.
  */
-async function loadTaskMatrixProjection(client: ReturnType<typeof getSupabaseClient>, taskId: string): Promise<{ matrixId: string; projection: MatrixReadProjection } | null> {
+async function loadTaskMatrixForReport(
+  client: ReturnType<typeof getSupabaseClient>,
+  taskId: string,
+): Promise<LoadedDataMatrix | null> {
   const { data: matrices } = await client
     .from('task_matrices')
-    .select('id,status,updated_at')
+    .select('id,status,updated_at,current_view_definition_id')
     .eq('task_id', taskId)
     .neq('status', 'archived')
     .order('updated_at', { ascending: false })
     .limit(1);
 
-  const matrixId = matrices?.[0]?.id ? String(matrices[0].id) : '';
+  const row = matrices?.[0] as
+    | { id?: string; current_view_definition_id?: string | null }
+    | undefined;
+  const matrixId = row?.id ? String(row.id) : '';
   if (!matrixId) return null;
+
+  const viewDefinitionId = row?.current_view_definition_id
+    ? String(row.current_view_definition_id)
+    : '';
+
+  if (viewDefinitionId) {
+    const v3 = await getV3MatrixProjection(matrixId);
+    if (!v3) return null;
+    const frozen = freezeV3MatrixForReport(v3);
+    return {
+      kind: 'v3',
+      matrixId,
+      projection: { projectionVersion: 'v3', ...frozen },
+    };
+  }
 
   const v2Projection = await getMatrixReadProjection(matrixId);
   if (!v2Projection) return null;
-  return { matrixId, projection: adaptTaskMatrixProjectionForReport(v2Projection) };
+  return {
+    kind: 'v2',
+    matrixId,
+    projection: adaptTaskMatrixProjectionForReport(v2Projection),
+  };
 }
 
-async function loadDataMatrixProjection(client: ReturnType<typeof getSupabaseClient>, taskId: string): Promise<{ assemblyId?: string; matrixId?: string; projection: MatrixReadProjection } | null> {
+async function loadDataMatrixProjection(
+  client: ReturnType<typeof getSupabaseClient>,
+  taskId: string,
+): Promise<LoadedDataMatrix | null> {
   try {
-    const taskMatrix = await loadTaskMatrixProjection(client, taskId);
+    const taskMatrix = await loadTaskMatrixForReport(client, taskId);
     if (taskMatrix) return taskMatrix;
   } catch {
     // fall back to legacy assembly model below
@@ -74,7 +114,7 @@ async function loadDataMatrixProjection(client: ReturnType<typeof getSupabaseCli
   if (!assemblyId) return null;
   try {
     const projection = await buildMatrixReadProjection(client, assemblyId);
-    return { assemblyId, projection };
+    return { kind: 'v2', assemblyId, projection };
   } catch {
     // matrix-load failure must NOT block report generation; logged upstream via null
     return null;
@@ -644,9 +684,9 @@ export async function POST(request: NextRequest) {
     : task;
 
   // ── 数据矩阵投影：若任务关联 data_matrix 组装，读取投影并写入 content（Sub-task A）──
-  // 失败不应阻断报告生成，统一降级为 null。
+  // 失败不应阻断报告生成，统一降级为 null。V3（有 view definition）写入冻结形状。
   const dataMatrix = await loadDataMatrixProjection(client, body.task_id);
-  const dataMatrixProjection: MatrixReadProjection | null = dataMatrix?.projection ?? null;
+  const dataMatrixProjection: ReportDataMatrixProjection | null = dataMatrix?.projection ?? null;
 
   const reportContent = {
     task: completedTaskSnapshot,
@@ -832,26 +872,34 @@ export async function POST(request: NextRequest) {
 
   // ── 数据矩阵快照冻结（Sub-task C, §11.3 no-drift）──
   // 当任务关联 data_matrix 组装时，发布一份快照并把完整投影冻结进
-  // snapshot_json.matrix_projection（含 schema key/version、行标签、排序、
-  // 指标值、公式版本、证据、可比性状态）。重新读取最新投影以保证发布精度，
-  // 绝不仅存 matrix_instance_id。镜像对比报告在生成时自动发布快照的既有模式。
+  // snapshot_json.matrix_projection。V3 直接复用 content 已冻结投影；
+  // V2 仍可补充 assembly 可比性/schema version meta。绝不仅存 matrix_instance_id。
   if (dataMatrixProjection) {
     try {
-      // 重新读取最新投影以保证发布精度（绝不仅存 matrix_instance_id）。
-      const fresh = dataMatrix?.assemblyId
-        ? await loadDataMatrixProjection(client, body.task_id)
-        : null;
-      const freshProjection = fresh?.projection ?? dataMatrixProjection;
-      // 补充投影 DTO 未携带但 §11.3 要求冻结的字段：可比性状态 + schema version id。
-      const assemblyMeta = (fresh?.assemblyId ?? dataMatrix?.assemblyId)
-        ? await loadDataMatrixAssemblyMeta(client, String(fresh?.assemblyId ?? dataMatrix?.assemblyId))
-        : null;
-      const freshProjectionMeta = freshProjection as unknown as Record<string, unknown>;
-      const frozenProjection = {
-        ...freshProjection,
-        comparabilityStatus: assemblyMeta?.comparabilityStatus ?? freshProjectionMeta.comparabilityStatus,
-        matrixSchemaVersionId: assemblyMeta?.matrixSchemaVersionId ?? freshProjectionMeta.matrixSchemaVersionId,
-      };
+      let frozenProjection: ReportDataMatrixProjection = dataMatrixProjection;
+
+      if (dataMatrix?.kind === 'v3' || isFrozenV3MatrixProjection(dataMatrixProjection)) {
+        // V3 already frozen at content write — do not re-run V2 assembly meta.
+        frozenProjection = dataMatrixProjection;
+      } else {
+        // 重新读取最新投影以保证发布精度（绝不仅存 matrix_instance_id）。
+        const fresh = dataMatrix?.kind === 'v2' && dataMatrix.assemblyId
+          ? await loadDataMatrixProjection(client, body.task_id)
+          : null;
+        const freshProjection = (fresh?.kind === 'v2' ? fresh.projection : null) ?? dataMatrixProjection;
+        const assemblyId = (fresh?.kind === 'v2' ? fresh.assemblyId : undefined)
+          ?? (dataMatrix?.kind === 'v2' ? dataMatrix.assemblyId : undefined);
+        const assemblyMeta = assemblyId
+          ? await loadDataMatrixAssemblyMeta(client, String(assemblyId))
+          : null;
+        const freshProjectionMeta = freshProjection as unknown as Record<string, unknown>;
+        frozenProjection = {
+          ...(freshProjection as MatrixReadProjection),
+          comparabilityStatus: assemblyMeta?.comparabilityStatus ?? freshProjectionMeta.comparabilityStatus,
+          matrixSchemaVersionId: assemblyMeta?.matrixSchemaVersionId ?? freshProjectionMeta.matrixSchemaVersionId,
+        } as MatrixReadProjection;
+      }
+
       const frozenSnapshotJson = {
         report_type: 'single_report',
         snapshot_status: 'published',

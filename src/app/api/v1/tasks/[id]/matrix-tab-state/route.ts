@@ -42,9 +42,11 @@ interface MatrixTabStateResponse {
     taskMatrixEnabled: boolean;
     dynamicMatrixExcelLikeViewEnabled: boolean;
     dynamicMatrixFormulaEnabled: boolean;
+    dynamicMatrixCellStyleEnabled: boolean;
     inlineEditEnabled: boolean;
     materialStagingEnabled: boolean;
     hermesAgentGatewayEnabled: boolean;
+    wecomMaterialIngestEnabled: boolean;
   };
 }
 
@@ -71,9 +73,11 @@ export async function GET(
             taskMatrixEnabled: false,
             dynamicMatrixExcelLikeViewEnabled: false,
             dynamicMatrixFormulaEnabled: false,
+            dynamicMatrixCellStyleEnabled: false,
             inlineEditEnabled: false,
             materialStagingEnabled: false,
             hermesAgentGatewayEnabled: false,
+            wecomMaterialIngestEnabled: false,
           },
         },
         traceId,
@@ -87,9 +91,11 @@ export async function GET(
       taskMatrixEnabled: flags.taskMatrixEnabled,
       dynamicMatrixExcelLikeViewEnabled: flags.dynamicMatrixExcelLikeViewEnabled,
       dynamicMatrixFormulaEnabled: flags.dynamicMatrixFormulaEnabled,
+      dynamicMatrixCellStyleEnabled: flags.dynamicMatrixCellStyleEnabled,
       inlineEditEnabled: flags.inlineEditEnabled,
       materialStagingEnabled: flags.materialStagingEnabled,
       hermesAgentGatewayEnabled: flags.hermesAgentGatewayEnabled,
+      wecomMaterialIngestEnabled: flags.wecomMaterialIngestEnabled,
     };
 
     // Feature fully disabled.
@@ -157,9 +163,11 @@ export async function GET(
           taskMatrixEnabled: false,
           dynamicMatrixExcelLikeViewEnabled: false,
           dynamicMatrixFormulaEnabled: false,
+          dynamicMatrixCellStyleEnabled: false,
           inlineEditEnabled: false,
           materialStagingEnabled: false,
           hermesAgentGatewayEnabled: false,
+          wecomMaterialIngestEnabled: false,
         },
         error: message,
       },

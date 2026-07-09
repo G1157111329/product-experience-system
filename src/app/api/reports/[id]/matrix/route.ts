@@ -5,6 +5,10 @@ import { loadLatestReportSnapshot } from '@/lib/server/report-snapshots';
 import { buildMatrixReadProjection, type MatrixReadProjection } from '@/lib/matrix/projection';
 import { getMatrixReadProjection } from '@/lib/matrix/projection-v2';
 import { adaptTaskMatrixProjectionForReport } from '@/lib/matrix/report-projection-adapter';
+import {
+  isFrozenV3MatrixProjection,
+  type ReportV3MatrixProjection,
+} from '@/lib/matrix/report-projection-v3-adapter';
 
 type Row = Record<string, unknown>;
 
@@ -43,28 +47,49 @@ async function findTaskMatrixId(client: ReturnType<typeof getSupabaseClient>, ta
   return matrices?.[0]?.id ? String(matrices[0].id) : null;
 }
 
+function pickFrozenProjection(
+  snapshotJson: Row | undefined,
+  content: Row | null,
+): unknown | null {
+  if (isRecordLike(snapshotJson?.matrix_projection)) return snapshotJson!.matrix_projection;
+  if (isRecordLike(content?.data_matrix_projection)) return content!.data_matrix_projection;
+  return null;
+}
+
 /**
  * Resolve a data-matrix projection for a report (Sub-task D).
  * Prefers the frozen snapshot (`snapshot_json.matrix_projection`, §11.3 no-drift);
- * falls back to building a fresh projection from the linked assembly.
+ * falls back to content, then building a fresh V2 projection from the linked assembly.
  */
 async function resolveDataMatrixProjection(
   client: ReturnType<typeof getSupabaseClient>,
   snapshotJson: Row | undefined,
+  content: Row | null,
   taskId: string,
-): Promise<MatrixReadProjection | null> {
-  const frozen = isRecordLike(snapshotJson?.matrix_projection) ? snapshotJson!.matrix_projection as unknown as MatrixReadProjection : null;
-  if (frozen && Array.isArray(frozen.groups)) return frozen;
+): Promise<
+  | { kind: 'v3'; projection: ReportV3MatrixProjection }
+  | { kind: 'v2'; projection: MatrixReadProjection }
+  | null
+> {
+  const frozen = pickFrozenProjection(snapshotJson, content);
+  if (isFrozenV3MatrixProjection(frozen)) {
+    return { kind: 'v3', projection: frozen };
+  }
+  if (frozen && Array.isArray((frozen as MatrixReadProjection).groups)) {
+    return { kind: 'v2', projection: frozen as MatrixReadProjection };
+  }
   if (!taskId) return null;
   try {
     const taskMatrixId = await findTaskMatrixId(client, taskId);
     if (taskMatrixId) {
       const taskMatrixProjection = await getMatrixReadProjection(taskMatrixId);
-      if (taskMatrixProjection) return adaptTaskMatrixProjectionForReport(taskMatrixProjection);
+      if (taskMatrixProjection) {
+        return { kind: 'v2', projection: adaptTaskMatrixProjectionForReport(taskMatrixProjection) };
+      }
     }
     const assemblyId = await findDataMatrixAssemblyId(client, taskId);
     if (!assemblyId) return null;
-    return await buildMatrixReadProjection(client, assemblyId);
+    return { kind: 'v2', projection: await buildMatrixReadProjection(client, assemblyId) };
   } catch {
     return null;
   }
@@ -111,21 +136,33 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     });
   }
 
-  // ── 数据矩阵分支（Task 12, Sub-task D）──
+  // ── 数据矩阵分支（Task 12 / Wave 6）──
   // 优先返回冻结快照中的投影；否则从组装即时构建。仅当任务确实关联 data_matrix
   // 组装、且快照/内容中存在投影时触发；既有对比/单报告不受影响。
   const taskId = report.task_id ? String(report.task_id) : '';
-  const hasFrozenDataMatrix = isRecordLike(snapshotJson?.matrix_projection) && Array.isArray((snapshotJson!.matrix_projection as Row).groups);
+  const frozenCandidate = pickFrozenProjection(snapshotJson, content);
+  const hasFrozenV3 = isFrozenV3MatrixProjection(frozenCandidate);
+  const hasFrozenV2 = isRecordLike(frozenCandidate) && Array.isArray((frozenCandidate as Row).groups);
   const hasContentDataMatrix = isRecordLike(content?.data_matrix_projection);
-  if (hasFrozenDataMatrix || hasContentDataMatrix || (taskId && ((await findTaskMatrixId(client, taskId)) || (await findDataMatrixAssemblyId(client, taskId))))) {
-    const dataMatrix = await resolveDataMatrixProjection(client, snapshotJson, taskId);
-    if (dataMatrix) {
+  if (hasFrozenV3 || hasFrozenV2 || hasContentDataMatrix || (taskId && ((await findTaskMatrixId(client, taskId)) || (await findDataMatrixAssemblyId(client, taskId))))) {
+    const resolved = await resolveDataMatrixProjection(client, snapshotJson, content, taskId);
+    if (resolved?.kind === 'v3') {
+      return NextResponse.json({
+        code: 0,
+        message: 'success',
+        data: {
+          matrixType: 'data_matrix_v3',
+          dataMatrixV3: resolved.projection,
+        },
+      });
+    }
+    if (resolved?.kind === 'v2') {
       return NextResponse.json({
         code: 0,
         message: 'success',
         data: {
           matrixType: 'data_matrix',
-          dataMatrix,
+          dataMatrix: resolved.projection,
         },
       });
     }

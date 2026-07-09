@@ -6,6 +6,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { isPendingMediaUrl, pendingMediaDataUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import { cn } from '@/lib/utils';
 import type { ReportDetailMediaItem, ReportDetailModel, ReportDetailSection, ReportDetailSectionBlock } from '@/lib/server/report-detail';
+import { ReportV3MatrixView } from '@/app/(main)/reports/[id]/components/report-v3-matrix-view';
+import type { ReportV3MatrixProjection } from '@/lib/matrix/report-projection-v3-adapter';
 
 function blockItemClass(status: string | undefined) {
   if (status === 'risk') return 'border-red-200 bg-red-50 text-red-800';
@@ -30,6 +32,8 @@ function blockTypeLabel(type: string) {
     table: '表格',
     media: '素材',
     matrix: '矩阵',
+    data_matrix: '数据矩阵',
+    data_matrix_v3: '数据矩阵',
   };
   return labels[type] || type;
 }
@@ -576,6 +580,12 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
         </div>
       )}
 
+      {block.type === 'data_matrix_v3' && block.dataMatrixV3 && (
+        <div data-testid="report-data-matrix-v3-block">
+          <ReportV3MatrixView projection={block.dataMatrixV3 as unknown as ReportV3MatrixProjection} />
+        </div>
+      )}
+
       {block.type === 'media' && (block.media?.length ?? 0) > 0 && (
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           <InteractiveMediaCards media={block.media?.slice(0, 12)} />
@@ -800,6 +810,58 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
         </table>
         </div>
       )}
+      {block.type === 'data_matrix_v3' && block.dataMatrixV3 && (() => {
+        const projection = block.dataMatrixV3;
+        const columns = [...(projection.columns || [])].sort(
+          (a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0),
+        );
+        const rows = [...(projection.rows || [])].sort(
+          (a, b) => (a.visibleRowIndex ?? 0) - (b.visibleRowIndex ?? 0),
+        );
+        return (
+          <div data-testid="print-data-matrix-v3-block" style={{ maxWidth: '100%', overflowX: 'auto' }}>
+            <div style={{ marginBottom: '6px', fontSize: '10px', color: '#6b7280' }}>
+              {projection.matrixName || '数据矩阵'}
+              {projection.summary
+                ? ` · ${projection.summary.totalRows} 行 / ${projection.summary.totalColumns} 列`
+                : ''}
+            </div>
+            <table style={{ width: '100%', minWidth: '100%', borderCollapse: 'collapse', fontSize: '9px', tableLayout: 'fixed' }}>
+              <thead>
+                <tr>
+                  <th style={{ border: '1px solid #d1d5db', textAlign: 'left', padding: '5px', color: '#374151' }}>一级</th>
+                  <th style={{ border: '1px solid #d1d5db', textAlign: 'left', padding: '5px', color: '#374151' }}>二级</th>
+                  <th style={{ border: '1px solid #d1d5db', textAlign: 'left', padding: '5px', color: '#374151' }}>三级</th>
+                  {columns.map((col) => (
+                    <th key={col.id} style={{ border: '1px solid #d1d5db', textAlign: 'left', padding: '5px', color: '#374151' }}>
+                      {col.label}{col.unitText ? ` (${col.unitText})` : ''}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.id} data-testid="print-data-matrix-v3-row">
+                    <td style={{ border: '1px solid #e5e7eb', padding: '5px', color: '#111827', verticalAlign: 'top', wordBreak: 'break-word' }}>{row.level1Label || '-'}</td>
+                    <td style={{ border: '1px solid #e5e7eb', padding: '5px', color: '#111827', verticalAlign: 'top', wordBreak: 'break-word' }}>{row.level2Label || '-'}</td>
+                    <td style={{ border: '1px solid #e5e7eb', padding: '5px', color: '#111827', verticalAlign: 'top', wordBreak: 'break-word' }}>{row.level3Label || '-'}</td>
+                    {columns.map((col) => {
+                      const mediaKey = `${row.id}:${col.id}`;
+                      const mediaCount = projection.cellMedia?.[mediaKey]?.length ?? 0;
+                      return (
+                        <td key={`${row.id}:${col.id}`} style={{ border: '1px solid #e5e7eb', padding: '5px', color: '#4b5563', verticalAlign: 'top', wordBreak: 'break-word' }}>
+                          {row.cells?.[col.id] || ''}
+                          {mediaCount > 0 ? <div style={{ color: '#6b7280', marginTop: '2px' }}>素材 {mediaCount}</div> : null}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
       {block.type === 'media' && blockMedia.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '6px' }}>
           {blockMedia.slice(0, 12).map((item) => (
