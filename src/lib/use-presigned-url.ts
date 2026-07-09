@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { readJsonResponse } from '@/lib/http';
+import { resolvePresignBatches } from '@/lib/presign-batches';
 
 /** 签名 URL 全局缓存（避免重复请求） */
 const globalCache = new Map<string, { url: string; expireAt: number }>();
@@ -86,6 +87,11 @@ function getReportIdFromLocation(): string | null {
 async function requestPresignedUrls(filePaths: string[]): Promise<Map<string, string>> {
   const result = new Map<string, string>();
   if (filePaths.length === 0) return result;
+  if (filePaths.length > 50) {
+    const urlMap = await resolvePresignBatches(filePaths, async (batch) =>
+      Object.fromEntries(await requestPresignedUrls(batch)));
+    return new Map(Object.entries(urlMap));
+  }
 
   try {
     const res = await fetch('/api/materials/presign', {

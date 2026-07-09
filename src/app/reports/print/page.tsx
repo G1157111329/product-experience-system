@@ -13,6 +13,7 @@ import {
   normalizeReportProjectType,
   sortReportsByCreatedAtAsc,
 } from '@/lib/report-merge';
+import { resolvePresignBatches } from '@/lib/presign-batches';
 import { toPublicMediaUrl } from '@/lib/use-presigned-url';
 
 interface Material {
@@ -152,6 +153,11 @@ async function batchPresignUrls(paths: string[], reportId?: string | null, share
   const directUrls = paths.filter(isDirectPrintableUrl);
   const directMap = Object.fromEntries(directUrls.map((url) => [url, url]));
   if (!objectKeys.length) return directMap;
+  if (objectKeys.length > 50) {
+    const signedMap = await resolvePresignBatches(objectKeys, (batch) =>
+      batchPresignUrls(batch, reportId, shareToken));
+    return { ...directMap, ...signedMap };
+  }
   try {
     const res = await fetch('/api/materials/presign', {
       method: 'POST',
@@ -201,6 +207,26 @@ async function presignReportUrls(rpt: ReportData, shareToken?: string | null): P
   };
   collectPaths(rpt);
   if (filePaths.length === 0) return rpt;
+  if (new Set(filePaths).size > 50) {
+    const urlMap = await batchPresignUrls([...new Set(filePaths)], rpt.id, shareToken);
+    const replacePaths = (obj: unknown): unknown => {
+      if (!obj || typeof obj !== 'object') return obj;
+      if (Array.isArray(obj)) return obj.map(item => replacePaths(item));
+      const record = obj as Record<string, unknown>;
+      const result: Record<string, unknown> = {};
+      for (const [key, val] of Object.entries(record)) {
+        if ((key === 'file_url' || key === 'file_path') && typeof val === 'string' && urlMap[val]) {
+          result[key] = urlMap[val];
+        } else if (typeof val === 'object' && val !== null) {
+          result[key] = replacePaths(val);
+        } else {
+          result[key] = val;
+        }
+      }
+      return result;
+    };
+    return replacePaths(rpt) as ReportData;
+  }
 
   try {
     const res = await fetch('/api/materials/presign', {
