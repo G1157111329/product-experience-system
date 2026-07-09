@@ -31,6 +31,7 @@ import { MediaGallery } from '@/components/app/media-gallery';
 import { buildReportReadiness } from '@/lib/report-readiness';
 import { formatAiSummaryText, parseAiSummaryText } from '@/lib/report-content-rules';
 import {
+  buildEffectAutosavePayload,
   initializeEffectProblemPoints,
   updateEffectProblemPoints,
 } from '@/lib/effect-problem-points';
@@ -2232,6 +2233,11 @@ function FunctionsTab({
   const [aiDetectingProblems, setAiDetectingProblems] = useState<Record<string, boolean>>({});
   const [effectMaterialIds, setEffectMaterialIds] = useState<Record<string, string[]>>({});
   const [effectSaving, setEffectSaving] = useState<Record<string, boolean>>({});
+  const [effectSaveStatus, setEffectSaveStatus] = useState<Record<string, 'idle' | 'dirty' | 'saving' | 'saved' | 'error'>>({});
+  const [dirtyEffectRecipeIds, setDirtyEffectRecipeIds] = useState<Set<string>>(new Set());
+  const effectSaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const effectSaveChainsRef = useRef<Record<string, Promise<boolean>>>({});
+  const effectDraftVersionRef = useRef<Record<string, number>>({});
   const [aiEvaluating, setAiEvaluating] = useState<Record<string, boolean>>({});
   const [aiResult, setAiResult] = useState<Record<string, {
     result?: {
@@ -2577,40 +2583,108 @@ function FunctionsTab({
     }
   };
 
-  // Save effect evaluation (materials + structured problem points; description autosaves via InlineEditable)
-  const handleSaveEffect = async (recipe: Recipe): Promise<boolean> => {
+  const markEffectDraftDirty = useCallback((recipeId: string) => {
+    effectDraftVersionRef.current[recipeId] = (effectDraftVersionRef.current[recipeId] || 0) + 1;
+    setEffectSaveStatus((current) => ({ ...current, [recipeId]: 'dirty' }));
+    setDirtyEffectRecipeIds((current) => {
+      const next = new Set(current);
+      next.add(recipeId);
+      return next;
+    });
+  }, []);
+
+  const persistEffectDraft = useCallback(async (
+    recipe: Recipe,
+    pps: ProblemPoint[],
+    selectedEffectMaterialIds: string[],
+    notify = false,
+  ): Promise<boolean> => {
     setEffectSaving(prev => ({ ...prev, [recipe.id]: true }));
+    setEffectSaveStatus((current) => ({ ...current, [recipe.id]: 'saving' }));
     try {
-      const pps = effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? [];
-      const ppJson = JSON.stringify(pps.filter(p => p.text.trim()));
-      const effectMats = effectMaterialIds[recipe.id] ?? (recipe.effect_materials || []).map(m => m.id);
-      const problemPointMats = pps.flatMap(p => p.material_ids || []);
-      const matIds = [...new Set([...effectMats, ...problemPointMats])];
       const res = await fetch(`/api/recipes/${recipe.id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: recipe.name, ingredients: recipe.ingredients,
-          recipe_type: recipe.recipe_type, problem_count: recipe.problem_count,
-          effect_description: recipe.effect_description ?? '',
-          effect_problem_point: ppJson,
-          effect_material_ids: matIds,
-        }),
+        body: JSON.stringify(buildEffectAutosavePayload(recipe, pps, selectedEffectMaterialIds)),
       });
       const data = await res.json().catch(() => null);
       if (res.ok && data?.code === 0) {
-        fetchRecipes();
-        toast.success('效果评价已保存');
+        setEffectSaveStatus((current) => ({ ...current, [recipe.id]: 'saved' }));
+        if (notify) toast.success('效果评价已保存');
         return true;
       }
-      toast.error(data?.message || `保存失败 (${res.status})`);
+      setEffectSaveStatus((current) => ({ ...current, [recipe.id]: 'error' }));
+      if (notify) toast.error(data?.message || `保存失败 (${res.status})`);
       return false;
     } catch (error) {
-      toast.error(error instanceof Error ? `保存失败：${error.message}` : '保存失败');
+      setEffectSaveStatus((current) => ({ ...current, [recipe.id]: 'error' }));
+      if (notify) toast.error(error instanceof Error ? `保存失败：${error.message}` : '保存失败');
       return false;
     } finally {
       setEffectSaving(prev => ({ ...prev, [recipe.id]: false }));
     }
+  }, []);
+
+  const queueEffectSave = useCallback((
+    recipe: Recipe,
+    pps: ProblemPoint[],
+    selectedEffectMaterialIds: string[],
+    notify = false,
+  ) => {
+    const previous = effectSaveChainsRef.current[recipe.id] || Promise.resolve(true);
+    const next = previous
+      .catch(() => false)
+      .then(() => persistEffectDraft(recipe, pps, selectedEffectMaterialIds, notify));
+    effectSaveChainsRef.current[recipe.id] = next;
+    return next;
+  }, [persistEffectDraft]);
+
+  // Save effect evaluation (materials + structured problem points; description autosaves via InlineEditable)
+  const handleSaveEffect = async (recipe: Recipe): Promise<boolean> => {
+    const timer = effectSaveTimersRef.current[recipe.id];
+    if (timer) {
+      clearTimeout(timer);
+      delete effectSaveTimersRef.current[recipe.id];
+    }
+    const version = effectDraftVersionRef.current[recipe.id] || 0;
+    const pps = effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? [];
+    const selectedMaterials = effectMaterialIds[recipe.id] ?? (recipe.effect_materials || []).map((material) => material.id);
+    const saved = await queueEffectSave(recipe, pps, selectedMaterials, true);
+    if (saved && effectDraftVersionRef.current[recipe.id] === version) {
+      setDirtyEffectRecipeIds((current) => {
+        const next = new Set(current);
+        next.delete(recipe.id);
+        return next;
+      });
+    }
+    return saved;
   };
+
+  useEffect(() => {
+    for (const recipeId of dirtyEffectRecipeIds) {
+      const existingTimer = effectSaveTimersRef.current[recipeId];
+      if (existingTimer) clearTimeout(existingTimer);
+      const recipe = recipes.find((item) => item.id === recipeId);
+      if (!recipe) continue;
+      const version = effectDraftVersionRef.current[recipeId] || 0;
+      effectSaveTimersRef.current[recipeId] = setTimeout(() => {
+        delete effectSaveTimersRef.current[recipeId];
+        const pps = effectProblemPoints[recipeId] ?? recipe.effect_problem_points ?? [];
+        const selectedMaterials = effectMaterialIds[recipeId] ?? (recipe.effect_materials || []).map((material) => material.id);
+        void queueEffectSave(recipe, pps, selectedMaterials).then((saved) => {
+          if (!saved || effectDraftVersionRef.current[recipeId] !== version) return;
+          setDirtyEffectRecipeIds((current) => {
+            const next = new Set(current);
+            next.delete(recipeId);
+            return next;
+          });
+        });
+      }, 800);
+    }
+    return () => {
+      for (const timer of Object.values(effectSaveTimersRef.current)) clearTimeout(timer);
+      effectSaveTimersRef.current = {};
+    };
+  }, [dirtyEffectRecipeIds, effectMaterialIds, effectProblemPoints, queueEffectSave, recipes]);
 
   // AI evaluate effect
   const handleAiEvaluate = async (recipe: Recipe) => {
@@ -2656,6 +2730,7 @@ function FunctionsTab({
         const existingPPs = effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? [];
         const newPPs = [...existingPPs, ...data.data.problems.map((p: { text: string }) => ({ text: p.text, material_ids: [] as string[] }))];
         setEffectProblemPoints(prev => ({ ...prev, [recipe.id]: newPPs }));
+        markEffectDraftDirty(recipe.id);
         toast.success(`AI识别到${data.data.problems.length}个问题点`);
       } else if (data.code === 0) {
         toast.info('AI未识别到问题点');
@@ -2677,6 +2752,7 @@ function FunctionsTab({
       recipe,
       (points) => [...points, { text: '', material_ids: [] }],
     ));
+    markEffectDraftDirty(recipeId);
   };
 
   // ── Remove problem point for recipe ──
@@ -2687,6 +2763,7 @@ function FunctionsTab({
       recipe,
       (points) => points.filter((_, pointIndex) => pointIndex !== index),
     ));
+    markEffectDraftDirty(recipeId);
   };
 
   // ── Update problem point text for recipe ──
@@ -2698,6 +2775,7 @@ function FunctionsTab({
       (points) => points.map((point, pointIndex) =>
         pointIndex === index ? { ...point, text } : point),
     ));
+    markEffectDraftDirty(recipeId);
   };
 
   return (
@@ -2769,10 +2847,11 @@ function FunctionsTab({
                 <MaterialPicker
                   taskId={taskId}
                   selectedIds={effectMaterialIds[recipe.id] ?? (recipe.effect_materials || []).map(m => m.id)}
-                  initialMaterials={recipe.effect_materials || []}
-                  onSelectionChange={(ids) => {
-                    setEffectMaterialIds(prev => ({ ...prev, [recipe.id]: ids }));
-                  }}
+                   initialMaterials={recipe.effect_materials || []}
+                   onSelectionChange={(ids) => {
+                     setEffectMaterialIds(prev => ({ ...prev, [recipe.id]: ids }));
+                     markEffectDraftDirty(recipe.id);
+                   }}
                   selectedPreviewSize="md"
                 />
               </div>
@@ -2802,8 +2881,19 @@ function FunctionsTab({
               <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 space-y-3">
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4 text-amber-600" />
-                  <span className="text-sm font-medium">问题点</span>
-                  <span className="text-[10px] text-muted-foreground">({validPps.length}条)</span>
+                 <span className="text-sm font-medium">问题点</span>
+                 <span className="text-[10px] text-muted-foreground">({validPps.length}条)</span>
+                 {effectSaveStatus[recipe.id] && effectSaveStatus[recipe.id] !== 'idle' && (
+                   <span className={cn(
+                     'ml-auto text-[10px]',
+                     effectSaveStatus[recipe.id] === 'error' ? 'text-destructive' : 'text-muted-foreground',
+                   )}>
+                     {effectSaveStatus[recipe.id] === 'dirty' && '待保存'}
+                     {effectSaveStatus[recipe.id] === 'saving' && '保存中'}
+                     {effectSaveStatus[recipe.id] === 'saved' && '已保存'}
+                     {effectSaveStatus[recipe.id] === 'error' && '保存失败，请重试'}
+                   </span>
+                 )}
                 </div>
                 {pps.map((pp, ppIdx) => (
                   <div key={ppIdx} className="space-y-2 rounded-md border border-amber-200/60 bg-background p-2">
@@ -2832,6 +2922,7 @@ function FunctionsTab({
                             (points) => points.map((item, pointIndex) =>
                               pointIndex === ppIdx ? { ...item, material_ids: ids } : item),
                           ));
+                          markEffectDraftDirty(recipe.id);
                         }}
                       />
                     </div>

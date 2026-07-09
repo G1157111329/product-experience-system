@@ -28,6 +28,27 @@ async function main() {
     { text: '已有问题二', material_ids: ['m2'] },
   ]);
 
+  const payload = helpers.buildEffectAutosavePayload(
+    {
+      id: 'recipe-1',
+      name: '烘烤',
+      ingredients: '200℃',
+      recipe_type: '功能',
+      problem_count: 2,
+      effect_description: '表面均匀',
+    },
+    [
+      { text: '  边缘偏焦  ', material_ids: ['m2', 'm3'] },
+      { text: '   ', material_ids: ['unused'] },
+    ],
+    ['m1', 'm2'],
+  );
+  assert.equal(
+    payload.effect_problem_point,
+    JSON.stringify([{ text: '边缘偏焦', material_ids: ['m2', 'm3'] }]),
+  );
+  assert.deepEqual(payload.effect_material_ids, ['m1', 'm2', 'm3']);
+
   console.log('effect-problem-points tests passed');
 }
 

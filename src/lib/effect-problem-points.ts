@@ -5,6 +5,11 @@ export interface EffectProblemPoint {
 
 export interface EffectProblemPointRecipe {
   id: string;
+  name?: string;
+  ingredients?: string | null;
+  recipe_type?: string;
+  problem_count?: number;
+  effect_description?: string | null;
   effect_problem_points?: EffectProblemPoint[];
 }
 
@@ -34,5 +39,29 @@ export function updateEffectProblemPoints(
   return {
     ...current,
     [recipe.id]: update(points),
+  };
+}
+
+export function buildEffectAutosavePayload(
+  recipe: EffectProblemPointRecipe,
+  points: EffectProblemPoint[],
+  effectMaterialIds: string[],
+) {
+  const normalizedPoints = points
+    .map((point) => ({
+      text: point.text.trim(),
+      material_ids: [...new Set(point.material_ids || [])],
+    }))
+    .filter((point) => point.text);
+  const problemMaterialIds = normalizedPoints.flatMap((point) => point.material_ids);
+
+  return {
+    name: recipe.name || '',
+    ingredients: recipe.ingredients || '',
+    recipe_type: recipe.recipe_type || '功能',
+    problem_count: recipe.problem_count || 0,
+    effect_description: recipe.effect_description || '',
+    effect_problem_point: JSON.stringify(normalizedPoints),
+    effect_material_ids: [...new Set([...effectMaterialIds, ...problemMaterialIds])],
   };
 }
