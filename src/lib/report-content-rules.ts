@@ -11,16 +11,20 @@ export interface AiSummaryContent {
 
 type EffectEvaluationSource = {
   effect_description?: unknown;
-  effect_ai_result?: { summary?: unknown } | null;
+  effectDescription?: unknown;
+  effect_ai_result?: unknown;
+  effectAiResult?: unknown;
 };
 
 const SUMMARY_LABELS = ['总结', '满意度', '主要优势', '主要风险', '历史表现', '后续建议'] as const;
 type SummaryLabel = (typeof SUMMARY_LABELS)[number];
 
 export function selectEffectEvaluationText(recipe: EffectEvaluationSource) {
-  const manual = String(recipe.effect_description ?? '').trim();
+  const manual = String(recipe.effect_description ?? recipe.effectDescription ?? '').trim();
   if (manual) return manual;
-  return String(recipe.effect_ai_result?.summary ?? '').trim();
+  const aiResult = recipe.effect_ai_result ?? recipe.effectAiResult;
+  if (!aiResult || typeof aiResult !== 'object') return '';
+  return String((aiResult as { summary?: unknown }).summary ?? '').trim();
 }
 
 export function formatAiSummaryText(summary: AiSummaryContent) {

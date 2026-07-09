@@ -6,6 +6,7 @@ import { ChevronDown, ChevronRight, Star } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { PresignedImage, PresignedVideo } from '@/components/presigned-media';
+import { selectEffectEvaluationText } from '@/lib/report-content-rules';
 import type { ComparisonSnapshot } from '@/components/reports/comparison-report-view';
 import { ReportV3MatrixView, isReportV3MatrixProjection } from './report-v3-matrix-view';
 import type { ReportV3MatrixProjection } from '@/lib/matrix/report-projection-v3-adapter';
@@ -464,6 +465,7 @@ function WaterfallList({ recipes }: { recipes: Row[] }) {
         const expanded = expandedIds.has(recipe.id as string);
         const steps = (recipe.recipe_steps || recipe.steps || []) as Row[];
         const effectScore = recipe.effect_score || recipe.effectScore;
+        const evaluationText = selectEffectEvaluationText(recipe);
         return (
           <Card key={recipe.id as string}>
             <CardHeader className="pb-2">
@@ -483,9 +485,9 @@ function WaterfallList({ recipes }: { recipes: Row[] }) {
             </CardHeader>
             {expanded && (
               <CardContent className="space-y-2 pt-0">
-                {Boolean(recipe.effect_description || recipe.effectDescription) && (
+                {evaluationText && (
                   <p className="text-xs text-muted-foreground">
-                    {String(recipe.effect_description || recipe.effectDescription)}
+                    {evaluationText}
                   </p>
                 )}
                 {steps.map((step, idx) => (

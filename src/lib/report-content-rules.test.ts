@@ -22,6 +22,13 @@ assert.equal(
 );
 
 assert.equal(selectEffectEvaluationText({}), '');
+assert.equal(
+  selectEffectEvaluationText({
+    effectDescription: '',
+    effectAiResult: { summary: '兼容旧字段 AI 评价' },
+  }),
+  '兼容旧字段 AI 评价',
+);
 
 const summary = {
   tag: '良好',

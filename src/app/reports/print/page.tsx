@@ -14,6 +14,7 @@ import {
   sortReportsByCreatedAtAsc,
 } from '@/lib/report-merge';
 import { resolvePresignBatches } from '@/lib/presign-batches';
+import { selectEffectEvaluationText } from '@/lib/report-content-rules';
 import { toPublicMediaUrl } from '@/lib/use-presigned-url';
 
 interface Material {
@@ -419,10 +420,8 @@ function PrintRecipeCard({ recipe }: { recipe: Record<string, unknown> }) {
   const name = String(recipe.name || '');
   const recipeType = String(recipe.recipe_type || '');
   const ingredients = String(recipe.ingredients || '');
-  const effectDesc = String(recipe.effect_description || '');
+  const effectEvaluation = selectEffectEvaluationText(recipe);
   const effectScore = String(recipe.effect_score || '');
-  const effectAiResultRaw = recipe.effect_ai_result as Record<string, unknown> | null | undefined;
-  const effectAiSummary = effectAiResultRaw?.summary ? String(effectAiResultRaw.summary) : '';
   const effectProblemPoint = String(recipe.effect_problem_point || '');
   const steps = (recipe.recipe_steps || []) as Array<Record<string, unknown>>;
   const effectMaterials = (recipe.effect_materials || []) as Array<Record<string, unknown>>;
@@ -485,11 +484,10 @@ function PrintRecipeCard({ recipe }: { recipe: Record<string, unknown> }) {
       {ingredients && <div style={{ fontSize: '11px', color: '#6b7280', marginBottom: '6px' }}>食材/参数：{ingredients}</div>}
 
       {/* 效果评价（含素材） */}
-      {(effectDesc || effectAiSummary || effectScore) && (
+      {(effectEvaluation || effectScore) && (
         <div style={{ marginBottom: '8px' }}>
           <div style={{ fontSize: '11px', fontWeight: 600, color: '#0d9488', marginBottom: '2px' }}>效果评价</div>
-          {effectDesc && <div style={{ fontSize: '11px', color: '#374151', whiteSpace: 'pre-wrap' }}>{effectDesc}</div>}
-          {effectAiSummary && <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>{effectAiSummary}</div>}
+          {effectEvaluation && <div style={{ fontSize: '11px', color: '#374151', whiteSpace: 'pre-wrap' }}>{effectEvaluation}</div>}
           {renderMedia(effectMaterials)}
         </div>
       )}
@@ -830,11 +828,10 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
                         color: 'white' }}>综合 {recipe.effect_score}分/10分</span>
                     )}
                   </div>
-                  {recipe.effect_ai_result && (
-                      <div style={{ fontSize: '11px', color: '#555', marginLeft: '20px', whiteSpace: 'pre-wrap' }}>{recipe.effect_ai_result.summary}</div>
-                  )}
-                  {!recipe.effect_ai_result && recipe.effect_description && (
-                    <div style={{ fontSize: '11px', color: '#555', marginLeft: '20px', whiteSpace: 'pre-wrap' }}>{recipe.effect_description}</div>
+                  {selectEffectEvaluationText(recipe) && (
+                    <div style={{ fontSize: '11px', color: '#555', marginLeft: '20px', whiteSpace: 'pre-wrap' }}>
+                      {selectEffectEvaluationText(recipe)}
+                    </div>
                   )}
                   {recipe.effect_problem_point && (() => {
                     let pps: string[] = [];

@@ -12,6 +12,7 @@ import { MediaGallery } from '@/components/app/media-gallery';
 import { ComparisonReportView, type ComparisonSnapshot } from '@/components/reports/comparison-report-view';
 import { ReportSectionBlockStack } from '@/components/reports/report-section-block-renderer';
 import { buildDisplayReportContent, type AiSummaryLike, type ReportContentWithReview, type ReportReviewOverrides } from '@/lib/report-review-overrides';
+import { selectEffectEvaluationText } from '@/lib/report-content-rules';
 import type { ReportDetailModel } from '@/lib/server/report-detail';
 
 interface Material {
@@ -668,11 +669,10 @@ export default function ShareReportPage() {
                                 </Badge>
                               )}
                             </div>
-                            {recipe.effect_ai_result && (
-                              <p className="text-xs text-muted-foreground whitespace-pre-wrap break-all ml-4">{recipe.effect_ai_result.summary}</p>
-                            )}
-                            {!recipe.effect_ai_result && recipe.effect_description && (
-                              <p className="text-xs text-muted-foreground whitespace-pre-wrap break-all ml-4">{recipe.effect_description}</p>
+                            {selectEffectEvaluationText(recipe) && (
+                              <p className="text-xs text-muted-foreground whitespace-pre-wrap break-all ml-4">
+                                {selectEffectEvaluationText(recipe)}
+                              </p>
                             )}
                             {(() => {
                               const effectPoints = parseProblemPoints(recipe.effect_problem_point);

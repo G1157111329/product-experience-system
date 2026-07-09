@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ChevronDown, ChevronRight, Star } from 'lucide-react';
 import { PresignedImage, PresignedVideo } from '@/components/presigned-media';
+import { selectEffectEvaluationText } from '@/lib/report-content-rules';
 
 interface FunctionEffectRecipe {
   id: string;
@@ -64,7 +65,7 @@ function RecipeCard({ recipe }: { recipe: FunctionEffectRecipe }) {
   const steps = recipe.recipe_steps || [];
   const effectPps = parseProblemPoints(recipe.effect_problem_point);
   const effectScore = recipe.effect_score;
-  const aiResult = recipe.effect_ai_result;
+  const evaluationText = selectEffectEvaluationText(recipe);
   // 实时计算步骤问题点 + 效果问题点（不依赖可能不准的 problem_count 字段）
   const stepProblemCount = steps.reduce((sum, step) => {
     const pps = step.problem_points;
@@ -97,17 +98,11 @@ function RecipeCard({ recipe }: { recipe: FunctionEffectRecipe }) {
       </CardHeader>
       <CardContent className="space-y-3 pt-0">
         {/* 效果评价 */}
-        {(recipe.effect_description || (recipe.effect_materials && recipe.effect_materials.length > 0) || aiResult || effectScore) && (
+        {(evaluationText || (recipe.effect_materials && recipe.effect_materials.length > 0) || effectScore) && (
           <div className="space-y-2">
             <p className="text-xs font-medium text-primary">效果/出品评价</p>
-            {recipe.effect_description && (
-              <p className="whitespace-pre-wrap text-xs text-muted-foreground">{recipe.effect_description}</p>
-            )}
-            {aiResult?.summary && (
-              <div className="rounded border bg-muted/30 p-2 text-xs">
-                <span className="font-medium">效果评价：</span>
-                <span className="text-muted-foreground">{aiResult.summary}</span>
-              </div>
+            {evaluationText && (
+              <p className="whitespace-pre-wrap text-xs text-muted-foreground">{evaluationText}</p>
             )}
             {recipe.effect_materials && recipe.effect_materials.length > 0 && (
               <EffectMediaGrid materials={recipe.effect_materials} />

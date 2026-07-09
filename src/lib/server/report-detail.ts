@@ -1,4 +1,5 @@
 import { comparisonCellFields } from '@/lib/report-comparison-fields';
+import { selectEffectEvaluationText } from '@/lib/report-content-rules';
 
 type Row = Record<string, unknown>;
 
@@ -899,7 +900,7 @@ function contentSections(report: Row, content: Row, issues: Row[], materials: Ro
     const effectProblemText = parseProblemPoints(recipe.effect_problem_point).map((point) => point.text).join('; ');
     return {
       '功能/食谱': firstNonEmpty(recipe.name, recipe.id),
-      '效果评价': firstNonEmpty(recipe.effect_description, '-'),
+      '效果评价': firstNonEmpty(selectEffectEvaluationText(recipe), '-'),
       '评分': firstNonEmpty(recipe.effect_score, '-'),
       '问题点': firstNonEmpty(effectProblemText, Number(recipe.problem_count || 0) > 0 ? `${recipe.problem_count} 个问题` : '', '-'),
       '素材数': String(effectMedia.length + stepMediaCount),
@@ -991,7 +992,7 @@ function contentSections(report: Row, content: Row, issues: Row[], materials: Ro
         block('function_effect:list', 'list', '功能效果', {
           items: recipes.slice(0, 8).map((recipe) => ({
             label: firstNonEmpty(recipe.name, recipe.id),
-            value: firstNonEmpty(recipe.effect_description, '暂无效果描述'),
+            value: firstNonEmpty(selectEffectEvaluationText(recipe), '暂无效果描述'),
             note: firstNonEmpty(recipe.effect_score, recipe.problem_count ? `${recipe.problem_count} 个问题` : ''),
             status: recipeProblems.some((item) => text(item.id) === text(recipe.id)) ? 'warning' : 'default',
           })),
@@ -1509,7 +1510,7 @@ function modelEffectEvolutionItems(content: Row, snapshotJson: Row) {
   if (explicitItems.length > 0) {
     return explicitItems.map((item) => ({
       label: firstNonEmpty(item.name, item.function_name, item.stage, '功能效果'),
-      value: firstNonEmpty(item.effect_description, item.summary, item.effect_score, '暂无效果摘要'),
+      value: firstNonEmpty(selectEffectEvaluationText(item), item.summary, item.effect_score, '暂无效果摘要'),
       note: firstNonEmpty(item.stage, item.effect_score, item.source_report_id),
       status: text(item.status) === 'risk' ? 'risk' as const : 'default' as const,
     }));
@@ -1517,7 +1518,7 @@ function modelEffectEvolutionItems(content: Row, snapshotJson: Row) {
 
   return rows(content.recipes).map((recipe) => ({
     label: firstNonEmpty(recipe.name, recipe.id),
-    value: firstNonEmpty(recipe.effect_description, '暂无效果描述'),
+    value: firstNonEmpty(selectEffectEvaluationText(recipe), '暂无效果描述'),
     note: firstNonEmpty(recipe.effect_score, recipe.recipe_type, ''),
     status: text(recipe.effect_problem_point) ? 'warning' as const : 'default' as const,
   }));
