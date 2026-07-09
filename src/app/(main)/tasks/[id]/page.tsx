@@ -30,6 +30,10 @@ import { PageShell } from '@/components/app';
 import { MediaGallery } from '@/components/app/media-gallery';
 import { buildReportReadiness } from '@/lib/report-readiness';
 import { formatAiSummaryText, parseAiSummaryText } from '@/lib/report-content-rules';
+import {
+  initializeEffectProblemPoints,
+  updateEffectProblemPoints,
+} from '@/lib/effect-problem-points';
 import { AgentPresetPanel } from './components/agent-preset-panel';
 import { MaterialEvidenceRail } from './components/material-evidence-rail';
 import { ReportAuthoringShell } from './components/report-authoring-shell';
@@ -2250,6 +2254,7 @@ function FunctionsTab({
   useEffect(() => {
     if (initialRecipes && initialRecipes.length > 0) {
       setRecipes(initialRecipes);
+      setEffectProblemPoints((current) => initializeEffectProblemPoints(current, initialRecipes));
       setLoading(false);
     }
   }, [initialRecipes]);
@@ -2259,6 +2264,7 @@ function FunctionsTab({
     try {
       const enriched = await loadRecipesForTask(taskId);
       setRecipes(enriched);
+      setEffectProblemPoints((current) => initializeEffectProblemPoints(current, enriched));
       onRecipesChange?.(enriched);
     } catch {
       toast.error('功能/食谱列表加载失败');
@@ -2665,23 +2671,33 @@ function FunctionsTab({
 
   // ── Add problem point for recipe ──
   const handleAddProblemPoint = (recipeId: string) => {
-    const existing = effectProblemPoints[recipeId] ?? [];
-    setEffectProblemPoints(prev => ({ ...prev, [recipeId]: [...existing, { text: '', material_ids: [] }] }));
+    const recipe = recipes.find((item) => item.id === recipeId) || { id: recipeId };
+    setEffectProblemPoints((current) => updateEffectProblemPoints(
+      current,
+      recipe,
+      (points) => [...points, { text: '', material_ids: [] }],
+    ));
   };
 
   // ── Remove problem point for recipe ──
   const handleRemoveProblemPoint = (recipeId: string, index: number) => {
-    const existing = effectProblemPoints[recipeId] ?? [];
-    setEffectProblemPoints(prev => ({ ...prev, [recipeId]: existing.filter((_, i) => i !== index) }));
+    const recipe = recipes.find((item) => item.id === recipeId) || { id: recipeId };
+    setEffectProblemPoints((current) => updateEffectProblemPoints(
+      current,
+      recipe,
+      (points) => points.filter((_, pointIndex) => pointIndex !== index),
+    ));
   };
 
   // ── Update problem point text for recipe ──
   const handleUpdateProblemPoint = (recipeId: string, index: number, text: string) => {
-    const existing = effectProblemPoints[recipeId] ?? [];
-    setEffectProblemPoints(prev => ({
-      ...prev,
-      [recipeId]: existing.map((pp, i) => i === index ? { ...pp, text } : pp),
-    }));
+    const recipe = recipes.find((item) => item.id === recipeId) || { id: recipeId };
+    setEffectProblemPoints((current) => updateEffectProblemPoints(
+      current,
+      recipe,
+      (points) => points.map((point, pointIndex) =>
+        pointIndex === index ? { ...point, text } : point),
+    ));
   };
 
   return (
@@ -2810,11 +2826,12 @@ function FunctionsTab({
                         selectedIds={pp.material_ids || []}
                         selectedPreviewSize="md"
                         onSelectionChange={(ids) => {
-                          const existing = effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? [];
-                          setEffectProblemPoints(prev => ({
-                            ...prev,
-                            [recipe.id]: existing.map((item, i) => i === ppIdx ? { ...item, material_ids: ids } : item),
-                          }));
+                          setEffectProblemPoints((current) => updateEffectProblemPoints(
+                            current,
+                            recipe,
+                            (points) => points.map((item, pointIndex) =>
+                              pointIndex === ppIdx ? { ...item, material_ids: ids } : item),
+                          ));
                         }}
                       />
                     </div>
