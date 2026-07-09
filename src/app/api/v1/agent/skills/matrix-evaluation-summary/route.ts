@@ -4,12 +4,17 @@
  *
  * Body: { matrixId, scope }
  * Returns the pending suggestion blocks (never auto-applied, PRD §11.5).
+ * Auto-provisions a default active agent_instance when none exists.
  */
 import { NextRequest } from 'next/server';
+import { eq, and } from 'drizzle-orm';
+import { getDb } from '@/storage/database/pg-db';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { requireUser, isAuthResponse } from '@/lib/server/auth';
 import { ok, fail, unauthorized, withTrace } from '@/lib/server/api-v1/response';
 import { runMatrixSummarySkill } from '@/lib/server/hermes/skills';
+import { getV3FeatureFlags } from '@/lib/feature-flags-v3';
+import { agentInstances, aiModelConfigs } from '@/storage/database/shared/schema';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,10 +23,46 @@ interface MatrixSummaryRequestBody {
   scope?: string;
 }
 
+/** Ensure at least one active agent instance exists for the default tenant. */
+async function ensureDefaultAgentInstance(userId: string): Promise<void> {
+  const db = await getDb();
+  const existing = await db
+    .select({ id: agentInstances.id })
+    .from(agentInstances)
+    .where(and(eq(agentInstances.tenantId, 'default'), eq(agentInstances.status, 'active')))
+    .limit(1)
+    .execute();
+  if (existing.length > 0) return;
+
+  const models = await db
+    .select({ id: aiModelConfigs.id })
+    .from(aiModelConfigs)
+    .where(eq(aiModelConfigs.isActive, true))
+    .limit(1)
+    .execute();
+
+  await db
+    .insert(agentInstances)
+    .values({
+      tenantId: 'default',
+      name: '默认矩阵助手',
+      status: 'active',
+      modelConfigId: models[0]?.id ?? null,
+      description: 'Wave 5 自动创建的默认 Hermes 实例',
+      createdBy: userId,
+    })
+    .execute();
+}
+
 export const POST = withTrace<[NextRequest]>(async (traceId, req) => {
   const client = getSupabaseClient();
   const user = await requireUser(req, client);
   if (isAuthResponse(user)) return unauthorized(traceId, 'unauthorized');
+
+  const flags = await getV3FeatureFlags();
+  if (!flags.hermesAgentGatewayEnabled) {
+    return fail(traceId, { message: '助手功能未启用', status: 403 });
+  }
 
   let body: MatrixSummaryRequestBody;
   try {
@@ -35,6 +76,12 @@ export const POST = withTrace<[NextRequest]>(async (traceId, req) => {
   }
   const scope = body.scope === 'by_level_1_group' ? 'by_level_1_group' : 'by_level_1_group';
 
+  try {
+    await ensureDefaultAgentInstance(user.id);
+  } catch {
+    // Non-fatal — skill will still report no_agent_instance if insert failed.
+  }
+
   const result = await runMatrixSummarySkill({
     matrixId: body.matrixId,
     scope,
@@ -45,8 +92,12 @@ export const POST = withTrace<[NextRequest]>(async (traceId, req) => {
     const status =
       result.errorCode === 'matrix_not_found' ? 404 :
       result.errorCode === 'no_agent_instance' ? 409 : 500;
+    const friendly =
+      result.errorCode === 'no_agent_instance'
+        ? '助手暂不可用：请先在设置中配置 AI 模型'
+        : `矩阵总结技能执行失败: ${result.errorCode ?? 'unknown'}`;
     return fail(traceId, {
-      message: `矩阵总结技能执行失败: ${result.errorCode ?? 'unknown'}`,
+      message: friendly,
       status,
       details: { errorCode: result.errorCode, runId: result.runId || null },
     });

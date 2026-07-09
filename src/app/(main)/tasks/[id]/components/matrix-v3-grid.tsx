@@ -16,7 +16,7 @@
  * relative fill-down is handled server-side by recompute-v3.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { Plus, Table2, Loader2, Type, Hash, Clock, Image as ImageIcon, AlertCircle, Calculator } from 'lucide-react';
+import { Plus, Table2, Loader2, Type, Hash, Clock, Image as ImageIcon, AlertCircle, Calculator, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -40,6 +40,11 @@ import type {
 import { cellKey, styleKey } from '@/lib/matrix/v3-types';
 import { MatrixFormulaEditor } from './matrix-formula-editor';
 import { MatrixV3MediaCell } from './matrix-v3-media-cell';
+import { MatrixMaterialStagingRail } from './matrix-material-staging-rail';
+import {
+  MatrixSummarySuggestionsDialog,
+  type SummarySuggestion,
+} from './matrix-summary-suggestions-dialog';
 
 interface MatrixV3GridProps {
   matrixId: string;
@@ -48,6 +53,10 @@ interface MatrixV3GridProps {
   onChanged: () => void;
   /** When false, formula editor is hidden (feature flag). Default true for Wave 3. */
   formulaEnabled?: boolean;
+  /** Wave 4 staging rail. */
+  stagingEnabled?: boolean;
+  /** Wave 5 Hermes matrix summary. */
+  hermesEnabled?: boolean;
 }
 
 // Zone display labels (PRD §7 / 附录 A).
@@ -144,6 +153,8 @@ export function MatrixV3Grid({
   projection,
   onChanged,
   formulaEnabled = true,
+  stagingEnabled = true,
+  hermesEnabled = true,
 }: MatrixV3GridProps) {
   const [gridRows, setGridRows] = useState<GridRow[]>([]);
   const [addingNode, setAddingNode] = useState(false);
@@ -160,6 +171,11 @@ export function MatrixV3Grid({
     colIndex: number;
     rowIndex: number;
   } | null>(null);
+
+  // Wave 5 Hermes summary
+  const [summaryBusy, setSummaryBusy] = useState(false);
+  const [summarySuggestions, setSummarySuggestions] = useState<SummarySuggestion[]>([]);
+  const [summaryDialogOpen, setSummaryDialogOpen] = useState(false);
 
   useEffect(() => {
     setGridRows(buildGridRows(projection));
@@ -201,6 +217,37 @@ export function MatrixV3Grid({
   // Hierarchy merge computation: for each grid row, determine if it's the
   // first row of its level1/level2/level3 group (rowspan start) and the span.
   const mergeInfo = computeMerges(gridRows);
+
+  const handleGenerateSummary = useCallback(async () => {
+    if (!hermesEnabled) {
+      toast.message('助手功能未启用');
+      return;
+    }
+    setSummaryBusy(true);
+    try {
+      const res = await fetch('/api/v1/agent/skills/matrix-evaluation-summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ matrixId, scope: 'by_level_1_group' }),
+      });
+      const json = await res.json();
+      if (json.code !== 0) {
+        toast.error(json.message || '助手暂不可用');
+        return;
+      }
+      const suggestions = (json.data?.suggestions ?? []) as SummarySuggestion[];
+      if (suggestions.length === 0) {
+        toast.message('未生成可用建议，请补充矩阵数据后重试');
+        return;
+      }
+      setSummarySuggestions(suggestions);
+      setSummaryDialogOpen(true);
+    } catch {
+      toast.error('助手暂不可用');
+    } finally {
+      setSummaryBusy(false);
+    }
+  }, [hermesEnabled, matrixId]);
 
   const handleAddLevel1 = useCallback(async () => {
     if (!newNodeLabel.trim()) return;
@@ -311,7 +358,7 @@ export function MatrixV3Grid({
   return (
     <div className="space-y-3">
       {/* Summary bar */}
-      <div className="flex items-center gap-3 text-sm text-muted-foreground">
+      <div className="flex items-center gap-3 text-sm text-muted-foreground flex-wrap">
         <Badge variant="secondary">{projection.summary.activeLeafRows} 行</Badge>
         <Badge variant="secondary">{columns.length} 列</Badge>
         <Badge variant="secondary">{projection.summary.filledCells} 已填</Badge>
@@ -320,6 +367,8 @@ export function MatrixV3Grid({
         )}
       </div>
 
+      <div className={cn('gap-3', stagingEnabled ? 'lg:grid lg:grid-cols-[1fr_200px]' : '')}>
+        <div className="space-y-3 min-w-0">
       {/* Grid */}
       <div className="border rounded-lg overflow-auto max-h-[70vh]" style={{ minWidth: 0 }}>
         <table className="border-collapse text-sm" style={{ tableLayout: 'fixed' }}>
@@ -486,8 +535,11 @@ export function MatrixV3Grid({
           block={summaryBlock}
           blockType="summary"
           label="小结"
-          placeholder="总结本矩阵结果（可点击 AI icon 生成建议）"
+          placeholder="总结本矩阵结果（可点击 AI 生成建议）"
           onChanged={onChanged}
+          hermesEnabled={hermesEnabled}
+          summaryBusy={summaryBusy}
+          onGenerateSummary={() => void handleGenerateSummary()}
         />
         {noteBlocks.map((nb) => (
           <NarrativeEditor
@@ -495,12 +547,24 @@ export function MatrixV3Grid({
             matrixId={matrixId}
             block={nb}
             blockType={nb.blockType}
-            label={ZONE_LABELS.detail_dimension ? '备注' : '备注'}
+            label="备注"
             placeholder="备注（测试口径、公式说明、异常条件等）"
             onChanged={onChanged}
           />
         ))}
       </div>
+        </div>
+
+        {stagingEnabled && (
+          <MatrixMaterialStagingRail taskId={taskId} className="hidden lg:flex sticky top-2 self-start" />
+        )}
+      </div>
+
+      {stagingEnabled && (
+        <div className="lg:hidden">
+          <MatrixMaterialStagingRail taskId={taskId} />
+        </div>
+      )}
 
       {pickMode && formulaColumn && (
         <div className="sticky bottom-0 z-30 rounded-md border border-primary/40 bg-primary/5 px-3 py-2 text-sm flex items-center justify-between gap-2">
@@ -535,6 +599,14 @@ export function MatrixV3Grid({
           onSaved={onChanged}
         />
       )}
+
+      <MatrixSummarySuggestionsDialog
+        open={summaryDialogOpen}
+        onOpenChange={setSummaryDialogOpen}
+        matrixId={matrixId}
+        suggestions={summarySuggestions}
+        onApplied={onChanged}
+      />
     </div>
   );
 }
@@ -802,6 +874,9 @@ function NarrativeEditor({
   label,
   placeholder,
   onChanged,
+  hermesEnabled,
+  summaryBusy,
+  onGenerateSummary,
 }: {
   matrixId: string;
   block: V3MatrixProjection['narratives'][number] | undefined;
@@ -809,6 +884,9 @@ function NarrativeEditor({
   label: string;
   placeholder: string;
   onChanged: () => void;
+  hermesEnabled?: boolean;
+  summaryBusy?: boolean;
+  onGenerateSummary?: () => void;
 }) {
   const [content, setContent] = useState(block?.content ?? '');
   const [saving, setSaving] = useState(false);
@@ -844,6 +922,20 @@ function NarrativeEditor({
       <div className="flex items-center gap-2 mb-1">
         <span className="text-sm font-medium">{label}</span>
         {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+        {blockType === 'summary' && hermesEnabled && onGenerateSummary && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1 text-xs ml-auto"
+            disabled={summaryBusy}
+            onClick={onGenerateSummary}
+            title="AI 生成小结建议"
+          >
+            {summaryBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+            AI 小结
+          </Button>
+        )}
       </div>
       <Textarea
         value={content}

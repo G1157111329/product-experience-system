@@ -26,8 +26,8 @@ export interface V3FeatureFlags {
 /**
  * Code-level defaults. Per PRD §14, matrix_tab_state_enabled stays ON so the
  * Tab never shows a blank page. Wave 2 enables the excel-like matrix path by
- * default; Wave 3 enables A1 formula editing. Remaining P1 capabilities
- * (Hermes / WeCom / staging / cell style) stay OFF.
+ * default; Wave 3 enables A1 formula editing; Wave 4/5 enable staging pool and
+ * Hermes matrix summary. WeCom ingest stays OFF until callback routes ship.
  */
 export const V3_FLAG_DEFAULTS: V3FeatureFlags = {
   matrixTabStateEnabled: true,
@@ -37,8 +37,8 @@ export const V3_FLAG_DEFAULTS: V3FeatureFlags = {
   dynamicMatrixCellStyleEnabled: false,
   inlineEditEnabled: true,
   autosaveEnabled: true,
-  materialStagingEnabled: false,
-  hermesAgentGatewayEnabled: false,
+  materialStagingEnabled: true,
+  hermesAgentGatewayEnabled: true,
   wecomMaterialIngestEnabled: false,
 };
 

@@ -119,8 +119,42 @@ export function MatrixV3MediaCell({
     }
   };
 
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const materialId = e.dataTransfer.getData('application/x-material-id');
+    if (!materialId) return;
+    if (selectedIds.includes(materialId)) {
+      toast.message('该素材已绑定');
+      return;
+    }
+    if (media.length >= maxCount) {
+      toast.error(`最多 ${maxCount} 个素材`);
+      return;
+    }
+    setSaving(true);
+    try {
+      await bindMaterial(materialId);
+      onChanged();
+      toast.success('已绑定素材');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '绑定失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <div className="px-1 py-1 min-h-[36px] space-y-1">
+    <div
+      className="px-1 py-1 min-h-[36px] space-y-1"
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes('application/x-material-id')) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'copy';
+        }
+      }}
+      onDrop={(e) => void handleDrop(e)}
+    >
       <div className="flex flex-wrap gap-1 items-center">
         {media.slice(0, maxCount).map((m) => (
           <div key={m.linkId} className="relative group">

@@ -38,7 +38,12 @@ export interface MatrixSummaryResult {
   traceId: string;
   status: 'succeeded' | 'failed';
   errorCode?: string;
-  suggestions: Array<{ id: string; blockType: string; content: string }>;
+  suggestions: Array<{
+    id: string;
+    blockType: string;
+    content: string;
+    scopeNodeId?: string | null;
+  }>;
 }
 
 type DbClient = Awaited<ReturnType<typeof getDb>>;
@@ -340,7 +345,12 @@ ${matrixContext}`;
   // Parse → persist suggestion blocks (all pending).
   const parsed = parseSummaryOutput(runResult.output, projection);
 
-  const persisted: Array<{ id: string; blockType: string; content: string }> = [];
+  const persisted: Array<{
+    id: string;
+    blockType: string;
+    content: string;
+    scopeNodeId?: string | null;
+  }> = [];
   for (const block of parsed) {
     const [row] = await db
       .insert(agentSuggestionBlocks)
@@ -360,10 +370,12 @@ ${matrixContext}`;
       .returning({ id: agentSuggestionBlocks.id, blockType: agentSuggestionBlocks.blockType, payload: agentSuggestionBlocks.payload })
       .execute();
     if (row) {
+      const payload = row.payload as Record<string, unknown> | null;
       persisted.push({
         id: row.id as string,
         blockType: row.blockType as string,
-        content: String((row.payload as Record<string, unknown>)?.content ?? ''),
+        content: String(payload?.content ?? ''),
+        scopeNodeId: typeof payload?.scopeNodeId === 'string' ? payload.scopeNodeId : null,
       });
     }
   }

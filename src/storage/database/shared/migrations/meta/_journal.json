@@ -71,6 +71,13 @@
                         "when":  1783900000006,
                         "version":  "7",
                         "tag":  "0009_enable_wave3_formula_flag"
+                    },
+                    {
+                        "idx":  10,
+                        "breakpoints":  true,
+                        "when":  1783900000007,
+                        "version":  "7",
+                        "tag":  "0010_enable_wave4_wave5_flags"
                     }
                 ]
 }

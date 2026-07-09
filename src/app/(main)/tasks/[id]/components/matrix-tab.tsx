@@ -42,6 +42,8 @@ interface TabStatePayload {
   flags?: {
     dynamicMatrixExcelLikeViewEnabled?: boolean;
     dynamicMatrixFormulaEnabled?: boolean;
+    materialStagingEnabled?: boolean;
+    hermesAgentGatewayEnabled?: boolean;
     taskMatrixEnabled?: boolean;
   };
   error?: string;
@@ -80,6 +82,8 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
   const [canCreate, setCanCreate] = useState(false);
   const [excelLike, setExcelLike] = useState(true);
   const [formulaEnabled, setFormulaEnabled] = useState(true);
+  const [stagingEnabled, setStagingEnabled] = useState(true);
+  const [hermesEnabled, setHermesEnabled] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [selectedMatrixId, setSelectedMatrixId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -101,6 +105,10 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
       setExcelLike(typeof flagExcel === 'boolean' ? flagExcel : true);
       const flagFormula = data.flags?.dynamicMatrixFormulaEnabled;
       setFormulaEnabled(typeof flagFormula === 'boolean' ? flagFormula : true);
+      const flagStaging = data.flags?.materialStagingEnabled;
+      setStagingEnabled(typeof flagStaging === 'boolean' ? flagStaging : true);
+      const flagHermes = data.flags?.hermesAgentGatewayEnabled;
+      setHermesEnabled(typeof flagHermes === 'boolean' ? flagHermes : true);
       return data;
     } catch {
       setTabState('api_error');
@@ -178,6 +186,8 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
             matrixId={selectedMatrixId}
             taskId={taskId}
             formulaEnabled={formulaEnabled}
+            stagingEnabled={stagingEnabled}
+            hermesEnabled={hermesEnabled}
             onBack={() => setSelectedMatrixId(null)}
           />
         ) : matrix?.status === 'designing' ? (
@@ -386,11 +396,15 @@ function MatrixV3Shell({
   matrixId,
   taskId,
   formulaEnabled = true,
+  stagingEnabled = true,
+  hermesEnabled = true,
   onBack,
 }: {
   matrixId: string;
   taskId: string;
   formulaEnabled?: boolean;
+  stagingEnabled?: boolean;
+  hermesEnabled?: boolean;
   onBack: () => void;
 }) {
   const [projection, setProjection] = useState<V3MatrixProjection | null>(null);
@@ -502,6 +516,8 @@ function MatrixV3Shell({
       taskId={taskId}
       projection={projection}
       formulaEnabled={formulaEnabled}
+      stagingEnabled={stagingEnabled}
+      hermesEnabled={hermesEnabled}
       onChanged={() => { void fetchProjection(); }}
     />
   );

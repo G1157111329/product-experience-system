@@ -43,6 +43,8 @@ interface MatrixTabStateResponse {
     dynamicMatrixExcelLikeViewEnabled: boolean;
     dynamicMatrixFormulaEnabled: boolean;
     inlineEditEnabled: boolean;
+    materialStagingEnabled: boolean;
+    hermesAgentGatewayEnabled: boolean;
   };
 }
 
@@ -70,6 +72,8 @@ export async function GET(
             dynamicMatrixExcelLikeViewEnabled: false,
             dynamicMatrixFormulaEnabled: false,
             inlineEditEnabled: false,
+            materialStagingEnabled: false,
+            hermesAgentGatewayEnabled: false,
           },
         },
         traceId,
@@ -84,6 +88,8 @@ export async function GET(
       dynamicMatrixExcelLikeViewEnabled: flags.dynamicMatrixExcelLikeViewEnabled,
       dynamicMatrixFormulaEnabled: flags.dynamicMatrixFormulaEnabled,
       inlineEditEnabled: flags.inlineEditEnabled,
+      materialStagingEnabled: flags.materialStagingEnabled,
+      hermesAgentGatewayEnabled: flags.hermesAgentGatewayEnabled,
     };
 
     // Feature fully disabled.
@@ -152,6 +158,8 @@ export async function GET(
           dynamicMatrixExcelLikeViewEnabled: false,
           dynamicMatrixFormulaEnabled: false,
           inlineEditEnabled: false,
+          materialStagingEnabled: false,
+          hermesAgentGatewayEnabled: false,
         },
         error: message,
       },

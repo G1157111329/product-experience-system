@@ -2,17 +2,17 @@
  * POST /api/v1/agent/suggestion-blocks/{id}/decide
  * PRD V3.1.2.4 §11.5 — Accept / reject / edit-accept a suggestion block.
  *
- * Body: { decision: 'accepted'|'rejected'|'edited_then_accepted', editedPayload? }
- * Transitions the block from 'pending' to the decided status. Only pending
- * blocks may be decided; idempotent re-decisions return 409.
+ * Body: { decision: 'accepted'|'rejected'|'edited_then_accepted', editedPayload?, matrixId? }
+ * On accept: upserts matrix_narrative_blocks and sets ai_suggestion_id.
  */
 import { NextRequest } from 'next/server';
-import { sql, eq } from 'drizzle-orm';
+import { sql, eq, and } from 'drizzle-orm';
 import { getDb } from '@/storage/database/pg-db';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { requireUser, isAuthResponse } from '@/lib/server/auth';
 import { ok, fail, unauthorized, notFound, withTrace } from '@/lib/server/api-v1/response';
-import { agentSuggestionBlocks } from '@/storage/database/shared/schema';
+import { agentSuggestionBlocks, matrixNarrativeBlocks } from '@/storage/database/shared/schema';
+import { getV3FeatureFlags } from '@/lib/feature-flags-v3';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,10 +21,23 @@ type Decision = 'accepted' | 'rejected' | 'edited_then_accepted';
 interface DecideBody {
   decision?: string;
   editedPayload?: unknown;
+  matrixId?: string;
 }
 
 function isDecision(value: unknown): value is Decision {
   return value === 'accepted' || value === 'rejected' || value === 'edited_then_accepted';
+}
+
+function extractContent(payload: unknown): string {
+  if (!payload || typeof payload !== 'object') return '';
+  const p = payload as Record<string, unknown>;
+  return typeof p.content === 'string' ? p.content : '';
+}
+
+function extractScopeNodeId(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const p = payload as Record<string, unknown>;
+  return typeof p.scopeNodeId === 'string' ? p.scopeNodeId : null;
 }
 
 export const POST = withTrace<[NextRequest, { params: Promise<{ id: string }> }]>(
@@ -34,6 +47,11 @@ export const POST = withTrace<[NextRequest, { params: Promise<{ id: string }> }]
     const client = getSupabaseClient();
     const user = await requireUser(req, client);
     if (isAuthResponse(user)) return unauthorized(traceId, 'unauthorized');
+
+    const flags = await getV3FeatureFlags();
+    if (!flags.hermesAgentGatewayEnabled) {
+      return fail(traceId, { message: '助手功能未启用', status: 403 });
+    }
 
     let body: DecideBody;
     try {
@@ -60,13 +78,14 @@ export const POST = withTrace<[NextRequest, { params: Promise<{ id: string }> }]
 
     const db = await getDb();
 
-    // Load current row.
     const existing = await db
       .select({
         id: agentSuggestionBlocks.id,
         status: agentSuggestionBlocks.status,
         blockType: agentSuggestionBlocks.blockType,
         payload: agentSuggestionBlocks.payload,
+        targetEntityType: agentSuggestionBlocks.targetEntityType,
+        targetEntityId: agentSuggestionBlocks.targetEntityId,
       })
       .from(agentSuggestionBlocks)
       .where(eq(agentSuggestionBlocks.id, blockId))
@@ -107,6 +126,70 @@ export const POST = withTrace<[NextRequest, { params: Promise<{ id: string }> }]
       })
       .execute();
 
+    let narrativeId: string | null = null;
+    if (body.decision === 'accepted' || body.decision === 'edited_then_accepted') {
+      const payload = existing[0].payload;
+      const content =
+        body.decision === 'edited_then_accepted'
+          ? extractContent(body.editedPayload) || extractContent(payload)
+          : extractContent(payload);
+      const scopeNodeId = extractScopeNodeId(payload);
+      const matrixId =
+        (typeof body.matrixId === 'string' ? body.matrixId : null) ||
+        (existing[0].targetEntityType === 'matrix' ? existing[0].targetEntityId : null);
+
+      if (matrixId && content.trim()) {
+        const scope = scopeNodeId ? 'level_1_group' : 'matrix';
+        const existingNarr = await db
+          .select({ id: matrixNarrativeBlocks.id })
+          .from(matrixNarrativeBlocks)
+          .where(
+            and(
+              eq(matrixNarrativeBlocks.matrixId, matrixId),
+              eq(matrixNarrativeBlocks.blockType, 'summary'),
+              eq(matrixNarrativeBlocks.scope, scope),
+              scopeNodeId
+                ? eq(matrixNarrativeBlocks.scopeNodeId, scopeNodeId)
+                : sql`${matrixNarrativeBlocks.scopeNodeId} IS NULL`,
+            ),
+          )
+          .limit(1)
+          .execute();
+
+        if (existingNarr[0]) {
+          await db
+            .update(matrixNarrativeBlocks)
+            .set({
+              content,
+              aiSuggestionId: blockId,
+              showInReport: true,
+              updatedBy: user.id,
+              updatedAt: sql`NOW()`,
+            })
+            .where(eq(matrixNarrativeBlocks.id, existingNarr[0].id))
+            .execute();
+          narrativeId = existingNarr[0].id;
+        } else {
+          const [created] = await db
+            .insert(matrixNarrativeBlocks)
+            .values({
+              matrixId,
+              blockType: 'summary',
+              scope,
+              scopeNodeId,
+              content,
+              aiSuggestionId: blockId,
+              showInReport: true,
+              sortOrder: 0,
+              updatedBy: user.id,
+            })
+            .returning({ id: matrixNarrativeBlocks.id })
+            .execute();
+          narrativeId = created?.id ?? null;
+        }
+      }
+    }
+
     return ok(
       {
         id: updated.id,
@@ -116,6 +199,7 @@ export const POST = withTrace<[NextRequest, { params: Promise<{ id: string }> }]
         editedPayload: updated.editedPayload,
         decidedBy: updated.decidedBy,
         decidedAt: updated.decidedAt,
+        narrativeId,
       },
       traceId,
     );
