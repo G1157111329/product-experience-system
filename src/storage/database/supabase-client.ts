@@ -21,13 +21,18 @@ export { platformUsers, platformAuditRequests, platformCategories, platformProdu
   agentSkillVersions, agentSkillAuditLogs, securityAuditLogs, securityRateLimits,
   comparisonAssemblies, comparisonObjects, comparisonItemNodes, comparisonMatrixCells,
   metricDefinitions, metricFormulaVersions, metricThresholdRules, metricEvaluations,
-  comparisonAiResults, reportSnapshots, pdfGenerationJobs, excelImportJobs,
+  comparisonAiResults, reportSnapshots,
+  matrixSchemas, matrixSchemaVersions, matrixDimensionBindings, matrixFormulaDefinitions,
+  matrixCalculationRuns,
+  pdfGenerationJobs, excelImportJobs,
   excelImportTemplates,
   projectPhaseDict, issueStatusDict, taskStatusDict, reportStatusDict,
   issueSeverityDict, slaPolicyDict,
   reportViewConfigs, reportOutlineSections, reportActionItems, exportJobs,
   renderProfiles, reportPrintBlocks, issueOccurrences, rectificationActions,
-  verifications, reportSummaries, aiRuns, outboxEvents, notifications } from './shared/schema';
+  verifications, reportSummaries, aiRuns, outboxEvents, notifications,
+  taskMatrices, matrixDesignVersions, matrixSections, matrixFieldDefinitions,
+  matrixGroups, matrixRows, matrixFieldValues, matrixNarratives } from './shared/schema';
 
 function getSupabaseUrl(): string | undefined {
   return process.env.NEXT_PUBLIC_SUPABASE_URL;

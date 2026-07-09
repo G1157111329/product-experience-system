@@ -45,7 +45,11 @@ export interface MatrixReadRow {
     issues: MatrixRowSlotIssues;
   };
   metrics: Record<string, MatrixMetricReadValue>;
-  evidence: { primaryCount: number; previewIds: string[] };
+  evidence: {
+    primaryCount: number;
+    previewIds: string[];
+    media?: Array<{ id: string; name: string; type: string; url: string; role?: string; owner?: string }>;
+  };
 }
 
 export interface MatrixReadGroup {

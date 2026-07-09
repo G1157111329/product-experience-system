@@ -2,10 +2,70 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessAssembly, isAuthResponse, requireUser } from '@/lib/server/auth';
 
-/**
- * GET /api/comparison-item-nodes?assembly_id=xxx
- * 列出某组装下的所有项目节点（按 sort_order 排序）
- */
+type ComparisonItemNodeSortRow = {
+  id: string;
+  parent_id?: string | null;
+  node_type?: string | null;
+  depth?: number | null;
+  sort_order?: number | null;
+};
+
+const COMPARISON_CHILD_ITEM_TYPES = ['item', 'condition', 'metric', 'process_node', 'issue_group'];
+
+function numericSortOrder(node: ComparisonItemNodeSortRow | null | undefined) {
+  return typeof node?.sort_order === 'number' ? node.sort_order : -1;
+}
+
+function nextTopLevelSort(nodes: ComparisonItemNodeSortRow[]) {
+  return Math.max(-1, ...nodes.map(numericSortOrder)) + 1;
+}
+
+function nextChildSort(parent: ComparisonItemNodeSortRow, nodes: ComparisonItemNodeSortRow[], nodeType: string) {
+  const siblings = nodes.filter((node) => node.parent_id === parent.id);
+  const siblingSorts = siblings.map(numericSortOrder).filter((sort) => sort >= 0);
+
+  if (COMPARISON_CHILD_ITEM_TYPES.includes(nodeType)) {
+    const summarySorts = siblings
+      .filter((node) => node.node_type === 'summary')
+      .map(numericSortOrder)
+      .filter((sort) => sort >= 0);
+    if (summarySorts.length > 0) return Math.min(...summarySorts);
+  }
+
+  if (siblingSorts.length > 0) return Math.max(...siblingSorts) + 1;
+  return numericSortOrder(parent) + 1;
+}
+
+async function shiftSortOrdersFrom(
+  client: ReturnType<typeof getSupabaseClient>,
+  assemblyId: string,
+  nodes: ComparisonItemNodeSortRow[],
+  insertionSort: number,
+) {
+  const affected = nodes
+    .filter((node) => numericSortOrder(node) >= insertionSort)
+    .sort((a, b) => numericSortOrder(b) - numericSortOrder(a));
+
+  for (const node of affected) {
+    const { error } = await client
+      .from('comparison_item_nodes')
+      .update({ sort_order: numericSortOrder(node) + 1, updated_at: new Date().toISOString() })
+      .eq('assembly_id', assemblyId)
+      .eq('id', node.id);
+    if (error) throw new Error(error.message);
+  }
+}
+
+async function getAssemblyNodes(client: ReturnType<typeof getSupabaseClient>, assemblyId: string) {
+  const { data, error } = await client
+    .from('comparison_item_nodes')
+    .select('id,parent_id,node_type,depth,sort_order')
+    .eq('assembly_id', assemblyId)
+    .order('sort_order', { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data || []) as ComparisonItemNodeSortRow[];
+}
+
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
   const user = await requireUser(request, client);
@@ -33,14 +93,6 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ code: 0, message: 'success', data });
 }
 
-/**
- * POST /api/comparison-item-nodes
- * 新增对比项目节点
- * body: {
- *   assembly_id, parent_id?, node_type, node_label,
- *   shared_recipe?, config?, depth?, is_collapsed?
- * }
- */
 export async function POST(request: NextRequest) {
   const client = getSupabaseClient();
   const user = await requireUser(request, client);
@@ -55,45 +107,33 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ code: 1, message: '无权访问' }, { status: 403 });
   }
 
-  // 计算 sort_order：按 parent_id 分组，取同父节点中 item 类型（非 summary）的最大 sort_order +1
-  // 新细项排在同类 item 末尾、summary 之前；新 summary 排在所有 item 之后
   let depth = typeof body.depth === 'number' ? body.depth : 0;
-  let nextSort: number;
-  if (body.parent_id) {
-    const { data: parent } = await client
-      .from('comparison_item_nodes')
-      .select('depth, sort_order')
-      .eq('id', body.parent_id)
-      .maybeSingle();
-    depth = (parent?.depth ?? -1) + 1;
-    // 取同一 parent_id 下、同类型范围的最大 sort_order
-    const isItemType = ['item', 'condition', 'metric', 'process_node', 'issue_group'].includes(body.node_type);
-    const typeFilter = isItemType ? ['item', 'condition', 'metric', 'process_node', 'issue_group'] : [body.node_type];
-    const { data: siblings } = await client
-      .from('comparison_item_nodes')
-      .select('sort_order')
-      .eq('assembly_id', body.assembly_id)
-      .eq('parent_id', body.parent_id)
-      .in('node_type', typeFilter)
-      .order('sort_order', { ascending: false })
-      .maybeSingle();
-    nextSort = (siblings?.sort_order ?? parent?.sort_order ?? -1) + 1;
-  } else {
-    // 顶层节点（section）：取全局最大 sort_order +1
-    const { data: existing } = await client
-      .from('comparison_item_nodes')
-      .select('sort_order')
-      .eq('assembly_id', body.assembly_id)
-      .is('parent_id', null)
-      .order('sort_order', { ascending: false })
-      .maybeSingle();
-    nextSort = (existing?.sort_order ?? -1) + 1;
+  let nextSort = 0;
+  try {
+    const nodes = await getAssemblyNodes(client, body.assembly_id);
+
+    if (body.parent_id) {
+      const parent = nodes.find((node) => node.id === body.parent_id) || null;
+      if (!parent) {
+        return NextResponse.json({ code: 1, message: '父级大类不存在' }, { status: 404 });
+      }
+      depth = (parent.depth ?? -1) + 1;
+      nextSort = nextChildSort(parent, nodes, body.node_type);
+      await shiftSortOrdersFrom(client, body.assembly_id, nodes, nextSort);
+    } else {
+      nextSort = nextTopLevelSort(nodes);
+    }
+  } catch (error) {
+    return NextResponse.json({
+      code: 1,
+      message: `计算排序失败: ${error instanceof Error ? error.message : 'unknown'}`,
+    }, { status: 500 });
   }
 
   const insertRow: Record<string, unknown> = {
     assembly_id: body.assembly_id,
     parent_id: body.parent_id ?? null,
-    node_type: body.node_type, // section | item | condition | process_node | metric | summary | issue_group
+    node_type: body.node_type,
     node_label: body.node_label,
     shared_recipe: body.shared_recipe ?? {},
     config: body.config ?? {},

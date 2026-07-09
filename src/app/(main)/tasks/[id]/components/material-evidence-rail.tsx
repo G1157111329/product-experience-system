@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { useImagePreview } from '@/components/image-preview';
 import { cn } from '@/lib/utils';
-import { isPendingMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
+import { getMediaSrc, isPendingMediaUrl, pendingMediaDataUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import type { EvidenceBindingTarget, Material, MaterialEvidenceFilter } from '../types';
 
 type MaterialEvidenceRailProps = {
@@ -33,7 +33,7 @@ const filters: Array<{ key: MaterialEvidenceFilter; label: string }> = [
 ];
 
 function isLinked(material: Material) {
-  return Boolean(material.record_id || material.recipe_step_id || material.recipe_id);
+  return Boolean(material.record_id || material.recipe_step_id || material.recipe_id || material.comparison_cell_id);
 }
 
 function matchesFilter(material: Material, filter: MaterialEvidenceFilter) {
@@ -50,6 +50,14 @@ function matchesFilter(material: Material, filter: MaterialEvidenceFilter) {
 
 function getMaterialPreviewUrl(material: Material, displayUrl: string) {
   return isPendingMediaUrl(displayUrl) ? (material.file_path || material.file_url || '') : displayUrl;
+}
+
+function getMaterialDisplayUrl(material: Material, signedUrl?: string) {
+  if (signedUrl) return signedUrl;
+  const fallback = getMediaSrc(material);
+  if (!fallback) return '';
+  if (/^(https?:|data:|\/api\/materials\/file\/|\/uploads\/|\/media\/)/.test(fallback)) return fallback;
+  return pendingMediaDataUrl;
 }
 
 export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange, embedded = false, compact = false }: MaterialEvidenceRailProps) {
@@ -250,7 +258,7 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
           ) : (
             filteredMaterials.map((material) => {
               const selected = selectedIds.includes(material.id);
-              const resolvedUrl = presignedUrls.get(material.id) || material.file_url || material.file_path || '';
+              const resolvedUrl = getMaterialDisplayUrl(material, presignedUrls.get(material.id));
               const previewUrl = getMaterialPreviewUrl(material, resolvedUrl);
               const isPendingVideo = material.material_type === 'video' && isPendingMediaUrl(resolvedUrl);
               return (

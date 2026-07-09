@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generatePresignedUrl } from '@/lib/server/storage';
+import { generatePresignedUrl, localFileExists } from '@/lib/server/storage';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessTask, canReadReport, getCurrentUser } from '@/lib/server/auth';
 
@@ -70,10 +70,11 @@ export async function POST(request: NextRequest) {
     const readableReportTaskId = user ? await resolveReadableReportTaskId(client, user, report_id) : null;
 
     // local + public access 模式下，素材通过 /uploads/ 静态目录公开访问，无需鉴权
-    // 这样分享页（未登录）也能正常加载素材，避免裂图
-    const isLocalPublicAccess = process.env.LOCAL_UPLOAD_PUBLIC_ACCESS !== 'protected'
+    // 这样分享页（未登录）也能正常加载素材，避免裂图。
+    // 灰度发布: 仅当该路径在本地真实存在时才跳过鉴权;S3 上的新文件仍需鉴权后签名。
+    const isLocalPublicMode = process.env.LOCAL_UPLOAD_PUBLIC_ACCESS !== 'protected'
       && process.env.STORAGE_DRIVER !== 's3';
-    if (!isLocalPublicAccess) {
+    if (!isLocalPublicMode) {
       if (!user && !sharedTaskId) {
         return NextResponse.json({ code: 1, message: '未登录' }, { status: 401 });
       }
@@ -87,14 +88,22 @@ export async function POST(request: NextRequest) {
     const urlMap: Record<string, string> = {};
 
     for (const path of limitedPaths) {
-      // local + public 模式：直接生成公开 URL，跳过素材归属鉴权（静态目录本就公开）
-      if (isLocalPublicAccess) {
-        try {
-          urlMap[path] = await generatePresignedUrl({ key: path, expireTime: 30 * 60 });
-        } catch (err) {
-          console.error('[presign] Failed for path:', path, err);
+      // local + public 模式下，若文件确实在本地静态目录存在，直接生成公开 URL 跳过鉴权；
+      // 否则（灰度发布时新上传到 S3 的文件）走鉴权分支。
+      if (isLocalPublicMode) {
+        const existsLocally = await localFileExists(path);
+        if (existsLocally) {
+          try {
+            urlMap[path] = await generatePresignedUrl({ key: path, expireTime: 30 * 60 });
+          } catch (err) {
+            console.error('[presign] Failed for path:', path, err);
+          }
+          continue;
         }
-        continue;
+        // Fall through to authenticated branch for S3-only files.
+        if (!user && !sharedTaskId) {
+          continue; // cannot auth → skip this path
+        }
       }
 
       const material = await findMaterialByPath(client, path);

@@ -839,6 +839,15 @@ export function MatrixInputView({ taskId, taskName }: MatrixInputViewProps) {
     [instanceId, refetchProjection],
   );
 
+  const clearCellFailure = useCallback((key: string) => {
+    setFailedCells((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
+
   // ----- Render guards -----
 
   if (loadError) {
@@ -923,15 +932,6 @@ export function MatrixInputView({ taskId, taskName }: MatrixInputViewProps) {
     onFocusRow: sharedHandlers.onFocusRow,
     onAddRowToGroup: sharedHandlers.onAddRowToGroup,
   };
-
-  const clearCellFailure = useCallback((key: string) => {
-    setFailedCells((prev) => {
-      if (!(key in prev)) return prev;
-      const next = { ...prev };
-      delete next[key];
-      return next;
-    });
-  }, []);
 
   return (
     <div className="flex min-w-0 flex-col gap-0">

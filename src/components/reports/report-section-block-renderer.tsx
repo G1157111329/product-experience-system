@@ -3,7 +3,7 @@
 import { Fragment, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { usePresignedUrls } from '@/lib/use-presigned-url';
+import { isPendingMediaUrl, pendingMediaDataUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import { cn } from '@/lib/utils';
 import type { ReportDetailMediaItem, ReportDetailModel, ReportDetailSection, ReportDetailSectionBlock } from '@/lib/server/report-detail';
 
@@ -85,11 +85,11 @@ function toRenderableMediaUrl(url: string) {
   ) {
     return url;
   }
-  return `/uploads/${url}`;
+  return pendingMediaDataUrl;
 }
 
 function usableResolvedMediaUrl(originalUrl: string, resolvedUrl: string | undefined) {
-  if (resolvedUrl && !resolvedUrl.startsWith('data:image/')) return resolvedUrl;
+  if (resolvedUrl) return resolvedUrl;
   return toRenderableMediaUrl(originalUrl);
 }
 
@@ -203,7 +203,11 @@ function InteractiveMediaStrip({
           )}
           title={item.name}
         >
-          {isImageType(item.type) ? (
+          {isPendingMediaUrl(item.url) ? (
+            <div className="flex h-full w-full items-center justify-center bg-muted text-[10px] text-muted-foreground">
+              加载中
+            </div>
+          ) : isImageType(item.type) ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={item.url} alt={item.name} className="h-full w-full object-cover transition-transform group-hover:scale-105" />
           ) : isVideoType(item.type) ? (
@@ -233,6 +237,27 @@ function InteractiveMediaStrip({
 
 function InlineMediaStrip({ media }: { media?: ReportDetailSectionBlock['media'] }) {
   return <InteractiveMediaStrip media={media} />;
+}
+
+function dataMatrixDimensionKey(dimension: Record<string, unknown>) {
+  return String(dimension.dimensionKey || dimension.key || '');
+}
+
+function dataMatrixDimensionLabel(dimension: Record<string, unknown>) {
+  return String(dimension.displayName || dimension.dimensionKey || dimension.key || '');
+}
+
+function dataMatrixMetricDisplay(metric: Record<string, unknown> | undefined) {
+  if (!metric) return '-';
+  if (metric.display) return String(metric.display);
+  if (metric.value !== undefined && metric.value !== null && metric.value !== '') return String(metric.value);
+  if (metric.text) return String(metric.text);
+  const state = String(metric.state || '');
+  if (state === 'missing') return '缺失';
+  if (state === 'not_applicable') return '不适用';
+  if (state === 'calculation_failed') return '计算失败';
+  if (state === 'pending') return '待计算';
+  return '-';
 }
 
 function isBlankMatrixText(value: string | undefined) {
@@ -265,7 +290,11 @@ function InteractiveMediaCards({ media }: { media?: ReportDetailSectionBlock['me
           onClick={() => setSelected(item)}
           className="min-w-0 overflow-hidden rounded-md border bg-muted/20 text-left text-xs transition-colors hover:bg-muted/40"
         >
-          {isImageType(item.type) ? (
+          {isPendingMediaUrl(item.url) ? (
+            <div className="flex h-28 w-full items-center justify-center bg-muted text-xs text-muted-foreground">
+              加载中
+            </div>
+          ) : isImageType(item.type) ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={item.url} alt={item.name} className="h-28 w-full object-cover" />
           ) : isVideoType(item.type) ? (
@@ -497,6 +526,56 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
         </div>
       )}
 
+      {block.type === 'data_matrix' && block.dataMatrix && block.dataMatrix.groups.length > 0 && (
+        <div className="max-w-full overflow-x-auto">
+          <table data-testid="report-data-matrix-block" className="w-full min-w-[56rem] border-collapse text-xs">
+            <thead>
+              <tr className="border-b bg-muted/30 text-left text-muted-foreground">
+                <th className="sticky left-0 z-10 w-36 bg-muted px-2 py-2 font-medium">分组</th>
+                <th className="w-36 px-2 py-2 font-medium">行项目</th>
+                {(block.dataMatrix.schema.dimensions || []).map((dimension) => (
+                  <th key={dataMatrixDimensionKey(dimension)} className="min-w-32 px-2 py-2 font-medium">
+                    {dataMatrixDimensionLabel(dimension)}
+                  </th>
+                ))}
+                <th className="min-w-28 px-2 py-2 font-medium">结果</th>
+                <th className="min-w-40 px-2 py-2 font-medium">证据/图片</th>
+              </tr>
+            </thead>
+            <tbody>
+              {block.dataMatrix.groups.flatMap((group) =>
+                group.rows.map((row) => {
+                  const evidenceMedia = row.evidence?.media || [];
+                  return (
+                    <tr key={row.id} data-testid="report-data-matrix-row" className="border-b last:border-0">
+                      <td className="sticky left-0 z-10 bg-background px-2 py-2 align-top font-medium text-foreground">
+                        {group.label}
+                      </td>
+                      <td className="px-2 py-2 align-top text-foreground">{row.subject?.label || row.id}</td>
+                      {(block.dataMatrix?.schema.dimensions || []).map((dimension) => {
+                        const key = dataMatrixDimensionKey(dimension);
+                        return (
+                          <td key={`${row.id}:${key}`} className="max-w-56 break-words px-2 py-2 align-top text-muted-foreground">
+                            {dataMatrixMetricDisplay(row.metrics?.[key])}
+                          </td>
+                        );
+                      })}
+                      <td className="max-w-48 break-words px-2 py-2 align-top text-muted-foreground">
+                        {row.slots?.result?.summary || row.slots?.result?.status || '-'}
+                      </td>
+                      <td className="px-2 py-2 align-top">
+                        <div className="text-[11px] text-muted-foreground">证据 {row.evidence?.primaryCount ?? evidenceMedia.length} 条</div>
+                        <InteractiveMediaStrip media={evidenceMedia} compact limit={6} context={`${group.label} / ${row.subject?.label || row.id}`} testId="report-data-matrix-media-item" />
+                      </td>
+                    </tr>
+                  );
+                }),
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {block.type === 'media' && (block.media?.length ?? 0) > 0 && (
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           <InteractiveMediaCards media={block.media?.slice(0, 12)} />
@@ -571,6 +650,9 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
     ...(block.items || []).flatMap((item) => item.media || []),
     ...(block.matrix?.rows || []).flatMap((row) =>
       (block.matrix?.objects || []).flatMap((object) => row.cells[object.id]?.media || []),
+    ),
+    ...(block.dataMatrix?.groups || []).flatMap((group) =>
+      group.rows.flatMap((row) => row.evidence?.media || []),
     ),
   ];
   const mediaMap = useResolvedReportMediaMap(allMedia);
@@ -667,6 +749,53 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
                 })}
               </tr>
             ))}
+          </tbody>
+        </table>
+        </div>
+      )}
+      {block.type === 'data_matrix' && block.dataMatrix && block.dataMatrix.groups.length > 0 && (
+        <div style={{ maxWidth: '100%', overflowX: 'auto' }}>
+        <table data-testid="print-data-matrix-block" style={{ width: '100%', minWidth: '100%', borderCollapse: 'collapse', fontSize: '9px', tableLayout: 'fixed' }}>
+          <thead>
+            <tr>
+              <th style={{ border: '1px solid #d1d5db', textAlign: 'left', padding: '5px', color: '#374151', width: '90px' }}>分组</th>
+              <th style={{ border: '1px solid #d1d5db', textAlign: 'left', padding: '5px', color: '#374151', width: '90px' }}>行项目</th>
+              {(block.dataMatrix.schema.dimensions || []).map((dimension) => (
+                <th key={dataMatrixDimensionKey(dimension)} style={{ border: '1px solid #d1d5db', textAlign: 'left', padding: '5px', color: '#374151' }}>
+                  {dataMatrixDimensionLabel(dimension)}
+                </th>
+              ))}
+              <th style={{ border: '1px solid #d1d5db', textAlign: 'left', padding: '5px', color: '#374151', width: '90px' }}>结果</th>
+              <th style={{ border: '1px solid #d1d5db', textAlign: 'left', padding: '5px', color: '#374151', width: '120px' }}>证据/图片</th>
+            </tr>
+          </thead>
+          <tbody>
+            {block.dataMatrix.groups.flatMap((group) =>
+              group.rows.map((row) => {
+                const evidenceMedia = resolveMedia(row.evidence?.media);
+                return (
+                  <tr key={row.id} data-testid="print-data-matrix-row">
+                    <td style={{ border: '1px solid #e5e7eb', padding: '5px', color: '#111827', verticalAlign: 'top', wordBreak: 'break-word' }}>{group.label}</td>
+                    <td style={{ border: '1px solid #e5e7eb', padding: '5px', color: '#111827', verticalAlign: 'top', wordBreak: 'break-word' }}>{row.subject?.label || row.id}</td>
+                    {(block.dataMatrix?.schema.dimensions || []).map((dimension) => {
+                      const key = dataMatrixDimensionKey(dimension);
+                      return (
+                        <td key={`${row.id}:${key}`} style={{ border: '1px solid #e5e7eb', padding: '5px', color: '#4b5563', verticalAlign: 'top', wordBreak: 'break-word' }}>
+                          {dataMatrixMetricDisplay(row.metrics?.[key])}
+                        </td>
+                      );
+                    })}
+                    <td style={{ border: '1px solid #e5e7eb', padding: '5px', color: '#4b5563', verticalAlign: 'top', wordBreak: 'break-word' }}>
+                      {row.slots?.result?.summary || row.slots?.result?.status || '-'}
+                    </td>
+                    <td style={{ border: '1px solid #e5e7eb', padding: '5px', color: '#4b5563', verticalAlign: 'top', wordBreak: 'break-word' }}>
+                      <div>证据 {row.evidence?.primaryCount ?? evidenceMedia.length} 条</div>
+                      <PrintMediaThumbs media={evidenceMedia} />
+                    </td>
+                  </tr>
+                );
+              }),
+            )}
           </tbody>
         </table>
         </div>

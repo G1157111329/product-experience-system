@@ -13,11 +13,21 @@ type MaterialRow = Record<string, unknown> & {
   comparison_assembly_id?: string | null;
 };
 
+type AccessibleMediaTarget = {
+  user: AuthUser;
+  cell: { id: string; assembly_id?: string | null };
+  assemblyId: string;
+  taskId?: string;
+  response?: never;
+} | {
+  response: NextResponse;
+};
+
 async function getAccessibleCell(
   client: ReturnType<typeof getSupabaseClient>,
   request: NextRequest,
   cellId: string,
-) {
+): Promise<AccessibleMediaTarget> {
   const user = await requireUser(request, client);
   if (isAuthResponse(user)) return { response: user };
 
@@ -29,17 +39,43 @@ async function getAccessibleCell(
   if (error) {
     return { response: NextResponse.json({ code: 1, message: error.message || '查询失败' }, { status: 500 }) };
   }
-  if (!cell?.assembly_id) {
-    return { response: NextResponse.json({ code: 1, message: '未找到矩阵单元格' }, { status: 404 }) };
+
+  if (cell?.assembly_id) {
+    const assemblyId = String(cell.assembly_id);
+    const accessible = await canAccessAssembly(client, user, assemblyId);
+    if (!accessible) {
+      return { response: NextResponse.json({ code: 1, message: '无权访问' }, { status: 403 }) };
+    }
+    return { user, cell, assemblyId };
   }
 
-  const assemblyId = String(cell.assembly_id);
-  const accessible = await canAccessAssembly(client, user, assemblyId);
-  if (!accessible) {
+  const { data: matrixRow, error: rowError } = await client
+    .from('matrix_rows')
+    .select('id,matrix_id')
+    .eq('id', cellId)
+    .maybeSingle();
+  if (rowError) {
+    return { response: NextResponse.json({ code: 1, message: rowError.message || '查询失败' }, { status: 500 }) };
+  }
+  if (!matrixRow?.matrix_id) {
+    return { response: NextResponse.json({ code: 1, message: '未找到矩阵单元格或数据矩阵行' }, { status: 404 }) };
+  }
+
+  const { data: matrix } = await client
+    .from('task_matrices')
+    .select('task_id')
+    .eq('id', String(matrixRow.matrix_id))
+    .maybeSingle();
+  if (!matrix?.task_id || !(await canAccessTask(client, user, String(matrix.task_id)))) {
     return { response: NextResponse.json({ code: 1, message: '无权访问' }, { status: 403 }) };
   }
 
-  return { user, cell, assemblyId };
+  return {
+    user,
+    cell: { id: cellId, assembly_id: null },
+    assemblyId: '',
+    taskId: String(matrix.task_id),
+  };
 }
 
 function roleForIndex(index: number) {
@@ -61,10 +97,10 @@ async function canUseMaterial(
   client: ReturnType<typeof getSupabaseClient>,
   user: AuthUser,
   material: MaterialRow,
-  assemblyId: string,
+  access: Extract<AccessibleMediaTarget, { user: AuthUser }>,
 ) {
   if (user.role === 'admin') return true;
-  if (material.comparison_assembly_id === assemblyId) return true;
+  if (access.assemblyId && material.comparison_assembly_id === access.assemblyId) return true;
   if (material.task_id) return canAccessTask(client, user, String(material.task_id));
   return false;
 }
@@ -120,7 +156,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const { data: material, error } = await loadMaterialById(client, materialId);
     if (error) return NextResponse.json({ code: 1, message: error.message || '素材查询失败' }, { status: 500 });
     if (!material) return NextResponse.json({ code: 1, message: `素材不存在: ${materialId}` }, { status: 404 });
-    if (!(await canUseMaterial(client, access.user, material as MaterialRow, access.assemblyId))) {
+    if (!(await canUseMaterial(client, access.user, material as MaterialRow, access))) {
       return NextResponse.json({ code: 1, message: `无权使用素材: ${materialId}` }, { status: 403 });
     }
     materials.push(material as MaterialRow);
@@ -149,7 +185,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       .from('materials')
       .update({
         comparison_cell_id: cellId,
-        comparison_assembly_id: access.assemblyId,
+        comparison_assembly_id: access.assemblyId || null,
         media_display_order: index,
         media_role: roleForIndex(index),
       })

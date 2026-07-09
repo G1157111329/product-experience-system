@@ -7,6 +7,7 @@ import {
   hasAnyPermission,
   hasPermission,
   isValidRole,
+  suggestRoleForLegacyUser,
 } from './rbac';
 
 export const SESSION_COOKIE_NAME = 'xp_session';
@@ -69,7 +70,19 @@ interface TokenPayload {
 }
 
 function isTokenRoleValid(role: unknown): role is AuthRole {
-  return typeof role === 'string' && isValidRole(role);
+  if (typeof role !== 'string') return false;
+  // Accept legacy 'user' role stored in session cookies issued before the V4
+  // RBAC migration. Those tokens are remapped to 'executor' when the claims are
+  // returned, so users are NOT forced to re-login just because the role enum
+  // changed. Without this, every old cookie (role='user') fails validation and
+  // the whole site returns 401 ("fail to fetch") for already-logged-in users.
+  if (role === 'user') return true;
+  return isValidRole(role);
+}
+
+/** Map a token role to the current AuthRole enum. Legacy 'user' -> 'executor'. */
+function normalizeTokenRole(role: AuthRole): AuthRole {
+  return role === ('user' as AuthRole) ? 'executor' : role;
 }
 
 interface TokenOptions {
@@ -173,7 +186,7 @@ export function verifySessionTokenClaims(token: string | undefined | null, optio
       id: payload.sub,
       account: payload.account,
       name: payload.name,
-      role: payload.role,
+      role: normalizeTokenRole(payload.role as AuthRole),
       issuedAt: Number(payload.iat || 0),
       expiresAt: payload.exp,
       persistent: payload.persistent === true,
@@ -279,7 +292,8 @@ export async function getCurrentUser(request: NextRequest, client: ClientLike): 
     .maybeSingle();
 
   if (!user || user.status !== 'approved') return null;
-  const dbRole = user.role as string;
+  const rawRole = user.role as string;
+  const dbRole = rawRole === 'user' ? suggestRoleForLegacyUser(false) : rawRole;
   if (!isValidRole(dbRole)) return null;
 
   return {

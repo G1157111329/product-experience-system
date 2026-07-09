@@ -3,6 +3,10 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canReadReport, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { loadLatestReportSnapshot } from '@/lib/server/report-snapshots';
 
+function isRecordLike(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
@@ -70,6 +74,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     } catch {
       hasMatrix = false;
     }
+  } else {
+    const dataMatrixProjection = content?.data_matrix_projection;
+    hasMatrix =
+      isRecordLike(dataMatrixProjection) &&
+      Array.isArray(dataMatrixProjection.groups) &&
+      dataMatrixProjection.groups.length > 0;
   }
   if (hasMatrix) availableTabs.push('matrix');
 

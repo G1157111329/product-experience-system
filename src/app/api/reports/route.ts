@@ -14,6 +14,8 @@ import {
 import { preserveReviewOverrides, type ReportContentWithReview } from '@/lib/report-review-overrides';
 import { buildComparisonReportSnapshot, findAssemblyForTask } from '@/lib/server/comparison-assembly';
 import { buildMatrixReadProjection, type MatrixReadProjection } from '@/lib/matrix/projection';
+import { getMatrixReadProjection } from '@/lib/matrix/projection-v2';
+import { adaptTaskMatrixProjectionForReport } from '@/lib/matrix/report-projection-adapter';
 
 /**
  * Find a data_matrix assembly linked to a task.
@@ -38,7 +40,31 @@ async function findDataMatrixAssemblyId(client: ReturnType<typeof getSupabaseCli
  * data_matrix assembly or the projection load fails. Failures are non-fatal —
  * a data-matrix projection error must never block report generation.
  */
-async function loadDataMatrixProjection(client: ReturnType<typeof getSupabaseClient>, taskId: string): Promise<{ assemblyId: string; projection: MatrixReadProjection } | null> {
+async function loadTaskMatrixProjection(client: ReturnType<typeof getSupabaseClient>, taskId: string): Promise<{ matrixId: string; projection: MatrixReadProjection } | null> {
+  const { data: matrices } = await client
+    .from('task_matrices')
+    .select('id,status,updated_at')
+    .eq('task_id', taskId)
+    .neq('status', 'archived')
+    .order('updated_at', { ascending: false })
+    .limit(1);
+
+  const matrixId = matrices?.[0]?.id ? String(matrices[0].id) : '';
+  if (!matrixId) return null;
+
+  const v2Projection = await getMatrixReadProjection(matrixId);
+  if (!v2Projection) return null;
+  return { matrixId, projection: adaptTaskMatrixProjectionForReport(v2Projection) };
+}
+
+async function loadDataMatrixProjection(client: ReturnType<typeof getSupabaseClient>, taskId: string): Promise<{ assemblyId?: string; matrixId?: string; projection: MatrixReadProjection } | null> {
+  try {
+    const taskMatrix = await loadTaskMatrixProjection(client, taskId);
+    if (taskMatrix) return taskMatrix;
+  } catch {
+    // fall back to legacy assembly model below
+  }
+
   let assemblyId: string | null = null;
   try {
     assemblyId = await findDataMatrixAssemblyId(client, taskId);
@@ -820,10 +846,11 @@ export async function POST(request: NextRequest) {
       const assemblyMeta = (fresh?.assemblyId ?? dataMatrix?.assemblyId)
         ? await loadDataMatrixAssemblyMeta(client, String(fresh?.assemblyId ?? dataMatrix?.assemblyId))
         : null;
+      const freshProjectionMeta = freshProjection as unknown as Record<string, unknown>;
       const frozenProjection = {
         ...freshProjection,
-        comparabilityStatus: assemblyMeta?.comparabilityStatus,
-        matrixSchemaVersionId: assemblyMeta?.matrixSchemaVersionId,
+        comparabilityStatus: assemblyMeta?.comparabilityStatus ?? freshProjectionMeta.comparabilityStatus,
+        matrixSchemaVersionId: assemblyMeta?.matrixSchemaVersionId ?? freshProjectionMeta.matrixSchemaVersionId,
       };
       const frozenSnapshotJson = {
         report_type: 'single_report',

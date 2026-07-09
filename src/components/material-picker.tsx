@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Plus, Loader2, Film, Image as ImageIcon, Camera, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -8,7 +8,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { ImagePreview, MediaThumbnail } from './image-preview';
 import { MediaCaptureDialog } from './media-capture-dialog';
 import { cn } from '@/lib/utils';
-import { toPublicMediaUrl } from '@/lib/use-presigned-url';
+import { getMediaSrc, pendingMediaDataUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import { toast } from 'sonner';
 
 export interface Material {
@@ -49,6 +49,12 @@ interface MaterialPickerProps {
 
 type FilterType = 'all' | 'image' | 'video';
 
+function inferMaterialType(nameOrUrl: string): 'image' | 'video' {
+  const ext = (nameOrUrl.split('.').pop() || '').toLowerCase();
+  if (['mp4', 'mov', 'webm', 'm4v', 'avi', 'mkv'].includes(ext)) return 'video';
+  return 'image';
+}
+
 export function MaterialPicker({
   taskId,
   open: controlledOpen,
@@ -88,7 +94,21 @@ export function MaterialPicker({
   const galleryVideoInputRef = useRef<HTMLInputElement>(null);
 
   const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
-  const materialUrl = (material: Material) => toPublicMediaUrl(material.file_path || material.file_url) || material.file_url;
+  const allKnownMaterials = useMemo(() => {
+    const byId = new Map<string, Material>();
+    for (const material of materials) byId.set(material.id, material);
+    for (const material of Object.values(selectedMaterialMap)) byId.set(material.id, material);
+    return Array.from(byId.values());
+  }, [materials, selectedMaterialMap]);
+  const presignedUrls = usePresignedUrls(allKnownMaterials);
+  const materialUrl = (material: Material) => {
+    const signedUrl = presignedUrls.get(material.id);
+    if (signedUrl) return signedUrl;
+    const fallback = getMediaSrc(material);
+    if (!fallback) return material.file_url;
+    if (/^(https?:|data:|\/api\/materials\/file\/|\/uploads\/|\/media\/)/.test(fallback)) return fallback;
+    return pendingMediaDataUrl;
+  };
   const setIsOpen = onOpenChange || setInternalOpen;
 
   useEffect(() => {
@@ -115,6 +135,22 @@ export function MaterialPicker({
       if (data.code !== 0) return;
 
       let list: Material[] = Array.isArray(data.data) ? data.data : (data.data?.list || []);
+
+      // Map filesystem-based material objects to the Material interface expected
+      // by the picker.
+      list = list.map((material: any) => ({
+        ...material,
+        material_type: material.material_type || inferMaterialType(material.url || material.name || material.file_name || ''),
+        file_url: material.url || material.file_url || '',
+        file_name: material.name || material.file_name || material.id || '',
+        file_size: material.size ?? material.file_size ?? 0,
+        task_id: material.taskId || material.task_id || taskId,
+        record_id: material.record_id ?? null,
+        recipe_step_id: material.recipe_step_id ?? null,
+        recipe_id: material.recipe_id ?? null,
+        issue_id: material.issue_id ?? null,
+        re_evaluation_id: material.re_evaluation_id ?? null,
+      }));
 
       if (onSelect && !onSelectionChange) {
         list = list.filter((material) => {

@@ -9,7 +9,7 @@
 | Web | Next.js 15.5.19 App Router, React 19, TypeScript 5 |
 | UI | shadcn/ui, Radix UI, Tailwind CSS 4 |
 | 数据库 | PostgreSQL + Drizzle ORM，本地模式通过 Supabase 兼容层复用 API 写法 |
-| 文件存储 | **默认 local 模式写入 `public/uploads`**；可切换 S3 兼容对象存储（MinIO / AWS S3 / 火山引擎 TOS） |
+| 文件存储 | **默认 local 模式写入 `public/uploads`**；可切换 S3 兼容对象存储（MinIO / AWS S3 / 火山引擎 TOS / Garage）。生产支持 local + S3 **灰度共存**：`STORAGE_DRIVER=local` 保护旧文件，`NEW_UPLOAD_DRIVER=s3` 让新上传走 Garage，读取链路自动双路径 fallback |
 | AI | 可配置的 Chat Completions 兼容接口 |
 | 文档解析 | pdf-parse, xlsx |
 | 包管理 | pnpm |
@@ -53,7 +53,17 @@ LOCAL_UPLOAD_PUBLIC_ACCESS_ACCEPTED=
 # 云服务器/内网部署时建议配置为平台可访问的完整站点地址
 PUBLIC_MEDIA_BASE_URL=http://<host>:5000
 
-# 如需切回 S3/MinIO，将 STORAGE_DRIVER 改为 s3 并取消以下注释
+# 灰度共存（可选）：STORAGE_DRIVER 保持 local 保护旧文件，
+# 同时让「新上传」走 S3。读取链路会自动 local-then-S3 双路径 fallback。
+# 不设置 NEW_UPLOAD_DRIVER 时默认跟随 STORAGE_DRIVER。
+# NEW_UPLOAD_DRIVER=s3
+# S3_ENDPOINT=http://127.0.0.1:3900   # Garage 默认端口
+# S3_REGION=garage
+# S3_BUCKET=xp-experience-media
+# S3_ACCESS_KEY=<access-key>
+# S3_SECRET_KEY=<secret-key>
+
+# 如需整体切到 S3/MinIO（一刀切，无 local 兜底），将 STORAGE_DRIVER 改为 s3 并配置 S3_*
 # S3_ENDPOINT=http://<s3-host>:<port>
 # S3_REGION=<region>
 # S3_BUCKET=<bucket-name>
@@ -156,9 +166,17 @@ NODE_ENV=production PORT=5000 pnpm start
 4. 在目标数据库执行 `database-schema.sql` 和 `scripts/verify-security-schema.sql`，留存执行结果。
 5. 验证通过后设置 `SECURITY_SCHEMA_VERIFIED=true`。
 6. 执行 `pnpm ts-check`、`pnpm build`、`pnpm audit --audit-level moderate --registry https://registry.npmjs.org`。
+   - **低内存服务器（≤2G RAM）构建必读**：`next build` 会因 OOM 失败。构建前临时加 swap：`sudo fallocate -l 4G /swap-build.img && sudo chmod 600 /swap-build.img && sudo mkswap /swap-build.img && sudo swapon /swap-build.img`，构建完成后再 `sudo swapoff /swap-build.img && sudo rm /swap-build.img`。
+   - **构建需要 DATABASE_URL**：Next.js 的 page-data 收集阶段会连库，需把运行时 env（DATABASE_URL、AUTH_SESSION_SECRET、AI_CONFIG_ENCRYPTION_KEY、SECURITY_SCHEMA_VERIFIED 等）source 进构建环境。
 7. 使用 PM2、systemd 或同类进程管理器执行 `pnpm start`，并由 Nginx/Caddy 等反向代理提供 HTTPS。
+   - PM2 推荐用 `ecosystem.config.cjs` 管理进程，所有 env 写在 `env: {}` 块；重启用 `pm2 delete <name> && pm2 start ecosystem.config.cjs && pm2 save`。
 8. 将 `public/uploads` 挂载到持久化磁盘目录；使用 S3 模式时确认 bucket、访问密钥和生命周期策略。
-9. 完成登录、素材上传、报告生成、分享、导出和审计日志查询回归。
+   - **灰度共存（推荐）**：保持 `STORAGE_DRIVER=local`，加 `NEW_UPLOAD_DRIVER=s3` + S3_* env，旧文件零迁移、新上传走 S3。详见 `docs/operations/2026-07-06-object-storage-gray-release.md`。
+9. 部署数据矩阵特性需额外执行矩阵迁移（已登记进 drizzle journal）：
+   - `psql "$DATABASE_URL" -f src/storage/database/shared/migrations/0002_matrix_input_tables.sql`（V1 schema 注册表 5 张表 + comparison_assemblies/metric_evaluations 扩展列）
+   - `psql "$DATABASE_URL" -f src/storage/database/shared/migrations/0003_task_matrix_model.sql`（**V2 用户自设计模型 8 张表，当前 UI 实际使用，必须执行**）
+   - `pnpm seed:matrix-schema`（仅 V1 黄金样本，V2 模型不需要）
+10. 完成登录、素材上传、报告生成、分享、导出和审计日志查询回归。
 
 ### 当前生产实例备注
 
@@ -248,15 +266,17 @@ docker compose -f docker-compose.local.yml down -v
 
 ## 存储模式说明
 
-默认文件存储模式是 **local**：上传文件写入 `public/uploads`，数据库仅保存相对对象 key。S3 兼容对象存储是可选切换模式，适用于需要 MinIO、AWS S3、火山引擎 TOS 等统一对象存储的部署环境。
+默认文件存储模式是 **local**：上传文件写入 `public/uploads`，数据库仅保存相对对象 key。S3 兼容对象存储是可选切换模式，适用于需要 MinIO、AWS S3、Garage、火山引擎 TOS 等统一对象存储的部署环境。
 
 | 模式 | `STORAGE_DRIVER` | 文件去向 | URL 生成 |
 | --- | --- | --- | --- |
 | 本地（默认） | `local` | 写入 `LOCAL_UPLOAD_DIR`（默认 `./public/uploads`） | 默认 `/uploads/<key>` 稳定静态 URL；显式加固时可切换为 `/api/materials/file/<key>` 短期签名 URL |
-| S3 兼容 | `s3` | 上传到 S3/MinIO bucket | presigned URL（86400 秒有效期） |
+| S3 兼容 | `s3` | 上传到 S3/MinIO/Garage bucket | presigned URL（86400 秒有效期） |
+| **灰度共存（生产已上线）** | `local` + `NEW_UPLOAD_DRIVER=s3` | 新上传走 S3，旧文件留 local | 读取时先 stat 本地，存在走 local，不存在 fallback S3 presigned URL |
 
 - **local 模式**：文件直接写入磁盘，Next.js 通过静态路径提供访问；如需让外部服务读取素材，`PUBLIC_MEDIA_BASE_URL` 需指向平台可访问的地址。
 - **S3 模式**：使用 AWS SDK 上传文件到 S3 兼容存储，访问时生成 presigned URL；素材删除调用 `DeleteObjectCommand`。
+- **灰度共存模式**：`STORAGE_DRIVER=local` 不变（保护旧文件静态路径），`NEW_UPLOAD_DRIVER=s3` 让新上传走 S3。读取链路自动双路径 fallback，无需迁移旧文件。当前生产用 Garage 单节点（`127.0.0.1:3900`，仅本机绑定），运维细节见 `docs/operations/2026-07-06-object-storage-gray-release.md`。
 - **缺失素材兜底**：local 模式下文件不存在时返回 SVG 占位图；presign API 对已缺失的 key 也返回占位图。
 - **前端兼容**：`usePresignedUrl` hook 自动识别本地路径（`/uploads/...`）、data URL、完整 HTTP URL，仅对 S3 对象 key 调用 presign 接口。
 
@@ -402,3 +422,7 @@ LOCAL_MEDIA_SIGNING_SECRET=<long-random-local-media-signing-secret>
 - 报告生成会重新汇总五感体验问题和功能效果问题，并自动创建问题记录。
 - 前期研究、自研和改型/降本/优化类型报告会按 `product_model` 做列表、详情、打印页和分享页合并展示。
 - AI Agent 的五感体验预设只使用标准候选上下文；功能效果/食谱预设只使用食谱库上下文，避免两类建议相互污染。
+- 任务详情录入目录当前为一级入口：AI方案 / 对比矩阵 / 数据矩阵 / 五感体验 / 功能效果 / 总结。数据矩阵入口始终并列展示，进入后先显示矩阵列表卡片，再进入具体矩阵录入网格。
+- 对比矩阵的大类、条目、小结按 `comparison_item_nodes.parent_id + sort_order` 维护层级顺序；在某个大类内新增条目时插入该大类小结之前，新增小结时追加到该大类末尾且仍位于下一大类之前，避免“大类小结”在报告矩阵中漂移或丢失。
+- 数据矩阵是任务详情页的可选 Tab（与五感体验、功能效果、对比矩阵并列）。当前运行的是 **V2 用户自设计模型**：用户在任务内自建矩阵 → 5 步设计器（基础结构 / 字段分区 / 字段与证据 / 公式与问题规则 / 预览确认）→ 确认后进入录入（桌面端表格 grid、移动端分组卡片）。矩阵结构、字段、公式全部由本次任务自行设计，不依赖平台预设 schema。数据存独立表族（`task_matrices` 等，迁移 `0003_task_matrix_model.sql`）。仓库另保留 V1 schema-driven 模型代码（管理员发布模式 → 任务应用），预留给后续「可复用设计库」使用，当前 UI 不调用。功能开关在 `platform_settings.feature_flag_task_matrix`，默认全开。
+- 数据矩阵行级证据复用素材表，`/api/comparison-cells/[id]/media` 同时兼容既有对比矩阵 cell id 和 V2 `matrix_rows.id`；报告中心矩阵 Tab、报告详情模型、分享页和 PDF 导出都会读取 `evidence.media` 并在服务端导出前 presign，防止图片/视频在报告和 PDF 中裂图。

@@ -7,7 +7,6 @@
 import { spawn } from "child_process";
 import { rename, unlink } from "fs/promises";
 import path from "path";
-import os from "os";
 
 const FASTSTART_EXTENSIONS = new Set([".mp4", ".m4v", ".mov"]);
 
@@ -25,9 +24,13 @@ export async function faststartRemux(filePath: string): Promise<boolean> {
   if (!needsFaststart(filePath)) return true; // not a video, skip silently
 
   return new Promise((resolve) => {
+    // Temp file MUST live on the same filesystem as the target so the final
+    // rename is an atomic, same-device operation. Using os.tmpdir() (/tmp) breaks
+    // when uploads are on a separate data disk (EXDEV cross-device rename),
+    // e.g. after migrating public/uploads to a dedicated volume.
     const tmpPath = path.join(
-      os.tmpdir(),
-      `faststart-${Date.now()}-${Math.random().toString(36).slice(2)}${path.extname(filePath)}`
+      path.dirname(filePath),
+      `.faststart-${Date.now()}-${Math.random().toString(36).slice(2)}${path.extname(filePath)}`
     );
 
     const ffmpeg = spawn("ffmpeg", [

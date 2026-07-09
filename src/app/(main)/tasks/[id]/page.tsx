@@ -33,7 +33,7 @@ import { ReportAuthoringShell } from './components/report-authoring-shell';
 import { SensesInputWorkspace } from './components/senses-input-workspace';
 import { FunctionsInputWorkspace } from './components/functions-input-workspace';
 import { ComparisonWorkspace } from './components/comparison-workspace';
-import { MatrixInputView } from './components/matrix-input-view';
+import { MatrixTab } from './components/matrix-tab';
 import type { EvidenceBindingTarget } from './types';
 
 /* ─── Types ─── */
@@ -177,6 +177,11 @@ export default function TaskDetailPage() {
   const [aiSummarizing, setAiSummarizing] = useState(false);
   const [aiSummarySaving, setAiSummarySaving] = useState(false);
   const [reportRecipes, setReportRecipes] = useState<Recipe[]>([]);
+  // Track whether recipes have been loaded at least once, so switching to the
+  // functions tab doesn't re-fetch all materials on every visit. A re-fetch is
+  // still triggered explicitly by handleMaterialsChanged / handleAgentAccepted
+  // when data actually changes.
+  const recipesLoadedRef = useRef(false);
   const [summaryForm, setSummaryForm] = useState({
     tag: '',
     satisfaction_score: '0',
@@ -204,6 +209,7 @@ export default function TaskDetailPage() {
 
   const fetchReportRecipes = useCallback(async () => {
     setReportRecipes(await loadRecipesForTask(id));
+    recipesLoadedRef.current = true;
   }, [id]);
 
   const handleAgentAccepted = useCallback((mode: 'senses' | 'recipes') => {
@@ -221,7 +227,10 @@ export default function TaskDetailPage() {
   useEffect(() => { fetchAiSummary(); }, [fetchAiSummary]);
   useEffect(() => { fetchReportRecipes(); }, [fetchReportRecipes]);
   useEffect(() => {
-    if (activeTab === 'functions') fetchReportRecipes();
+    // Only auto-fetch when entering the functions tab if recipes haven't been
+    // loaded yet. Subsequent tab switches reuse cached data; explicit refreshes
+    // (handleMaterialsChanged / handleAgentAccepted) invalidate via re-fetch.
+    if (activeTab === 'functions' && !recipesLoadedRef.current) fetchReportRecipes();
   }, [activeTab, fetchReportRecipes]);
   useEffect(() => {
     const tab = searchParams.get('tab');
@@ -460,7 +469,7 @@ export default function TaskDetailPage() {
           <ComparisonWorkspace taskId={id} taskName={task.task_name} initialLayoutType={task.comparison_layout_type} />
         )}
         {activeTab === 'matrix' && (
-          <MatrixInputView taskId={id} taskName={task.task_name} />
+          <MatrixTab taskId={id} taskName={task.task_name} />
         )}
         {activeTab === 'senses' && <SensesTab taskId={id} records={task.records || []} taskProductCategory={task.product_category} taskProduct={task.product} onRefresh={fetchTask} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onBindingTargetChange={setEvidenceBindingTarget} />}
         {activeTab === 'functions' && <FunctionsTab taskId={id} initialRecipes={reportRecipes} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onRecipesChange={setReportRecipes} onBindingTargetChange={setEvidenceBindingTarget} />}

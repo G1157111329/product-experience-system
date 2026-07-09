@@ -239,14 +239,17 @@ export function ComparisonWorkspace({
         return next;
       });
 
-      const mediaEntries = await Promise.all(
-        (data.data.cells || []).map(async (cell) => {
-          const mediaRes = await fetch(`/api/comparison-cells/${cell.id}/media`);
-          const mediaData = await mediaRes.json() as ApiResponse<CellMediaResponse>;
-          return [cell.id, cellMediaFromResponse(mediaData.data)] as const;
-        })
-      );
-      setCellMediaById(Object.fromEntries(mediaEntries));
+      // Batch-load all cell media in one request (replaces the per-cell N+1 pattern
+      // that fired one /api/comparison-cells/[id]/media request per cell).
+      try {
+        const mediaRes = await fetch(`/api/comparison-assemblies/${encodeURIComponent(assemblyId)}/cell-media`, { cache: 'no-store' });
+        const mediaJson = await mediaRes.json() as ApiResponse<{ media_by_cell?: Record<string, Material[]> }>;
+        if (mediaJson.code === 0 && mediaJson.data?.media_by_cell) {
+          setCellMediaById(mediaJson.data.media_by_cell);
+        }
+      } catch {
+        // network error: leave cell media empty; individual cells can be refreshed on demand
+      }
     } else {
       toast.error(data.message || '加载对比矩阵失败');
     }

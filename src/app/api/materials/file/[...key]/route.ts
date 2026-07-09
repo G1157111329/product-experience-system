@@ -5,6 +5,8 @@ import {
   createLocalFileReadStream,
   getLocalContentType,
   isNginxAccelRedirect,
+  isS3FallbackAvailable,
+  localFileExists,
   NGINX_UPLOADS_INTERNAL,
   statLocalFile,
   STORAGE_DRIVER,
@@ -66,29 +68,110 @@ export async function GET(
   const { key } = await params;
   const fileKey = key.join('/');
 
-  if (STORAGE_DRIVER === 's3') {
-    return NextResponse.json({ code: 1, message: 'S3 storage uses presigned object URLs' }, { status: 404 });
-  }
-
   const token = request.nextUrl.searchParams.get('token');
   const exp = request.nextUrl.searchParams.get('exp');
   const hasValidToken = verifyLocalMediaToken(fileKey, token, exp);
 
-  if (!hasValidToken) {
-    const client = getSupabaseClient();
-    const user = await getCurrentUser(request, client);
-    if (!user) return NextResponse.json({ code: 1, message: '未登录' }, { status: 401 });
+  // Gray-release: figure out where the file lives.
+  // - STORAGE_DRIVER=s3 (pure S3): skip local probe, go straight to S3 stream.
+  // - otherwise: probe local; if present, serve local; if absent and S3 is
+  //   configured as fallback, stream from S3 (new uploads in gray-release mode).
+  const existsLocally = STORAGE_DRIVER === 's3' ? false : await localFileExists(fileKey);
+  const useS3 = !existsLocally && isS3FallbackAvailable();
 
-    const material = await findMaterialByPath(client, fileKey);
-    const canAccess = user.role === 'admin'
-      || (material?.task_id && await canAccessTask(client, user, String(material.task_id)));
-    if (!canAccess) return NextResponse.json({ code: 1, message: '无权限' }, { status: 403 });
+  if (!existsLocally && !useS3) {
+    return NextResponse.json({ code: 1, message: '素材文件不存在' }, { status: 404 });
   }
 
+  // Auth: required for any non-public path (S3 fallback or local protected mode).
+  // The local-public-access + valid-token path stays open (legacy behavior for
+  // public/uploads static-style access via signed token).
+  if (!hasValidToken) {
+    const isLocalPublic = STORAGE_DRIVER !== 's3'
+      && (process.env.LOCAL_UPLOAD_PUBLIC_ACCESS || 'public') !== 'protected'
+      && existsLocally;
+    if (!isLocalPublic) {
+      const client = getSupabaseClient();
+      const user = await getCurrentUser(request, client);
+      if (!user) return NextResponse.json({ code: 1, message: '未登录' }, { status: 401 });
+
+      const material = await findMaterialByPath(client, fileKey);
+      const canAccess = user.role === 'admin'
+        || (material?.task_id && await canAccessTask(client, user, String(material.task_id)));
+      if (!canAccess) return NextResponse.json({ code: 1, message: '无权限' }, { status: 403 });
+    }
+  }
+
+  const contentType = getLocalContentType(fileKey);
+  const cacheControl = hasValidToken ? 'private, max-age=300' : 'no-store';
+
+  // S3 streaming path (supports Range for video playback).
+  if (useS3) {
+    try {
+      const { getS3Client, S3_BUCKET } = await import('@/lib/server/storage');
+      const { HeadObjectCommand, GetObjectCommand } = await import('@aws-sdk/client-s3');
+      const client = getS3Client();
+
+      // Head to get size for Range handling.
+      const head = await client.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: fileKey }));
+      const totalSize = head.ContentLength ?? 0;
+
+      const range = parseRange(request.headers.get('range'), totalSize);
+      if (range?.invalid) {
+        return new NextResponse(null, {
+          status: 416,
+          headers: {
+            'Content-Range': `bytes */${totalSize}`,
+            'Accept-Ranges': 'bytes',
+            'Content-Type': contentType,
+            'Cache-Control': cacheControl,
+            'X-Content-Type-Options': 'nosniff',
+          },
+        });
+      }
+
+      if (range) {
+        const s3Resp = await client.send(new GetObjectCommand({
+          Bucket: S3_BUCKET,
+          Key: fileKey,
+          Range: `bytes=${range.start}-${range.end}`,
+        }));
+        if (!s3Resp.Body) return NextResponse.json({ code: 1, message: '素材读取失败' }, { status: 500 });
+        const body = s3Resp.Body.transformToWebStream() as ReadableStream<Uint8Array>;
+        return new NextResponse(body, {
+          status: 206,
+          headers: {
+            'Content-Type': s3Resp.ContentType || contentType,
+            'Content-Length': String(range.end - range.start + 1),
+            'Content-Range': `bytes ${range.start}-${range.end}/${totalSize}`,
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': cacheControl,
+            'X-Content-Type-Options': 'nosniff',
+          },
+        });
+      }
+
+      const s3Resp = await client.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: fileKey }));
+      if (!s3Resp.Body) return NextResponse.json({ code: 1, message: '素材读取失败' }, { status: 500 });
+      const body = s3Resp.Body.transformToWebStream() as ReadableStream<Uint8Array>;
+      return new NextResponse(body, {
+        headers: {
+          'Content-Type': s3Resp.ContentType || contentType,
+          'Content-Length': String(totalSize),
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': cacheControl,
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    } catch (error) {
+      console.error('[materials/file] S3 stream failed for key:', fileKey, error);
+      return NextResponse.json({ code: 1, message: '素材读取失败' }, { status: 500 });
+    }
+  }
+
+  // Local streaming path (unchanged behavior).
   try {
     const fileStat = await statLocalFile(fileKey);
-    const contentType = getLocalContentType(fileKey);
-    const cacheControl = hasValidToken ? 'private, max-age=300' : 'no-store';
 
     if (isNginxAccelRedirect()) {
       const encodedKey = fileKey.split('/').map(encodeURIComponent).join('/');

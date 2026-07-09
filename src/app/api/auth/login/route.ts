@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
       id: user.id,
       account: user.account,
       name: user.name,
-      role: user.role,
+      role: user.role === 'user' ? 'executor' : user.role,
     };
     await writeSecurityAudit(supabase, {
       request,

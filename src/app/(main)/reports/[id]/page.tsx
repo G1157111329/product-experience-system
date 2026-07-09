@@ -42,7 +42,7 @@ interface SummaryData {
     recipeCount: number;
   };
   conclusion: { level: string; text: string };
-  matrixType: 'multi_matrix' | 'single_waterfall' | null;
+  matrixType: 'multi_matrix' | 'single_waterfall' | 'data_matrix' | null;
 }
 
 interface IssueItem extends IssueForRectification {

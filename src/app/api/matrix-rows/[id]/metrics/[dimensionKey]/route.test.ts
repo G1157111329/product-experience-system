@@ -4,7 +4,7 @@ import {
   emptyMetricBody,
   versionConflict,
   type DimensionBindingLike,
-} from './route';
+} from '@/lib/matrix/metric-helpers';
 
 /**
  * Route-level validation tests for the metric PATCH endpoint.

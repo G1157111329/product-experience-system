@@ -245,6 +245,8 @@ export async function createAssembly(
     source_task_ids: input.sourceTaskIds ?? [],
     source_report_ids: input.sourceReportIds ?? [],
     created_by: input.createdBy,
+    matrix_role: 'comparison',
+    comparability_status: 'unknown',
   };
   const { data, error } = await client
     .from('comparison_assemblies')

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canReadReport, isAuthResponse, requireUser, type AuthUser } from '@/lib/server/auth';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
-import { buildReportDetailModel } from '@/lib/server/report-detail';
+import { buildReportDetailModel, presignReportMediaUrls } from '@/lib/server/report-detail';
 import { renderReportDetailPdfHtml } from '@/lib/server/report-print-renderer';
 import { loadLatestReportSnapshot } from '@/lib/server/report-snapshots';
 
@@ -190,6 +190,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         : { width: 900, height: 1200 },
     });
     await page.emulateMedia({ media: 'print' });
+    // Server-side PDF render has no /api/materials/presign to call, so resolve
+    // storage keys to absolute URLs now. Gray-release aware (local-then-S3).
+    await presignReportMediaUrls(detail);
     await page.setContent(renderReportDetailPdfHtml(detail, new Date()), { waitUntil: 'networkidle' });
     const pdfBuffer = await page.pdf({
       format: delivery.profile.paper,

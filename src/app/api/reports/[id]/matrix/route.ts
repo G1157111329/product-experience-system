@@ -3,6 +3,8 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canReadReport, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { loadLatestReportSnapshot } from '@/lib/server/report-snapshots';
 import { buildMatrixReadProjection, type MatrixReadProjection } from '@/lib/matrix/projection';
+import { getMatrixReadProjection } from '@/lib/matrix/projection-v2';
+import { adaptTaskMatrixProjectionForReport } from '@/lib/matrix/report-projection-adapter';
 
 type Row = Record<string, unknown>;
 
@@ -30,6 +32,17 @@ async function findDataMatrixAssemblyId(client: ReturnType<typeof getSupabaseCli
   return match?.id || null;
 }
 
+async function findTaskMatrixId(client: ReturnType<typeof getSupabaseClient>, taskId: string): Promise<string | null> {
+  const { data: matrices } = await client
+    .from('task_matrices')
+    .select('id,status,updated_at')
+    .eq('task_id', taskId)
+    .neq('status', 'archived')
+    .order('updated_at', { ascending: false })
+    .limit(1);
+  return matrices?.[0]?.id ? String(matrices[0].id) : null;
+}
+
 /**
  * Resolve a data-matrix projection for a report (Sub-task D).
  * Prefers the frozen snapshot (`snapshot_json.matrix_projection`, §11.3 no-drift);
@@ -44,6 +57,11 @@ async function resolveDataMatrixProjection(
   if (frozen && Array.isArray(frozen.groups)) return frozen;
   if (!taskId) return null;
   try {
+    const taskMatrixId = await findTaskMatrixId(client, taskId);
+    if (taskMatrixId) {
+      const taskMatrixProjection = await getMatrixReadProjection(taskMatrixId);
+      if (taskMatrixProjection) return adaptTaskMatrixProjectionForReport(taskMatrixProjection);
+    }
     const assemblyId = await findDataMatrixAssemblyId(client, taskId);
     if (!assemblyId) return null;
     return await buildMatrixReadProjection(client, assemblyId);
@@ -99,7 +117,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const taskId = report.task_id ? String(report.task_id) : '';
   const hasFrozenDataMatrix = isRecordLike(snapshotJson?.matrix_projection) && Array.isArray((snapshotJson!.matrix_projection as Row).groups);
   const hasContentDataMatrix = isRecordLike(content?.data_matrix_projection);
-  if (hasFrozenDataMatrix || hasContentDataMatrix || (taskId && (await findDataMatrixAssemblyId(client, taskId)))) {
+  if (hasFrozenDataMatrix || hasContentDataMatrix || (taskId && ((await findTaskMatrixId(client, taskId)) || (await findDataMatrixAssemblyId(client, taskId))))) {
     const dataMatrix = await resolveDataMatrixProjection(client, snapshotJson, taskId);
     if (dataMatrix) {
       return NextResponse.json({

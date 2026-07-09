@@ -2,10 +2,23 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { useState, useCallback, useEffect, type KeyboardEvent } from 'react';
+import { useState, useCallback, useEffect, useMemo, type KeyboardEvent } from 'react';
 import { X, ZoomIn, ZoomOut, Play, ImageOff, VideoOff } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { usePresignedUrl } from '@/lib/use-presigned-url';
+
+/** Extract a storage key (e.g. "experience-media/.../x.png") from a url that may
+ *  be a raw key, a /uploads/... path, or an already-absolute URL. Returns null
+ *  for data URLs / remote URLs where no local key can be derived. */
+function toStorageKey(value: string | null | undefined): string | null {
+  if (!value) return null;
+  if (value.startsWith('data:')) return null;
+  if (value.startsWith('http')) return null;
+  if (value.startsWith('/uploads/')) return value.slice('/uploads/'.length);
+  if (value.startsWith('/api/materials/file/')) return null;
+  // Raw storage key (e.g. "experience-media/.../x.png")
+  return value.replace(/^\/+/, '');
+}
 
 interface ImagePreviewProps {
   url: string | null;
@@ -106,9 +119,24 @@ export function MediaThumbnail({ url, type, onClick, size = 'md', responsive }: 
   const isVideo = type === 'video';
   const presignedSrc = usePresignedUrl(url);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [thumbFallback, setThumbFallback] = useState(false);
+
+  // Derive a thumbnail/poster URL from the storage key so list/grid views load
+  // small derivatives instead of multi-MB originals. Falls back to the presigned
+  // original when the key can't be derived or the derivative fails to load.
+  const storageKey = useMemo(() => toStorageKey(url), [url]);
+  const thumbUrl = useMemo(
+    () => (storageKey && !isVideo && !thumbFallback ? `/api/materials/thumb/${storageKey}` : null),
+    [storageKey, isVideo, thumbFallback],
+  );
+  const posterUrl = useMemo(
+    () => (storageKey && isVideo ? `/api/materials/poster/${storageKey}` : null),
+    [storageKey, isVideo],
+  );
 
   useEffect(() => {
     setLoadFailed(false);
+    setThumbFallback(false);
   }, [presignedSrc, url]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -130,13 +158,30 @@ export function MediaThumbnail({ url, type, onClick, size = 'md', responsive }: 
         <MediaLoadError type={isVideo ? 'video' : 'image'} />
       ) : isVideo ? (
         <>
-          <video src={presignedSrc || undefined} className="w-full h-full object-cover" muted preload="metadata" onError={() => setLoadFailed(true)} />
+          <video
+            src={presignedSrc || undefined}
+            poster={posterUrl || undefined}
+            className="w-full h-full object-cover"
+            muted
+            preload="metadata"
+            onError={() => setLoadFailed(true)}
+          />
           <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/40 transition-colors">
             <Play className="h-5 w-5 text-white fill-white" />
           </div>
         </>
       ) : (
-        <img src={presignedSrc || undefined} alt="" className="w-full h-full object-cover" loading="lazy" onError={() => setLoadFailed(true)} />
+        <img
+          src={thumbUrl || presignedSrc || undefined}
+          alt=""
+          className="w-full h-full object-cover"
+          loading="lazy"
+          onError={() => {
+            // If the thumbnail 404/fails (e.g. file only in S3), fall back to original.
+            if (thumbUrl) setThumbFallback(true);
+            else setLoadFailed(true);
+          }}
+        />
       )}
     </div>
   );

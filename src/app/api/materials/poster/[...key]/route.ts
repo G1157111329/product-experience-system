@@ -1,6 +1,7 @@
 import { execFile } from 'child_process';
 import { createReadStream } from 'fs';
-import { mkdir, stat } from 'fs/promises';
+import { mkdir, stat, unlink, writeFile } from 'fs/promises';
+import os from 'os';
 import path from 'path';
 import { Readable } from 'stream';
 import { promisify } from 'util';
@@ -9,6 +10,8 @@ import { canAccessTask, getCurrentUser } from '@/lib/server/auth';
 import {
   getLocalContentType,
   isLocalUploadPublicAccess,
+  isS3FallbackAvailable,
+  localFileExists,
   LOCAL_UPLOAD_DIR,
   STORAGE_DRIVER,
   verifyLocalMediaToken,
@@ -111,17 +114,13 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ key: string[] }> },
 ) {
-  if (STORAGE_DRIVER === 's3') {
-    return NextResponse.json({ code: 1, message: 'S3 storage does not support local poster generation' }, { status: 404 });
-  }
-
   const { key } = await params;
   let safeKey: string;
-  let sourcePath: string;
+  let localSourcePath: string;
   try {
     const resolved = resolveUploadPath(key.join('/'));
     safeKey = resolved.safeKey;
-    sourcePath = resolved.target;
+    localSourcePath = resolved.target;
   } catch {
     return NextResponse.json({ code: 1, message: 'Invalid media path' }, { status: 400 });
   }
@@ -134,11 +133,45 @@ export async function GET(
     return NextResponse.json({ code: 1, message: '未登录或无权访问素材' }, { status: 401 });
   }
 
+  // Decide source location (gray-release aware).
+  const existsLocally = STORAGE_DRIVER === 's3' ? false : await localFileExists(safeKey);
+  const useS3 = !existsLocally && isS3FallbackAvailable();
+  if (!existsLocally && !useS3) {
+    return NextResponse.json({ code: 1, message: '视频源文件不存在' }, { status: 404 });
+  }
+
+  // Poster cache lives next to local uploads regardless of source.
+  const posterPath = path.resolve(LOCAL_UPLOAD_DIR, '.posters', ...safeKey.split('/')) + '.jpg';
+
   try {
-    await stat(sourcePath);
-    const posterPath = path.resolve(LOCAL_UPLOAD_DIR, '.posters', ...safeKey.split('/')) + '.jpg';
-    if (!(await isFreshPoster(sourcePath, posterPath))) {
-      await generatePoster(sourcePath, posterPath);
+    // For S3 sources, we need the bytes locally to run ffmpeg. Download once
+    // to a temp path (per request), and reuse the local poster cache for output.
+    let ffmpegSourcePath = localSourcePath;
+    let tmpDownloadPath: string | null = null;
+    if (useS3) {
+      // S3 poster freshness: just regenerate each call is wasteful; cache by
+      // poster file mtime presence (no source mtime comparison available).
+      const posterExists = await stat(posterPath).then(() => true).catch(() => false);
+      if (!posterExists) {
+        const { getS3Client, S3_BUCKET } = await import('@/lib/server/storage');
+        const { GetObjectCommand } = await import('@aws-sdk/client-s3');
+        const client = getS3Client();
+        const s3Resp = await client.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: safeKey }));
+        if (!s3Resp.Body) throw new Error('S3 object body empty');
+        const buf = Buffer.from(await s3Resp.Body.transformToByteArray());
+        tmpDownloadPath = path.join(os.tmpdir(), `poster-src-${Date.now()}${path.extname(safeKey) || '.mp4'}`);
+        await writeFile(tmpDownloadPath, buf);
+        ffmpegSourcePath = tmpDownloadPath;
+        try {
+          await generatePoster(ffmpegSourcePath, posterPath);
+        } finally {
+          await unlink(tmpDownloadPath).catch(() => {});
+        }
+      }
+    } else {
+      if (!(await isFreshPoster(localSourcePath, posterPath))) {
+        await generatePoster(localSourcePath, posterPath);
+      }
     }
 
     const posterStat = await stat(posterPath);

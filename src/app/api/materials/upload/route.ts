@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generatePresignedUrl, LOCAL_UPLOAD_DIR, STORAGE_DRIVER, uploadFile } from '@/lib/server/storage';
+import fs from 'fs';
+import { generatePresignedUrl, LOCAL_UPLOAD_DIR, STORAGE_DRIVER, uploadFile, isNewUploadS3 } from '@/lib/server/storage';
 import { faststartRemux } from '@/lib/server/video';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessAssembly, canAccessTask, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
@@ -267,25 +268,27 @@ export async function POST(request: NextRequest) {
         extension: uploadType.extension,
         existingFileNames,
       });
-    const folderId = recipe_library_step_id || issue_id || task_id || comparison_cell_id || 'unknown';
-    const storageFileName = `experience-media/${folderId}/${materialType}/${generatedFileName}`;
+    const folderId = task_id || recipe_library_step_id || issue_id || comparison_cell_id || 'unknown';
+    // Store materials locally under public/uploads/materials/[taskId]/ so the
+    // GET /api/materials endpoint can serve them directly from the filesystem.
+    const localDir = path.join(process.cwd(), 'public', 'uploads', 'materials', folderId);
+    fs.mkdirSync(localDir, { recursive: true });
+    const storageFileName = path.join(localDir, generatedFileName);
 
     let fileKey: string | undefined;
     const maxRetries = isLargeFile ? 2 : 0;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        fileKey = await uploadFile({
-          fileContent: Readable.fromWeb(file.stream() as unknown as NodeReadableStream<Uint8Array>),
-          fileName: storageFileName,
-          contentType: file.type,
-        });
+        const buffer = Buffer.from(await file.arrayBuffer());
+        fs.writeFileSync(storageFileName, buffer);
+        fileKey = `materials/${folderId}/${generatedFileName}`;
         break;
       } catch (uploadErr) {
-        console.error(`[upload] S3 upload attempt ${attempt + 1} failed:`, uploadErr);
+        console.error(`[upload] local upload attempt ${attempt + 1} failed:`, uploadErr);
         if (attempt === maxRetries) {
           return NextResponse.json({
             code: 1,
-            message: `文件上传失败(${(file.size / 1024 / 1024).toFixed(1)}MB)，请检查网络后重试`,
+            message: `文件上传失败(${(file.size / 1024 / 1024).toFixed(1)}MB)，请检查磁盘空间后重试`,
           }, { status: 500 });
         }
         await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
@@ -297,9 +300,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Faststart remux for video files: move moov atom to beginning
-    // so browsers can load metadata without seeking to end of file
-    if (materialType === 'video' && STORAGE_DRIVER !== 's3') {
-      const videoPath = path.join(LOCAL_UPLOAD_DIR, fileKey);
+    // so browsers can load metadata without seeking to end of file.
+    if (materialType === 'video') {
+      const videoPath = path.join(process.cwd(), 'public', 'uploads', fileKey);
       faststartRemux(videoPath).catch(err =>
         console.warn('[upload] faststart background task failed:', err)
       );
@@ -339,12 +342,9 @@ export async function POST(request: NextRequest) {
       metadata: { materialType, fileSize: file.size, storageDriver: process.env.STORAGE_DRIVER || 'local' },
     });
 
-    let accessibleUrl = fileKey;
-    try {
-      accessibleUrl = await generatePresignedUrl({ key: fileKey, expireTime: 30 * 60 });
-    } catch (urlError) {
-      console.error('[upload] URL generation failed:', urlError);
-    }
+    // Local materials are exposed directly from /uploads/materials/...; no
+    // presigned URL needed.
+    const accessibleUrl = `/uploads/${fileKey}`;
 
     return NextResponse.json({ code: 0, message: '上传成功', data: { ...data, file_url: accessibleUrl } });
   } catch (err) {

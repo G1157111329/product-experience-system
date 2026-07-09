@@ -14,6 +14,17 @@ export async function GET(request: NextRequest) {
   if (!key) return NextResponse.json({ code: 1, message: '缺少 key 参数' }, { status: 400 });
   if (key === 'ai_config' && user.role !== 'admin') return forbidden();
 
+  if (key === 'feature_flag_task_matrix') {
+    const defaultMatrixFlags = {
+      taskMatrixEnabled: true,
+      matrixRuntimeDesignerEnabled: true,
+      matrixFormulaBuilderEnabled: true,
+      matrixBatchPasteEnabled: true,
+      matrixSnapshotAuditEnabled: true,
+    };
+    return NextResponse.json({ code: 0, message: 'success', data: defaultMatrixFlags });
+  }
+
   const { data, error } = await client.from('platform_settings').select('value').eq('key', key).maybeSingle();
   if (error) return NextResponse.json({ code: 1, message: '查询失败' }, { status: 500 });
   if (key === 'ai_config' && data?.value && typeof data.value === 'object') {

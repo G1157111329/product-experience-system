@@ -170,6 +170,16 @@ function isDirectPrintableUrl(value: string): boolean {
   return value.startsWith('http') || value.startsWith('/uploads/') || value.startsWith('/media/') || value.startsWith('data:');
 }
 
+const pendingPrintableMediaDataUrl =
+  `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96"><rect width="96" height="96" rx="8" fill="#f3f4f6"/><text x="48" y="51" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#6b7280">加载素材</text></svg>',
+  )}`;
+
+function printableMatrixMediaUrl(value: string | null | undefined): string {
+  if (!value) return pendingPrintableMediaDataUrl;
+  return isDirectPrintableUrl(value) ? value : pendingPrintableMediaDataUrl;
+}
+
 function printableMediaUrl(material: { file_url?: string | null; file_path?: string | null }) {
   return toPublicMediaUrl(material.file_url || material.file_path) || '';
 }
@@ -345,7 +355,12 @@ function PrintInlineMatrix({ detailModel }: { detailModel: ReportDetailModel }) 
                               {cell.media.slice(0, 3).map((m) => (
                                 <div key={m.id} style={{ width: '48px', height: '48px', overflow: 'hidden', borderRadius: '3px', border: '1px solid #e5e7eb' }}>
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img src={m.url || ''} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                  <img
+                                    src={printableMatrixMediaUrl(m.url)}
+                                    data-media-key={m.url || ''}
+                                    alt=""
+                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                  />
                                 </div>
                               ))}
                             </div>
@@ -368,6 +383,12 @@ function PrintInlineMatrix({ detailModel }: { detailModel: ReportDetailModel }) 
 }
 
 // ── 单食谱列表式卡片（全展开，不分割）──
+function PrintDataMatrixSections({ detailModel }: { detailModel: ReportDetailModel }) {
+  const sections = detailModel.sections.filter((section) => section.key === 'data_matrix');
+  if (sections.length === 0) return null;
+  return <ReportPrintSectionBlocks sections={sections} />;
+}
+
 function PrintRecipeCard({ recipe }: { recipe: Record<string, unknown> }) {
   const name = String(recipe.name || '');
   const recipeType = String(recipe.recipe_type || '');
@@ -1089,10 +1110,14 @@ function ReportPrintContent() {
       // Step 1: Update DOM img/video src from S3 key to presigned URL
       for (const [fp, presignedUrl] of Object.entries(presignedMap)) {
         document.querySelectorAll('img').forEach((img) => {
-          if (img.getAttribute('src') === fp) (img as HTMLImageElement).src = presignedUrl;
+          if (img.getAttribute('src') === fp || img.getAttribute('data-media-key') === fp) {
+            (img as HTMLImageElement).src = presignedUrl;
+          }
         });
         document.querySelectorAll('video').forEach((vid) => {
-          if (vid.getAttribute('src') === fp) (vid as HTMLVideoElement).src = presignedUrl;
+          if (vid.getAttribute('src') === fp || vid.getAttribute('data-media-key') === fp) {
+            (vid as HTMLVideoElement).src = presignedUrl;
+          }
         });
       }
 
@@ -1381,6 +1406,10 @@ function ReportPrintContent() {
             {/* 横向对比矩阵（仅对比报告，仅渲染一次，不重复） */}
             {rpt.report_type === 'comparison_report' && rptSnapshot && (
               <PrintInlineMatrix detailModel={rptSnapshot} />
+            )}
+
+            {rptSnapshot && (
+              <PrintDataMatrixSections detailModel={rptSnapshot} />
             )}
 
             {/* 功能效果（单食谱列表式，全展开） */}

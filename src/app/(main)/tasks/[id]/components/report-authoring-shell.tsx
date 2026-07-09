@@ -32,10 +32,10 @@ type ReportAuthoringShellProps = {
 };
 
 const baseNavItems: Array<{ key: TaskTabKey; label: string; icon: ComponentType<{ className?: string }> | null }> = [
-  { key: 'agent', label: 'AI体验方案', icon: WandSparkles },
+  { key: 'agent', label: 'AI方案', icon: WandSparkles },
   { key: 'senses', label: '五感体验', icon: Eye },
   { key: 'functions', label: '功能效果', icon: Wrench },
-  { key: 'info', label: 'AI总结/报告', icon: FileText },
+  { key: 'info', label: '总结', icon: FileText },
 ];
 
 export function ReportAuthoringShell({
@@ -43,7 +43,6 @@ export function ReportAuthoringShell({
   activeTab,
   agentOpen,
   isComparisonTask = true,
-  hasMatrixInstance = false,
   onTabChange,
   onAgentOpenChange,
   materialRail,
@@ -53,25 +52,14 @@ export function ReportAuthoringShell({
   const matrixNavItem = { key: 'matrix' as const, label: '数据矩阵', icon: Table };
   const navItems = (() => {
     if (isComparisonTask) {
-      const withComparison = [
+      return [
         baseNavItems[0],
         { key: 'comparison' as const, label: '对比矩阵', icon: GitCompareArrows },
+        matrixNavItem,
         ...baseNavItems.slice(1),
       ];
-      if (hasMatrixInstance) {
-        const comparisonIndex = withComparison.findIndex((item) => item.key === 'comparison');
-        return [
-          ...withComparison.slice(0, comparisonIndex + 1),
-          matrixNavItem,
-          ...withComparison.slice(comparisonIndex + 1),
-        ];
-      }
-      return withComparison;
     }
-    if (hasMatrixInstance) {
-      return [baseNavItems[0], matrixNavItem, ...baseNavItems.slice(1)];
-    }
-    return baseNavItems;
+    return [baseNavItems[0], matrixNavItem, ...baseNavItems.slice(1)];
   })();
 
   const compactRail = useMemo(() => {

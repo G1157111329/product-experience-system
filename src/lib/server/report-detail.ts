@@ -1,4 +1,4 @@
-﻿type Row = Record<string, unknown>;
+type Row = Record<string, unknown>;
 
 export type ReportViewMode = 'read' | 'data' | 'evidence' | 'review' | 'print';
 export type ReportSectionStatus = 'ready' | 'empty' | 'warning' | 'blocked';
@@ -142,7 +142,7 @@ export type ReportDetailDataMatrixProjection = {
         process?: { note?: string };
         issues?: { count: number; severitySummary: string[] };
       };
-      evidence?: { primaryCount: number; previewIds: string[] };
+      evidence?: { primaryCount: number; previewIds: string[]; media?: ReportDetailMediaItem[] };
     }>;
   }>;
   calculation?: { status: string; lastRunId?: string };
@@ -565,6 +565,38 @@ function mediaItems(materials: Row[], owner?: string) {
   return materials.map((material) => mediaItem(material, owner)).filter((item): item is ReportDetailMediaItem => Boolean(item));
 }
 
+function mediaItemDedupKey(item: ReportDetailMediaItem) {
+  return firstNonEmpty(item.id, item.url, item.name);
+}
+
+function uniqueMediaItems(items: ReportDetailMediaItem[]) {
+  const seen = new Set<string>();
+  const result: ReportDetailMediaItem[] = [];
+  for (const item of items) {
+    const key = mediaItemDedupKey(item);
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    result.push(item);
+  }
+  return result;
+}
+
+function materialDedupKey(material: Row) {
+  return firstNonEmpty(material.id, material.file_path, material.file_url, material.url, material.src);
+}
+
+function uniqueMaterials(materials: Row[]) {
+  const seen = new Set<string>();
+  const result: Row[] = [];
+  for (const material of materials) {
+    const key = materialDedupKey(material);
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    result.push(material);
+  }
+  return result;
+}
+
 function mediaByIds(materials: Row[], ids: string[], owner?: string) {
   if (ids.length === 0) return [];
   const wanted = new Set(ids.filter(Boolean));
@@ -598,11 +630,11 @@ function issueEvidenceMedia(issue: Row, recordById: Map<string, Row>, allMateria
     || text(material.record_id) === text(issue.record_id)
   ));
   const record = recordById.get(text(issue.record_id)) || recordById.get(text(issue.id));
-  return [
+  return uniqueMediaItems([
     ...mediaItems(rows(issue.materials), firstNonEmpty(issue.title, issue.check_item, issue.id)),
     ...mediaItems(rows(record?.materials), firstNonEmpty(issue.title, issue.check_item, record?.check_item, issue.id)),
     ...mediaItems(direct, firstNonEmpty(issue.title, issue.check_item, issue.id)),
-  ];
+  ]);
 }
 
 function reEvaluationRows(issue: Row) {
@@ -777,8 +809,8 @@ function contentSections(report: Row, content: Row, issues: Row[], materials: Ro
     const effectProblemText = parseProblemPoints(recipe.effect_problem_point).map((point) => point.text).join('; ');
     return {
       '功能/食谱': firstNonEmpty(recipe.name, recipe.id),
-      '效果评价': firstNonEmpty(recipe.effect_description, isRecord(recipe.effect_ai_result) ? recipe.effect_ai_result.summary : '', '-'),
-      '评分': firstNonEmpty(recipe.effect_score, isRecord(recipe.effect_ai_result) ? recipe.effect_ai_result.score : '', '-'),
+      '效果评价': firstNonEmpty(recipe.effect_description, '-'),
+      '评分': firstNonEmpty(recipe.effect_score, '-'),
       '问题点': firstNonEmpty(effectProblemText, Number(recipe.problem_count || 0) > 0 ? `${recipe.problem_count} 个问题` : '', '-'),
       '素材数': String(effectMedia.length + stepMediaCount),
     };
@@ -869,7 +901,7 @@ function contentSections(report: Row, content: Row, issues: Row[], materials: Ro
         block('function_effect:list', 'list', '功能效果', {
           items: recipes.slice(0, 8).map((recipe) => ({
             label: firstNonEmpty(recipe.name, recipe.id),
-            value: firstNonEmpty(recipe.effect_description, isRecord(recipe.effect_ai_result) ? recipe.effect_ai_result.summary : '', '暂无效果描述'),
+            value: firstNonEmpty(recipe.effect_description, '暂无效果描述'),
             note: firstNonEmpty(recipe.effect_score, recipe.problem_count ? `${recipe.problem_count} 个问题` : ''),
             status: recipeProblems.some((item) => text(item.id) === text(recipe.id)) ? 'warning' : 'default',
           })),
@@ -922,11 +954,11 @@ function contentSections(report: Row, content: Row, issues: Row[], materials: Ro
     section('source_trace', '来源追溯', 'ready', ['来源任务', '来源报告'], {
       blocks: sourceTraceBlocks(report, {}),
     }),
-    section('evidence_archive', '素材归档', contentMaterials.length + materials.length > 0 ? 'ready' : 'empty', ['素材归档'], {
-      count: contentMaterials.length + materials.length,
+    section('evidence_archive', '素材归档', uniqueMaterials([...materials, ...contentMaterials]).length > 0 ? 'ready' : 'empty', ['素材归档'], {
+      count: uniqueMaterials([...materials, ...contentMaterials]).length,
       blocks: [
         block('evidence_archive:list', 'list', '素材归档', {
-          items: [...contentMaterials, ...materials].slice(0, 12).map((material) => ({
+          items: uniqueMaterials([...materials, ...contentMaterials]).slice(0, 12).map((material) => ({
             label: firstNonEmpty(material.file_name, material.id, material.file_path),
             value: firstNonEmpty(material.media_role, material.material_type, '素材'),
             note: firstNonEmpty(material.record_id, material.recipe_step_id, material.recipe_id, material.task_id),
@@ -934,7 +966,7 @@ function contentSections(report: Row, content: Row, issues: Row[], materials: Ro
           emptyMessage: '暂无报告素材。',
         }),
         block('evidence_archive:media', 'media', '证据素材', {
-          media: mediaItems([...contentMaterials, ...materials]).slice(0, 30),
+          media: mediaItems(uniqueMaterials([...materials, ...contentMaterials])).slice(0, 30),
           emptyMessage: '暂无可展示素材。',
         }),
       ],
@@ -1801,7 +1833,34 @@ function allBlockMedia(sections: ReportDetailSection[]): ReportDetailMediaItem[]
   return sections.flatMap((sectionItem) => sectionItem.blocks.flatMap((blockItem) => [
     ...(blockItem.media || []),
     ...(blockItem.items || []).flatMap((item) => item.media || []),
+    ...(blockItem.matrix?.rows || []).flatMap((row) =>
+      (blockItem.matrix?.objects || []).flatMap((object) => row.cells[object.id]?.media || []),
+    ),
+    ...(blockItem.dataMatrix?.groups || []).flatMap((group) =>
+      group.rows.flatMap((row) => row.evidence?.media || []),
+    ),
   ]));
+}
+
+/**
+ * In-place presign every media URL in the report model. Required for server-side
+ * rendering (PDF export via Playwright) where relative storage keys must be
+ * turned into absolute, browser-fetchable URLs. Gray-release aware: tries local
+ * first, falls back to S3 (see generatePresignedUrl).
+ *
+ * Idempotent: skips URLs that are already http(s) or data URIs.
+ */
+export async function presignReportMediaUrls(model: ReportDetailModel): Promise<void> {
+  const { generatePresignedUrl } = await import('@/lib/server/storage');
+  const media = allBlockMedia(model.sections);
+  await Promise.all(media.map(async (item) => {
+    if (!item.url || item.url.startsWith('http') || item.url.startsWith('data:')) return;
+    try {
+      item.url = await generatePresignedUrl({ key: item.url, expireTime: 30 * 60, absoluteUrl: true });
+    } catch (error) {
+      console.error('[report-detail] presign failed for media url:', item.url, error);
+    }
+  }));
 }
 
 function latestPdfJob(pdfJobs: Row[]): ReportPrintDelivery['latestPdfJob'] {

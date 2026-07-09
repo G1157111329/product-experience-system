@@ -82,7 +82,10 @@ export async function POST(request: NextRequest) {
     comparison_source: body.comparison_source || null,
   }).select().single();
 
-  if (error) return NextResponse.json({ code: 1, message: '创建失败' }, { status: 500 });
+  if (error) {
+    console.error('[api.tasks.POST] create failed:', error);
+    return NextResponse.json({ code: 1, message: '创建失败' }, { status: 500 });
+  }
 
   let responseData: Record<string, unknown> | null = data;
   if (body.task_mode === 'comparison' && data?.id) {

@@ -12,7 +12,7 @@
 - **UI 组件**: shadcn/ui (基于 Radix UI)
 - **Styling**: Tailwind CSS 4
 - **Database**: 自建 PostgreSQL / Supabase PostgreSQL；服务端通过 Supabase 兼容层 + Drizzle ORM 访问
-- **File Storage**: 默认 local 模式写入 `public/uploads`；可切换 S3 兼容对象存储 (MinIO / AWS S3 / 火山引擎 TOS)
+- **File Storage**: 默认 local 模式写入 `public/uploads`；可切换 S3 兼容对象存储 (MinIO / AWS S3 / 火山引擎 TOS / Garage)。生产已上线 **Garage 单节点灰度方案**：`STORAGE_DRIVER=local` 保护旧文件静态路径，`NEW_UPLOAD_DRIVER=s3` 让新上传走 Garage（127.0.0.1:3900），读取链路自动 local-then-S3 双路径 fallback
 - **AI/LLM**: 可配置的 Chat Completions 兼容接口；仓库文档不记录具体敏感连接信息
 - **PDF解析**: pdf-parse (本地解析) + xlsx (Excel解析)
 - **Theme**: Teal 主色 / Business 字体 / Cool 阴影
@@ -103,17 +103,36 @@
 | `security_audit_logs` | 统一安全审计日志（登录、越权、上传、分享、AI调用、导出、配置变更等） |
 | `security_rate_limits` | 多实例共享限速状态 |
 | `ai_model_configs` | AI 模型配置（API Key 加密保存） |
+
+**数据矩阵（V2 用户自设计模型，当前 UI 实际使用）** — 由迁移 `0003_task_matrix_model.sql` 建立：
+
+| 表名 | 说明 |
+|------|------|
+| `task_matrices` | 任务级矩阵实例（一个任务一个矩阵），状态 designing/active/review_locked/completed/archived，含 comparability 字段与版本锁 |
+| `matrix_design_versions` | 可确认的设计快照（draft/confirmed/superseded/retired），含 hash 校验 |
+| `matrix_sections` | 字段分区（矩阵级或分组级） |
+| `matrix_field_definitions` | 字段定义（kind/data_type/formula/result_status 映射/evidence 规则/移动端桌面端报告可见性） |
+| `matrix_groups` | 矩阵内分组 |
+| `matrix_rows` | 分组内行（completion_status、版本锁） |
+| `matrix_field_values` | 单元格值（numeric/text/duration/enum 等，calc_mode、formula_version、乐观锁 version） |
+| `matrix_narratives` | 分组/矩阵级叙述文本 |
+
+**数据矩阵 schema 注册表（V1 schema-driven 模型，已保留但 UI 不再使用，预留给 Wave 2 复用设计库）** — 由迁移 `0002_matrix_input_tables.sql` 建立：
+
+| 表名 | 说明 |
+|------|------|
 | `matrix_schemas` | 数据矩阵模式定义（schema_key 全局唯一，状态 draft/published；管理员发布，版本化，发布后不可变） |
 | `matrix_schema_versions` | 模式版本（每个版本携带完整 schema_json 快照，发布后冻结，记录 checksum/published_by/effectiveFrom-To） |
 | `matrix_dimension_bindings` | 模式维度绑定（列/行定义：dimension_key、column_group、value_kind、单位、必填/可编辑、校验规则） |
 | `matrix_formula_definitions` | 模式公式定义（受限 DSL 计算维度：output_dimension_key、formula_dsl、compiled_ast、依赖、formula_version） |
 | `matrix_calculation_runs` | 公式计算审计记录（每个矩阵实例的输入/公式哈希、触发类型、状态、错误码、trace_id） |
 
-> 数据矩阵输入视图复用既有表并扩展字段：
+> V1 schema-driven 模型仍复用既有表并扩展字段：
 > - `comparison_assemblies` 扩展 `matrix_role`（`data_matrix`/`comparison`）、`matrix_schema_version_id`、`comparability_status`，用于标记数据矩阵实例。
 > - `comparison_item_nodes` 通过 section/item 节点类型承载分组与记录行。
 > - `metric_evaluations` 扩展 typed-value 列（`numeric_value`/`text_value`/`duration_ms`/`unit_code`/`value_kind`/`input_state`/`calculation_mode`/`formula_definition_id`/`source_run_id`/`version`），区分原始输入与计算结果。
 > - 素材与问题复用 `materials`/`issues` 表。
+> - **注意**：上述 V1 复用方案在当前 V2 模型下不再用于运行时实例；V2 走独立的 `task_matrices` 等表。schema 注册表保留供未来 Wave 2「可复用设计库」使用。
 
 ## 标准分类体系
 
@@ -189,22 +208,28 @@
 | GET/POST | `/api/issue-re-evaluations` | 问题复评估列表/创建（支持issue_id和issue_ids参数）；GET返回含素材 |
 | PUT/DELETE | `/api/issue-re-evaluations/[id]` | 复评估更新/删除 |
 | POST | `/api/issue-re-evaluations/[id]/ai-evaluate` | AI效果评价（基于描述+图片，同食谱四维评价体系） |
-| GET | `/api/matrix-schemas` | 可用模式库（已登录可读） |
-| POST | `/api/matrix-schemas` | 新建模式草稿（管理员） |
+| GET/POST | `/api/tasks/[id]/matrices` | **（V2，当前 UI 使用）** 任务矩阵列表 / 创建矩阵（status=designing） |
+| GET/PATCH | `/api/matrices/[id]` | **（V2，当前 UI 使用）** 读取 MatrixReadProjectionV2（分组/行/值/证据/问题计数/摘要）/ 更新名称/描述/可对比性 |
+| POST | `/api/matrices/[id]/design-versions` | 创建设计版本（含 sections & fields） |
+| POST | `/api/matrix-design-versions/[id]` | 确认/发布设计版本 |
+| GET/POST | `/api/matrices/[id]/groups` | 矩阵分组列表 / 新增分组 |
+| PATCH | `/api/matrix-groups/[id]` | 更新分组 |
+| GET/POST | `/api/matrix-groups/[id]/rows` | 分组行列表 / 新增行 |
+| PATCH | `/api/matrix-rows/[id]` | 更新行元数据 |
+| PATCH | `/api/matrix-rows/[id]/values/[fieldId]` | **（V2，当前 UI 使用）** 写字段值 + 触发依赖字段重算（乐观锁） |
+| POST | `/api/matrices/[id]/validate` | 提交前校验（MX-V-001..010 阻断 / MX-W-001..006 警告） |
+| GET/POST | `/api/matrix-schemas` | 可用模式库（已登录可读） |
 | POST | `/api/matrix-schemas/[id]/versions` | 新建版本草稿（管理员） |
 | POST | `/api/matrix-schema-versions/[id]/publish` | 编译+校验+发布模式（管理员；原子：先全量校验通过再落库） |
 | GET | `/api/matrix-schema-versions/[id]` | 读取模式版本详情（含 dimensions + formulas，admin） |
 | PUT | `/api/matrix-schema-versions/[id]/draft` | 保存模式版本草稿（dimensions + formulas，replace 策略幂等，admin，编译校验） |
-| GET | `/api/tasks/[id]/matrices` | 任务的数据矩阵实例列表 |
-| POST | `/api/tasks/[id]/matrices` | 应用模式创建实例（幂等，重复应用同一模式返回既有实例） |
-| GET | `/api/task-matrices/[id]` | 窗口化 MatrixReadProjection（分组/行/单元格/指标分页读取） |
-| POST | `/api/task-matrices/[id]/groups` | 新增分组 |
-| POST | `/api/task-matrices/[id]/rows` | 新增记录行 |
-| POST | `/api/task-matrices/[id]/validate` | 提交前校验（必填项/单位/范围） |
-| PATCH | `/api/matrix-rows/[id]` | 修改行元数据（对象/规格/排序） |
-| PATCH | `/api/matrix-rows/[id]/slots` | 三槽位（效果结论/过程记录；关联问题由问题模块管理） |
-| PATCH | `/api/matrix-rows/[id]/metrics/[dimensionKey]` | 写原始指标 + 服务端复核计算（同一引擎复核，返回 needs_recompute） |
-| POST | `/api/task-matrices/[id]/batch-commands` | 批量粘贴原始指标（≤500 单元格，部分成功+逐项错误，batch 末尾集中重算；点选错点决定起点；跨组截断；移动端不开放） |
+| GET | `/api/task-matrices/[id]` | 窗口化 MatrixReadProjection（V1 schema 模型，分组/行/单元格/指标分页读取） |
+| POST | `/api/task-matrices/[id]/groups` `/rows` `/validate` | V1 schema 模型新增分组/行、提交前校验 |
+| PATCH | `/api/matrix-rows/[id]/slots` | V1 schema 模型三槽位（效果结论/过程记录；关联问题由问题模块管理） |
+| PATCH | `/api/matrix-rows/[id]/metrics/[dimensionKey]` | V1 schema 模型写原始指标 + 服务端复核计算（同一引擎复核，返回 needs_recompute） |
+| POST | `/api/task-matrices/[id]/batch-commands` | V1 schema 模型批量粘贴原始指标（≤500 单元格，部分成功+逐项错误，batch 末尾集中重算） |
+
+> **数据矩阵 API 说明**：当前 UI（`src/app/(main)/tasks/[id]/components/matrix-tab.tsx`）实际调用的是 V2 路由（`/api/tasks/[id]/matrices`、`/api/matrices/[id]`、`/api/matrix-rows/[id]/values/[fieldId]`），对应任务级用户自设计模型。V1 schema-driven 路由（matrix-schemas / task-matrices / matrix-rows 的 slots/metrics）代码仍保留在仓库中，预留给后续「可复用设计库」使用。另有契约加固版 `/api/v1/*` 路由（带 `If-Match`/ETag 版本、幂等信封、`trace_id` 错误信封、`force-dynamic`），与 `/api/*` 路由共享同一套服务实现。
 
 ## 构建与运行
 
@@ -229,7 +254,8 @@
 | `AUTH_SESSION_SECRET` | 生产会话签名密钥 | `<long-random-session-secret>` |
 | `AI_CONFIG_ENCRYPTION_KEY` | AI API Key 加密密钥 | `<long-random-ai-config-key>` |
 | `SECURITY_SCHEMA_VERIFIED` | 目标库执行并验证安全 schema 后才设为 true | `true` |
-| `STORAGE_DRIVER` | 文件存储驱动，默认 local，可切换 s3 | `local` |
+| `STORAGE_DRIVER` | 文件存储驱动（全局读/写控制），默认 local，可切换 s3 | `local` |
+| `NEW_UPLOAD_DRIVER` | **新上传写入驱动（灰度开关）**，默认空=跟随 `STORAGE_DRIVER`；设为 `s3` 时新上传走 S3，旧文件继续从 local 读（双路径 fallback） | `s3` |
 | `LOCAL_UPLOAD_DIR` | local 模式文件写入目录 | `./public/uploads` |
 | `LOCAL_PUBLIC_BASE_PATH` | local 静态访问前缀 | `/uploads` |
 | `LOCAL_UPLOAD_PUBLIC_ACCESS` | local 访问模式，默认 public；可显式 protected | `public` |
@@ -266,10 +292,11 @@ pnpm build
 # 启动生产环境
 pnpm start
 
-# 数据矩阵：初始化/升级原汁机黄金样本模式（执行 0002_matrix_input_tables.sql 迁移后运行）
+# 数据矩阵（V1 schema 模型）：初始化/升级原汁机黄金样本模式
+# 仅 V1 schema-driven 模型需要；V2 用户自设计模型不依赖此 seed
 pnpm seed:matrix-schema
 
-# 数据矩阵：公式引擎契约测试（受限 DSL 白名单/拒绝规则/语义引用）
+# 数据矩阵：公式引擎契约测试（受限 DSL 白名单/拒绝规则/语义引用，前后端共享同一份引擎）
 pnpm check:matrix-formula
 ```
 
@@ -296,7 +323,10 @@ pnpm audit --audit-level moderate --registry https://registry.npmjs.org
 NODE_ENV=production PORT=5000 pnpm start
 ```
 
-> 部署数据矩阵特性需额外执行：先运行迁移 `0002_matrix_input_tables.sql`（已登记进 drizzle journal，建立 5 张 matrix_* 表 + comparison_assemblies/metric_evaluations 扩展列），再执行 `pnpm seed:matrix-schema` 初始化原汁机黄金样本模式。未跑迁移会导致矩阵相关 API 500，未跑 seed 会导致默认无可用模式。
+> 部署数据矩阵特性需额外执行矩阵相关迁移（已登记进 drizzle journal）：
+> - `0002_matrix_input_tables.sql`：建立 V1 schema 注册表 5 张表（`matrix_schemas`/`matrix_schema_versions`/`matrix_dimension_bindings`/`matrix_formula_definitions`/`matrix_calculation_runs`）+ `comparison_assemblies`/`metric_evaluations` 扩展列。
+> - `0003_task_matrix_model.sql`：建立 V2 用户自设计模型 8 张表（`task_matrices`/`matrix_design_versions`/`matrix_sections`/`matrix_field_definitions`/`matrix_groups`/`matrix_rows`/`matrix_field_values`/`matrix_narratives`）。**当前 UI 实际使用 V2 模型，此迁移必须执行，否则矩阵 Tab 的 API 会 500。**
+> - `pnpm seed:matrix-schema`：仅初始化 V1 原汁机黄金样本模式（schema 注册表），V2 模型不需要。未跑此 seed 只影响 V1 schema 库为空，不影响 V2 任务矩阵功能。
 
 生产部署注意：
 
@@ -307,6 +337,11 @@ NODE_ENV=production PORT=5000 pnpm start
 - 文件存储默认 local，上传写入 `public/uploads`；服务器部署必须将该目录挂载到持久化磁盘。
 - local 默认保留 `/uploads/*` 静态直连，避免历史报告和分享页长期查看时裂图；更高安全要求环境可显式设置 `LOCAL_UPLOAD_PUBLIC_ACCESS=protected`。
 - AI 内网、本机或 HTTP 地址不会默认拦截，便于内网优先部署；公网部署建议配置 `AI_ALLOWED_HOSTS` 并配合网络出口 ACL。
+- **对象存储灰度方案（当前生产已上线 Garage 单节点）**：`STORAGE_DRIVER=local` 保持不变以保护旧文件静态路径，`NEW_UPLOAD_DRIVER=s3` 让新上传走 Garage S3（`127.0.0.1:3900`，仅本机绑定，不公网暴露）。读取链路自动 local-then-S3 双路径 fallback（旧 459 文件继续从 `/uploads/` 静态服务，新上传从 S3 presigned URL 读取）。运维文档见 `docs/operations/2026-07-06-object-storage-gray-release.md`。
+- **Garage 部署位置**：二进制 `/usr/local/bin/garage`（v2.1.0），配置 `/etc/garage.toml`（含 inline rpc_secret/admin_token，perms 600 ubuntu:ubuntu），数据 `/var/lib/garage/{meta,data}`（系统盘，**单节点 replication_factor=1 无冗余，必须做每日备份**），systemd 单元 `/etc/systemd/system/garage.service`（enabled，auto-restart）。bucket `xp-experience-media`，key `product-experience-app`（RWO）。
+- **PM2 配置位置**：生产 PM2 用 `/home/ubuntu/product-experience-system/ecosystem.config.cjs` 启动（live 目录，不再依赖 backup-deploy 目录的旧文件）。env 全部写在该文件的 `env: {}` 块，重启用 `pm2 delete product-experience-system && pm2 start ecosystem.config.cjs && pm2 save`。
+- **服务器内存与构建**：生产机仅 1.9G RAM，`next build` 会 OOM。每次服务器构建前必须临时加 4G swap：`sudo fallocate -l 4G /swap-build.img && sudo chmod 600 /swap-build.img && sudo mkswap /swap-build.img && sudo swapon /swap-build.img`，构建完成后再 `sudo swapoff /swap-build.img && sudo rm /swap-build.img`。构建还需带 DATABASE_URL 等 env（page-data 收集阶段会连库），从 PM2 env 导出 source 即可。
+- **数据库在 Docker**：生产机没装 psql，PostgreSQL 跑在 Docker 容器（`172.17.0.1:5433`）。DB 相关操作需通过应用 node 脚本（用 `node_modules/pg`）或进容器执行，不能直接 `psql`。
 
 ### 当前生产实例与部署注意
 
@@ -376,7 +411,7 @@ INITIAL_ADMIN_PASSWORD=<strong-password>
 ## 关键设计决策
 
 1. **响应式布局**: 桌面端左侧导航 + 右侧内容；移动端顶部汉堡菜单 + 底部Tab导航
-2. **任务详情页四Tab**: 基本信息 / 素材仓库 / 五感体验 / 功能效果，顶部"报告生成"按钮
+2. **任务详情页录入目录**: 当前一级入口为 AI方案 / 对比矩阵 / 数据矩阵 / 五感体验 / 功能效果 / 总结，顶部保留"报告生成"按钮
 3. **素材引用**: 五感体验新增问题点和功能效果新增步骤时均可引用素材库图片（MaterialPicker组件）
 4. **素材上传**: 100MB 限制，仅图片/视频；默认上传至 local `public/uploads`，可切换 S3 兼容对象存储；可关联record_id、recipe_step_id、recipe_library_step_id、recipe_id、issue_id、re_evaluation_id
 5. **报告生成**: 包含任务信息+检查记录+问题清单+食谱/功能详细列表+素材附录
@@ -467,6 +502,10 @@ INITIAL_ADMIN_PASSWORD=<strong-password>
 90. **数据矩阵 Wave 映射**: Wave 0（schema/公式引擎/迁移）与 Wave 1（实例/CRUD/投影/移动端/报告）已完成；Wave 2（受限公式构建器、模式草稿/审批、批量粘贴增强）未做；RESERVED（任意 Excel 解析、A1 自由公式、宏/VBA、自由画布单元格格式）明确不做。
 91. **批量粘贴增强 (Wave 2)**: 从 Excel 粘贴「原始指标区」到桌面 grid（移动端不开）；点选 observed+editable 单元格作错点 → Cmd/Ctrl+V → 服务端校验分两层：batch 级（anchor 存在/可观测、commands 非空、≤500 上限）失败则整批拒绝（422/400/429）；逐命令几何校验（同组、列序≥错点、行序≥错点）为 partial success——单个命令失败（如计算列 `MATRIX_CALCULATED_VALUE_READONLY`、跨组、跳列）只标记该命令，其余照常写入 → batch 末尾按行去重集中重算 → 返回逐命令成功/失败 + 权威计算结果。仅原始指标区（计算列/行标签/证据拒绝）；≤500 单元格/次（超出 429）；跨组截断到当前组末 + warning；失败格前端红色高亮 + 错误码 tooltip，可单格 PATCH 重试。复用 `upsertMetricEvaluation` + `recomputeAffected`，不新增表。幂等键 = `matrix_calculation_runs.trace_id = clientOperationId`（v1 不重放逐项结果，返回 warning 提示刷新投影）。paste 监听器只在多单元格（含 \t/\n）且目标在聚焦单元格内时触发，避免劫持 textarea/搜索框粘贴。
 92. **受限公式构建器 (Wave 2-2)**: admin 在设置面板「数据矩阵模式管理」Dialog 里通过结构化点选表单（积木块：SELF/数字/算术运算符/ROUND）组装计算列公式 + 同表单创输出列 → 保存草稿 → 发布（复用 Wave 1 编译校验 + 循环检测）。最小能力集（SELF+算术+ROUND+数字字面量），不暴露 REF/GROUP_*/IF/COALESCE（DSL 引擎支持但 UI 不开放，后续可扩）；强制结构化点选（无文本框，避免手写非法 DSL）；语义化存储（`SELF("juice_weight")` 非 A1 坐标）；草稿保存走 replace 策略幂等；admin 直接发布无审批。token 流 → DSL 转换是纯函数 `tokensToDsl`，前端预览复用 `compileFormula`/`evaluate`。
+93. **数据矩阵当前 UI 模型 = V2 用户自设计（重要）**: 上述笔记 81–92 描述的是 V1 schema-driven 模型（管理员发布模式 → 任务应用模式实例 → 复用 comparison_assemblies）。**当前任务详情页的「数据矩阵」Tab 实际运行的是 V2 用户自设计模型**（PRD V3.1 §3.4–3.8）：用户在任务内自建矩阵 → 5 步设计器定义基础结构/字段分区/字段与证据/公式与问题规则/预览确认 → 确认后进入录入。V2 使用独立表族（`task_matrices`/`matrix_design_versions`/`matrix_sections`/`matrix_field_definitions`/`matrix_groups`/`matrix_rows`/`matrix_field_values`/`matrix_narratives`，迁移 `0003_task_matrix_model.sql`），**不再复用 comparison_assemblies**。前端入口 `src/app/(main)/tasks/[id]/components/matrix-tab.tsx`，调 `/api/tasks/[id]/matrices` + `/api/matrices/[id]`；桌面端 `matrix-desktop-grid.tsx`、移动端 `matrix-mobile-v2.tsx`、设计器 `matrix-designer.tsx`。V1 schema 路由代码仍保留在仓库，预留给后续「可复用设计库」。功能开关在 `platform_settings.feature_flag_task_matrix`（默认全开：taskMatrixEnabled/matrixRuntimeDesignerEnabled/matrixFormulaEnabled/matrixMobileEnabled/matrixBatchPasteEnabled/matrixReportProjectionEnabled/matrixStructuralRevisionEnabled）。
+94. **矩阵素材与报告/PDF投影**: 既有对比矩阵素材继续绑定 `comparison_matrix_cells.id`；V2 数据矩阵行级证据复用同一素材表与 `/api/comparison-cells/[id]/media`，该接口兼容 `matrix_rows.id` 并把素材写入 `materials.comparison_cell_id`。`projection-v2` 会把行级素材带入 `evidenceMaterials`，报告适配器转成 `evidence.media`；报告中心矩阵 Tab、报告详情模型、分享页和 PDF 导出都必须读取该字段，PDF 渲染前由 `presignReportMediaUrls` 统一签名，避免矩阵图片/视频裂图。
+95. **对比矩阵大类插入边界**: `comparison_item_nodes` 的新增逻辑必须按 `parent_id` 计算插入点。给 A 大类新增条目时，应插入 A 大类已有 summary 之前；给 A 大类新增 summary 时，应追加在 A 大类末尾并仍位于 B 大类 section 之前。前端渲染也要按 parent 分组重排，避免 report snapshot 或任务页矩阵把“大类小结”漂移到最后。
+96. **对象存储灰度方案（当前生产已上线）**: 生产采用 Garage 单节点 S3 + local 双路径灰度，而非一刀切 `STORAGE_DRIVER=s3`。核心机制：`STORAGE_DRIVER=local` 保持不变（保护旧文件继续走 `/uploads/` 静态路径），新增 `NEW_UPLOAD_DRIVER=s3` 独立控制新上传写入目标；读取链路 `generatePresignedUrl` 先 stat 本地，存在走 local，不存在 fallback S3 presigned URL。这样旧 459 个文件零迁移、零回归，新上传逐步进 S3。涉及代码：`src/lib/server/storage.ts`（`isNewUploadS3`/`isS3FallbackAvailable`/`localFileExists` + uploadFile/generatePresignedUrl/deleteFile/readLocalImageAsDataUrl 双路径）、`src/app/api/materials/file/[...key]/route.ts`（S3 流式 + Range）、`src/app/api/materials/poster/[...key]/route.ts`（S3 源下载 + ffmpeg）、`src/app/api/materials/presign/route.ts`（按 path 判断鉴权）、`src/lib/server/report-detail.ts` + `reports/[id]/pdf/route.ts`（PDF 渲染前 presign media URL）。顺带修复 `readLocalImageAsDataUrl` 在 S3 模式返回 null 导致 AI 图片评价失效的 bug（改为 local-then-S3 fallback）。回滚只需把 `NEW_UPLOAD_DRIVER` 改回 `local`。详细运维见 `docs/operations/2026-07-06-object-storage-gray-release.md`。
 
 ## 代码风格
 

@@ -65,7 +65,7 @@ const WHITELIST_FUNCTIONS: ReadonlySet<string> = new Set([
 /** Valid suffixes for the `GROUP_*` aggregate references. */
 const GROUP_AGG_FNS: ReadonlySet<string> = new Set(['AVG', 'SUM', 'MIN', 'MAX', 'COUNT']);
 
-const METRIC_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const METRIC_KEY_RE = /^[^"\\\r\n]{1,100}$/;
 
 const WHITESPACE_RE = /\s/;
 const DIGIT_RE = /[0-9]/;

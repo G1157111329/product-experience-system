@@ -9,10 +9,44 @@ import { PresignedImage, PresignedVideo } from '@/components/presigned-media';
 import type { ComparisonSnapshot } from '@/components/reports/comparison-report-view';
 
 type Row = Record<string, unknown>;
+type MatrixMetricReadValue = {
+  display?: unknown;
+  durationMs?: unknown;
+  value?: unknown;
+  text?: unknown;
+  state?: unknown;
+};
+type MatrixReadProjection = {
+  schema: {
+    name: string;
+    dimensions: Array<{ dimensionKey: string; displayName: string }>;
+  };
+  viewport: {
+    totalGroups: number;
+    totalRows: number;
+  };
+  groups: Array<{
+    label: string;
+    rows: Array<{
+      id: string;
+      subject: { label: string };
+      slots: {
+        result: { summary?: string; status?: string };
+        process: { note?: string };
+      };
+      metrics: Record<string, MatrixMetricReadValue>;
+      evidence?: {
+        primaryCount?: number;
+        media?: Array<{ id: string; name: string; type: string; url: string }>;
+      };
+    }>;
+  }>;
+};
 
 export interface MatrixData {
-  matrixType: 'multi_matrix' | 'single_waterfall';
+  matrixType: 'multi_matrix' | 'single_waterfall' | 'data_matrix';
   matrix?: ComparisonSnapshot;
+  dataMatrix?: MatrixReadProjection;
   waterfall?: Row[];
   emptyReason?: string;
 }
@@ -38,12 +72,110 @@ export function ReportMatrixTab({ data }: { data: MatrixData | null }) {
     return <WaterfallList recipes={data.waterfall} />;
   }
 
+  if (data.matrixType === 'data_matrix' && data.dataMatrix) {
+    return <DataMatrixView projection={data.dataMatrix} />;
+  }
+
   return <div className="p-8 text-center text-sm text-muted-foreground">暂无矩阵/功能效果数据</div>;
 }
 
 // ── 字段读取助手：snapshot 使用 snake_case 数据库字段 ──
+
+function formatMetricValue(value: MatrixMetricReadValue | undefined): string {
+  if (!value) return '-';
+  if (value.display) return String(value.display);
+  if (value.durationMs != null) return `${Math.round(Number(value.durationMs) / 1000)}s`;
+  if (value.value != null) return String(value.value);
+  if (value.text) return String(value.text);
+  if (value.state && value.state !== 'valid') return String(value.state);
+  return '-';
+}
+
+function DataMatrixView({ projection }: { projection: MatrixReadProjection }) {
+  const dimensions = projection.schema.dimensions;
+  return (
+    <div className="space-y-4 p-4">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <Badge variant="secondary">{projection.schema.name}</Badge>
+        <span className="text-muted-foreground">
+          {projection.viewport.totalGroups} 个分组 / {projection.viewport.totalRows} 行
+        </span>
+      </div>
+      <div className="overflow-x-auto rounded-lg border">
+        <table className="w-full min-w-[760px] text-xs">
+          <thead>
+            <tr className="bg-muted">
+              <th className="border-b border-r p-2 text-left">分组</th>
+              <th className="border-b border-r p-2 text-left">行项目</th>
+              <th className="border-b border-r p-2 text-left">结果</th>
+              <th className="border-b border-r p-2 text-left">过程说明</th>
+              {dimensions.map((dimension) => (
+                <th key={dimension.dimensionKey} className="border-b border-r p-2 text-left">
+                  {dimension.displayName}
+                </th>
+              ))}
+              <th className="border-b border-r p-2 text-left">证据/图片</th>
+            </tr>
+          </thead>
+          <tbody>
+            {projection.groups.flatMap((group) =>
+              group.rows.map((row) => {
+                const media = row.evidence?.media || [];
+                return (
+                  <tr key={row.id}>
+                    <td className="border-b border-r p-2 align-top font-medium">{group.label}</td>
+                    <td className="border-b border-r p-2 align-top">{row.subject.label}</td>
+                    <td className="border-b border-r p-2 align-top">
+                      {row.slots.result.summary || row.slots.result.status || '-'}
+                    </td>
+                    <td className="border-b border-r p-2 align-top">{row.slots.process.note || '-'}</td>
+                    {dimensions.map((dimension) => (
+                      <td key={`${row.id}:${dimension.dimensionKey}`} className="border-b border-r p-2 align-top">
+                        {formatMetricValue(row.metrics[dimension.dimensionKey])}
+                      </td>
+                    ))}
+                    <td className="border-b border-r p-2 align-top">
+                      <div className="mb-1 text-[10px] text-muted-foreground">证据 {row.evidence?.primaryCount ?? media.length} 条</div>
+                      <div className="flex flex-wrap gap-1">
+                        {media.slice(0, 6).map((item) => (
+                          <div key={`${item.id}-${item.url}`} className="h-12 w-12 overflow-hidden rounded border bg-muted">
+                            {String(item.type || 'image').includes('video') ? (
+                              <PresignedVideo filePath={item.url} className="h-full w-full object-cover" />
+                            ) : (
+                              <PresignedImage filePath={item.url} alt={item.name} className="h-full w-full object-cover" />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              }),
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function nodeName(node: Row): string {
   return String(node.node_label ?? node.name ?? node.label ?? '');
+}
+function nodeType(node: Row): string {
+  return String(node.node_type ?? '').trim();
+}
+function isSectionNode(node: Row): boolean {
+  return nodeType(node) === 'section';
+}
+function isSummaryNode(node: Row): boolean {
+  if (nodeType(node) === 'summary') return true;
+  const name = nodeName(node);
+  return name.includes('小结') || name.includes('总结');
+}
+function summaryTextOf(node: Row): string {
+  const cfg = (node.config || {}) as Record<string, unknown>;
+  return String(cfg.summary_text || cfg.summary || node.summary_text || node.summary || node.description || '').trim();
 }
 function objectType(obj: Row): string {
   return String(obj.object_name ?? obj.name ?? '');
@@ -98,12 +230,12 @@ function MultiMatrixView({ matrix }: { matrix: ComparisonSnapshot }) {
   );
 
   // 构建层级结构：section（大类）→ item（细项）
-  const sections = itemNodes.filter((n) => String(n.node_type ?? '') === 'section' || !n.parent_id);
-  const sectionSummaryNodes = itemNodes.filter((n) => String(n.node_type ?? '') === 'summary');
+  const sections = itemNodes.filter(isSectionNode);
+  const sectionSummaryNodes = itemNodes.filter(isSummaryNode);
 
   // 每个 section 的子项（排除 summary 节点，避免小结行重复渲染）
   const childrenOf = (parentId: string) => itemNodes.filter(
-    (n) => String(n.parent_id ?? '') === parentId && String(n.node_type ?? '') !== 'summary',
+    (n) => String(n.parent_id ?? '') === parentId && !isSummaryNode(n),
   );
 
   const findCell = (nodeId: string, objId: string) =>
@@ -136,7 +268,7 @@ function MultiMatrixView({ matrix }: { matrix: ComparisonSnapshot }) {
           <tbody>
             {sections.length === 0 ? (
               // 无 section 结构：直接平铺所有 item_nodes
-              itemNodes.map((node) => (
+              itemNodes.filter((node) => !isSummaryNode(node)).map((node) => (
                 <MatrixRow
                   key={node.id as string}
                   node={node}
@@ -201,15 +333,14 @@ function SectionGroup({
       ))}
       {/* 大类小结汇总行：优先读 summary 节点的 config.summary_text（用户输入），跨列显示 */}
       {summaryNode && (() => {
-        const cfg = summaryNode.config as Record<string, unknown> | null | undefined;
-        const summaryText = String(cfg?.summary_text || cfg?.summary || summaryNode.node_label || '');
+        const summaryText = summaryTextOf(summaryNode);
         return (
           <tr className="bg-amber-50/60">
             <td className="sticky left-0 z-[2] border-b border-r bg-inherit p-2 font-semibold align-top whitespace-nowrap">
               {nodeName(summaryNode) || '小结'}
             </td>
             <td colSpan={objects.length} className="border-b border-r p-2 text-[11px] whitespace-pre-wrap leading-relaxed">
-              {summaryText || <span className="text-muted-foreground">—</span>}
+              {summaryText || <span className="text-muted-foreground">暂无小结内容</span>}
             </td>
           </tr>
         );
