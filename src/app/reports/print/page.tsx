@@ -369,8 +369,19 @@ function PrintInlineMatrix({ detailModel }: { detailModel: ReportDetailModel }) 
                     <td key={obj.id} style={{ border: '1px solid #e5e7eb', padding: '6px', verticalAlign: 'top' }}>
                       {cell ? (
                         <div style={{ lineHeight: 1.5 }}>
-                          {cell.conclusion && <div style={{ fontWeight: 600 }}>{cell.conclusion}</div>}
-                          {cell.value && <div style={{ color: '#6b7280' }}>{cell.value}</div>}
+                          {cell.processNotes && cell.processNotes.length > 0 && (
+                            <div style={{ color: '#4b5563', whiteSpace: 'pre-wrap' }}>
+                              <span style={{ fontWeight: 600 }}>过程记录：</span>
+                              {cell.processNotes.join('；')}
+                            </div>
+                          )}
+                          {cell.conclusion && (
+                            <div style={{ color: '#111827', whiteSpace: 'pre-wrap' }}>
+                              <span style={{ fontWeight: 600 }}>效果结论：</span>
+                              {cell.conclusion}
+                            </div>
+                          )}
+                          {cell.value && cell.value !== cell.conclusion && <div style={{ color: '#6b7280' }}>{cell.value}</div>}
                           {cell.score && <div style={{ color: '#6b7280' }}>{cell.score}分</div>}
                           {cell.problems && cell.problems.length > 0 && (
                             <ul style={{ margin: '2px 0 0', paddingLeft: '14px', color: '#dc2626' }}>
@@ -379,7 +390,7 @@ function PrintInlineMatrix({ detailModel }: { detailModel: ReportDetailModel }) 
                           )}
                           {cell.media && cell.media.length > 0 && (
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', marginTop: '4px' }}>
-                              {cell.media.slice(0, 3).map((m) => (
+                              {cell.media.map((m) => (
                                 <div key={m.id} style={{ width: '48px', height: '48px', overflow: 'hidden', borderRadius: '3px', border: '1px solid #e5e7eb' }}>
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img
