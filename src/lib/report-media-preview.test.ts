@@ -15,6 +15,11 @@ assert.match(previewSource, /onClick=\{\(\)\s*=>\s*setPreviewUrl/);
 
 const sharedPreviewSource = readFileSync(resolve(process.cwd(), 'src/components/image-preview.tsx'), 'utf8');
 assert.match(sharedPreviewSource, /<video[\s\S]+?controls/);
+assert.doesNotMatch(
+  sharedPreviewSource,
+  /const displayUrl = presignedUrl \|\| url/,
+  'raw storage keys must not be requested as report-relative URLs while presigning is pending',
+);
 
 const matrixSource = readFileSync(
   resolve(process.cwd(), 'src/app/(main)/reports/[id]/components/report-matrix-tab.tsx'),

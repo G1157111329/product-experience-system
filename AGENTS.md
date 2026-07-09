@@ -660,6 +660,7 @@ INITIAL_ADMIN_PASSWORD=<strong-password>
 | AI 总结弹窗拆成多个输入框 | UI 直接绑定结构化字段 | 总结编辑使用一个分行文本框，固定包含“总结/满意度/主要优势/主要风险/历史表现/后续建议”，保存时由 `parseAiSummaryText` 还原结构 |
 | 下载报告的问题列表没有素材 | 只按直接 `issue_id` 找素材，遗漏 record、矩阵 cell、食谱步骤和效果问题点关联 | 使用 `issueMaterialRows` / `recipeIssueMaterialRows` 汇总全部来源；报告详情和 PDF 不得再对问题素材做数量截断 |
 | 报告中心素材只能看缩略图 | 专用报告 Tab 直接渲染静态 `PresignedImage/Video` | 报告矩阵、功能效果、问题及整改素材统一使用 `ReportMediaPreview`；图片点击看原图，视频点击进入带 controls 的播放器 |
+| 报告原图弹窗首次打开短暂请求错误路径 | 签名 URL 尚未返回时直接把对象 key 当作页面相对 URL，产生 `/reports/<id>/experience-media/...` 404 | `ImagePreview` 必须等待 `usePresignedUrl` 返回可访问 URL，不得以原始对象 key 作为 `src` fallback |
 | 功能效果问题点首次输入后已有列表消失 | 渲染回退服务器列表，但输入 handler 从空本地数组开始更新 | 本地状态必须先由 `initializeEffectProblemPoints` 初始化；更新必须通过 `updateEffectProblemPoints` 以服务器列表为 fallback |
 | 功能效果问题点/素材依赖手动保存 | 评价描述已自动保存，但问题点与素材仍走独立按钮 | 问题点和效果素材按 recipe 进行 800ms 防抖、串行自动保存；失败保留草稿并显示错误，AI 评价前必须 flush |
 | 全仓 ESLint 存在 11 个 error | JSX 文案使用未转义英文引号、可用 `const` 的变量使用 `let`、旧 API/素材适配使用显式 `any` | 文案改用中文引号、不可变请求体使用 `const`、通用行类型使用 `Record<string, unknown>`、旧素材兼容字段使用 `LegacyMaterial` 显式类型；后续提交不得新增 ESLint error |

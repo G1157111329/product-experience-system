@@ -29,7 +29,7 @@ export function ImagePreview({ url, onClose }: ImagePreviewProps) {
   const [zoomed, setZoomed] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const presignedUrl = usePresignedUrl(url);
-  const displayUrl = presignedUrl || url || undefined;
+  const displayUrl = presignedUrl || undefined;
 
   useEffect(() => {
     setLoadFailed(false);
