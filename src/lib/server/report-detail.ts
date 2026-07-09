@@ -1,5 +1,6 @@
 import { comparisonCellFields } from '@/lib/report-comparison-fields';
 import { selectEffectEvaluationText } from '@/lib/report-content-rules';
+import { issueMaterialRows } from '@/lib/report-issue-media';
 
 type Row = Record<string, unknown>;
 
@@ -668,10 +669,7 @@ function parseProblemPoints(value: unknown): Array<{ text: string; materialIds: 
 }
 
 function issueEvidenceMedia(issue: Row, recordById: Map<string, Row>, allMaterials: Row[]) {
-  const direct = allMaterials.filter((material) => (
-    text(material.issue_id) === text(issue.id)
-    || text(material.record_id) === text(issue.record_id)
-  ));
+  const direct = issueMaterialRows(issue, allMaterials);
   const record = recordById.get(text(issue.record_id)) || recordById.get(text(issue.id));
   return uniqueMediaItems([
     ...mediaItems(rows(issue.materials), firstNonEmpty(issue.title, issue.check_item, issue.id)),
@@ -971,7 +969,7 @@ function contentSections(report: Row, content: Row, issues: Row[], materials: Ro
             value: firstNonEmpty(issue.description, issue.problem_description, issue.improve_plan, '暂无详情说明'),
             note: firstNonEmpty(issue.responsible_person, issue.category, issue.source_type),
             status: isHighRiskLevel(firstNonEmpty(issue.level, issue.problem_level)) ? 'risk' : 'default',
-            media: issueMedia(issue).slice(0, 6),
+            media: issueMedia(issue),
           })),
           emptyMessage: '暂无问题详情。',
         }),
