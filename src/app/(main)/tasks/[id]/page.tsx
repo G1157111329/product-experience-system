@@ -1,7 +1,5 @@
 'use client';
 
-/* eslint-disable @next/next/no-img-element */
-
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { PresignedImage, PresignedVideo } from '@/components/presigned-media';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
@@ -2597,6 +2595,7 @@ function FunctionsTab({
     recipe: Recipe,
     pps: ProblemPoint[],
     selectedEffectMaterialIds: string[],
+    draftVersion: number,
     notify = false,
   ): Promise<boolean> => {
     setEffectSaving(prev => ({ ...prev, [recipe.id]: true }));
@@ -2608,15 +2607,21 @@ function FunctionsTab({
       });
       const data = await res.json().catch(() => null);
       if (res.ok && data?.code === 0) {
-        setEffectSaveStatus((current) => ({ ...current, [recipe.id]: 'saved' }));
+        if (effectDraftVersionRef.current[recipe.id] === draftVersion) {
+          setEffectSaveStatus((current) => ({ ...current, [recipe.id]: 'saved' }));
+        }
         if (notify) toast.success('效果评价已保存');
         return true;
       }
-      setEffectSaveStatus((current) => ({ ...current, [recipe.id]: 'error' }));
+      if (effectDraftVersionRef.current[recipe.id] === draftVersion) {
+        setEffectSaveStatus((current) => ({ ...current, [recipe.id]: 'error' }));
+      }
       if (notify) toast.error(data?.message || `保存失败 (${res.status})`);
       return false;
     } catch (error) {
-      setEffectSaveStatus((current) => ({ ...current, [recipe.id]: 'error' }));
+      if (effectDraftVersionRef.current[recipe.id] === draftVersion) {
+        setEffectSaveStatus((current) => ({ ...current, [recipe.id]: 'error' }));
+      }
       if (notify) toast.error(error instanceof Error ? `保存失败：${error.message}` : '保存失败');
       return false;
     } finally {
@@ -2628,12 +2633,13 @@ function FunctionsTab({
     recipe: Recipe,
     pps: ProblemPoint[],
     selectedEffectMaterialIds: string[],
+    draftVersion: number,
     notify = false,
   ) => {
     const previous = effectSaveChainsRef.current[recipe.id] || Promise.resolve(true);
     const next = previous
       .catch(() => false)
-      .then(() => persistEffectDraft(recipe, pps, selectedEffectMaterialIds, notify));
+      .then(() => persistEffectDraft(recipe, pps, selectedEffectMaterialIds, draftVersion, notify));
     effectSaveChainsRef.current[recipe.id] = next;
     return next;
   }, [persistEffectDraft]);
@@ -2648,7 +2654,7 @@ function FunctionsTab({
     const version = effectDraftVersionRef.current[recipe.id] || 0;
     const pps = effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? [];
     const selectedMaterials = effectMaterialIds[recipe.id] ?? (recipe.effect_materials || []).map((material) => material.id);
-    const saved = await queueEffectSave(recipe, pps, selectedMaterials, true);
+    const saved = await queueEffectSave(recipe, pps, selectedMaterials, version, true);
     if (saved && effectDraftVersionRef.current[recipe.id] === version) {
       setDirtyEffectRecipeIds((current) => {
         const next = new Set(current);
@@ -2670,7 +2676,7 @@ function FunctionsTab({
         delete effectSaveTimersRef.current[recipeId];
         const pps = effectProblemPoints[recipeId] ?? recipe.effect_problem_points ?? [];
         const selectedMaterials = effectMaterialIds[recipeId] ?? (recipe.effect_materials || []).map((material) => material.id);
-        void queueEffectSave(recipe, pps, selectedMaterials).then((saved) => {
+        void queueEffectSave(recipe, pps, selectedMaterials, version).then((saved) => {
           if (!saved || effectDraftVersionRef.current[recipeId] !== version) return;
           setDirtyEffectRecipeIds((current) => {
             const next = new Set(current);

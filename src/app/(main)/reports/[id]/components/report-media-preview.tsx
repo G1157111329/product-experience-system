@@ -18,13 +18,14 @@ export function ReportMediaPreview({
 }: ReportMediaPreviewProps) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   if (!filePath) return null;
+  const mediaType = type.toLowerCase().includes('video') ? 'video' : 'image';
 
   return (
     <>
-      <div title={name || (type === 'video' ? '播放视频' : '查看原图')}>
+      <div title={name || (mediaType === 'video' ? '播放视频' : '查看原图')}>
         <MediaThumbnail
           url={filePath}
-          type={type === 'video' ? 'video' : 'image'}
+          type={mediaType}
           size={size}
           onClick={() => setPreviewUrl(filePath)}
         />
