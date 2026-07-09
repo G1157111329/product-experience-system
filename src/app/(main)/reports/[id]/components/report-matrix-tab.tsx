@@ -214,6 +214,14 @@ function cellSummary(cell: Row | undefined): string {
   if (!cell) return '';
   return String(cell.effect_summary ?? cell.summary ?? '');
 }
+function cellProcessNotes(cell: Row | undefined): string[] {
+  if (!cell) return [];
+  if (Array.isArray(cell.process_notes)) {
+    return cell.process_notes.map((note) => String(note ?? '').trim()).filter(Boolean);
+  }
+  const note = String(cell.process_notes ?? '').trim();
+  return note ? [note] : [];
+}
 function cellProblems(cell: Row | undefined): string[] {
   if (!cell) return [];
   const pp = cell.problem_points;
@@ -389,6 +397,7 @@ function MatrixCell({ cell }: { cell: Row | undefined }) {
   const conclusion = cellConclusion(cell);
   const score = cellScore(cell);
   const summary = cellSummary(cell);
+  const processNotes = cellProcessNotes(cell);
   const problems = cellProblems(cell);
   // 去重：与 summary 相同的问题文本不重复显示
   const dedupedProblems = problems.filter((p) => p !== summary);
@@ -403,7 +412,16 @@ function MatrixCell({ cell }: { cell: Row | undefined }) {
         {conclusion && <span className={cn('font-semibold', conclusionColor(conclusion))}>{conclusion}</span>}
         {score && <span className="text-muted-foreground">{score}分</span>}
       </div>
-      {summary && <p className="line-clamp-2 text-[10px] text-muted-foreground">{summary}</p>}
+      {processNotes.length > 0 && (
+        <p className="whitespace-pre-wrap text-[10px] text-muted-foreground">
+          <span className="font-medium">过程记录：</span>{processNotes.join('；')}
+        </p>
+      )}
+      {summary && (
+        <p className="whitespace-pre-wrap text-[10px] text-muted-foreground">
+          <span className="font-medium">效果结论：</span>{summary}
+        </p>
+      )}
       {dedupedProblems.length > 0 && (
         <ul className="space-y-0.5">
           {dedupedProblems.map((p, i) => (

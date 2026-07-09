@@ -18,11 +18,25 @@ function isMatrixCellEmpty(cell: NonNullable<NonNullable<ReportDetailSectionBloc
   if (!cell) return true;
   return isBlankMatrixText(cell.value)
     && isBlankMatrixText(cell.conclusion)
+    && (cell.processNotes || []).length === 0
     && isBlankMatrixText(cell.score)
     && isBlankMatrixText(cell.anomaly)
     && isBlankMatrixText(cell.conclusionTag)
     && cell.problems.length === 0
     && cell.media.length === 0;
+}
+
+function renderMatrixText(cell: { value: string; conclusion: string; processNotes?: string[] }) {
+  const process = (cell.processNotes || []).length
+    ? `<p><strong>过程记录：</strong>${escapeHtml((cell.processNotes || []).join('；'))}</p>`
+    : '';
+  const conclusion = !isBlankMatrixText(cell.conclusion)
+    ? `<p><strong>效果结论：</strong>${escapeHtml(cell.conclusion)}</p>`
+    : '';
+  const value = cell.value && cell.value !== cell.conclusion
+    ? `<p>${escapeHtml(cell.value)}</p>`
+    : '';
+  return `${process}${conclusion || `<b>${escapeHtml(cell.value)}</b>`}${conclusion ? value : ''}`;
 }
 
 function renderBlock(block: ReportDetailSectionBlock) {
@@ -83,8 +97,7 @@ function renderBlock(block: ReportDetailSectionBlock) {
           const problems = cell.problems.length ? `<p class="cell-risk">${escapeHtml(cell.problems.join('；'))}</p>` : '';
           const anomaly = cell.anomaly ? `<p class="cell-warning">${escapeHtml(cell.anomaly)}</p>` : '';
           return `<td class="${escapeHtml(cell.conclusionTag || 'default')}">
-            <b>${escapeHtml(isBlankMatrixText(cell.conclusion) ? cell.value : cell.conclusion)}</b>
-            ${cell.value && cell.value !== cell.conclusion ? `<p>${escapeHtml(cell.value)}</p>` : ''}
+            ${renderMatrixText(cell)}
             ${cell.score ? `<em>Score: ${escapeHtml(cell.score)}</em>` : ''}
             ${problems}
             ${anomaly}

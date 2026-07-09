@@ -1,3 +1,5 @@
+import { comparisonCellFields } from '@/lib/report-comparison-fields';
+
 type Row = Record<string, unknown>;
 
 export type ReportViewMode = 'read' | 'data' | 'evidence' | 'review' | 'print';
@@ -84,6 +86,7 @@ export type ReportDetailMatrixObject = {
 export type ReportDetailMatrixCell = {
   id: string;
   value: string;
+  processNotes?: string[];
   score?: string;
   conclusion: string;
   conclusionTag?: string;
@@ -1281,11 +1284,13 @@ function comparisonMatrix(snapshotJson: Row): ReadableComparisonMatrix {
     if (!isMatrixItemNode(item)) return [];
     const cells = Object.fromEntries(objects.map((object) => {
       const cell = cellByKey.get(`${text(item.id)}::${object.id}`) || {};
+      const fields = comparisonCellFields(cell);
       const matrixCell: ReportDetailMatrixCell = {
         id: firstNonEmpty(cell.id, `${text(item.id)}:${object.id}`),
-        value: firstNonEmpty(cell.metric_value, cell.measurement_value, cell.effect_summary, cell.manual_score, '-'),
+        value: firstNonEmpty(cell.metric_value, cell.measurement_value, cell.manual_score, '-'),
+        processNotes: fields.processNotes,
         score: firstNonEmpty(cell.manual_score, cell.ai_score),
-        conclusion: firstNonEmpty(cell.effect_summary, cell.conclusion, cell.conclusion_tag, '-'),
+        conclusion: fields.conclusion,
         conclusionTag: firstNonEmpty(cell.conclusion_tag, cell.status),
         problems: stringArray(cell.problem_points),
         aiStatus: firstNonEmpty(cell.ai_status, cell.ai_confirmation_status),
