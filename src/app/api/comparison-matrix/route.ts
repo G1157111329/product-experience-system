@@ -1,21 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessAssembly, isAuthResponse, requireUser } from '@/lib/server/auth';
+import {
+  buildMissingComparisonCells,
+  ensureComparisonMatrixCells,
+} from '@/lib/server/comparison-matrix-cells';
 
 type MatrixRow = Record<string, unknown>;
 
 function asRows(value: unknown): MatrixRow[] {
   return Array.isArray(value) ? (value as MatrixRow[]) : [];
-}
-
-const MATRIX_CELL_NODE_TYPES = new Set(['item', 'condition', 'process_node', 'metric', 'issue_group']);
-
-function isMatrixNode(node: MatrixRow) {
-  return MATRIX_CELL_NODE_TYPES.has(String(node.node_type || 'item'));
-}
-
-function cellKey(itemNodeId: unknown, objectId: unknown) {
-  return `${String(itemNodeId)}::${String(objectId)}`;
 }
 
 async function loadMatrix(client: ReturnType<typeof getSupabaseClient>, assemblyId: string) {
@@ -38,32 +32,6 @@ async function loadMatrix(client: ReturnType<typeof getSupabaseClient>, assembly
     cells: asRows(cellsResult.data),
     error: assemblyResult.error || objectsResult.error || nodesResult.error || cellsResult.error,
   };
-}
-
-function buildMissingCells(assemblyId: string, objects: MatrixRow[], itemNodes: MatrixRow[], cells: MatrixRow[]) {
-  const existing = new Set(cells.map((cell) => cellKey(cell.item_node_id, cell.object_id)));
-  const missing: MatrixRow[] = [];
-
-  for (const node of itemNodes.filter(isMatrixNode)) {
-    if (!node.id) continue;
-    for (const object of objects) {
-      if (!object.id) continue;
-      const key = cellKey(node.id, object.id);
-      if (existing.has(key)) continue;
-      missing.push({
-        assembly_id: assemblyId,
-        item_node_id: node.id,
-        object_id: object.id,
-        params: {},
-        process_notes: [],
-        problem_points: [],
-        metric_values: {},
-        media_display_config: {},
-      });
-    }
-  }
-
-  return missing;
 }
 
 export async function GET(request: NextRequest) {
@@ -89,7 +57,28 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ code: 1, message: '未找到对比组装' }, { status: 404 });
   }
 
-  const missingCells = buildMissingCells(assemblyId, matrix.objects, matrix.itemNodes, matrix.cells);
+  // PRD §10.1 — auto-heal any missing cells on read so the UI is always editable.
+  const missingCells = buildMissingComparisonCells(
+    assemblyId,
+    matrix.objects,
+    matrix.itemNodes,
+    matrix.cells,
+  );
+  let cells = matrix.cells;
+  if (missingCells.length > 0) {
+    const ensured = await ensureComparisonMatrixCells(client, assemblyId);
+    if (ensured.error) {
+      return NextResponse.json({ code: 1, message: ensured.error }, { status: 500 });
+    }
+    if (ensured.created.length > 0) {
+      const refreshed = await loadMatrix(client, assemblyId);
+      if (refreshed.error) {
+        return NextResponse.json({ code: 1, message: refreshed.error.message || '查询失败' }, { status: 500 });
+      }
+      cells = refreshed.cells;
+    }
+  }
+
   return NextResponse.json({
     code: 0,
     message: 'success',
@@ -97,8 +86,8 @@ export async function GET(request: NextRequest) {
       assembly: matrix.assembly,
       objects: matrix.objects,
       item_nodes: matrix.itemNodes,
-      cells: matrix.cells,
-      missing_cells: missingCells,
+      cells,
+      missing_cells: [],
     },
   });
 }
@@ -129,29 +118,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ code: 1, message: '未找到对比组装' }, { status: 404 });
   }
 
-  const missingCells = buildMissingCells(assemblyId, matrix.objects, matrix.itemNodes, matrix.cells);
-  if (missingCells.length === 0) {
-    return NextResponse.json({
-      code: 0,
-      message: '矩阵单元格已完整',
-      data: { created_count: 0, cells: matrix.cells },
-    });
-  }
-
-  const { data, error } = await client
-    .from('comparison_matrix_cells')
-    .insert(missingCells)
-    .select();
-  if (error) {
-    return NextResponse.json({ code: 1, message: error.message || '补齐矩阵单元格失败' }, { status: 500 });
+  const ensured = await ensureComparisonMatrixCells(client, assemblyId);
+  if (ensured.error) {
+    return NextResponse.json({ code: 1, message: ensured.error }, { status: 500 });
   }
 
   return NextResponse.json({
     code: 0,
-    message: '矩阵单元格已补齐',
+    message: ensured.created.length === 0 ? '矩阵单元格已完整' : '矩阵单元格已补齐',
     data: {
-      created_count: missingCells.length,
-      cells: [...matrix.cells, ...asRows(data)],
+      created_count: ensured.created.length,
+      cells: [...matrix.cells, ...ensured.created],
     },
   });
 }

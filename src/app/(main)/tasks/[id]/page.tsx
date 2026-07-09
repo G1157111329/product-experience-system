@@ -6,6 +6,8 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { PresignedImage, PresignedVideo } from '@/components/presigned-media';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, ArrowRightLeft, FileText, Eye, Package, Plus, Camera, Video, Film, Image as ImageIcon, Pencil, Trash2, Check, X, Play, Sparkles, Save, Star, AlertTriangle, Crop } from 'lucide-react';
+import { InlineEditable } from '@/components/inline-editable';
+import { patchInlineValue } from '@/lib/inline-save-helpers';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -1119,8 +1121,13 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
   const [, setSelectedMaterials] = useState<Material[]>([]);
   const [initialMaterialIds, setInitialMaterialIds] = useState<string[]>([]);
   const [recordMaterials, setRecordMaterials] = useState<Record<string, Material[]>>({});
+  const [recordPatches, setRecordPatches] = useState<Record<string, Partial<CheckRecord>>>({});
   const { open, PreviewComponent } = useImagePreview();
 
+  const displayRecords = useMemo(
+    () => records.map((record) => ({ ...record, ...(recordPatches[record.id] || {}) })),
+    [records, recordPatches],
+  );
   // ── Edit mode ──
   const [editRecordId, setEditRecordId] = useState<string | null>(null);
   const [editRecordData, setEditRecordData] = useState<CheckRecord | null>(null);
@@ -2125,7 +2132,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
       <PreviewComponent />
 
       <SensesInputWorkspace
-        records={records}
+        records={displayRecords}
         recordMaterials={recordMaterials}
         onCreateRecord={openCreateRecordDialog}
         onEditRecord={handleEditRecord}
@@ -2133,6 +2140,12 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
         onPreview={open}
         onBindingTargetChange={(target) => onBindingTargetChange?.(target)}
         onMaterialsChange={onRefresh}
+        onRecordPatched={(recordId, patch) => {
+          setRecordPatches((current) => ({
+            ...current,
+            [recordId]: { ...(current[recordId] || {}), ...patch },
+          }));
+        }}
       />
 
       <div className="hidden">
@@ -2287,12 +2300,10 @@ function FunctionsTab({
   const { open, PreviewComponent } = useImagePreview();
 
   // ── Effect evaluation states ──
-  const [effectDesc, setEffectDesc] = useState<Record<string, string>>({});
   const [effectProblemPoints, setEffectProblemPoints] = useState<Record<string, ProblemPoint[]>>({});
   const [aiDetectingProblems, setAiDetectingProblems] = useState<Record<string, boolean>>({});
   const [effectMaterialIds, setEffectMaterialIds] = useState<Record<string, string[]>>({});
   const [effectSaving, setEffectSaving] = useState<Record<string, boolean>>({});
-  const [effectEditing, setEffectEditing] = useState<Record<string, boolean>>({});
   const [aiEvaluating, setAiEvaluating] = useState<Record<string, boolean>>({});
   const [aiResult, setAiResult] = useState<Record<string, {
     result?: {
@@ -2636,11 +2647,10 @@ function FunctionsTab({
     }
   };
 
-  // Save effect evaluation
+  // Save effect evaluation (materials + structured problem points; description autosaves via InlineEditable)
   const handleSaveEffect = async (recipe: Recipe): Promise<boolean> => {
     setEffectSaving(prev => ({ ...prev, [recipe.id]: true }));
     try {
-      const desc = effectDesc[recipe.id] ?? recipe.effect_description ?? '';
       const pps = effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? [];
       const ppJson = JSON.stringify(pps.filter(p => p.text.trim()));
       const effectMats = effectMaterialIds[recipe.id] ?? (recipe.effect_materials || []).map(m => m.id);
@@ -2651,7 +2661,7 @@ function FunctionsTab({
         body: JSON.stringify({
           name: recipe.name, ingredients: recipe.ingredients,
           recipe_type: recipe.recipe_type, problem_count: recipe.problem_count,
-          effect_description: desc,
+          effect_description: recipe.effect_description ?? '',
           effect_problem_point: ppJson,
           effect_material_ids: matIds,
         }),
@@ -2785,100 +2795,33 @@ function FunctionsTab({
         onBindingTargetChange={(target) => onBindingTargetChange?.(target)}
         onRefresh={fetchRecipes}
         renderEffectEditor={(recipe) => {
-          const editing = effectEditing[recipe.id] ?? false;
           const aiData = aiResult[recipe.id]?.result || recipe.effect_ai_result;
           const aiScore = aiResult[recipe.id]?.score || recipe.effect_score;
           const pps = effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? [];
           const validPps = pps.filter(p => p.text?.trim());
-          const effectMats = recipe.effect_materials || [];
 
-          // 只读视图：保存后字段固定显示，点击编辑按钮进入可编辑状态
-          if (!editing) {
-            const hasAnyContent = recipe.effect_description || effectMats.length > 0 || aiData || aiScore || validPps.length > 0;
-            return (
-              <div
-                className="rounded-lg border bg-card p-3 shadow-sm space-y-3 cursor-pointer hover:border-primary/40 transition-colors"
-                onClick={() => setEffectEditing(prev => ({ ...prev, [recipe.id]: true }))}
-              >
-                <div className="flex items-center gap-2">
-                  <Star className="h-4 w-4 text-primary" />
-                  <span className="text-sm font-semibold">效果/出品评价</span>
-                  <div className="ml-auto flex items-center gap-2">
-                    {aiScore && <Badge className="text-[10px]">{aiScore}分</Badge>}
-                    <Button variant="ghost" size="sm" className="h-7" onClick={(e) => { e.stopPropagation(); setEffectEditing(prev => ({ ...prev, [recipe.id]: true })); }}>
-                      <Pencil className="mr-1 h-3 w-3" />编辑
-                    </Button>
-                  </div>
-                </div>
-                {!hasAnyContent ? (
-                  <div className="flex items-center justify-center rounded-md border border-dashed py-6 text-xs text-muted-foreground">
-                    点击进入，录入效果评价与问题点
-                  </div>
-                ) : (
-                  <>
-                    <div className="whitespace-pre-wrap rounded-md border bg-background p-3 text-sm">
-                      {recipe.effect_description || '暂无效果描述'}
-                    </div>
-                    {effectMats.length > 0 && (
-                      <div className="flex flex-wrap gap-2">
-                        {effectMats.map(m => (
-                          <div key={m.id} className="h-16 w-16 overflow-hidden rounded-md border bg-muted">
-                            {m.material_type === 'image' ? (
-                              <img src={m.file_url || m.file_path} alt={m.file_name} className="h-full w-full object-cover" />
-                            ) : (
-                              <video src={m.file_url || m.file_path} className="h-full w-full object-cover" muted preload="metadata" />
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {(aiData || aiScore) && (
-                      <div className="rounded-lg border bg-muted/40 p-2.5 space-y-1.5">
-                        <div className="flex items-center gap-2">
-                          <Sparkles className="h-3.5 w-3.5 text-primary" />
-                          <span className="text-xs font-medium">AI评价结果</span>
-                          {aiScore && <Badge className="ml-auto text-[10px]">{aiScore}分</Badge>}
-                        </div>
-                        {aiData?.summary && <p className="text-[11px] text-muted-foreground">{aiData.summary}</p>}
-                      </div>
-                    )}
-                    {validPps.length > 0 && (
-                      <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <AlertTriangle className="h-4 w-4 text-amber-600" />
-                          <span className="text-sm font-medium">问题点</span>
-                          <span className="text-[10px] text-muted-foreground">({validPps.length}条)</span>
-                        </div>
-                        {validPps.map((pp, ppIdx) => (
-                          <div key={ppIdx} className="rounded-md border border-amber-200/60 bg-background p-2">
-                            <div className="text-xs">{pp.text}</div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            );
-          }
-
-          // 编辑视图：可编辑表单
           return (
-            <div className="rounded-lg border border-primary/40 bg-card p-3 shadow-sm space-y-3">
+            <div className="rounded-lg border bg-card p-3 shadow-sm space-y-3">
               <div className="flex items-center gap-2">
                 <Star className="h-4 w-4 text-primary" />
                 <span className="text-sm font-semibold">效果/出品评价</span>
-                {recipe.effect_score && (
-                  <Badge className="ml-auto text-[10px]">{recipe.effect_score}分</Badge>
-                )}
+                {aiScore && <Badge className="ml-auto text-[10px]">{aiScore}分</Badge>}
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">评价描述</Label>
-                <Textarea
+                <InlineEditable.Textarea
+                  value={recipe.effect_description ?? ''}
                   placeholder="描述该功能/食谱的出品效果、使用感受和关键观察..."
-                  value={effectDesc[recipe.id] ?? recipe.effect_description ?? ''}
-                  onChange={(e) => setEffectDesc(prev => ({ ...prev, [recipe.id]: e.target.value }))}
                   rows={3}
+                  onSave={async (v) => {
+                    const result = await patchInlineValue('function_effect_record', recipe.id, 'effect_description', v);
+                    if (!result.conflict) {
+                      setRecipes((prev) => prev.map((item) =>
+                        item.id === recipe.id ? { ...item, effect_description: v } : item,
+                      ));
+                    }
+                    return result;
+                  }}
                 />
               </div>
               <div className="space-y-1.5">
@@ -2893,31 +2836,25 @@ function FunctionsTab({
                   selectedPreviewSize="md"
                 />
               </div>
-              {(() => {
-                if (!aiData && !aiScore) return null;
-                return (
-                  <div className="rounded-lg border bg-muted/40 p-2.5 space-y-1.5">
-                    <div className="flex items-center gap-2">
-                      <Sparkles className="h-3.5 w-3.5 text-primary" />
-                      <span className="text-xs font-medium">AI评价结果</span>
-                      {aiScore && <Badge className="ml-auto text-[10px]">{aiScore}分</Badge>}
-                    </div>
-                    {aiData?.summary && <p className="text-[11px] text-muted-foreground">{aiData.summary}</p>}
+              {(aiData || aiScore) && (
+                <div className="rounded-lg border bg-muted/40 p-2.5 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-3.5 w-3.5 text-primary" />
+                    <span className="text-xs font-medium">AI评价结果</span>
+                    {aiScore && <Badge className="ml-auto text-[10px]">{aiScore}分</Badge>}
                   </div>
-                );
-              })()}
+                  {aiData?.summary && <p className="text-[11px] text-muted-foreground">{aiData.summary}</p>}
+                </div>
+              )}
               <div className="grid gap-2 sm:grid-cols-2">
                 <Button variant="outline" size="sm"
-                  onClick={async () => {
-                    const ok = await handleSaveEffect(recipe);
-                    if (ok) setEffectEditing(prev => ({ ...prev, [recipe.id]: false }));
-                  }}
+                  onClick={() => void handleSaveEffect(recipe)}
                   disabled={effectSaving[recipe.id]}>
                   <Save className="h-3.5 w-3.5 mr-1" />
-                  {effectSaving[recipe.id] ? '保存中...' : '保存'}
+                  {effectSaving[recipe.id] ? '保存中...' : '保存素材/问题点'}
                 </Button>
                 <Button size="sm" onClick={() => handleAiEvaluate(recipe)}
-                  disabled={aiEvaluating[recipe.id] || (!effectDesc[recipe.id] && !recipe.effect_description && (!effectMaterialIds[recipe.id]?.length && !recipe.effect_materials?.length))}>
+                  disabled={aiEvaluating[recipe.id] || (!recipe.effect_description && (!effectMaterialIds[recipe.id]?.length && !recipe.effect_materials?.length))}>
                   <Sparkles className="h-3.5 w-3.5 mr-1" />
                   {aiEvaluating[recipe.id] ? 'AI评价中...' : 'AI总结评分'}
                 </Button>
@@ -2968,13 +2905,10 @@ function FunctionsTab({
                     {aiDetectingProblems[recipe.id] ? '识别中...' : 'AI识别问题点'}
                   </Button>
                   <Button variant="outline" size="sm"
-                    onClick={async () => {
-                      const ok = await handleSaveEffect(recipe);
-                      if (ok) setEffectEditing(prev => ({ ...prev, [recipe.id]: false }));
-                    }}
+                    onClick={() => void handleSaveEffect(recipe)}
                     disabled={effectSaving[recipe.id]}>
                     <Save className="h-3.5 w-3.5 mr-1" />
-                    {effectSaving[recipe.id] ? '保存中...' : '保存'}
+                    {effectSaving[recipe.id] ? '保存中...' : '保存问题点'}
                   </Button>
                 </div>
               </div>

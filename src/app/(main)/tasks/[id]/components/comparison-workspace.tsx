@@ -70,15 +70,6 @@ type ApiResponse<T> = {
   data?: T;
 };
 
-type CellForm = {
-  effect_summary: string;
-  process_notes_text: string;
-  problem_points_text: string;
-  manual_score: string;
-  conclusion_tag: string;
-};
-
-type CellDrafts = Record<string, CellForm>;
 type CellMediaMap = Record<string, Material[]>;
 
 const OBJECT_COLUMN_WIDTH = 240;
@@ -93,27 +84,6 @@ function listToTextarea(value: unknown) {
   return Array.isArray(value)
     ? value.map((item) => (typeof item === 'string' ? item : JSON.stringify(item))).join('\n')
     : '';
-}
-
-function textareaToList(value: string) {
-  return value.split('\n').map((line) => line.trim()).filter(Boolean);
-}
-
-function buildCellForm(cell: ComparisonCell): CellForm {
-  return {
-    effect_summary: cell.effect_summary || '',
-    process_notes_text: listToTextarea(cell.process_notes),
-    problem_points_text: listToTextarea(cell.problem_points),
-    manual_score: cell.manual_score || '',
-    conclusion_tag: cell.conclusion_tag || '',
-  };
-}
-
-function scoreError(value: string) {
-  if (!value.trim()) return '';
-  const score = Number(value.trim());
-  if (!Number.isFinite(score) || score < 0 || score > 10) return '评分必须是 0-10';
-  return '';
 }
 
 function cellMediaFromResponse(data?: CellMediaResponse) {
@@ -167,10 +137,8 @@ export function ComparisonWorkspace({
   const [editingNodeId, setEditingNodeId] = useState('');
   const [editingNodeLabel, setEditingNodeLabel] = useState('');
   const [summaryDrafts, setSummaryDrafts] = useState<Record<string, string>>({});
-  const [cellDrafts, setCellDrafts] = useState<CellDrafts>({});
   const [cellMediaById, setCellMediaById] = useState<CellMediaMap>({});
   const [cellMediaSavingId, setCellMediaSavingId] = useState('');
-  const [savingCellId, setSavingCellId] = useState('');
 
   const cellsByKey = useMemo(() => {
     const next = new Map<string, ComparisonCell>();
@@ -224,13 +192,6 @@ export function ComparisonWorkspace({
     const data = await res.json() as ApiResponse<MatrixData>;
     if (data.code === 0 && data.data) {
       setMatrix(data.data);
-      setCellDrafts((current) => {
-        const next: CellDrafts = {};
-        for (const cell of data.data?.cells || []) {
-          next[cell.id] = current[cell.id] || buildCellForm(cell);
-        }
-        return next;
-      });
       setSummaryDrafts((current) => {
         const next: Record<string, string> = {};
         for (const node of data.data?.item_nodes || []) {
@@ -347,18 +308,6 @@ export function ComparisonWorkspace({
     }
   };
 
-  const completeMatrixCells = async () => {
-    if (!assembly?.id) return;
-    const res = await fetch('/api/comparison-matrix', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ assembly_id: assembly.id }),
-    });
-    const data = await res.json() as ApiResponse<unknown>;
-    if (data.code === 0) await refreshMatrix();
-    else toast.error(data.message || '补齐单元格失败');
-  };
-
   const updateObject = async (objectId: string) => {
     if (!editingObjectName.trim()) return;
     const res = await fetch(`/api/comparison-objects/${objectId}`, {
@@ -426,55 +375,6 @@ export function ComparisonWorkspace({
     else toast.error(data.message || '删除项目失败');
   };
 
-  const updateCellDraft = (cellId: string, field: keyof CellForm, value: string) => {
-    setCellDrafts((current) => ({
-      ...current,
-      [cellId]: {
-        ...(current[cellId] || {
-          effect_summary: '',
-          process_notes_text: '',
-          problem_points_text: '',
-          manual_score: '',
-          conclusion_tag: '',
-        }),
-        [field]: value,
-      },
-    }));
-  };
-
-  const saveCell = async (cell: ComparisonCell) => {
-    const draft = cellDrafts[cell.id] || buildCellForm(cell);
-    const error = scoreError(draft.manual_score);
-    if (error) {
-      toast.error(error);
-      return;
-    }
-    setSavingCellId(cell.id);
-    try {
-      // effect_summary 已由 InlineEditable 自动保存（PATCH /api/v1/inline-values），
-      // 此处仅提交过程记录 / 问题点 / 评分 / 结论标签，避免覆盖已自动保存的文本。
-      const res = await fetch(`/api/comparison-cells/${cell.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          process_notes: textareaToList(draft.process_notes_text),
-          problem_points: textareaToList(draft.problem_points_text),
-          manual_score: draft.manual_score.trim() || null,
-          conclusion_tag: draft.conclusion_tag || null,
-        }),
-      });
-      const data = await res.json() as ApiResponse<unknown>;
-      if (data.code === 0) {
-        toast.success('单元格已保存');
-        await refreshMatrix();
-      } else {
-        toast.error(data.message || '保存失败');
-      }
-    } finally {
-      setSavingCellId('');
-    }
-  };
-
   const syncCellMedia = async (cellId: string, ids: string[], optimisticMaterials?: Material[]) => {
     const previousMaterials = cellMediaById[cellId] || [];
     if (optimisticMaterials) {
@@ -524,14 +424,12 @@ export function ComparisonWorkspace({
     if (!cell) {
       return (
         <div className="flex min-h-[280px] items-center justify-center rounded-md border border-dashed bg-muted/20 p-3 text-center text-xs text-muted-foreground">
-          补齐单元格后录入
+          加载单元格中…
         </div>
       );
     }
 
-    const draft = cellDrafts[cell.id] || buildCellForm(cell);
     const cellMedia = cellMediaById[cell.id] || [];
-    const cellSaving = savingCellId === cell.id;
     const mediaSaving = cellMediaSavingId === cell.id;
 
     return (
@@ -556,34 +454,80 @@ export function ComparisonWorkspace({
         </div>
 
         <div className="space-y-2">
-          <InlineEditable.Textarea
-            value={cell.effect_summary ?? ''}
-            placeholder="输入效果结论"
-            rows={3}
-            onSave={async (v) => patchInlineValue('comparison_matrix_cell', cell.id, 'effect_summary', v)}
-            inputClassName="min-h-20 resize-y text-xs"
-          />
-          <Textarea
-            value={draft.process_notes_text}
-            onChange={(event) => updateCellDraft(cell.id, 'process_notes_text', event.target.value)}
-            rows={2}
-            placeholder="过程记录，一行一条"
-            className="min-h-16 resize-y text-xs"
-          />
-          <Textarea
-            value={draft.problem_points_text}
-            onChange={(event) => updateCellDraft(cell.id, 'problem_points_text', event.target.value)}
-            rows={2}
-            placeholder="问题点，一行一条"
-            className="min-h-16 resize-y text-xs"
-          />
-        </div>
-
-        <div className="flex justify-end">
-          <Button size="sm" onClick={() => void saveCell(cell)} disabled={cellSaving} className="h-8 gap-1.5 whitespace-nowrap">
-            {cellSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-            保存
-          </Button>
+          <div className="space-y-1">
+            <Label className="text-[10px] text-muted-foreground">效果结论</Label>
+            <InlineEditable.Textarea
+              value={cell.effect_summary ?? ''}
+              placeholder="输入效果结论"
+              rows={3}
+              onSave={async (v) => {
+                const result = await patchInlineValue('comparison_matrix_cell', cell.id, 'effect_summary', v);
+                if (!result.conflict) {
+                  setMatrix((current) => {
+                    if (!current) return current;
+                    return {
+                      ...current,
+                      cells: current.cells.map((item) =>
+                        item.id === cell.id ? { ...item, effect_summary: v } : item,
+                      ),
+                    };
+                  });
+                }
+                return result;
+              }}
+              inputClassName="min-h-20 resize-y text-xs"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-[10px] text-muted-foreground">过程记录（一行一条）</Label>
+            <InlineEditable.Textarea
+              value={listToTextarea(cell.process_notes)}
+              placeholder="过程记录，一行一条"
+              rows={2}
+              onSave={async (v) => {
+                const result = await patchInlineValue('comparison_matrix_cell', cell.id, 'process_notes_text', v);
+                if (!result.conflict) {
+                  setMatrix((current) => {
+                    if (!current) return current;
+                    const nextNotes = v.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+                    return {
+                      ...current,
+                      cells: current.cells.map((item) =>
+                        item.id === cell.id ? { ...item, process_notes: nextNotes } : item,
+                      ),
+                    };
+                  });
+                }
+                return result;
+              }}
+              inputClassName="min-h-16 resize-y text-xs"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-[10px] text-muted-foreground">问题点（一行一条）</Label>
+            <InlineEditable.Textarea
+              value={listToTextarea(cell.problem_points)}
+              placeholder="问题点，一行一条"
+              rows={2}
+              onSave={async (v) => {
+                const result = await patchInlineValue('comparison_matrix_cell', cell.id, 'problem_points_text', v);
+                if (!result.conflict) {
+                  setMatrix((current) => {
+                    if (!current) return current;
+                    const nextPoints = v.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+                    return {
+                      ...current,
+                      cells: current.cells.map((item) =>
+                        item.id === cell.id ? { ...item, problem_points: nextPoints } : item,
+                      ),
+                    };
+                  });
+                }
+                return result;
+              }}
+              inputClassName="min-h-16 resize-y text-xs"
+            />
+          </div>
         </div>
       </div>
     );
@@ -684,9 +628,6 @@ export function ComparisonWorkspace({
               <Badge variant="secondary">{nodeStats.sections} 个大类</Badge>
               <Badge variant="secondary">{nodeStats.items} 个细项</Badge>
               <Badge variant="secondary">{nodeStats.summaries} 个小结</Badge>
-              <Badge variant={(matrix?.missing_cells.length || 0) > 0 ? 'outline' : 'secondary'}>
-                缺 {matrix?.missing_cells.length || 0} 格
-              </Badge>
             </div>
           </div>
           <div className="grid gap-3 lg:grid-cols-2">
@@ -697,11 +638,6 @@ export function ComparisonWorkspace({
               </Button>
             </div>
           </div>
-          {(matrix?.missing_cells.length || 0) > 0 && (
-            <Button variant="outline" size="sm" onClick={completeMatrixCells} className="w-fit">
-              补齐矩阵单元格
-            </Button>
-          )}
         </CardHeader>
         <CardContent className="space-y-4">
           {!matrix?.objects.length ? (

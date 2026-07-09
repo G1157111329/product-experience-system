@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessAssembly, isAuthResponse, requireUser } from '@/lib/server/auth';
+import { ensureComparisonMatrixCells } from '@/lib/server/comparison-matrix-cells';
 
 type ComparisonItemNodeSortRow = {
   id: string;
@@ -146,5 +147,24 @@ export async function POST(request: NextRequest) {
   if (error) {
     return NextResponse.json({ code: 1, message: `创建失败: ${error.message}` }, { status: 500 });
   }
+
+  // PRD §10.1 — 新增细项后即时生成可编辑单元格（section/summary 不生成）
+  const MATRIX_NODE_TYPES = new Set(['item', 'condition', 'process_node', 'metric', 'issue_group']);
+  if (MATRIX_NODE_TYPES.has(body.node_type)) {
+    const ensured = await ensureComparisonMatrixCells(client, body.assembly_id);
+    if (ensured.error) {
+      return NextResponse.json({
+        code: 0,
+        message: '细项已创建，但补齐单元格失败，请刷新后重试',
+        data: { ...data, cells_warning: ensured.error },
+      });
+    }
+    return NextResponse.json({
+      code: 0,
+      message: '创建成功',
+      data: { ...data, cells_created: ensured.created.length },
+    });
+  }
+
   return NextResponse.json({ code: 0, message: '创建成功', data });
 }

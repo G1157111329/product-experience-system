@@ -97,19 +97,29 @@ function normalizeIfMatch(ifMatch: string | undefined): string | undefined {
 // Wave 0 built-in writers
 // ---------------------------------------------------------------------------
 
-// --- sensory_record (check_records) — no version column on check_records ---
-registerEntityHandler('sensory_record', async (input) => {
-  const ALLOWED = new Set([
-    'problem_description',
-    'sensory_dimension',
-    'evaluation_result',
-  ]);
-  if (!ALLOWED.has(input.fieldId)) return { kind: 'unsupported' };
+function textareaToList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item ?? '').trim()).filter(Boolean);
+  }
+  if (typeof value !== 'string') return [];
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
 
+// --- sensory_record (check_records) — no version column ---
+registerEntityHandler('sensory_record', async (input) => {
   const db = await getDb();
+  const patch: Record<string, unknown> = { updatedAt: sql`NOW()` };
+  if (input.fieldId === 'problem_description') patch.problemDescription = input.value ?? null;
+  else if (input.fieldId === 'sensory_dimension') patch.sensoryDimension = input.value ?? null;
+  else if (input.fieldId === 'evaluation_result') patch.evaluationResult = input.value ?? null;
+  else return { kind: 'unsupported' };
+
   const result = await db
     .update(checkRecords)
-    .set({ [input.fieldId]: input.value ?? null, updatedAt: sql`NOW()` })
+    .set(patch)
     .where(eq(checkRecords.id, input.entityId))
     .returning({ id: checkRecords.id })
     .execute();
@@ -117,36 +127,43 @@ registerEntityHandler('sensory_record', async (input) => {
   return { kind: 'success', version: Date.now(), appliedValue: input.value };
 });
 
-// --- function_effect_record (recipes) — has version column ---
+// --- function_effect_record (recipes) — no version column ---
 registerEntityHandler('function_effect_record', async (input) => {
-  const ALLOWED: Record<string, boolean> = {
-    effect_description: true,
-    effect_problem_point: true,
-    name: true,
-  };
-  if (!ALLOWED[input.fieldId]) return { kind: 'unsupported' };
-  return updateVersionedRow({
-    table: recipes,
-    id: input.entityId,
-    fieldId: input.fieldId,
-    value: input.value,
-    ifMatch: normalizeIfMatch(input.ifMatch),
-  });
+  const db = await getDb();
+  const patch: Record<string, unknown> = { updatedAt: sql`NOW()` };
+  if (input.fieldId === 'effect_description') patch.effectDescription = input.value ?? null;
+  else if (input.fieldId === 'effect_problem_point') patch.effectProblemPoint = input.value ?? null;
+  else if (input.fieldId === 'name') patch.name = input.value ?? null;
+  else return { kind: 'unsupported' };
+
+  const result = await db
+    .update(recipes)
+    .set(patch)
+    .where(eq(recipes.id, input.entityId))
+    .returning({ id: recipes.id })
+    .execute();
+  if (result.length === 0) return { kind: 'not_found' };
+  return { kind: 'success', version: Date.now(), appliedValue: input.value };
 });
 
-// --- comparison_matrix_cell — no version column; effect_summary is text ---
+// --- comparison_matrix_cell — text + JSONB list fields ---
 registerEntityHandler('comparison_matrix_cell', async (input) => {
   const ALLOWED = new Set(['effect_summary', 'process_notes_text', 'problem_points_text']);
   if (!ALLOWED.has(input.fieldId)) return { kind: 'unsupported' };
 
   const db = await getDb();
-  // effect_summary is a text column; process_notes/problem_points are JSONB
-  // (stored as text in the cell editor). For Wave 0 we only support effect_summary.
-  if (input.fieldId !== 'effect_summary') return { kind: 'unsupported' };
+  const patch: Record<string, unknown> = { updatedAt: sql`NOW()` };
+  if (input.fieldId === 'effect_summary') {
+    patch.effectSummary = typeof input.value === 'string' ? input.value : null;
+  } else if (input.fieldId === 'process_notes_text') {
+    patch.processNotes = textareaToList(input.value);
+  } else if (input.fieldId === 'problem_points_text') {
+    patch.problemPoints = textareaToList(input.value);
+  }
 
   const result = await db
     .update(comparisonMatrixCells)
-    .set({ effectSummary: (input.value as string) ?? null, updatedAt: sql`NOW()` })
+    .set(patch)
     .where(eq(comparisonMatrixCells.id, input.entityId))
     .returning({ id: comparisonMatrixCells.id })
     .execute();
@@ -156,24 +173,38 @@ registerEntityHandler('comparison_matrix_cell', async (input) => {
 
 // --- report_summary / basic info (experience_tasks) — has version column ---
 registerEntityHandler('report_summary', async (input) => {
-  // experience_tasks has no `summary` column; the closest inline-editable
-  // fields are task_name, product_model, test_purpose, test_method.
-  const ALLOWED: Record<string, boolean> = {
-    task_name: true,
-    product_model: true,
-    test_purpose: true,
-    test_method: true,
-    description: false,
-    summary: false,
+  const db = await getDb();
+  const existing = await db
+    .select({ id: experienceTasks.id, version: experienceTasks.version })
+    .from(experienceTasks)
+    .where(eq(experienceTasks.id, input.entityId))
+    .limit(1)
+    .execute();
+  if (existing.length === 0) return { kind: 'not_found' };
+
+  const current = existing[0];
+  const ifMatch = normalizeIfMatch(input.ifMatch);
+  if (ifMatch !== undefined && String(current.version) !== ifMatch) {
+    return { kind: 'conflict', serverVersion: current.version };
+  }
+
+  const patch: Record<string, unknown> = {
+    version: (current.version ?? 0) + 1,
+    updatedAt: sql`NOW()`,
   };
-  if (!ALLOWED[input.fieldId]) return { kind: 'unsupported' };
-  return updateVersionedRow({
-    table: experienceTasks,
-    id: input.entityId,
-    fieldId: input.fieldId,
-    value: input.value,
-    ifMatch: normalizeIfMatch(input.ifMatch),
-  });
+  if (input.fieldId === 'task_name') patch.taskName = input.value ?? null;
+  else if (input.fieldId === 'product_model') patch.productModel = input.value ?? null;
+  else if (input.fieldId === 'test_purpose') patch.testPurpose = input.value ?? null;
+  else if (input.fieldId === 'test_method') patch.testMethod = input.value ?? null;
+  else return { kind: 'unsupported' };
+
+  await db
+    .update(experienceTasks)
+    .set(patch)
+    .where(eq(experienceTasks.id, input.entityId))
+    .execute();
+
+  return { kind: 'success', version: patch.version as number, appliedValue: input.value };
 });
 
 // --- dynamic_matrix_cell_value (V3) — optimistic lock on version ---
@@ -260,44 +291,6 @@ registerEntityHandler('matrix_issue_point', async (input) => {
 // ---------------------------------------------------------------------------
 
 /**
- * Update a single column on a versioned Drizzle table with optimistic locking.
- * `fieldId` must match the snake_case DB column name.
- */
-async function updateVersionedRow(opts: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  table: any;
-  id: string;
-  fieldId: string;
-  value: unknown;
-  ifMatch?: string;
-}): Promise<InlineUpdateResult> {
-  const db = await getDb();
-  const { table, id, fieldId, value, ifMatch } = opts;
-
-  const existing = await db
-    .select({ id: table.id, version: table.version })
-    .from(table)
-    .where(eq(table.id, id))
-    .limit(1)
-    .execute();
-  if (existing.length === 0) return { kind: 'not_found' };
-
-  const current = existing[0];
-  if (ifMatch !== undefined && String(current.version) !== ifMatch) {
-    return { kind: 'conflict', serverVersion: current.version };
-  }
-
-  const nextVersion = (current.version ?? 0) + 1;
-  await db
-    .update(table)
-    .set({ [fieldId]: value ?? null, version: nextVersion, updatedAt: sql`NOW()` })
-    .where(eq(table.id, id))
-    .execute();
-
-  return { kind: 'success', version: nextVersion, appliedValue: value };
-}
-
-/**
  * Update a single column on a table without optimistic locking.
  */
 async function updateSimpleRow(opts: {
@@ -311,9 +304,16 @@ async function updateSimpleRow(opts: {
   const db = await getDb();
   const { table, id, column, value } = opts;
 
+  // Resolve the JS property name used by Drizzle `.set()` (camelCase),
+  // not the SQL column name (snake_case).
+  const fieldKey =
+    (typeof column.key === 'string' && column.key) ||
+    Object.keys(table).find((key) => table[key] === column);
+  if (!fieldKey) return { kind: 'unsupported' };
+
   const result = await db
     .update(table)
-    .set({ [column.key]: value ?? null, updatedAt: sql`NOW()` })
+    .set({ [fieldKey]: value ?? null, updatedAt: sql`NOW()` })
     .where(eq(table.id, id))
     .returning({ id: table.id })
     .execute();

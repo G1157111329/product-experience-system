@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessAssembly, canAccessTask, canReadReport, isAuthResponse, requireUser } from '@/lib/server/auth';
+import { ensureComparisonMatrixCells } from '@/lib/server/comparison-matrix-cells';
 
 /**
  * GET /api/comparison-objects?assembly_id=xxx
@@ -111,5 +112,20 @@ export async function POST(request: NextRequest) {
   if (error) {
     return NextResponse.json({ code: 1, message: `创建失败: ${error.message}` }, { status: 500 });
   }
-  return NextResponse.json({ code: 0, message: '创建成功', data });
+
+  // PRD §10.1 — 新增对象后即时生成可编辑单元格
+  const ensured = await ensureComparisonMatrixCells(client, body.assembly_id);
+  if (ensured.error) {
+    return NextResponse.json({
+      code: 0,
+      message: '对象已创建，但补齐单元格失败，请刷新后重试',
+      data: { ...data, cells_warning: ensured.error },
+    });
+  }
+
+  return NextResponse.json({
+    code: 0,
+    message: '创建成功',
+    data: { ...data, cells_created: ensured.created.length },
+  });
 }

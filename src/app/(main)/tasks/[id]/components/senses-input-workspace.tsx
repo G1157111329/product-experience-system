@@ -5,6 +5,8 @@ import { AlertCircle, CheckCircle2, Filter, Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { MediaGallery } from '@/components/app/media-gallery';
+import { InlineEditable } from '@/components/inline-editable';
+import { patchInlineValue } from '@/lib/inline-save-helpers';
 import { cn } from '@/lib/utils';
 import type { CheckRecord, EvidenceBindingTarget, Material } from '../types';
 import { toast } from 'sonner';
@@ -18,6 +20,7 @@ type SensesInputWorkspaceProps = {
   onPreview: (url: string) => void;
   onBindingTargetChange: (target: EvidenceBindingTarget | null) => void;
   onMaterialsChange?: () => void;
+  onRecordPatched?: (recordId: string, patch: Partial<CheckRecord>) => void;
 };
 
 function getRecordTitle(record: CheckRecord) {
@@ -41,6 +44,7 @@ export function SensesInputWorkspace({
   onPreview,
   onBindingTargetChange,
   onMaterialsChange,
+  onRecordPatched,
 }: SensesInputWorkspaceProps) {
   const [selectedId, setSelectedId] = useState(records[0]?.id || '');
   const selectedRecord = useMemo(
@@ -169,9 +173,20 @@ export function SensesInputWorkspace({
               </div>
             </div>
 
-            <div className="rounded-md border bg-background p-3">
+            <div className="rounded-md border bg-background p-3 space-y-2">
               <div className="text-xs font-medium text-muted-foreground">问题描述</div>
-              <p className="mt-2 whitespace-pre-wrap text-sm">{selectedRecord.problem_description || '暂无问题描述'}</p>
+              <InlineEditable.Textarea
+                value={selectedRecord.problem_description ?? ''}
+                placeholder="点击输入问题描述..."
+                rows={3}
+                onSave={async (v) => {
+                  const result = await patchInlineValue('sensory_record', selectedRecord.id, 'problem_description', v);
+                  if (!result.conflict) {
+                    onRecordPatched?.(selectedRecord.id, { problem_description: v });
+                  }
+                  return result;
+                }}
+              />
             </div>
 
             <div className="rounded-md border bg-background p-3">
