@@ -34,13 +34,16 @@ import type {
   V3CellValue,
   V3CellStyle,
   V3FormulaDefinition,
+  V3CellMedia,
   ColumnZone,
 } from '@/lib/matrix/v3-types';
 import { cellKey, styleKey } from '@/lib/matrix/v3-types';
 import { MatrixFormulaEditor } from './matrix-formula-editor';
+import { MatrixV3MediaCell } from './matrix-v3-media-cell';
 
 interface MatrixV3GridProps {
   matrixId: string;
+  taskId: string;
   projection: V3MatrixProjection;
   onChanged: () => void;
   /** When false, formula editor is hidden (feature flag). Default true for Wave 3. */
@@ -137,6 +140,7 @@ function buildGridRows(projection: V3MatrixProjection): GridRow[] {
 
 export function MatrixV3Grid({
   matrixId,
+  taskId,
   projection,
   onChanged,
   formulaEnabled = true,
@@ -399,9 +403,11 @@ export function MatrixV3Grid({
                       >
                         <MatrixV3Cell
                           matrixId={matrixId}
+                          taskId={taskId}
                           leafRowId={grow.leaf.id}
                           column={col}
                           cell={cell}
+                          media={projection.cellMedia?.[cellKey(grow.leaf.id, col.id)] ?? []}
                           hierarchyContext={{ level1: grow.level1, level2: grow.level2, level3: grow.level3 }}
                           mergeInfo={merges}
                           onAddLevel2={handleAddLevel2}
@@ -539,9 +545,11 @@ export function MatrixV3Grid({
 
 interface MatrixV3CellProps {
   matrixId: string;
+  taskId: string;
   leafRowId: string;
   column: V3Column;
   cell: V3CellValue | undefined;
+  media: V3CellMedia[];
   hierarchyContext: { level1: V3HierarchyNode; level2: V3HierarchyNode | null; level3: V3HierarchyNode | null };
   mergeInfo?: MergeInfo;
   onAddLevel2?: (parentId: string) => void;
@@ -552,9 +560,12 @@ interface MatrixV3CellProps {
 }
 
 function MatrixV3Cell({
+  matrixId,
+  taskId,
   leafRowId,
   column,
   cell,
+  media,
   hierarchyContext,
   mergeInfo,
   onAddLevel2,
@@ -669,13 +680,17 @@ function MatrixV3Cell({
     );
   }
 
-  // Media columns — Wave 4 will wire the picker. For now show a placeholder count.
+  // Media columns — D/O slots via material_links (Wave 4).
   if (column.columnZone === 'primary_media' || column.columnZone === 'effect_media') {
     return (
-      <div className="px-1 py-1 min-h-[32px] flex items-center text-muted-foreground text-xs">
-        <ImageIcon className="h-3 w-3 mr-1" />
-        {column.maxMediaCount ? `≤${column.maxMediaCount}` : '素材'}
-      </div>
+      <MatrixV3MediaCell
+        matrixId={matrixId}
+        taskId={taskId}
+        leafRowId={leafRowId}
+        column={column}
+        media={media}
+        onChanged={onChanged}
+      />
     );
   }
 

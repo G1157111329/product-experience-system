@@ -22,6 +22,7 @@ import {
   matrixCellValues,
   materials,
   materialLinks,
+  taskMatrices,
 } from '@/storage/database/shared/schema';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { requireUser, isAuthResponse } from '@/lib/server/auth';
@@ -54,6 +55,89 @@ function contentTypeFor(fileName: string): string {
     case 'webm': return 'video/webm';
     case 'mov': return 'video/quicktime';
     default: return 'application/octet-stream';
+  }
+}
+
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string; leafRowId: string; columnId: string }> },
+) {
+  const traceId = resolveTraceId(req.headers);
+  const { id: matrixId, leafRowId, columnId } = await params;
+
+  const client = getSupabaseClient();
+  const user = await requireUser(req, client);
+  if (isAuthResponse(user)) return fail(traceId, { message: '未认证', status: 401 });
+
+  try {
+    const db = await getDb();
+    const cellRows = await db
+      .select({ id: matrixCellValues.id })
+      .from(matrixCellValues)
+      .where(
+        sql`${matrixCellValues.matrixId} = ${matrixId}
+          AND ${matrixCellValues.leafRowId} = ${leafRowId}
+          AND ${matrixCellValues.columnId} = ${columnId}`,
+      )
+      .execute();
+
+    const cellId = cellRows[0]?.id;
+    if (!cellId) {
+      return ok({ materials: [] }, traceId);
+    }
+
+    const rows = await db
+      .select({
+        linkId: materialLinks.id,
+        materialId: materials.id,
+        materialType: materials.materialType,
+        fileName: materials.fileName,
+        fileUrl: materials.fileUrl,
+        filePath: materials.filePath,
+        thumbnailUrl: materials.thumbnailUrl,
+        bindingMethod: materialLinks.bindingMethod,
+        boundAt: materialLinks.boundAt,
+      })
+      .from(materialLinks)
+      .innerJoin(materials, eq(materials.id, materialLinks.materialId))
+      .where(
+        sql`${materialLinks.targetType} = ${TARGET_TYPE} AND ${materialLinks.targetId} = ${cellId}`,
+      )
+      .execute();
+
+    const { generatePresignedUrl } = await import('@/lib/server/storage');
+    const materialsOut = await Promise.all(
+      rows.map(async (m) => {
+        const rawPath = m.filePath || m.fileUrl || '';
+        let fileUrl = m.fileUrl;
+        try {
+          if (rawPath && !rawPath.startsWith('http') && !rawPath.startsWith('data:')) {
+            fileUrl = await generatePresignedUrl({
+              key: rawPath,
+              expireTime: 30 * 60,
+              absoluteUrl: true,
+            });
+          }
+        } catch {
+          // keep original
+        }
+        return {
+          linkId: m.linkId,
+          materialId: m.materialId,
+          materialType: m.materialType,
+          fileName: m.fileName,
+          fileUrl,
+          thumbnailUrl: m.thumbnailUrl,
+          bindingMethod: m.bindingMethod,
+          boundAt: m.boundAt,
+        };
+      }),
+    );
+
+    return ok({ cellId, materials: materialsOut }, traceId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '读取媒体失败';
+    return fail(traceId, { message, status: 500 });
   }
 }
 
@@ -166,10 +250,17 @@ export async function POST(
         contentType: file.type || contentTypeFor(safeName),
       });
 
+      const matrixRows = await db
+        .select({ taskId: taskMatrices.taskId })
+        .from(taskMatrices)
+        .where(eq(taskMatrices.id, matrixId))
+        .limit(1)
+        .execute();
+
       const [material] = await db
         .insert(materials)
         .values({
-          taskId: null,
+          taskId: matrixRows[0]?.taskId ?? null,
           materialType: inferMaterialType(safeName),
           fileName: safeName,
           filePath: storedKey,
@@ -210,11 +301,13 @@ export async function POST(
     }
 
     // 5. Bind the material to the cell.
+    const bindingMethod =
+      contentType.includes('multipart/form-data') ? 'upload_at_slot' : 'click_select';
     const { linkId } = await bindMaterial({
       materialId,
       targetType: TARGET_TYPE,
       targetId: cellId,
-      bindingMethod: 'upload_at_slot',
+      bindingMethod,
       boundBy: user.id,
     });
 

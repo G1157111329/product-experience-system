@@ -8,7 +8,7 @@
  * Hierarchy nesting: flat matrix_hierarchy_nodes → tree by parent_id.
  */
 
-import { eq, asc, and, isNull, sql } from 'drizzle-orm';
+import { eq, asc, and, isNull, sql, inArray } from 'drizzle-orm';
 import { getDb } from '@/storage/database/pg-db';
 import {
   taskMatrices,
@@ -21,6 +21,8 @@ import {
   matrixNarrativeBlocks,
   matrixIssuePoints,
   matrixFormulaDefinitionsV3,
+  materialLinks,
+  materials,
 } from '@/storage/database/shared/schema';
 import type {
   V3MatrixProjection,
@@ -34,8 +36,10 @@ import type {
   V3FormulaDefinition,
   V3ViewDefinition,
   V3MatrixSummary,
+  V3CellMedia,
 } from './v3-types';
 import { cellKey, styleKey } from './v3-types';
+import { generatePresignedUrl } from '@/lib/server/storage';
 
 // ---------------------------------------------------------------------------
 // Hierarchy tree assembly
@@ -305,6 +309,69 @@ export async function getV3MatrixProjection(
     status: f.status as V3FormulaDefinition['status'],
   }));
 
+  // Cell media via material_links (target = matrix_cell_values.id).
+  const cellMedia: Record<string, V3CellMedia[]> = {};
+  const cellIds = cellsRaw.map((c) => c.id);
+  if (cellIds.length > 0) {
+    const mediaRows = await db
+      .select({
+        linkId: materialLinks.id,
+        targetId: materialLinks.targetId,
+        bindingMethod: materialLinks.bindingMethod,
+        boundAt: materialLinks.boundAt,
+        materialId: materials.id,
+        materialType: materials.materialType,
+        fileName: materials.fileName,
+        fileUrl: materials.fileUrl,
+        filePath: materials.filePath,
+        thumbnailUrl: materials.thumbnailUrl,
+      })
+      .from(materialLinks)
+      .innerJoin(materials, eq(materials.id, materialLinks.materialId))
+      .where(
+        and(
+          eq(materialLinks.targetType, 'dynamic_matrix_cell_value'),
+          inArray(materialLinks.targetId, cellIds),
+        ),
+      )
+      .execute();
+
+    const cellIdToKey = new Map<string, string>();
+    for (const c of cellsRaw) {
+      cellIdToKey.set(c.id, cellKey(c.leafRowId, c.columnId));
+    }
+
+    for (const m of mediaRows) {
+      const key = cellIdToKey.get(m.targetId);
+      if (!key) continue;
+      const rawPath = m.filePath || m.fileUrl || '';
+      let fileUrl = m.fileUrl;
+      try {
+        if (rawPath && !rawPath.startsWith('http') && !rawPath.startsWith('data:')) {
+          fileUrl = await generatePresignedUrl({
+            key: rawPath,
+            expireTime: 30 * 60,
+            absoluteUrl: true,
+          });
+        }
+      } catch {
+        // keep original fileUrl on presign failure
+      }
+      const item: V3CellMedia = {
+        linkId: m.linkId,
+        materialId: m.materialId,
+        materialType: m.materialType,
+        fileName: m.fileName,
+        fileUrl,
+        thumbnailUrl: m.thumbnailUrl,
+        bindingMethod: m.bindingMethod,
+        boundAt: m.boundAt,
+      };
+      if (!cellMedia[key]) cellMedia[key] = [];
+      cellMedia[key].push(item);
+    }
+  }
+
   // Summary stats.
   const filledCells = Object.values(cells).filter(
     (c) => c.valueState === 'filled',
@@ -331,6 +398,7 @@ export async function getV3MatrixProjection(
     narratives,
     issuePoints,
     formulas,
+    cellMedia,
     summary,
   };
 }

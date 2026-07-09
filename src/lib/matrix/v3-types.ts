@@ -165,6 +165,18 @@ export interface V3IssuePoint {
   status: 'text' | 'converted';
 }
 
+/** Media bound to a matrix cell via material_links (D/O columns). */
+export interface V3CellMedia {
+  linkId: string;
+  materialId: string;
+  materialType: string;
+  fileName: string | null;
+  fileUrl: string | null;
+  thumbnailUrl: string | null;
+  bindingMethod: string;
+  boundAt: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Formula (Wave 3 will fill AST; V3 projection carries display metadata only)
 // ---------------------------------------------------------------------------
@@ -229,6 +241,11 @@ export interface V3MatrixProjection {
   narratives: V3NarrativeBlock[];
   issuePoints: V3IssuePoint[];
   formulas: V3FormulaDefinition[];
+  /**
+   * Media bound to cells via material_links, keyed by `${leafRowId}:${columnId}`
+   * (same as cells). Empty object when no bindings.
+   */
+  cellMedia: Record<string, V3CellMedia[]>;
   summary: V3MatrixSummary;
 }
 

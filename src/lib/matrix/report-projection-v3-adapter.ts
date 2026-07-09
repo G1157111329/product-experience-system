@@ -52,6 +52,13 @@ export interface ReportV3IssuePoint {
   status: string;
 }
 
+export interface ReportV3CellMedia {
+  materialId: string;
+  materialType: string;
+  fileName: string | null;
+  fileUrl: string | null;
+}
+
 export interface ReportV3MatrixProjection {
   matrixId: string;
   matrixName: string;
@@ -59,6 +66,8 @@ export interface ReportV3MatrixProjection {
   hierarchy: ReportV3HierarchyNode[];
   columns: ReportV3Column[];
   rows: ReportV3Row[];
+  /** Media keyed by `${leafRowId}:${columnId}` — frozen URLs at report time. */
+  cellMedia: Record<string, ReportV3CellMedia[]>;
   narratives: ReportV3NarrativeBlock[];
   issuePoints: ReportV3IssuePoint[];
   summary: {
@@ -146,6 +155,16 @@ export function freezeV3MatrixForReport(
     };
   });
 
+  const cellMedia: Record<string, ReportV3CellMedia[]> = {};
+  for (const [key, items] of Object.entries(projection.cellMedia ?? {})) {
+    cellMedia[key] = items.map((m) => ({
+      materialId: m.materialId,
+      materialType: m.materialType,
+      fileName: m.fileName,
+      fileUrl: m.fileUrl,
+    }));
+  }
+
   return {
     matrixId: projection.matrix.id,
     matrixName: projection.matrix.name,
@@ -160,6 +179,7 @@ export function freezeV3MatrixForReport(
       displayOrder: c.displayOrder,
     })),
     rows,
+    cellMedia,
     narratives,
     issuePoints,
     summary: {

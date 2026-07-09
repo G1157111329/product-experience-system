@@ -176,6 +176,7 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
         {excelLike ? (
           <MatrixV3Shell
             matrixId={selectedMatrixId}
+            taskId={taskId}
             formulaEnabled={formulaEnabled}
             onBack={() => setSelectedMatrixId(null)}
           />
@@ -383,10 +384,12 @@ function StatusCard({
 
 function MatrixV3Shell({
   matrixId,
+  taskId,
   formulaEnabled = true,
   onBack,
 }: {
   matrixId: string;
+  taskId: string;
   formulaEnabled?: boolean;
   onBack: () => void;
 }) {
@@ -496,6 +499,7 @@ function MatrixV3Shell({
   return (
     <MatrixV3Grid
       matrixId={matrixId}
+      taskId={taskId}
       projection={projection}
       formulaEnabled={formulaEnabled}
       onChanged={() => { void fetchProjection(); }}
