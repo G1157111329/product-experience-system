@@ -64,6 +64,13 @@
                         "when":  1783900000005,
                         "version":  "7",
                         "tag":  "0008_enable_wave2_matrix_flags"
+                    },
+                    {
+                        "idx":  9,
+                        "breakpoints":  true,
+                        "when":  1783900000006,
+                        "version":  "7",
+                        "tag":  "0009_enable_wave3_formula_flag"
                     }
                 ]
 }

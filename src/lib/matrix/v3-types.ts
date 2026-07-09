@@ -175,7 +175,7 @@ export interface V3FormulaDefinition {
   columnId: string;
   expressionDisplay: string;
   referenceMode: string;
-  applyScope: 'matrix' | 'level_1_group';
+  applyScope: 'matrix' | 'level_1_group' | 'group';
   resultFormat: string;
   decimalPlaces: number;
   status: 'active' | 'invalid' | 'archived';

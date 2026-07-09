@@ -12,11 +12,11 @@
  *   - Bottom summary + notes narrative area
  *
  * NOT a full spreadsheet engine (PRD S-02): no macros, no arbitrary functions,
- * no cross-matrix refs. Formula evaluation is Wave 3; cells render read-only
- * until then for calculation_dimension columns.
+ * no cross-matrix refs. Calculation columns open the A1 formula editor (Wave 3);
+ * relative fill-down is handled server-side by recompute-v3.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { Plus, Table2, Loader2, Type, Hash, Clock, Image as ImageIcon, AlertCircle } from 'lucide-react';
+import { Plus, Table2, Loader2, Type, Hash, Clock, Image as ImageIcon, AlertCircle, Calculator } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -33,14 +33,18 @@ import type {
   V3HierarchyNode,
   V3CellValue,
   V3CellStyle,
+  V3FormulaDefinition,
   ColumnZone,
 } from '@/lib/matrix/v3-types';
 import { cellKey, styleKey } from '@/lib/matrix/v3-types';
+import { MatrixFormulaEditor } from './matrix-formula-editor';
 
 interface MatrixV3GridProps {
   matrixId: string;
   projection: V3MatrixProjection;
   onChanged: () => void;
+  /** When false, formula editor is hidden (feature flag). Default true for Wave 3. */
+  formulaEnabled?: boolean;
 }
 
 // Zone display labels (PRD §7 / 附录 A).
@@ -131,7 +135,12 @@ function buildGridRows(projection: V3MatrixProjection): GridRow[] {
   });
 }
 
-export function MatrixV3Grid({ matrixId, projection, onChanged }: MatrixV3GridProps) {
+export function MatrixV3Grid({
+  matrixId,
+  projection,
+  onChanged,
+  formulaEnabled = true,
+}: MatrixV3GridProps) {
   const [gridRows, setGridRows] = useState<GridRow[]>([]);
   const [addingNode, setAddingNode] = useState(false);
   const [newNodeLabel, setNewNodeLabel] = useState('');
@@ -139,6 +148,14 @@ export function MatrixV3Grid({ matrixId, projection, onChanged }: MatrixV3GridPr
   const [addingColumn, setAddingColumn] = useState(false);
   const [newColumnLabel, setNewColumnLabel] = useState('');
   const [newColumnZone, setNewColumnZone] = useState<ColumnZone>('detail_dimension');
+
+  // Wave 3 formula editor state
+  const [formulaColumn, setFormulaColumn] = useState<V3Column | null>(null);
+  const [pickMode, setPickMode] = useState(false);
+  const [pendingCellRef, setPendingCellRef] = useState<{
+    colIndex: number;
+    rowIndex: number;
+  } | null>(null);
 
   useEffect(() => {
     setGridRows(buildGridRows(projection));
@@ -150,6 +167,32 @@ export function MatrixV3Grid({ matrixId, projection, onChanged }: MatrixV3GridPr
 
   // Group frozen + scrollable for header rendering.
   const allColumns = [...frozenColumns, ...scrollableColumns];
+
+  const formulaByColumnId = useCallback(
+    (columnId: string): V3FormulaDefinition | undefined =>
+      projection.formulas.find((f) => f.columnId === columnId && f.status === 'active'),
+    [projection.formulas],
+  );
+
+  const openFormulaEditor = useCallback((col: V3Column) => {
+    if (!formulaEnabled) {
+      toast.message('公式功能未启用');
+      return;
+    }
+    setFormulaColumn(col);
+    setPickMode(false);
+    setPendingCellRef(null);
+  }, [formulaEnabled]);
+
+  const handleCellPick = useCallback(
+    (columnId: string, rowIndex: number) => {
+      if (!pickMode || !formulaColumn) return;
+      const colIndex = columns.findIndex((c) => c.id === columnId);
+      if (colIndex < 0) return;
+      setPendingCellRef({ colIndex, rowIndex });
+    },
+    [pickMode, formulaColumn, columns],
+  );
 
   // Hierarchy merge computation: for each grid row, determine if it's the
   // first row of its level1/level2/level3 group (rowspan start) and the span.
@@ -297,7 +340,21 @@ export function MatrixV3Grid({ matrixId, projection, onChanged }: MatrixV3GridPr
                     {zoneIcon(col.columnZone)}
                     <span>{col.columnLabel}</span>
                     {col.unitText && <span className="text-muted-foreground text-xs">({col.unitText})</span>}
-                    {col.columnZone === 'calculation_dimension' && (
+                    {col.columnZone === 'calculation_dimension' && formulaEnabled && (
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-0.5 text-[10px] font-mono text-primary hover:underline ml-0.5"
+                        title="编辑公式"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openFormulaEditor(col);
+                        }}
+                      >
+                        <Calculator className="h-3 w-3" />
+                        fx
+                      </button>
+                    )}
+                    {col.columnZone === 'calculation_dimension' && !formulaEnabled && (
                       <span className="text-[10px] font-mono text-muted-foreground">fx</span>
                     )}
                   </div>
@@ -323,6 +380,7 @@ export function MatrixV3Grid({ matrixId, projection, onChanged }: MatrixV3GridPr
                           'border-b border-r px-1 py-0.5 align-top',
                           frozenColumns.includes(col) && 'sticky bg-background z-[1]',
                           styleToClass(style),
+                          pickMode && 'cursor-crosshair hover:bg-primary/10',
                         )}
                         style={{
                           left: frozenColumns.includes(col)
@@ -330,6 +388,14 @@ export function MatrixV3Grid({ matrixId, projection, onChanged }: MatrixV3GridPr
                             : undefined,
                         }}
                         rowSpan={span && span > 1 ? span : undefined}
+                        onClick={
+                          pickMode
+                            ? (e) => {
+                                e.stopPropagation();
+                                handleCellPick(col.id, grow.leaf.visibleRowIndex);
+                              }
+                            : undefined
+                        }
                       >
                         <MatrixV3Cell
                           matrixId={matrixId}
@@ -340,6 +406,13 @@ export function MatrixV3Grid({ matrixId, projection, onChanged }: MatrixV3GridPr
                           mergeInfo={merges}
                           onAddLevel2={handleAddLevel2}
                           onChanged={onChanged}
+                          formulaEnabled={formulaEnabled}
+                          formula={formulaByColumnId(col.id)}
+                          onEditFormula={
+                            col.columnZone === 'calculation_dimension'
+                              ? () => openFormulaEditor(col)
+                              : undefined
+                          }
                         />
                       </td>
                     );
@@ -422,6 +495,40 @@ export function MatrixV3Grid({ matrixId, projection, onChanged }: MatrixV3GridPr
           />
         ))}
       </div>
+
+      {pickMode && formulaColumn && (
+        <div className="sticky bottom-0 z-30 rounded-md border border-primary/40 bg-primary/5 px-3 py-2 text-sm flex items-center justify-between gap-2">
+          <span>
+            点选模式：点击任意单元格将引用追加到「{formulaColumn.columnLabel}」公式
+          </span>
+          <Button size="sm" variant="ghost" onClick={() => setPickMode(false)}>
+            取消点选
+          </Button>
+        </div>
+      )}
+
+      {formulaColumn && (
+        <MatrixFormulaEditor
+          open={!!formulaColumn}
+          onOpenChange={(open) => {
+            if (!open) {
+              setFormulaColumn(null);
+              setPickMode(false);
+              setPendingCellRef(null);
+            }
+          }}
+          matrixId={matrixId}
+          column={formulaColumn}
+          formula={formulaByColumnId(formulaColumn.id) ?? null}
+          columns={columns}
+          rows={projection.rows}
+          pendingCellRef={pendingCellRef}
+          onPendingCellConsumed={() => setPendingCellRef(null)}
+          pickMode={pickMode}
+          onPickModeChange={setPickMode}
+          onSaved={onChanged}
+        />
+      )}
     </div>
   );
 }
@@ -439,6 +546,9 @@ interface MatrixV3CellProps {
   mergeInfo?: MergeInfo;
   onAddLevel2?: (parentId: string) => void;
   onChanged: () => void;
+  formulaEnabled?: boolean;
+  formula?: V3FormulaDefinition;
+  onEditFormula?: () => void;
 }
 
 function MatrixV3Cell({
@@ -449,6 +559,9 @@ function MatrixV3Cell({
   mergeInfo,
   onAddLevel2,
   onChanged,
+  formulaEnabled,
+  formula,
+  onEditFormula,
 }: MatrixV3CellProps) {
   // Hierarchy columns: render merged labels + inline rename.
   if (column.columnZone === 'hierarchy') {
@@ -519,7 +632,7 @@ function MatrixV3Cell({
     return <span className="text-muted-foreground text-xs px-1">{cell?.valueText ?? ''}</span>;
   }
 
-  // Calculation columns are read-only until Wave 3.
+  // Calculation columns: show computed value; click opens formula editor (Wave 3).
   if (column.columnZone === 'calculation_dimension') {
     const display = cell?.valueNumber ?? cell?.displayText ?? '';
     if (cell?.valueState === 'calculation_pending') {
@@ -527,12 +640,33 @@ function MatrixV3Cell({
     }
     if (cell?.valueState === 'calculation_failed') {
       return (
-        <span className="text-red-600 text-xs px-1 inline-flex items-center gap-1" title={cell.errorCode ?? ''}>
+        <button
+          type="button"
+          className="text-red-600 text-xs px-1 inline-flex items-center gap-1 hover:underline"
+          title={cell.errorCode ?? '计算失败，点击编辑公式'}
+          onClick={onEditFormula}
+          disabled={!formulaEnabled}
+        >
           <AlertCircle className="h-3 w-3" /> 计算失败
-        </span>
+        </button>
       );
     }
-    return <span className="px-1 font-mono text-xs">{display}</span>;
+    return (
+      <button
+        type="button"
+        className={cn(
+          'w-full text-left px-1 py-0.5 font-mono text-xs rounded hover:bg-muted/60',
+          !display && 'text-muted-foreground italic',
+        )}
+        title={formula?.expressionDisplay ?? '点击编辑公式'}
+        onClick={onEditFormula}
+        disabled={!formulaEnabled}
+      >
+        {display !== '' && display !== null && display !== undefined
+          ? String(display)
+          : formula?.expressionDisplay || (formulaEnabled ? '设置公式…' : '—')}
+      </button>
+    );
   }
 
   // Media columns — Wave 4 will wire the picker. For now show a placeholder count.

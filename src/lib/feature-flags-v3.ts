@@ -26,14 +26,14 @@ export interface V3FeatureFlags {
 /**
  * Code-level defaults. Per PRD §14, matrix_tab_state_enabled stays ON so the
  * Tab never shows a blank page. Wave 2 enables the excel-like matrix path by
- * default so newly wired UI is usable without a manual flag flip; remaining
- * P1 capabilities (Hermes / WeCom / staging) stay OFF.
+ * default; Wave 3 enables A1 formula editing. Remaining P1 capabilities
+ * (Hermes / WeCom / staging / cell style) stay OFF.
  */
 export const V3_FLAG_DEFAULTS: V3FeatureFlags = {
   matrixTabStateEnabled: true,
   taskMatrixEnabled: true,
   dynamicMatrixExcelLikeViewEnabled: true,
-  dynamicMatrixFormulaEnabled: false,
+  dynamicMatrixFormulaEnabled: true,
   dynamicMatrixCellStyleEnabled: false,
   inlineEditEnabled: true,
   autosaveEnabled: true,

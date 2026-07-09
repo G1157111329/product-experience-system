@@ -41,6 +41,7 @@ interface TabStatePayload {
   cta: { primary: 'create_matrix' | null };
   flags?: {
     dynamicMatrixExcelLikeViewEnabled?: boolean;
+    dynamicMatrixFormulaEnabled?: boolean;
     taskMatrixEnabled?: boolean;
   };
   error?: string;
@@ -78,6 +79,7 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
   const [matrices, setMatrices] = useState<TabStatePayload['matrices']>([]);
   const [canCreate, setCanCreate] = useState(false);
   const [excelLike, setExcelLike] = useState(true);
+  const [formulaEnabled, setFormulaEnabled] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [selectedMatrixId, setSelectedMatrixId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -97,6 +99,8 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
 
       const flagExcel = data.flags?.dynamicMatrixExcelLikeViewEnabled;
       setExcelLike(typeof flagExcel === 'boolean' ? flagExcel : true);
+      const flagFormula = data.flags?.dynamicMatrixFormulaEnabled;
+      setFormulaEnabled(typeof flagFormula === 'boolean' ? flagFormula : true);
       return data;
     } catch {
       setTabState('api_error');
@@ -172,6 +176,7 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
         {excelLike ? (
           <MatrixV3Shell
             matrixId={selectedMatrixId}
+            formulaEnabled={formulaEnabled}
             onBack={() => setSelectedMatrixId(null)}
           />
         ) : matrix?.status === 'designing' ? (
@@ -378,9 +383,11 @@ function StatusCard({
 
 function MatrixV3Shell({
   matrixId,
+  formulaEnabled = true,
   onBack,
 }: {
   matrixId: string;
+  formulaEnabled?: boolean;
   onBack: () => void;
 }) {
   const [projection, setProjection] = useState<V3MatrixProjection | null>(null);
@@ -490,6 +497,7 @@ function MatrixV3Shell({
     <MatrixV3Grid
       matrixId={matrixId}
       projection={projection}
+      formulaEnabled={formulaEnabled}
       onChanged={() => { void fetchProjection(); }}
     />
   );

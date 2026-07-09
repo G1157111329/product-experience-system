@@ -27,8 +27,14 @@ import { compileA1Formula } from '@/lib/matrix/formula-engine-a1';
 
 export const dynamic = 'force-dynamic';
 
-const VALID_SCOPES = new Set(['matrix', 'group', 'row']);
+const VALID_SCOPES = new Set(['matrix', 'group', 'level_1_group', 'row']);
 const VALID_FORMATS = new Set(['number', 'percentage', 'duration', 'decimal']);
+
+/** Normalize UI/API aliases onto the stored apply_scope vocabulary. */
+function normalizeApplyScope(scope: string): string {
+  if (scope === 'group') return 'level_1_group';
+  return scope;
+}
 
 export async function PUT(
   req: NextRequest,
@@ -66,10 +72,11 @@ export async function PUT(
     return fail(traceId, { message: 'expressionDisplay 不能为空', status: 400 });
   }
 
-  const applyScope = typeof body.applyScope === 'string' ? body.applyScope : 'matrix';
-  if (!VALID_SCOPES.has(applyScope)) {
-    return fail(traceId, { message: `applyScope 无效: ${applyScope}`, status: 400 });
+  const applyScopeRaw = typeof body.applyScope === 'string' ? body.applyScope : 'matrix';
+  if (!VALID_SCOPES.has(applyScopeRaw)) {
+    return fail(traceId, { message: `applyScope 无效: ${applyScopeRaw}`, status: 400 });
   }
+  const applyScope = normalizeApplyScope(applyScopeRaw);
 
   const resultFormat =
     typeof body.resultFormat === 'string' ? body.resultFormat : 'number';

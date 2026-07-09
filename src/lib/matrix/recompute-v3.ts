@@ -177,7 +177,10 @@ export async function recomputeMatrixFormulas(matrixId: string): Promise<void> {
     columnId: string;
     decimalPlaces: number;
     resultFormat: string | null;
+    applyScope: string;
     anchorRow: number | null;
+    /** When applyScope is level_1_group, only rows in this L1 group are filled. */
+    anchorLevel1NodeId: string | null;
     compiled: CompiledFormula;
   };
   const compiledFormulas: Compiled[] = [];
@@ -189,12 +192,19 @@ export async function recomputeMatrixFormulas(matrixId: string): Promise<void> {
       await recordCompileFailure(db, matrixId, f.id, f.columnId, result.code, activeLeafRows);
       continue;
     }
+    const anchorRow = anchorRowOf(result.compiled);
+    const anchorLeafId =
+      anchorRow === null ? null : leafByVisibleIndex.get(anchorRow) ?? null;
+    const anchorLeaf = anchorLeafId ? leafById.get(anchorLeafId) : undefined;
+    const scope = f.applyScope === 'group' ? 'level_1_group' : (f.applyScope ?? 'matrix');
     compiledFormulas.push({
       formulaId: f.id,
       columnId: f.columnId,
       decimalPlaces: f.decimalPlaces ?? 2,
       resultFormat: f.resultFormat ?? null,
-      anchorRow: anchorRowOf(result.compiled),
+      applyScope: scope,
+      anchorRow,
+      anchorLevel1NodeId: anchorLeaf?.level1NodeId ?? null,
       compiled: result.compiled,
     });
   }
@@ -202,6 +212,15 @@ export async function recomputeMatrixFormulas(matrixId: string): Promise<void> {
   // --- 4. For each formula × leaf row: propagate, evaluate, persist. ---
   for (const f of compiledFormulas) {
     for (const leaf of activeLeafRows) {
+      // PRD §7.9.6 — group scope: only fill rows in the same level_1 as the anchor.
+      if (
+        f.applyScope === 'level_1_group' &&
+        f.anchorLevel1NodeId &&
+        leaf.level1NodeId !== f.anchorLevel1NodeId
+      ) {
+        continue;
+      }
+
       const targetRow = rowIndexFor(leaf);
 
       // Relative propagation (PRD §7.9.5): shift the formula from its anchor
