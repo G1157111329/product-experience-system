@@ -24,17 +24,19 @@ export interface V3FeatureFlags {
 }
 
 /**
- * Code-level defaults. Per PRD §14, all new capabilities default OFF except
- * matrix_tab_state_enabled (ON so the Tab never shows a blank page).
+ * Code-level defaults. Per PRD §14, matrix_tab_state_enabled stays ON so the
+ * Tab never shows a blank page. Wave 2 enables the excel-like matrix path by
+ * default so newly wired UI is usable without a manual flag flip; remaining
+ * P1 capabilities (Hermes / WeCom / staging) stay OFF.
  */
 export const V3_FLAG_DEFAULTS: V3FeatureFlags = {
   matrixTabStateEnabled: true,
-  taskMatrixEnabled: false,
-  dynamicMatrixExcelLikeViewEnabled: false,
+  taskMatrixEnabled: true,
+  dynamicMatrixExcelLikeViewEnabled: true,
   dynamicMatrixFormulaEnabled: false,
   dynamicMatrixCellStyleEnabled: false,
-  inlineEditEnabled: false,
-  autosaveEnabled: false,
+  inlineEditEnabled: true,
+  autosaveEnabled: true,
   materialStagingEnabled: false,
   hermesAgentGatewayEnabled: false,
   wecomMaterialIngestEnabled: false,
@@ -43,6 +45,30 @@ export const V3_FLAG_DEFAULTS: V3FeatureFlags = {
 let cached: V3FeatureFlags | null = null;
 let cacheTime = 0;
 const CACHE_TTL_MS = 30000;
+
+/** Map DB snake_case keys (migration 0007) onto camelCase V3FeatureFlags. */
+function normalizeFlagPayload(raw: unknown): Partial<V3FeatureFlags> {
+  if (!raw || typeof raw !== 'object') return {};
+  const src = raw as Record<string, unknown>;
+  const out: Partial<V3FeatureFlags> = {};
+  const map: Array<[keyof V3FeatureFlags, string]> = [
+    ['matrixTabStateEnabled', 'matrix_tab_state_enabled'],
+    ['taskMatrixEnabled', 'task_matrix_enabled'],
+    ['dynamicMatrixExcelLikeViewEnabled', 'dynamic_matrix_excel_like_view_enabled'],
+    ['dynamicMatrixFormulaEnabled', 'dynamic_matrix_formula_enabled'],
+    ['dynamicMatrixCellStyleEnabled', 'dynamic_matrix_cell_style_enabled'],
+    ['inlineEditEnabled', 'inline_edit_enabled'],
+    ['autosaveEnabled', 'autosave_enabled'],
+    ['materialStagingEnabled', 'material_staging_enabled'],
+    ['hermesAgentGatewayEnabled', 'hermes_agent_gateway_enabled'],
+    ['wecomMaterialIngestEnabled', 'wecom_material_ingest_enabled'],
+  ];
+  for (const [camel, snake] of map) {
+    if (typeof src[camel] === 'boolean') out[camel] = src[camel] as boolean;
+    else if (typeof src[snake] === 'boolean') out[camel] = src[snake] as boolean;
+  }
+  return out;
+}
 
 /**
  * Read the V3.1.2.4 feature flags from the database, with a 30s cache.
@@ -61,7 +87,7 @@ export async function getV3FeatureFlags(): Promise<V3FeatureFlags> {
       const row = result.rows[0] as unknown as { value: unknown };
       const value =
         typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
-      cached = { ...V3_FLAG_DEFAULTS, ...(value as Partial<V3FeatureFlags>) };
+      cached = { ...V3_FLAG_DEFAULTS, ...normalizeFlagPayload(value) };
     } else {
       cached = { ...V3_FLAG_DEFAULTS };
     }

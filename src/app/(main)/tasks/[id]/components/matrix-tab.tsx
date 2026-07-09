@@ -1,32 +1,55 @@
 'use client';
 
 /**
- * MatrixTab — task page "数据矩阵" tab (V2 model).
+ * MatrixTab — task page "数据矩阵" tab.
  *
- * PRD §5.1–5.2: Shows empty state or matrix list.
- * When a matrix is selected, delegates to MatrixInputViewV2.
+ * Wave 2 (PRD V3.1.2.4):
+ *   - Consumes /api/v1/tasks/{id}/matrix-tab-state so the tab is never blank
+ *   - When dynamic_matrix_excel_like_view is ON → MatrixV3Grid (Excel-like)
+ *   - Otherwise falls back to V2 designer / desktop grid
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Plus, Table2, Edit3, AlertCircle, CheckCircle2, Clock, Archive, Loader2 } from 'lucide-react';
+import {
+  Plus, Table2, Edit3, AlertCircle, CheckCircle2, Clock, Archive, Loader2, Lock,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
-import type { TaskMatrix, MatrixFeatureFlags, MatrixReadProjectionV2 } from '@/lib/matrix/task-matrix-types';
+import type { MatrixReadProjectionV2 } from '@/lib/matrix/task-matrix-types';
+import type { V3MatrixProjection } from '@/lib/matrix/v3-types';
 import { MatrixDesigner } from './matrix-designer';
 import { DesktopMatrixGrid } from './matrix-desktop-grid';
 import { MobileMatrixCards } from './matrix-mobile-v2';
+import { MatrixV3Grid } from './matrix-v3-grid';
 
 interface MatrixTabProps {
   taskId: string;
   taskName: string;
 }
 
+type TabState = 'loading' | 'feature_disabled' | 'forbidden' | 'api_error' | 'empty' | 'ready';
+
+interface TabStatePayload {
+  enabled: boolean;
+  permission: 'editable' | 'none';
+  state: TabState;
+  matrices: Array<{ id: string; name: string; status: string; updatedAt: string }>;
+  cta: { primary: 'create_matrix' | null };
+  flags?: {
+    dynamicMatrixExcelLikeViewEnabled?: boolean;
+    taskMatrixEnabled?: boolean;
+  };
+  error?: string;
+}
+
 const STATUS_LABELS: Record<string, string> = {
   designing: '设计中',
   active: '录入中',
+  draft: '草稿',
   review_locked: '审核锁定',
   completed: '已完成',
   archived: '已归档',
@@ -34,195 +57,279 @@ const STATUS_LABELS: Record<string, string> = {
 
 const STATUS_COLORS: Record<string, string> = {
   designing: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  active: 'bg-green-100 text-green-800 border-green-200',
+  active: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  draft: 'bg-yellow-100 text-yellow-800 border-yellow-200',
   review_locked: 'bg-blue-100 text-blue-800 border-blue-200',
-  completed: 'bg-gray-100 text-gray-800 border-gray-200',
+  completed: 'bg-muted text-muted-foreground border-border',
   archived: 'bg-red-100 text-red-800 border-red-200',
 };
 
 const STATUS_ICONS: Record<string, React.ReactNode> = {
   designing: <Edit3 className="h-3 w-3" />,
   active: <CheckCircle2 className="h-3 w-3" />,
+  draft: <Edit3 className="h-3 w-3" />,
   review_locked: <Clock className="h-3 w-3" />,
   completed: <CheckCircle2 className="h-3 w-3" />,
   archived: <Archive className="h-3 w-3" />,
 };
 
 export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
-  const [matrices, setMatrices] = useState<TaskMatrix[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [flags, setFlags] = useState<MatrixFeatureFlags | null>(null);
+  const [tabState, setTabState] = useState<TabState>('loading');
+  const [matrices, setMatrices] = useState<TabStatePayload['matrices']>([]);
+  const [canCreate, setCanCreate] = useState(false);
+  const [excelLike, setExcelLike] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [selectedMatrixId, setSelectedMatrixId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [createName, setCreateName] = useState('');
+  const [showCreateForm, setShowCreateForm] = useState(false);
 
-  const fetchMatrices = useCallback(async () => {
+  const fetchTabState = useCallback(async () => {
     try {
-      const res = await fetch(`/api/tasks/${taskId}/matrices`, { cache: 'no-store' });
+      const res = await fetch(`/api/v1/tasks/${taskId}/matrix-tab-state`, { cache: 'no-store' });
       const json = await res.json();
-      if (json.code === 0 && Array.isArray(json.data)) {
-        setMatrices(json.data);
-      }
+      const data = (json.data ?? json) as TabStatePayload;
+      const state = (data.state || 'api_error') as TabState;
+      setTabState(state === 'loading' ? 'api_error' : state);
+      setMatrices(Array.isArray(data.matrices) ? data.matrices : []);
+      setCanCreate(data.cta?.primary === 'create_matrix');
+      setErrorMessage(data.error || (json.message && json.code !== 0 ? json.message : null));
+
+      const flagExcel = data.flags?.dynamicMatrixExcelLikeViewEnabled;
+      setExcelLike(typeof flagExcel === 'boolean' ? flagExcel : true);
+      return data;
     } catch {
-      // ignore
-    } finally {
-      setLoading(false);
+      setTabState('api_error');
+      setErrorMessage('网络错误，无法加载数据矩阵状态');
+      return null;
     }
   }, [taskId]);
 
-  useEffect(() => { fetchMatrices(); }, [fetchMatrices]);
-
   useEffect(() => {
-    fetch('/api/settings?key=feature_flag_task_matrix')
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.code === 0 && d.data?.value) {
-          setFlags(typeof d.data.value === 'string' ? JSON.parse(d.data.value) : d.data.value);
-        }
-      })
-      .catch(() => {});
-  }, []);
+    void fetchTabState().then((data) => {
+      if (data?.state === 'ready' && data.matrices?.length === 1) {
+        setSelectedMatrixId((current) => current ?? data.matrices[0].id);
+      }
+    });
+  }, [fetchTabState]);
 
   const handleCreate = async () => {
-    const name = prompt('请输入矩阵名称：', `${taskName} - 数据矩阵`);
-    if (!name?.trim()) return;
-
+    const name = (createName.trim() || `${taskName} - 数据矩阵`).trim();
+    setCreating(true);
     try {
-      const res = await fetch(`/api/tasks/${taskId}/matrices`, {
+      const endpoint = excelLike
+        ? `/api/v1/tasks/${taskId}/matrices`
+        : `/api/tasks/${taskId}/matrices`;
+      const body = excelLike
+        ? { name, view_mode: 'excel_like_dynamic_matrix' }
+        : { name };
+
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim() }),
+        body: JSON.stringify(body),
       });
       const json = await res.json();
-      if (json.code === 0) {
-        toast.success('矩阵创建成功，请设计矩阵结构');
-        setMatrices((prev) => {
-          const withoutDuplicate = prev.filter((item) => item.id !== json.data.id);
-          return [json.data, ...withoutDuplicate];
-        });
-        setSelectedMatrixId(json.data.id);
+      const created = json.data;
+      if (json.code === 0 && created?.id) {
+        toast.success(excelLike ? '矩阵已创建，可直接录入' : '矩阵创建成功，请设计结构');
+        setShowCreateForm(false);
+        setCreateName('');
+        setSelectedMatrixId(created.id);
+        await fetchTabState();
       } else {
         toast.error(json.message || '创建失败');
       }
     } catch {
       toast.error('创建失败，请重试');
+    } finally {
+      setCreating(false);
     }
   };
 
-  const handleEnterMatrix = (matrix: TaskMatrix) => {
-    if (matrix.status === 'designing') {
-      // Go to designer
-      setSelectedMatrixId(matrix.id);
-    } else {
-      // Go to input view
-      setSelectedMatrixId(matrix.id);
-    }
-  };
-
-  // If a specific matrix is selected, show its view
+  // ---- Selected matrix detail ----
   if (selectedMatrixId) {
     const matrix = matrices.find((m) => m.id === selectedMatrixId);
-    if (!matrix) {
-      return (
-        <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            <p>矩阵数据已刷新，请返回列表重新选择。</p>
-            <Button variant="outline" size="sm" className="mt-3" onClick={() => setSelectedMatrixId(null)}>
-              返回矩阵列表
-            </Button>
-          </CardContent>
-        </Card>
-      );
-    }
-
-    if (matrix.status === 'designing') {
-      return (
-        <MatrixDesignerView
-          matrixId={matrix.id}
-          taskId={taskId}
-          onBack={() => setSelectedMatrixId(null)}
-          onConfirmed={fetchMatrices}
-        />
-      );
-    }
-
     return (
-      <MatrixInputShell
-        matrixId={matrix.id}
-        taskId={taskId}
-        taskName={taskName}
-        onBack={() => setSelectedMatrixId(null)}
-      />
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="ghost" size="sm" onClick={() => setSelectedMatrixId(null)}>
+            ← 返回矩阵列表
+          </Button>
+          {matrix && (
+            <>
+              <span className="text-sm font-medium truncate max-w-[240px]">{matrix.name}</span>
+              <Badge className={STATUS_COLORS[matrix.status] ?? 'bg-muted'} variant="outline">
+                <span className="flex items-center gap-1">
+                  {STATUS_ICONS[matrix.status]}
+                  {STATUS_LABELS[matrix.status] ?? matrix.status}
+                </span>
+              </Badge>
+            </>
+          )}
+        </div>
+
+        {excelLike ? (
+          <MatrixV3Shell
+            matrixId={selectedMatrixId}
+            onBack={() => setSelectedMatrixId(null)}
+          />
+        ) : matrix?.status === 'designing' ? (
+          <MatrixDesigner
+            matrixId={selectedMatrixId}
+            taskId={taskId}
+            onBack={() => setSelectedMatrixId(null)}
+            onConfirmed={() => { void fetchTabState(); }}
+          />
+        ) : (
+          <MatrixInputShellV2 matrixId={selectedMatrixId} taskId={taskId} />
+        )}
+      </div>
     );
   }
 
-  // Feature flag check
-  if (flags && !flags.taskMatrixEnabled) {
-    return (
-      <Card>
-        <CardContent className="py-12 text-center text-muted-foreground">
-          <AlertCircle className="mx-auto h-8 w-8 mb-2" />
-          <p>数据矩阵功能当前未启用</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (loading) {
+  // ---- Status pages (PRD §13.1) ----
+  if (tabState === 'loading') {
     return (
       <div className="space-y-4">
         <Skeleton className="h-10 w-48" />
-        <Skeleton className="h-32 w-full" />
         <Skeleton className="h-32 w-full" />
       </div>
     );
   }
 
-  // Empty state (PRD §5.1)
-  if (matrices.length === 0) {
+  if (tabState === 'feature_disabled') {
+    return (
+      <StatusCard
+        icon={<Lock className="mx-auto h-8 w-8 mb-2 text-muted-foreground" />}
+        title="数据矩阵功能未启用"
+        description="管理员尚未开启数据矩阵 Tab。开启后可在此创建 Excel 型动态矩阵。"
+      />
+    );
+  }
+
+  if (tabState === 'forbidden') {
+    return (
+      <StatusCard
+        icon={<Lock className="mx-auto h-8 w-8 mb-2 text-muted-foreground" />}
+        title="无权限访问"
+        description="当前账号无权查看或编辑本任务的数据矩阵。"
+      />
+    );
+  }
+
+  if (tabState === 'api_error') {
+    return (
+      <StatusCard
+        icon={<AlertCircle className="mx-auto h-8 w-8 mb-2 text-destructive" />}
+        title="加载失败"
+        description={errorMessage || '无法获取数据矩阵状态'}
+        action={
+          <Button variant="outline" size="sm" onClick={() => void fetchTabState()}>
+            重试
+          </Button>
+        }
+      />
+    );
+  }
+
+  if (tabState === 'empty' || matrices.length === 0) {
     return (
       <Card>
         <CardContent className="py-12 text-center">
           <Table2 className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
           <h3 className="text-lg font-semibold mb-2">当前任务尚未建立数据矩阵</h3>
-          <p className="text-muted-foreground mb-6 max-w-md mx-auto">
-            当本次体验需要记录多对象、多场景、多批次或多指标数据时，
-            可创建一份由本次任务自行设计的动态数据矩阵。
+          <p className="text-muted-foreground mb-6 max-w-md mx-auto text-sm">
+            {excelLike
+              ? '创建后即可自定义一级/二级/三级行头与对比维度列，像 Excel 一样直接录入测量数据、评价与问题点。'
+              : '当本次体验需要记录多对象、多场景、多批次或多指标数据时，可创建一份由本次任务自行设计的动态数据矩阵。'}
           </p>
-          <Button onClick={handleCreate} disabled={!!flags && !flags.matrixRuntimeDesignerEnabled}>
-            <Plus className="mr-2 h-4 w-4" />
-            新建数据矩阵
-          </Button>
+          {!canCreate ? (
+            <p className="text-sm text-muted-foreground">功能暂未开放创建，请联系管理员开启。</p>
+          ) : showCreateForm ? (
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-2 max-w-md mx-auto">
+              <Input
+                value={createName}
+                onChange={(e) => setCreateName(e.target.value)}
+                placeholder={`${taskName} - 数据矩阵`}
+                className="h-9"
+                onKeyDown={(e) => e.key === 'Enter' && void handleCreate()}
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <Button onClick={() => void handleCreate()} disabled={creating} className="h-9">
+                  {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  创建
+                </Button>
+                <Button variant="ghost" className="h-9" onClick={() => setShowCreateForm(false)}>取消</Button>
+              </div>
+            </div>
+          ) : (
+            <Button onClick={() => setShowCreateForm(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              新建数据矩阵
+            </Button>
+          )}
         </CardContent>
       </Card>
     );
   }
 
-  // Matrix list (PRD §5.2)
+  // ---- Matrix list ----
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">数据矩阵（自定义）</h2>
-        <Button onClick={handleCreate} variant="outline" size="sm" disabled={!!flags && !flags.matrixRuntimeDesignerEnabled}>
-          <Plus className="mr-2 h-4 w-4" />
-          新建数据矩阵
-        </Button>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <h2 className="text-lg font-semibold">数据矩阵</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {excelLike ? 'Excel 型动态矩阵 · 用户自定义层级与列' : '自定义设计矩阵'}
+          </p>
+        </div>
+        {canCreate && (
+          showCreateForm ? (
+            <div className="flex items-center gap-2">
+              <Input
+                value={createName}
+                onChange={(e) => setCreateName(e.target.value)}
+                placeholder="矩阵名称"
+                className="h-8 w-48"
+                onKeyDown={(e) => e.key === 'Enter' && void handleCreate()}
+                autoFocus
+              />
+              <Button size="sm" onClick={() => void handleCreate()} disabled={creating}>
+                {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : '创建'}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowCreateForm(false)}>取消</Button>
+            </div>
+          ) : (
+            <Button onClick={() => setShowCreateForm(true)} variant="outline" size="sm">
+              <Plus className="mr-2 h-4 w-4" />
+              新建
+            </Button>
+          )
+        )}
       </div>
 
       <div className="grid gap-3">
         {matrices.map((m) => (
           <Card
             key={m.id}
-            className="cursor-pointer transition-shadow hover:shadow-md"
-            onClick={() => handleEnterMatrix(m)}
+            className="cursor-pointer transition-shadow hover:shadow-md hover:border-primary/30"
+            onClick={() => setSelectedMatrixId(m.id)}
           >
             <CardHeader className="pb-2">
-              <div className="flex items-start justify-between">
-                <div>
-                  <CardTitle className="text-base">{m.name}</CardTitle>
-                  {m.description && (
-                    <CardDescription className="mt-1">{m.description}</CardDescription>
-                  )}
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <CardTitle className="text-base truncate">{m.name}</CardTitle>
+                  <CardDescription className="mt-1">
+                    {m.status === 'designing'
+                      ? '设计未确认 — 点击进入设计器'
+                      : excelLike
+                        ? '点击进入 Excel 型矩阵录入'
+                        : '点击进入矩阵录入'}
+                  </CardDescription>
                 </div>
-                <Badge className={STATUS_COLORS[m.status] ?? 'bg-gray-100'} variant="outline">
+                <Badge className={STATUS_COLORS[m.status] ?? 'bg-muted'} variant="outline">
                   <span className="flex items-center gap-1">
                     {STATUS_ICONS[m.status]}
                     {STATUS_LABELS[m.status] ?? m.status}
@@ -231,13 +338,8 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
               </div>
             </CardHeader>
             <CardContent>
-              <div className="flex gap-4 text-xs text-muted-foreground">
-                {m.status === 'designing' ? (
-                  <span>设计未确认 — 点击进入设计器</span>
-                ) : (
-                  <span>点击进入矩阵录入</span>
-                )}
-                <span>创建于 {new Date(m.createdAt).toLocaleDateString('zh-CN')}</span>
+              <div className="text-xs text-muted-foreground">
+                更新于 {m.updatedAt ? new Date(m.updatedAt).toLocaleString('zh-CN') : '—'}
               </div>
             </CardContent>
           </Card>
@@ -247,41 +349,162 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Placeholder sub-components (will be replaced by full Designer/InputGrid)
-// ---------------------------------------------------------------------------
-
-function MatrixDesignerView({
-  matrixId,
-  taskId,
-  onBack,
-  onConfirmed,
+function StatusCard({
+  icon,
+  title,
+  description,
+  action,
 }: {
-  matrixId: string;
-  taskId: string;
-  onBack: () => void;
-  onConfirmed: () => void;
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  action?: React.ReactNode;
 }) {
   return (
-    <MatrixDesigner
+    <Card>
+      <CardContent className="py-12 text-center text-muted-foreground">
+        {icon}
+        <p className="font-medium text-foreground">{title}</p>
+        <p className="text-sm mt-1 max-w-md mx-auto">{description}</p>
+        {action && <div className="mt-4 flex justify-center">{action}</div>}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// V3 excel-like shell
+// ---------------------------------------------------------------------------
+
+function MatrixV3Shell({
+  matrixId,
+  onBack,
+}: {
+  matrixId: string;
+  onBack: () => void;
+}) {
+  const [projection, setProjection] = useState<V3MatrixProjection | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [bootstrapping, setBootstrapping] = useState(false);
+
+  const fetchProjection = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/v1/matrices/${matrixId}/v3-projection`, { cache: 'no-store' });
+      const json = await res.json();
+      if (json.code === 0 && json.data) {
+        setProjection(json.data);
+      } else {
+        setError(json.message || '加载 V3 投影失败');
+      }
+    } catch {
+      setError('网络错误');
+    } finally {
+      setLoading(false);
+    }
+  }, [matrixId]);
+
+  useEffect(() => {
+    void fetchProjection();
+  }, [fetchProjection]);
+
+  // If projection exists but has no view definition / empty columns, try ensure bootstrap via reopen create path is not needed —
+  // ensure is server-side. For legacy matrices without view, show a one-click migrate.
+  const needsBootstrap =
+    projection &&
+    !projection.viewDefinition &&
+    projection.columns.length === 0 &&
+    projection.hierarchy.length === 0;
+
+  const handleBootstrap = async () => {
+    setBootstrapping(true);
+    try {
+      // Re-create view by calling ensure endpoint via hierarchy-nodes noop is not available;
+      // use a dedicated soft path: POST a sentinel then delete is too heavy.
+      // Instead call create columns bootstrap through a lightweight internal fetch to v1 create is wrong.
+      // Use ensure via temporary API: POST /api/v1/matrices/{id}/ensure-v3
+      const res = await fetch(`/api/v1/matrices/${matrixId}/ensure-v3`, { method: 'POST' });
+      const json = await res.json();
+      if (json.code === 0) {
+        toast.success('已切换为 Excel 型矩阵视图');
+        await fetchProjection();
+      } else {
+        toast.error(json.message || '初始化失败');
+      }
+    } catch {
+      toast.error('初始化失败');
+    } finally {
+      setBootstrapping(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="py-16 text-center text-muted-foreground">
+          <Loader2 className="mx-auto h-8 w-8 animate-spin mb-2" />
+          <p>加载矩阵数据…</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card>
+        <CardContent className="py-16 text-center text-muted-foreground">
+          <AlertCircle className="mx-auto h-8 w-8 mb-2 text-destructive" />
+          <p>{error}</p>
+          <div className="mt-3 flex justify-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => void fetchProjection()}>重试</Button>
+            <Button variant="ghost" size="sm" onClick={onBack}>返回</Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (needsBootstrap) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center">
+          <Table2 className="mx-auto h-10 w-10 text-muted-foreground mb-3" />
+          <h3 className="font-semibold mb-2">此矩阵尚未启用 Excel 型视图</h3>
+          <p className="text-sm text-muted-foreground mb-4 max-w-md mx-auto">
+            将初始化空白结构列（一级大类 / 细项 / 图片 / 对比类目 / 评价 / 问题点），不会预设业务字段。
+          </p>
+          <Button onClick={() => void handleBootstrap()} disabled={bootstrapping}>
+            {bootstrapping ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            启用 Excel 型视图
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!projection) return null;
+
+  return (
+    <MatrixV3Grid
       matrixId={matrixId}
-      taskId={taskId}
-      onBack={onBack}
-      onConfirmed={onConfirmed}
+      projection={projection}
+      onChanged={() => { void fetchProjection(); }}
     />
   );
 }
 
-function MatrixInputShell({
+// ---------------------------------------------------------------------------
+// V2 input shell (fallback)
+// ---------------------------------------------------------------------------
+
+function MatrixInputShellV2({
   matrixId,
   taskId,
-  taskName,
-  onBack,
 }: {
   matrixId: string;
   taskId: string;
-  taskName: string;
-  onBack: () => void;
 }) {
   const [projection, setProjection] = useState<MatrixReadProjectionV2 | null>(null);
   const [loading, setLoading] = useState(true);
@@ -299,13 +522,10 @@ function MatrixInputShell({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/matrices/' + matrixId, { cache: 'no-store' });
+      const res = await fetch(`/api/matrices/${matrixId}`, { cache: 'no-store' });
       const json = await res.json();
-      if (json.code === 0 && json.data) {
-        setProjection(json.data);
-      } else {
-        setError(json.message || '加载失败');
-      }
+      if (json.code === 0 && json.data) setProjection(json.data);
+      else setError(json.message || '加载失败');
     } catch {
       setError('网络错误');
     } finally {
@@ -313,57 +533,33 @@ function MatrixInputShell({
     }
   }, [matrixId]);
 
-  useEffect(() => { fetchProjection(); }, [fetchProjection]);
+  useEffect(() => { void fetchProjection(); }, [fetchProjection]);
 
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="sm" onClick={onBack}>
-          ← 返回矩阵列表
-        </Button>
-        <span className="text-sm text-muted-foreground">矩阵录入</span>
-      </div>
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="py-16 text-center text-muted-foreground">
+          <Loader2 className="mx-auto h-8 w-8 animate-spin mb-2" />
+          <p>加载矩阵数据…</p>
+        </CardContent>
+      </Card>
+    );
+  }
+  if (error) {
+    return (
+      <Card>
+        <CardContent className="py-16 text-center text-muted-foreground">
+          <AlertCircle className="mx-auto h-8 w-8 mb-2 text-destructive" />
+          <p>{error}</p>
+        </CardContent>
+      </Card>
+    );
+  }
+  if (!projection) return null;
 
-      {loading && (
-        <Card>
-          <CardContent className="py-16 text-center text-muted-foreground">
-            <Loader2 className="mx-auto h-8 w-8 animate-spin mb-2" />
-            <p>加载矩阵数据...</p>
-          </CardContent>
-        </Card>
-      )}
-
-      {error && (
-        <Card>
-          <CardContent className="py-16 text-center text-muted-foreground">
-            <AlertCircle className="mx-auto h-8 w-8 mb-2 text-destructive" />
-            <p>{error}</p>
-            <Button variant="outline" size="sm" className="mt-3" onClick={() => window.location.reload()}>
-              重试
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {projection && !isMobile && (
-        <DesktopMatrixGrid
-          projection={projection}
-          taskId={taskId}
-          onRefresh={() => {
-            fetchProjection();
-          }}
-        />
-      )}
-
-      {projection && isMobile && (
-        <MobileMatrixCards
-          projection={projection}
-          taskId={taskId}
-          onRefresh={() => {
-            fetchProjection();
-          }}
-        />
-      )}
-    </div>
+  return isMobile ? (
+    <MobileMatrixCards projection={projection} taskId={taskId} onRefresh={fetchProjection} />
+  ) : (
+    <DesktopMatrixGrid projection={projection} taskId={taskId} onRefresh={fetchProjection} />
   );
 }

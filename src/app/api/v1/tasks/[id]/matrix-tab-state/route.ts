@@ -38,6 +38,12 @@ interface MatrixTabStateResponse {
   state: 'feature_disabled' | 'forbidden' | 'api_error' | 'empty' | 'ready';
   matrices: MatrixListItem[];
   cta: { primary: 'create_matrix' | null };
+  flags: {
+    taskMatrixEnabled: boolean;
+    dynamicMatrixExcelLikeViewEnabled: boolean;
+    dynamicMatrixFormulaEnabled: boolean;
+    inlineEditEnabled: boolean;
+  };
 }
 
 export async function GET(
@@ -59,6 +65,12 @@ export async function GET(
           state: 'forbidden',
           matrices: [],
           cta: { primary: null },
+          flags: {
+            taskMatrixEnabled: false,
+            dynamicMatrixExcelLikeViewEnabled: false,
+            dynamicMatrixFormulaEnabled: false,
+            inlineEditEnabled: false,
+          },
         },
         traceId,
       );
@@ -67,6 +79,12 @@ export async function GET(
 
     const flags = await getV3FeatureFlags();
     const flagState = resolveMatrixTabStateFromFlags(flags);
+    const flagPayload = {
+      taskMatrixEnabled: flags.taskMatrixEnabled,
+      dynamicMatrixExcelLikeViewEnabled: flags.dynamicMatrixExcelLikeViewEnabled,
+      dynamicMatrixFormulaEnabled: flags.dynamicMatrixFormulaEnabled,
+      inlineEditEnabled: flags.inlineEditEnabled,
+    };
 
     // Feature fully disabled.
     if (flagState.state === 'feature_disabled') {
@@ -77,6 +95,7 @@ export async function GET(
           state: 'feature_disabled',
           matrices: [],
           cta: { primary: null },
+          flags: flagPayload,
         },
         traceId,
       );
@@ -104,15 +123,18 @@ export async function GET(
     }));
 
     const hasMatrices = matrices.length > 0;
-    const state: 'empty' | 'ready' = hasMatrices ? 'ready' : 'empty';
+    // When task_matrix_enabled=false, keep empty + no create CTA even if rows exist.
+    const state: 'empty' | 'ready' =
+      !flags.taskMatrixEnabled ? 'empty' : hasMatrices ? 'ready' : 'empty';
 
     return ok<MatrixTabStateResponse>(
       {
         enabled: true,
         permission: 'editable',
         state,
-        matrices,
+        matrices: flags.taskMatrixEnabled ? matrices : [],
         cta: { primary: flagState.canCreate ? 'create_matrix' : null },
+        flags: flagPayload,
       },
       traceId,
     );
@@ -125,6 +147,12 @@ export async function GET(
         state: 'api_error',
         matrices: [],
         cta: { primary: null },
+        flags: {
+          taskMatrixEnabled: false,
+          dynamicMatrixExcelLikeViewEnabled: false,
+          dynamicMatrixFormulaEnabled: false,
+          inlineEditEnabled: false,
+        },
         error: message,
       },
       traceId,

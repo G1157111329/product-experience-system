@@ -135,6 +135,7 @@ export function MatrixV3Grid({ matrixId, projection, onChanged }: MatrixV3GridPr
   const [gridRows, setGridRows] = useState<GridRow[]>([]);
   const [addingNode, setAddingNode] = useState(false);
   const [newNodeLabel, setNewNodeLabel] = useState('');
+  const [showAddLevel1, setShowAddLevel1] = useState(false);
   const [addingColumn, setAddingColumn] = useState(false);
   const [newColumnLabel, setNewColumnLabel] = useState('');
   const [newColumnZone, setNewColumnZone] = useState<ColumnZone>('detail_dimension');
@@ -167,6 +168,7 @@ export function MatrixV3Grid({ matrixId, projection, onChanged }: MatrixV3GridPr
       if (json.code === 0) {
         toast.success('一级大类已创建');
         setNewNodeLabel('');
+        setShowAddLevel1(false);
         onChanged();
       } else {
         toast.error(json.message || '创建失败');
@@ -177,6 +179,27 @@ export function MatrixV3Grid({ matrixId, projection, onChanged }: MatrixV3GridPr
       setAddingNode(false);
     }
   }, [matrixId, newNodeLabel, onChanged]);
+
+  const handleAddLevel2 = useCallback(async (parentId: string) => {
+    const label = window.prompt('二级细项名称：', '新细项');
+    if (!label?.trim()) return;
+    try {
+      const res = await fetch(`/api/v1/matrices/${matrixId}/hierarchy-nodes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ level: 2, parentId, nodeLabel: label.trim() }),
+      });
+      const json = await res.json();
+      if (json.code === 0) {
+        toast.success('二级细项已创建');
+        onChanged();
+      } else {
+        toast.error(json.message || '创建失败');
+      }
+    } catch {
+      toast.error('创建失败，请重试');
+    }
+  }, [matrixId, onChanged]);
 
   const handleAddColumn = useCallback(async () => {
     if (!newColumnLabel.trim()) return;
@@ -288,6 +311,9 @@ export function MatrixV3Grid({ matrixId, projection, onChanged }: MatrixV3GridPr
               return (
                 <tr key={grow.leaf.id} className="hover:bg-muted/30">
                   {allColumns.map((col) => {
+                    const span = getRowSpanForColumn(col, merges, grow);
+                    // Skip non-start cells in a rowspan merge group.
+                    if (span === 0) return null;
                     const cell = projection.cells[cellKey(grow.leaf.id, col.id)];
                     const style = projection.styles[styleKey('cell', cellKey(grow.leaf.id, col.id))];
                     return (
@@ -303,7 +329,7 @@ export function MatrixV3Grid({ matrixId, projection, onChanged }: MatrixV3GridPr
                             ? `${frozenColumnOffset(frozenColumns, col)}px`
                             : undefined,
                         }}
-                        rowSpan={getRowSpanForColumn(col, merges, grow)}
+                        rowSpan={span && span > 1 ? span : undefined}
                       >
                         <MatrixV3Cell
                           matrixId={matrixId}
@@ -311,6 +337,8 @@ export function MatrixV3Grid({ matrixId, projection, onChanged }: MatrixV3GridPr
                           column={col}
                           cell={cell}
                           hierarchyContext={{ level1: grow.level1, level2: grow.level2, level3: grow.level3 }}
+                          mergeInfo={merges}
+                          onAddLevel2={handleAddLevel2}
                           onChanged={onChanged}
                         />
                       </td>
@@ -323,14 +351,38 @@ export function MatrixV3Grid({ matrixId, projection, onChanged }: MatrixV3GridPr
         </table>
       </div>
 
-      {/* Add column bar */}
+      {/* Add column / hierarchy bar */}
       <div className="flex items-center gap-2 flex-wrap">
+        {showAddLevel1 ? (
+          <>
+            <Input
+              value={newNodeLabel}
+              onChange={(e) => setNewNodeLabel(e.target.value)}
+              placeholder="一级大类名称（如：产品、食材、场景）"
+              className="max-w-[220px] h-8"
+              onKeyDown={(e) => e.key === 'Enter' && void handleAddLevel1()}
+              autoFocus
+            />
+            <Button size="sm" onClick={() => void handleAddLevel1()} disabled={addingNode || !newNodeLabel.trim()}>
+              {addingNode ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+              确认
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => { setShowAddLevel1(false); setNewNodeLabel(''); }}>
+              取消
+            </Button>
+          </>
+        ) : (
+          <Button size="sm" variant="outline" onClick={() => setShowAddLevel1(true)}>
+            <Plus className="h-3 w-3" /> 一级大类
+          </Button>
+        )}
+        <div className="h-4 w-px bg-border" />
         <Input
           value={newColumnLabel}
           onChange={(e) => setNewColumnLabel(e.target.value)}
           placeholder="新列名称（如：耗时、重量、温度）"
           className="max-w-[200px] h-8"
-          onKeyDown={(e) => e.key === 'Enter' && handleAddColumn()}
+          onKeyDown={(e) => e.key === 'Enter' && void handleAddColumn()}
         />
         <select
           value={newColumnZone}
@@ -342,12 +394,9 @@ export function MatrixV3Grid({ matrixId, projection, onChanged }: MatrixV3GridPr
           <option value="evaluation">效果评价</option>
           <option value="issue_point">问题点</option>
         </select>
-        <Button size="sm" variant="outline" onClick={handleAddColumn} disabled={addingColumn || !newColumnLabel.trim()}>
+        <Button size="sm" variant="outline" onClick={() => void handleAddColumn()} disabled={addingColumn || !newColumnLabel.trim()}>
           {addingColumn ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
           新增列
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => { setNewNodeLabel(''); }} title="添加一级大类">
-          <Plus className="h-3 w-3" /> 一级大类
         </Button>
       </div>
 
@@ -387,14 +436,86 @@ interface MatrixV3CellProps {
   column: V3Column;
   cell: V3CellValue | undefined;
   hierarchyContext: { level1: V3HierarchyNode; level2: V3HierarchyNode | null; level3: V3HierarchyNode | null };
+  mergeInfo?: MergeInfo;
+  onAddLevel2?: (parentId: string) => void;
   onChanged: () => void;
 }
 
-function MatrixV3Cell({ leafRowId, column, cell, onChanged }: MatrixV3CellProps) {
-  // Hierarchy columns render the merged label (rowspan handled by <td rowSpan>).
+function MatrixV3Cell({
+  leafRowId,
+  column,
+  cell,
+  hierarchyContext,
+  mergeInfo,
+  onAddLevel2,
+  onChanged,
+}: MatrixV3CellProps) {
+  // Hierarchy columns: render merged labels + inline rename.
   if (column.columnZone === 'hierarchy') {
-    // The actual label is rendered via rowSpan in the parent; cells here are
-    // typically empty for hierarchy zone unless it's a leaf-level label column.
+    const role = column.zoneRole || 'A';
+    if (role === 'A') {
+      if (mergeInfo && !mergeInfo.isLevel1Start) return null;
+      return (
+        <div className="px-1 py-1 space-y-1 min-w-0">
+          <InlineEditable.Text
+            value={hierarchyContext.level1.nodeLabel}
+            placeholder="一级大类"
+            onSave={async (v) => {
+              await patchInlineValue('dynamic_matrix_hierarchy_node', hierarchyContext.level1.id, 'node_label', v);
+              onChanged();
+            }}
+            inputClassName="h-7 text-xs font-medium"
+          />
+          {onAddLevel2 && (
+            <button
+              type="button"
+              className="text-[10px] text-muted-foreground hover:text-primary"
+              onClick={() => onAddLevel2(hierarchyContext.level1.id)}
+            >
+              + 二级细项
+            </button>
+          )}
+        </div>
+      );
+    }
+    if (role === 'B') {
+      if (mergeInfo && !mergeInfo.isLevel2Start) return null;
+      if (!hierarchyContext.level2) {
+        return <span className="text-muted-foreground text-xs px-1">—</span>;
+      }
+      return (
+        <div className="px-1 py-1">
+          <InlineEditable.Text
+            value={hierarchyContext.level2.nodeLabel}
+            placeholder="二级细项"
+            onSave={async (v) => {
+              await patchInlineValue('dynamic_matrix_hierarchy_node', hierarchyContext.level2!.id, 'node_label', v);
+              onChanged();
+            }}
+            inputClassName="h-7 text-xs"
+          />
+        </div>
+      );
+    }
+    if (role === 'C') {
+      if (mergeInfo && !mergeInfo.isLevel3Start) return null;
+      if (!hierarchyContext.level3) {
+        return <span className="text-muted-foreground text-xs px-1">—</span>;
+      }
+      return (
+        <div className="px-1 py-1">
+          <InlineEditable.Text
+            value={hierarchyContext.level3.nodeLabel}
+            placeholder="三级细项"
+            onSave={async (v) => {
+              await patchInlineValue('dynamic_matrix_hierarchy_node', hierarchyContext.level3!.id, 'node_label', v);
+              onChanged();
+            }}
+            inputClassName="h-7 text-xs"
+          />
+        </div>
+      );
+    }
     return <span className="text-muted-foreground text-xs px-1">{cell?.valueText ?? ''}</span>;
   }
 
