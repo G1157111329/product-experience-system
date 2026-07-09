@@ -645,3 +645,54 @@ INITIAL_ADMIN_PASSWORD=<strong-password>
 - **模型列表删除**：已保存配置列表中每个配置增加删除按钮，删除后清除该配置数据。
 - **配置字段统一展示**：设置页保持必要的连接配置字段可编辑，但文档只描述配置原则，不写真实值。
 - **数据库默认值**：`ai_model_configs.provider` 默认值从 `builtin` 改为 `custom`。
+
+## 2026-07-09 报告、矩阵与素材回归防护
+
+### 已修复问题与根因
+
+| 问题 | 根因 | 修复与禁止回归规则 |
+|------|------|-------------------|
+| 对比矩阵/冻结报告附录超过 50 张后无法显示 | `/api/materials/presign` 单次上限 50，前端一次提交全部路径 | `resolvePresignBatches` 必须按 50 条分批、去重并允许部分批次失败后继续；不得重新改成单次请求 |
+| 大素材报告服务端 PDF 超时或只嵌入部分图片 | Playwright 使用 `networkidle`，且服务器经公网入口回环加载自身素材 | PDF 使用 `domcontentloaded` + 有界图片就绪等待；服务端素材 URL 必须走 `127.0.0.1:${PORT}`，浏览器页面仍走公开地址 |
+| 冻结对比报告缺少“过程记录”，或“效果结论”替代过程记录 | 报告消费者把 `effect_summary` 当作通用文本，打印页遗漏 `processNotes` | 快照保留 `process_notes`；报告详情和 `/reports/print` 必须分别读取并标注“过程记录”“效果结论”，不得互相 fallback |
+| 功能效果报告显示 AI 评价而不是人工采纳评价 | 多个报告消费者各自选择文案且优先级不一致 | 统一使用 `selectEffectEvaluationText`：非空 `effect_description` 优先，只有人工评价为空才使用 AI summary |
+| AI 评价无法删除 | 删除动作只清部分 UI 状态或只清评分 | DELETE/清除操作必须同时清除 `effect_ai_result` 与 `effect_score`，且不得清除人工 `effect_description` |
+| AI 总结弹窗拆成多个输入框 | UI 直接绑定结构化字段 | 总结编辑使用一个分行文本框，固定包含“总结/满意度/主要优势/主要风险/历史表现/后续建议”，保存时由 `parseAiSummaryText` 还原结构 |
+| 下载报告的问题列表没有素材 | 只按直接 `issue_id` 找素材，遗漏 record、矩阵 cell、食谱步骤和效果问题点关联 | 使用 `issueMaterialRows` / `recipeIssueMaterialRows` 汇总全部来源；报告详情和 PDF 不得再对问题素材做数量截断 |
+| 报告中心素材只能看缩略图 | 专用报告 Tab 直接渲染静态 `PresignedImage/Video` | 报告矩阵、功能效果、问题及整改素材统一使用 `ReportMediaPreview`；图片点击看原图，视频点击进入带 controls 的播放器 |
+| 功能效果问题点首次输入后已有列表消失 | 渲染回退服务器列表，但输入 handler 从空本地数组开始更新 | 本地状态必须先由 `initializeEffectProblemPoints` 初始化；更新必须通过 `updateEffectProblemPoints` 以服务器列表为 fallback |
+| 功能效果问题点/素材依赖手动保存 | 评价描述已自动保存，但问题点与素材仍走独立按钮 | 问题点和效果素材按 recipe 进行 800ms 防抖、串行自动保存；失败保留草稿并显示错误，AI 评价前必须 flush |
+
+### 数据与素材稳定性约束
+
+- 报告修复不得修改素材外键、删除素材实体或改变 local-then-S3 读取策略。
+- 删除记录、食谱、步骤和问题时只能按既有规则解除素材关联；除非用户明确删除素材，不得级联删除物理文件。
+- 报告快照是冻结数据源。报告中心、分享页、打印页和服务端 PDF 必须消费同一语义字段，不能分别发明 fallback。
+- 附录素材不得使用 `.slice(0, N)` 静默截断。若 UI 需要折叠，必须提供可展开全部素材的入口。
+- 保存请求必须避免并发旧响应覆盖新草稿；功能效果自动保存使用 recipe 级串行队列。
+- 文档、测试、日志和提交信息禁止记录生产密码、API Key、对象存储密钥或会话令牌。
+
+### 修改后最小回归验证
+
+```bash
+# 类型与生产构建
+pnpm ts-check
+pnpm build
+
+# 报告/素材专项回归
+node_modules/.bin/tsx src/lib/presign-batches.test.ts
+node_modules/.bin/tsx src/lib/report-comparison-fields.test.ts
+node_modules/.bin/tsx src/lib/report-content-rules.test.ts
+node_modules/.bin/tsx src/lib/report-issue-media.test.ts
+node_modules/.bin/tsx src/lib/report-pdf-loading.test.ts
+node_modules/.bin/tsx src/lib/effect-problem-points.test.ts
+node_modules/.bin/tsx src/lib/report-media-preview.test.ts
+node_modules/.bin/tsx src/lib/report-print-matrix.test.ts
+```
+
+生产验收至少覆盖：
+
+- 指定对比报告的矩阵 API 中 `process_notes` 非空，报告中心与打印预览均显示过程记录。
+- 报告详情中的全部图片可打开原图，全部视频可点击播放。
+- 功能效果已有多条问题点时，编辑任意一条不会让其他条目消失；停止输入后状态变为“已保存”，刷新仍存在。
+- 实际下载 PDF 返回 `application/pdf`、文件头为 `%PDF-`，图片对象数与报告展示位一致。
