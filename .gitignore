@@ -115,3 +115,9 @@ docs/*.docx
 docs/*.xlsx
 scripts/ssh-*.py
 deploy-prod.py
+
+# Agent session artifacts & scratch dirs (never commit)
+tmp/
+.zcode/
+*.bak
+*.bak-*
