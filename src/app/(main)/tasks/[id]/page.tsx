@@ -29,6 +29,7 @@ import { ImageEditorDialog } from '@/components/image-editor-dialog';
 import { PageShell } from '@/components/app';
 import { MediaGallery } from '@/components/app/media-gallery';
 import { buildReportReadiness } from '@/lib/report-readiness';
+import { formatAiSummaryText, parseAiSummaryText } from '@/lib/report-content-rules';
 import { AgentPresetPanel } from './components/agent-preset-panel';
 import { MaterialEvidenceRail } from './components/material-evidence-rail';
 import { ReportAuthoringShell } from './components/report-authoring-shell';
@@ -85,19 +86,7 @@ const statusConfig: Record<string, { label: string; color: string }> = {
 };
 
 function summaryToForm(summary: AiTaskSummary) {
-  return {
-    tag: summary.tag || '',
-    satisfaction_score: String(summary.satisfaction_score ?? 0),
-    summary: summary.summary || '',
-    strengths: (summary.strengths || []).join('\n'),
-    risks: (summary.risks || []).join('\n'),
-    historical_position: summary.historical_position || '',
-    suggestions: (summary.suggestions || []).join('\n'),
-  };
-}
-
-function linesToList(value: string) {
-  return value.split('\n').map((line) => line.trim()).filter(Boolean);
+  return { text: formatAiSummaryText(summary) };
 }
 
 async function loadRecipesForTask(taskId: string): Promise<Recipe[]> {
@@ -184,15 +173,7 @@ export default function TaskDetailPage() {
   // still triggered explicitly by handleMaterialsChanged / handleAgentAccepted
   // when data actually changes.
   const recipesLoadedRef = useRef(false);
-  const [summaryForm, setSummaryForm] = useState({
-    tag: '',
-    satisfaction_score: '0',
-    summary: '',
-    strengths: '',
-    risks: '',
-    historical_position: '',
-    suggestions: '',
-  });
+  const [summaryForm, setSummaryForm] = useState({ text: '' });
 
   const fetchTask = useCallback(async () => {
     const res = await fetch(`/api/tasks/${id}`);
@@ -377,13 +358,15 @@ export default function TaskDetailPage() {
     setAiSummarySaving(true);
     try {
       const payload: AiTaskSummary = {
-        tag: summaryForm.tag.trim(),
-        satisfaction_score: Math.min(10, Math.max(0, Number(summaryForm.satisfaction_score) || 0)),
-        summary: summaryForm.summary.trim(),
-        strengths: linesToList(summaryForm.strengths),
-        risks: linesToList(summaryForm.risks),
-        historical_position: summaryForm.historical_position.trim(),
-        suggestions: linesToList(summaryForm.suggestions),
+        ...parseAiSummaryText(summaryForm.text, aiSummary || {
+          tag: '',
+          satisfaction_score: 0,
+          summary: '',
+          strengths: [],
+          risks: [],
+          historical_position: '',
+          suggestions: [],
+        }),
         updated_at: new Date().toISOString(),
       };
       const res = await fetch(`/api/tasks/${id}/ai-summary`, {
@@ -568,72 +551,13 @@ export default function TaskDetailPage() {
             <DialogDescription>AI会结合五感体验、功能效果、素材和历史同品类同产品报告生成初稿，内容可编辑后进入报告。</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px] gap-3">
-              <div className="space-y-1.5">
-                <Label>总结Tag</Label>
-                <Input
-                  value={summaryForm.tag}
-                  onChange={(e) => setSummaryForm({ ...summaryForm, tag: e.target.value })}
-                  placeholder="如：表现稳定"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>满意度</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  max={10}
-                  step={0.1}
-                  value={summaryForm.satisfaction_score}
-                  onChange={(e) => setSummaryForm({ ...summaryForm, satisfaction_score: e.target.value })}
-                />
-              </div>
-            </div>
             <div className="space-y-1.5">
-              <Label>总评</Label>
+              <Label>AI总结（可编辑）</Label>
               <Textarea
-                rows={4}
-                value={summaryForm.summary}
-                onChange={(e) => setSummaryForm({ ...summaryForm, summary: e.target.value })}
-                placeholder="概括当前产品体验水平、关键证据与整体判断"
-              />
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>主要优势</Label>
-                <Textarea
-                  rows={4}
-                  value={summaryForm.strengths}
-                  onChange={(e) => setSummaryForm({ ...summaryForm, strengths: e.target.value })}
-                  placeholder="每行一条"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>主要风险</Label>
-                <Textarea
-                  rows={4}
-                  value={summaryForm.risks}
-                  onChange={(e) => setSummaryForm({ ...summaryForm, risks: e.target.value })}
-                  placeholder="每行一条"
-                />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label>历史表现判断</Label>
-              <Textarea
-                rows={3}
-                value={summaryForm.historical_position}
-                onChange={(e) => setSummaryForm({ ...summaryForm, historical_position: e.target.value })}
-                placeholder="相对历史同品类同产品的体验水平判断"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>后续建议</Label>
-              <Textarea
-                rows={4}
-                value={summaryForm.suggestions}
-                onChange={(e) => setSummaryForm({ ...summaryForm, suggestions: e.target.value })}
-                placeholder="每行一条"
+                rows={16}
+                value={summaryForm.text}
+                onChange={(e) => setSummaryForm({ text: e.target.value })}
+                placeholder={'总结：\n满意度：\n主要优势：\n主要风险：\n历史表现：\n后续建议：'}
               />
             </div>
             <div className="flex flex-col-reverse sm:flex-row gap-2 justify-end pt-2 border-t">
