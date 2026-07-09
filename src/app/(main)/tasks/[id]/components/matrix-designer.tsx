@@ -10,11 +10,10 @@
  * Step 5/5: 预览与确认 (preview + confirm)
  */
 
-import { useCallback, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useCallback, useState } from 'react';
 import {
   ChevronLeft, ChevronRight, Check, Plus, Trash2, GripVertical,
-  Table2, Layout, Type, Hash, Clock, ToggleLeft, List, Image, Video,
+  Type, Hash, Clock, ToggleLeft, List, Image as ImageIcon, Video,
   AlertCircle, FileText,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -90,7 +89,7 @@ const FIELD_TYPE_OPTIONS: { value: FieldDataType; label: string; icon: React.Rea
   { value: 'date_time', label: '日期时间', icon: <Clock className="h-4 w-4" />, kinds: ['manual_value'] },
   { value: 'calculated_number', label: '计算数值', icon: <Hash className="h-4 w-4" />, kinds: ['formula'] },
   { value: 'calculated_percentage', label: '计算百分比', icon: <Hash className="h-4 w-4" />, kinds: ['formula'] },
-  { value: 'image_slot', label: '图片槽位', icon: <Image className="h-4 w-4" />, kinds: ['evidence_slot'] },
+  { value: 'image_slot', label: '图片槽位', icon: <ImageIcon className="h-4 w-4" />, kinds: ['evidence_slot'] },
   { value: 'video_slot', label: '视频槽位', icon: <Video className="h-4 w-4" />, kinds: ['evidence_slot'] },
   { value: 'file_slot', label: '附件槽位', icon: <FileText className="h-4 w-4" />, kinds: ['evidence_slot'] },
   { value: 'issue_slot', label: '问题槽位', icon: <AlertCircle className="h-4 w-4" />, kinds: ['issue_slot'] },
@@ -141,8 +140,7 @@ interface MatrixDesignerProps {
   onConfirmed: () => void;
 }
 
-export function MatrixDesigner({ matrixId, taskId, onBack, onConfirmed }: MatrixDesignerProps) {
-  const router = useRouter();
+export function MatrixDesigner({ matrixId, onBack, onConfirmed }: MatrixDesignerProps) {
   const [step, setStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
 
@@ -371,7 +369,7 @@ export function MatrixDesigner({ matrixId, taskId, onBack, onConfirmed }: Matrix
                 创建分区来组织字段。常用分区：测量记录、计算结果、体验观察、证据与问题。
               </p>
               <div className="space-y-3">
-                {state.sections.map((sec, idx) => (
+                {state.sections.map((sec) => (
                   <Card key={sec.key} className="border-dashed">
                     <CardContent className="py-3 flex items-center gap-3">
                       <GripVertical className="h-4 w-4 text-muted-foreground shrink-0" />

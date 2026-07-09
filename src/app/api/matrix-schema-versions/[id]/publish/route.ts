@@ -6,7 +6,6 @@ import { writeSecurityAudit } from '@/lib/server/security-audit';
 import {
   buildDependencyGraph,
   compileFormula,
-  MatrixFormulaError,
   parseErrorToCode,
 } from '@/lib/matrix/formula-engine';
 

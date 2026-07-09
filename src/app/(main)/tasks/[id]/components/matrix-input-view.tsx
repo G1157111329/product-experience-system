@@ -28,7 +28,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Table2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { DimensionBinding } from '@/lib/matrix/types';
 import type {
@@ -411,8 +410,9 @@ export function MatrixInputView({ taskId, taskName }: MatrixInputViewProps) {
   const setCellBusy = (key: string, busy: boolean) => {
     setBusyCells((cur) => {
       if (!busy) {
-        const { [key]: _omit, ...rest } = cur;
-        return rest;
+        const next = { ...cur };
+        delete next[key];
+        return next;
       }
       return { ...cur, [key]: true };
     });

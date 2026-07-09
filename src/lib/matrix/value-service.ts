@@ -430,6 +430,7 @@ function validateFieldValue(fieldDef: MatrixFieldDefinition, req: UpdateFieldVal
 }
 
 function determineValueState(req: UpdateFieldValueRequest, _fieldDef: MatrixFieldDefinition): ValueState {
+  void _fieldDef;
   const hasValue = req.numericValue != null || req.textValue != null ||
     req.durationMs != null || req.booleanValue != null ||
     req.dateTimeValue != null || req.enumValue != null;
@@ -443,6 +444,7 @@ function buildEvalContext(
   valueMap: Map<string, MatrixFieldValue>,
   _fieldDefMap: Map<string, MatrixFieldDefinition>,
 ): EvalContext {
+  void _fieldDefMap;
   const metrics: Record<string, MetricValue> = {};
 
   for (const [fieldId, value] of valueMap) {
@@ -483,12 +485,6 @@ async function getCompiledFormulas(
   }
 
   const db = await getDb();
-  const rows = await db
-    .select()
-    .from(matrixFormulaDefinitions)
-    .where(eq(matrixFormulaDefinitions.fieldDefinitionId!, '') // will be overridden
-    );
-
   // Actually query by design version via field definitions
   const fieldDefs = await db
     .select({ id: matrixFieldDefinitions.id })

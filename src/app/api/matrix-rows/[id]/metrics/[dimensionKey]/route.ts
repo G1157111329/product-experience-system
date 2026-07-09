@@ -35,7 +35,7 @@ import { recomputeAffected, MatrixMetricConflictError } from '@/lib/matrix/recom
  * }
  */
 
-import type { PatchMetricBody, DimensionBindingLike, EmptyBodyCheck } from '@/lib/matrix/metric-helpers';
+import type { PatchMetricBody, DimensionBindingLike } from '@/lib/matrix/metric-helpers';
 import { isCalculatedDimension, emptyMetricBody, versionConflict } from '@/lib/matrix/metric-helpers';
 
 type Row = Record<string, unknown>;

@@ -185,6 +185,7 @@ export async function executeBatchPaste(
   req: BatchPasteRequest,
   _opts: ExecuteOptions,
 ): Promise<BatchPasteResult> {
+  void _opts;
   // 1. Load assembly — must be a data_matrix instance.
   const { data: assembly, error: aErr } = await client.from('comparison_assemblies')
     .select('id,matrix_role,matrix_schema_version_id')

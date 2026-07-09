@@ -20,7 +20,7 @@
  * Responsive split is CSS-only: MatrixInputView renders this component inside
  * a `md:hidden` container and the grid inside `hidden md:block`.
  */
-import { Fragment, useState } from 'react';
+import { useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -508,7 +508,6 @@ function DimensionDrawer({
   open,
   onOpenChange,
   row,
-  taskId,
   dimensions,
   observedKeys,
   optimistic,

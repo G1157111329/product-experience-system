@@ -16,7 +16,7 @@
  * relative fill-down is handled server-side by recompute-v3.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { Plus, Table2, Loader2, Type, Hash, Clock, Image as ImageIcon, AlertCircle, Calculator, Sparkles, Settings2 } from 'lucide-react';
+import { Plus, Table2, Loader2, Type, Hash, Image as ImageIcon, AlertCircle, Calculator, Sparkles, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -71,18 +71,6 @@ const CONFIGURABLE_COLUMN_ZONES = new Set<ColumnZone>([
   'evaluation',
   'issue_point',
 ]);
-
-// Zone display labels (PRD §7 / 附录 A).
-const ZONE_LABELS: Record<ColumnZone, string> = {
-  hierarchy: '层级',
-  primary_media: '图片素材',
-  comparison_category: '一级对比类目',
-  detail_dimension: '详细对比维度',
-  calculation_dimension: '计算列',
-  effect_media: '效果素材',
-  evaluation: '效果评价',
-  issue_point: '问题点',
-};
 
 // Style token → tailwind class (safe whitelist, PRD §8.8 / 附录 C).
 const FONT_COLOR_CLASS: Record<string, string> = {

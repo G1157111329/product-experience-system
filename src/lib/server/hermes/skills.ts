@@ -14,7 +14,7 @@ import {
 } from '@/storage/database/shared/schema';
 import { getV3MatrixProjection } from '@/lib/matrix/projection-v3';
 import { cellKey } from '@/lib/matrix/v3-types';
-import type { V3MatrixProjection, V3HierarchyNode, V3Column, V3CellValue } from '@/lib/matrix/v3-types';
+import type { V3MatrixProjection, V3HierarchyNode, V3CellValue } from '@/lib/matrix/v3-types';
 import { executeHermesRun } from './runtime';
 
 export interface MatrixSummarySuggestion {

@@ -663,6 +663,7 @@ INITIAL_ADMIN_PASSWORD=<strong-password>
 | 功能效果问题点首次输入后已有列表消失 | 渲染回退服务器列表，但输入 handler 从空本地数组开始更新 | 本地状态必须先由 `initializeEffectProblemPoints` 初始化；更新必须通过 `updateEffectProblemPoints` 以服务器列表为 fallback |
 | 功能效果问题点/素材依赖手动保存 | 评价描述已自动保存，但问题点与素材仍走独立按钮 | 问题点和效果素材按 recipe 进行 800ms 防抖、串行自动保存；失败保留草稿并显示错误，AI 评价前必须 flush |
 | 全仓 ESLint 存在 11 个 error | JSX 文案使用未转义英文引号、可用 `const` 的变量使用 `let`、旧 API/素材适配使用显式 `any` | 文案改用中文引号、不可变请求体使用 `const`、通用行类型使用 `Record<string, unknown>`、旧素材兼容字段使用 `LegacyMaterial` 显式类型；后续提交不得新增 ESLint error |
+| 全仓 ESLint 存在 66 个 warning | 旧矩阵/报告模块残留未使用 import、变量与参数，打印页 Hook 依赖不完整，MaterialPicker 上传函数每次渲染重建 | 清理确定无引用的代码；保留旧流程时显式标记；补齐打印依赖；`resetFileInputs`/`uploadFiles` 使用 `useCallback` 稳定引用。全仓 ESLint 基线为 0 error / 0 warning |
 
 ### 数据与素材稳定性约束
 

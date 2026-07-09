@@ -6,15 +6,13 @@
  * Mobile-first view: group list → row cards → row edit page.
  */
 
-import { useCallback, useState } from 'react';
-import { ChevronRight, CheckCircle2, AlertTriangle, ImagePlus, Camera } from 'lucide-react';
+import { useState } from 'react';
+import { ChevronRight, CheckCircle2, AlertTriangle, Camera } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import type {
   MatrixReadProjectionV2,
-  GroupWithRows,
   MatrixRowProjection,
 } from '@/lib/matrix/task-matrix-types';
 
@@ -163,8 +161,6 @@ export function MobileMatrixCards({ projection, taskId, onRefresh }: MobileMatri
 
 function RowEditCard({
   row,
-  taskId,
-  onRefresh,
 }: {
   row: MatrixRowProjection;
   taskId: string;

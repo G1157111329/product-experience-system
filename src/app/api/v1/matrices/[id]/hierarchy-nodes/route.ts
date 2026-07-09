@@ -56,7 +56,6 @@ export async function POST(
     const db = await getDb();
 
     // Compute next sort_order under the parent (or at root for level_1).
-    const parentFilter = body.parentId ?? null;
     const sortOrderResult = await db
       .select({ maxOrder: sql<number>`COALESCE(MAX(${matrixHierarchyNodes.sortOrder}), 0) + 1` })
       .from(matrixHierarchyNodes)

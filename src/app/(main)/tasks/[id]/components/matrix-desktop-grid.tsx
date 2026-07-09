@@ -16,13 +16,11 @@ import { Loader2, AlertTriangle, CheckCircle2, ImagePlus, Plus, ClipboardCheck }
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import type {
   MatrixReadProjectionV2,
   MatrixFieldDefinition,
   MatrixRowProjection,
-  MatrixFieldValue,
   ValidationResult,
 } from '@/lib/matrix/task-matrix-types';
 
@@ -32,7 +30,7 @@ interface DesktopMatrixGridProps {
   onRefresh: () => void;
 }
 
-export function DesktopMatrixGrid({ projection, taskId, onRefresh }: DesktopMatrixGridProps) {
+export function DesktopMatrixGrid({ projection, onRefresh }: DesktopMatrixGridProps) {
   const { groups, designVersion, summary } = projection;
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [validating, setValidating] = useState(false);
@@ -49,9 +47,6 @@ export function DesktopMatrixGrid({ projection, taskId, onRefresh }: DesktopMatr
     }
     return fields;
   }, [designVersion]);
-
-  const manualFields = gridFields.filter((f) => f.fieldKind === 'manual_value');
-  const formulaFields = gridFields.filter((f) => f.fieldKind === 'formula');
 
   const validateMatrix = async () => {
     setValidating(true);
@@ -156,9 +151,6 @@ export function DesktopMatrixGrid({ projection, taskId, onRefresh }: DesktopMatr
                 key={group.id}
                 group={group}
                 gridFields={gridFields}
-                manualFields={manualFields}
-                formulaFields={formulaFields}
-                taskId={taskId}
                 onRefresh={onRefresh}
               />
             ))}
@@ -223,16 +215,10 @@ function CreateGroupInline({ matrixId, onRefresh }: { matrixId: string; onRefres
 function MatrixGroupRows({
   group,
   gridFields,
-  manualFields,
-  formulaFields,
-  taskId,
   onRefresh,
 }: {
   group: { id: string; groupLabel: string; rows: MatrixRowProjection[] };
   gridFields: MatrixFieldDefinition[];
-  manualFields: MatrixFieldDefinition[];
-  formulaFields: MatrixFieldDefinition[];
-  taskId: string;
   onRefresh: () => void;
 }) {
   return (
@@ -269,7 +255,6 @@ function MatrixGroupRows({
               key={field.id}
               row={row}
               field={field}
-              taskId={taskId}
               onRefresh={onRefresh}
             />
           ))}
@@ -338,12 +323,10 @@ function CreateRowInline({ groupId, onRefresh }: { groupId: string; onRefresh: (
 function MatrixCell({
   row,
   field,
-  taskId,
   onRefresh,
 }: {
   row: MatrixRowProjection;
   field: MatrixFieldDefinition;
-  taskId: string;
   onRefresh: () => void;
 }) {
   const value = row.values[field.id];

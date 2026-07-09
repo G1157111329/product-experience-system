@@ -129,7 +129,6 @@ export async function recomputeMatrixFormulas(matrixId: string): Promise<void> {
   for (const r of activeLeafRows) leafById.set(r.id, r);
 
   const totalCols = activeColumns.length;
-  const totalRows = activeLeafRows.length;
   // The grid's row extent is max(visibleRowIndex)+1 (visibleRowIndex is dense
   // 0..N-1 for active rows in practice, but we size defensively).
   let maxRowIndex = -1;

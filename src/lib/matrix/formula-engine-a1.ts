@@ -400,6 +400,7 @@ function renderNode(node: FormulaNode): string {
  * because the AST already encodes the grouping.
  */
 function renderChild(node: FormulaNode, parentOp: '+' | '-' | '*' | '/', _isLeft: boolean): string {
+  void _isLeft;
   if (node.type !== 'binop') return renderNode(node);
   const parentRank = parentOp === '+' || parentOp === '-' ? 1 : 2;
   const childRank = node.op === '+' || node.op === '-' ? 1 : 2;

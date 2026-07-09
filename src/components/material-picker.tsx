@@ -210,14 +210,14 @@ export function MaterialPicker({
     }
   }, [initialMaterials]);
 
-  const resetFileInputs = () => {
+  const resetFileInputs = useCallback(() => {
     [
       galleryImageInputRef,
       galleryVideoInputRef,
     ].forEach((inputRef) => {
       if (inputRef.current) inputRef.current.value = '';
     });
-  };
+  }, []);
 
   const triggerFilePicker = (inputRef: React.RefObject<HTMLInputElement | null>) => {
     const input = inputRef.current;
@@ -225,7 +225,7 @@ export function MaterialPicker({
     input.click();
   };
 
-  const uploadFiles = async (files: File[]) => {
+  const uploadFiles = useCallback(async (files: File[]) => {
     if (files.length === 0) return;
 
     setUploading(true);
@@ -283,7 +283,21 @@ export function MaterialPicker({
       setUploading(false);
       resetFileInputs();
     }
-  };
+  }, [
+    comparisonCellId,
+    issueId,
+    materials,
+    notifySelectionChange,
+    onSelect,
+    onSelectionChange,
+    reEvaluationId,
+    recipeId,
+    recipeStepId,
+    recordId,
+    resetFileInputs,
+    selected,
+    taskId,
+  ]);
 
   const handlePaste = useCallback((e: ClipboardEvent) => {
     // Only handle when the dialog is open.

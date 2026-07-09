@@ -5,7 +5,6 @@ import {
   getIssueHistoryCount,
   getIssueOccurrenceTimeline,
   getRectificationHistory,
-  type RectificationWithVerifications,
 } from '@/lib/server/issue-lifecycle';
 
 type Row = Record<string, unknown>;

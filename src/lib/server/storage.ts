@@ -8,12 +8,10 @@
 
 import {
   S3Client,
-  GetObjectCommand,
   DeleteObjectCommand,
   type PutObjectCommandInput,
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import crypto from 'crypto';
 import { createReadStream, createWriteStream } from 'fs';
 import { access, mkdir, readFile, stat, unlink, writeFile } from 'fs/promises';

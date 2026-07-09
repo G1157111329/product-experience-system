@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, GitCompareArrows, Loader2, Plus, Save, Table2, Trash2, X } from 'lucide-react';
+import { Check, GitCompareArrows, Loader2, Plus, Table2, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { MaterialPicker, type Material } from '@/components/material-picker';
 import { Badge } from '@/components/ui/badge';
@@ -11,7 +11,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Textarea } from '@/components/ui/textarea';
 import { InlineEditable } from '@/components/inline-editable';
 import { patchInlineValue } from '@/lib/inline-save-helpers';
 
@@ -367,6 +366,8 @@ export function ComparisonWorkspace({
       toast.error(data.message || '保存大类小结失败');
     }
   };
+  // Retained for the legacy explicit-save flow; current summary fields autosave.
+  void saveSummaryNode;
 
   const deleteNode = async (nodeId: string) => {
     const res = await fetch(`/api/comparison-item-nodes/${nodeId}`, { method: 'DELETE' });

@@ -24,11 +24,8 @@ export function ReportStickyHeader({
   id,
   title,
   productModel,
-  status,
-  reportType,
   projectPhase,
   projectType,
-  taskTitle,
   aiSummary,
   onExport,
 }: ReportStickyHeaderProps) {

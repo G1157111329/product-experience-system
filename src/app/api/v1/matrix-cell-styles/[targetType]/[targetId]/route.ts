@@ -7,7 +7,7 @@
  */
 import { NextRequest } from 'next/server';
 import { getDb } from '@/storage/database/pg-db';
-import { eq, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { matrixCellStyles } from '@/storage/database/shared/schema';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { requireUser, isAuthResponse } from '@/lib/server/auth';

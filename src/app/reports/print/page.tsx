@@ -894,6 +894,8 @@ function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIs
     </>
   );
 }
+// Kept as the legacy report renderer while the merged print path is active.
+void PrintReportSection;
 
 export default function ReportPrintPage() {
   return (
@@ -908,7 +910,6 @@ function ReportPrintContent() {
   const reportId = searchParams.get('id');
   const shareToken = searchParams.get('share_token');
   const printMode = normalizePrintMode(searchParams.get('mode'));
-  const printParityMode = searchParams.get('parity') === '1' || searchParams.get('debug') === 'legacy';
   const [report, setReport] = useState<ReportData | null>(null);
   const [siblingReports, setSiblingReports] = useState<ReportData[]>([]);
   const [detailModelsMap, setDetailModelsMap] = useState<Record<string, ReportDetailModel>>({});
@@ -1174,7 +1175,7 @@ function ReportPrintContent() {
     };
     const timer = setTimeout(convertImages, 500);
     return () => clearTimeout(timer);
-  }, [report, siblingReports, printMode, liveIssuesMap, reportId, shareToken]);
+  }, [report, siblingReports, printMode, liveIssuesMap, detailModelsMap, reportId, shareToken]);
 
   useEffect(() => {
     if (report && imagesLoaded) {
@@ -1204,12 +1205,7 @@ function ReportPrintContent() {
   const allReports = isMerged ? [report, ...siblingReports] : [report];
 
   // Total stats
-  const totalRecords = allReports.flatMap(r => r.content?.records || []);
   const allLiveIssues = allReports.flatMap(r => liveIssuesMap[r.id] || []);
-  const totalRecipes = allReports.flatMap(r => r.content?.recipes || []);
-  const totalPass = totalRecords.filter(r => r.evaluation_result === '合格').length;
-  const totalFail = totalRecords.filter(r => r.evaluation_result === '不合格').length;
-  const totalRecipePC = totalRecipes.reduce((s, r) => s + (r.problem_count || 0), 0);
   const displayReport = report.content
     ? buildDisplayReportContent({
       title: report.title,
