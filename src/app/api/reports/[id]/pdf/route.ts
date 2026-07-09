@@ -193,7 +193,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // Server-side PDF render has no /api/materials/presign to call, so resolve
     // storage keys to absolute URLs now. Gray-release aware (local-then-S3).
     await presignReportMediaUrls(detail);
-    await page.setContent(renderReportDetailPdfHtml(detail, new Date()), { waitUntil: 'networkidle' });
+    await page.setContent(renderReportDetailPdfHtml(detail, new Date()), { waitUntil: 'domcontentloaded' });
+    // Video metadata requests can keep the page globally "busy" even after every
+    // printable image is ready. Wait only for images, with a bounded fallback so
+    // one unavailable asset cannot block the whole report.
+    await page.waitForFunction(
+      () => Array.from(document.images).every((image) => image.complete),
+      undefined,
+      { timeout: 30_000 },
+    ).catch(() => undefined);
     const pdfBuffer = await page.pdf({
       format: delivery.profile.paper,
       landscape: delivery.profile.orientation === 'landscape',
