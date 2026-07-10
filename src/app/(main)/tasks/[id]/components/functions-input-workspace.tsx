@@ -8,6 +8,8 @@ import { cn } from '@/lib/utils';
 import type { EvidenceBindingTarget, Recipe, RecipeStep } from '../types';
 import { toast } from 'sonner';
 import { getRecipeStatistics } from '@/lib/recipe-statistics';
+import type { IngredientItem } from '@/lib/task-context-contract';
+import { RecipeIngredientEditor, shouldShowIngredientEditor } from './recipe-ingredient-editor';
 
 type FunctionsInputWorkspaceProps = {
   recipes: Recipe[];
@@ -22,6 +24,7 @@ type FunctionsInputWorkspaceProps = {
   onReorderSteps: (recipe: Recipe, steps: RecipeStep[]) => void;
   onBindingTargetChange: (target: EvidenceBindingTarget | null) => void;
   onRefresh?: () => void;
+  onSaveIngredients: (recipe: Recipe, items: IngredientItem[]) => Promise<void>;
   renderEffectEditor?: (recipe: Recipe) => ReactNode;
 };
 
@@ -38,6 +41,7 @@ export function FunctionsInputWorkspace({
   onReorderSteps,
   onBindingTargetChange,
   onRefresh,
+  onSaveIngredients,
   renderEffectEditor,
 }: FunctionsInputWorkspaceProps) {
   const [selectedRecipeId, setSelectedRecipeId] = useState('');
@@ -220,12 +224,18 @@ export function FunctionsInputWorkspace({
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h3 className="truncate text-base font-semibold">{selectedRecipe.name}</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">{selectedRecipe.ingredients || '暂无参数/食材'}</p>
                 </div>
                 <Button variant="outline" size="sm" onClick={() => onEditRecipe(selectedRecipe)}>
                   <Pencil className="mr-1.5 h-3.5 w-3.5" />编辑
                 </Button>
               </div>
+              {shouldShowIngredientEditor(selectedRecipe.recipe_type) && (
+                <RecipeIngredientEditor
+                  items={selectedRecipe.ingredient_items || []}
+                  legacyText={selectedRecipe.ingredients}
+                  onSave={(items) => onSaveIngredients(selectedRecipe, items)}
+                />
+              )}
             </div>
 
             <div className="rounded-lg border bg-card p-3 shadow-sm">
@@ -238,7 +248,7 @@ export function FunctionsInputWorkspace({
               <div className="mb-2">
                 <span className="text-[10px] text-muted-foreground">拖拽步骤可重新排序</span>
               </div>
-              <div className="space-y-2">
+              <div className="max-h-[30rem] space-y-2 overflow-y-auto pr-1">
                 {(selectedRecipe.recipe_steps || []).map((step, stepIdx) => (
                   <div
                     key={step.id}

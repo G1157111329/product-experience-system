@@ -2828,6 +2828,24 @@ function FunctionsTab({
         }}
         onBindingTargetChange={(target) => onBindingTargetChange?.(target)}
         onRefresh={fetchRecipes}
+        onSaveIngredients={async (recipe, items) => {
+          const response = await fetch(`/api/recipes/${recipe.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: recipe.name,
+              ingredients: recipe.ingredients,
+              ingredient_items: items,
+              recipe_type: recipe.recipe_type,
+              problem_count: recipe.problem_count,
+            }),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok || data.code !== 0) throw new Error(data.message || '食材参数保存失败');
+          const nextRecipes = recipes.map((item) => item.id === recipe.id ? { ...item, ingredient_items: items } : item);
+          setRecipes(nextRecipes);
+          onRecipesChange?.(nextRecipes);
+        }}
         renderEffectEditor={(recipe) => {
           const aiData = aiResult[recipe.id]?.result || recipe.effect_ai_result;
           const aiScore = aiResult[recipe.id]?.score || recipe.effect_score;

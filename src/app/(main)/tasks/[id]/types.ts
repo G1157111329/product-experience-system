@@ -1,4 +1,5 @@
 import type { Material as MaterialType } from '@/components/material-picker';
+import type { IngredientItem, StepParameters } from '@/lib/task-context-contract';
 export type Material = MaterialType;
 
 export interface CategoryWithProducts {
@@ -93,6 +94,7 @@ export interface Recipe {
   id: string;
   name: string;
   ingredients: string | null;
+  ingredient_items?: IngredientItem[];
   recipe_type: string;
   problem_count: number;
   recipe_steps: RecipeStep[];
@@ -115,6 +117,7 @@ export interface RecipeStep {
   operation: string;
   problem_point: string | null;
   problem_points?: ProblemPoint[];
+  parameters?: StepParameters;
   materials?: Material[];
 }
 
