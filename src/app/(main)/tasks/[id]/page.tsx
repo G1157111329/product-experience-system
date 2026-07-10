@@ -40,6 +40,7 @@ import { MaterialEvidenceRail } from './components/material-evidence-rail';
 import { ReportAuthoringShell } from './components/report-authoring-shell';
 import { SensesInputWorkspace } from './components/senses-input-workspace';
 import { FunctionsInputWorkspace } from './components/functions-input-workspace';
+import { RecipeIssueOutputPanel } from './components/recipe-issue-output-panel';
 import { ComparisonWorkspace } from './components/comparison-workspace';
 import { MatrixTab } from './components/matrix-tab';
 import type { EvidenceBindingTarget } from './types';
@@ -463,7 +464,7 @@ export default function TaskDetailPage() {
           <MatrixTab taskId={id} taskName={task.task_name} />
         )}
         {activeTab === 'senses' && <SensesTab taskId={id} records={task.records || []} taskProductCategory={task.product_category} taskProduct={task.product} onRefresh={fetchTask} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onBindingTargetChange={setEvidenceBindingTarget} />}
-        {activeTab === 'functions' && <FunctionsTab taskId={id} initialRecipes={reportRecipes} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onRecipesChange={setReportRecipes} onBindingTargetChange={setEvidenceBindingTarget} />}
+        {activeTab === 'functions' && <FunctionsTab taskId={id} productModel={task.product_model} initialRecipes={reportRecipes} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onRecipesChange={setReportRecipes} onBindingTargetChange={setEvidenceBindingTarget} />}
       </ReportAuthoringShell>
 
       {/* Transfer Dialog */}
@@ -2203,12 +2204,14 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
 /* ─── Tab: 功能效果 ─── */
 function FunctionsTab({
   taskId,
+  productModel,
   initialRecipes,
   onStatusUpdate,
   onRecipesChange,
   onBindingTargetChange,
 }: {
   taskId: string;
+  productModel?: string | null;
   initialRecipes?: Recipe[];
   onStatusUpdate: () => void;
   onRecipesChange?: (recipes: Recipe[]) => void;
@@ -2240,7 +2243,6 @@ function FunctionsTab({
   const [effectProblemPoints, setEffectProblemPoints] = useState<Record<string, ProblemPoint[]>>({});
   const [aiDetectingProblems, setAiDetectingProblems] = useState<Record<string, boolean>>({});
   const [effectMaterialIds, setEffectMaterialIds] = useState<Record<string, string[]>>({});
-  const [effectSaving, setEffectSaving] = useState<Record<string, boolean>>({});
   const [effectSaveStatus, setEffectSaveStatus] = useState<Record<string, 'idle' | 'dirty' | 'saving' | 'saved' | 'error'>>({});
   const [dirtyEffectRecipeIds, setDirtyEffectRecipeIds] = useState<Set<string>>(new Set());
   const effectSaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -2608,7 +2610,6 @@ function FunctionsTab({
     draftVersion: number,
     notify = false,
   ): Promise<boolean> => {
-    setEffectSaving(prev => ({ ...prev, [recipe.id]: true }));
     setEffectSaveStatus((current) => ({ ...current, [recipe.id]: 'saving' }));
     try {
       const res = await fetch(`/api/recipes/${recipe.id}`, {
@@ -2635,7 +2636,6 @@ function FunctionsTab({
       if (notify) toast.error(error instanceof Error ? `保存失败：${error.message}` : '保存失败');
       return false;
     } finally {
-      setEffectSaving(prev => ({ ...prev, [recipe.id]: false }));
     }
   }, []);
 
@@ -2899,14 +2899,8 @@ function FunctionsTab({
                   {aiData?.summary && <p className="text-[11px] text-muted-foreground">{aiData.summary}</p>}
                 </div>
               )}
-              <div className="grid gap-2 sm:grid-cols-2">
-                <Button variant="outline" size="sm"
-                  onClick={() => void handleSaveEffect(recipe)}
-                  disabled={effectSaving[recipe.id]}>
-                  <Save className="h-3.5 w-3.5 mr-1" />
-                  {effectSaving[recipe.id] ? '保存中...' : '保存素材/问题点'}
-                </Button>
-                <Button size="sm" onClick={() => handleAiEvaluate(recipe)}
+              <div>
+                <Button className="w-full" size="sm" onClick={() => handleAiEvaluate(recipe)}
                   disabled={aiEvaluating[recipe.id] || (!recipe.effect_description && (!effectMaterialIds[recipe.id]?.length && !recipe.effect_materials?.length))}>
                   <Sparkles className="h-3.5 w-3.5 mr-1" />
                   {aiEvaluating[recipe.id] ? 'AI评价中...' : 'AI总结评分'}
@@ -2962,7 +2956,7 @@ function FunctionsTab({
                     </div>
                   </div>
                 ))}
-                <div className="grid gap-2 sm:grid-cols-3">
+                <div className="grid gap-2 sm:grid-cols-2">
                   <Button variant="outline" size="sm" onClick={() => handleAddProblemPoint(recipe.id)}>
                     <Plus className="h-3.5 w-3.5 mr-1" /> 新增问题点
                   </Button>
@@ -2970,14 +2964,15 @@ function FunctionsTab({
                     <Sparkles className="h-3.5 w-3.5 mr-1" />
                     {aiDetectingProblems[recipe.id] ? '识别中...' : 'AI识别问题点'}
                   </Button>
-                  <Button variant="outline" size="sm"
-                    onClick={() => void handleSaveEffect(recipe)}
-                    disabled={effectSaving[recipe.id]}>
-                    <Save className="h-3.5 w-3.5 mr-1" />
-                    {effectSaving[recipe.id] ? '保存中...' : '保存问题点'}
-                  </Button>
                 </div>
               </div>
+              <RecipeIssueOutputPanel
+                taskId={taskId}
+                productModel={productModel}
+                recipe={recipe}
+                problemPoints={pps}
+                ensureDraftSaved={() => handleSaveEffect(recipe)}
+              />
             </div>
           );
         }}

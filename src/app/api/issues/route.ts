@@ -59,6 +59,10 @@ export async function POST(request: NextRequest) {
   if (isAuthResponse(user)) return user;
 
   const body = await request.json();
+  const title = String(body.title || '').trim().slice(0, 200);
+  if (!title) {
+    return NextResponse.json({ code: 1, message: '请输入问题标题' }, { status: 400 });
+  }
   if (!body.task_id || !(await canAccessTask(client, user, body.task_id))) return forbidden();
   if (!(await isRecipeContextInTask(client, body.task_id, body.recipe_id, body.recipe_step_id))) {
     return NextResponse.json({ code: 1, message: '食谱或步骤不属于当前体验计划' }, { status: 400 });
@@ -70,12 +74,30 @@ export async function POST(request: NextRequest) {
     .eq('id', body.task_id)
     .maybeSingle();
 
+  // Authoring can retry after a timeout or a double click. Recipe problems are
+  // idempotent within their recipe so a retry never creates duplicate work.
+  if (body.source_type === 'recipe_problem' && body.recipe_id) {
+    const { data: existingIssues } = await client
+      .from('issues')
+      .select('*')
+      .eq('task_id', body.task_id)
+      .eq('recipe_id', body.recipe_id)
+      .eq('source_type', 'recipe_problem')
+      .eq('title', title)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    const existing = existingIssues?.[0];
+    if (existing) {
+      return NextResponse.json({ code: 0, message: '问题已存在', created: false, data: existing });
+    }
+  }
+
   const { data, error } = await client.from('issues').insert({
     task_id: body.task_id,
     record_id: body.record_id || null,
     recipe_id: body.recipe_id || null,
     recipe_step_id: body.recipe_step_id || null,
-    title: body.title,
+    title,
     product_model: body.product_model || null,
     category: body.category || null,
     sub_category: body.sub_category || null,
@@ -109,5 +131,5 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  return NextResponse.json({ code: 0, message: '创建成功', data });
+  return NextResponse.json({ code: 0, message: '创建成功', created: true, data });
 }

@@ -79,6 +79,9 @@ export interface Issue {
   title: string;
   severity: string;
   status: string;
+  recipe_id?: string | null;
+  recipe_step_id?: string | null;
+  source_type?: string | null;
 }
 
 export type MaterialEvidenceFilter = 'all' | 'unlinked' | 'linked' | 'image' | 'video' | 'senses' | 'functions' | 'effect';
