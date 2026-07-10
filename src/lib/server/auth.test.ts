@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import {
   PERSISTENT_SESSION_MAX_AGE_SECONDS,
   SESSION_COOKIE_NAME,
+  canAccessMatrix,
   checkRateLimit,
   shouldUseSecureSessionCookie,
   signSessionToken,
   verifySessionToken,
   verifySessionTokenClaims,
+  type ClientLike,
   type AuthUser,
 } from './auth';
 import { hashPassword, passwordNeedsRehash, verifyPassword } from './password';
@@ -76,4 +78,60 @@ else mutableEnv.AUTH_COOKIE_SECURE = originalAuthCookieSecure;
 if (originalPublicMediaBaseUrl === undefined) delete mutableEnv.PUBLIC_MEDIA_BASE_URL;
 else mutableEnv.PUBLIC_MEDIA_BASE_URL = originalPublicMediaBaseUrl;
 
-console.log('server auth tests passed');
+function fakeClient(rows: Record<string, Record<string, unknown>[]>): ClientLike {
+  return {
+    from(table: string) {
+      let selected = rows[table] || [];
+      const query = {
+        select() {
+          return query;
+        },
+        eq(field: string, value: unknown) {
+          selected = selected.filter((row) => row[field] === value);
+          return query;
+        },
+        order() {
+          return query;
+        },
+        async maybeSingle() {
+          return { data: selected[0] || null, error: null };
+        },
+        async single() {
+          return { data: selected[0] || null, error: null };
+        },
+        then(resolve: (value: { data: Record<string, unknown>[]; error: null }) => unknown) {
+          return Promise.resolve({ data: selected, error: null }).then(resolve);
+        },
+      };
+      return query;
+    },
+  } as unknown as ClientLike;
+}
+
+async function runMatrixAccessTests() {
+  const matrixClient = fakeClient({
+    task_matrices: [{ id: 'matrix-1', task_id: 'task-1' }],
+    experience_tasks: [{ id: 'task-1', created_by: 'owner-1', owner_id: 'owner-1' }],
+  });
+
+  assert.equal(
+    await canAccessMatrix(matrixClient, { id: 'owner-1', account: 'owner', name: 'Owner', role: 'executor' }, 'matrix-1'),
+    true,
+  );
+  assert.equal(
+    await canAccessMatrix(matrixClient, { id: 'other-1', account: 'other', name: 'Other', role: 'executor' }, 'matrix-1'),
+    false,
+  );
+  assert.equal(
+    await canAccessMatrix(matrixClient, { id: 'admin-1', account: 'admin', name: 'Admin', role: 'admin' }, 'missing-matrix'),
+    true,
+  );
+  assert.equal(
+    await canAccessMatrix(matrixClient, { id: 'owner-1', account: 'owner', name: 'Owner', role: 'executor' }, 'missing-matrix'),
+    false,
+  );
+}
+
+void runMatrixAccessTests().then(() => {
+  console.log('server auth tests passed');
+});

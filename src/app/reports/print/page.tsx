@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useState, type CSSProperties } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { reportFilenameBase } from '@/lib/report-filename';
 import { Loader2 } from 'lucide-react';
 import { ReportPrintSectionBlocks } from '@/components/reports/report-section-block-renderer';
 import { buildDisplayReportContent, type AiSummaryLike, type ReportContentWithReview, type ReportReviewOverrides } from '@/lib/report-review-overrides';
@@ -15,7 +16,7 @@ import {
 } from '@/lib/report-merge';
 import { resolvePresignBatches } from '@/lib/presign-batches';
 import { selectEffectEvaluationText } from '@/lib/report-content-rules';
-import { toPublicMediaUrl } from '@/lib/use-presigned-url';
+import { isAllowedMediaSource, toPublicMediaUrl } from '@/lib/use-presigned-url';
 
 interface Material {
   id: string; material_type: string; file_name: string; file_url: string; file_size: number; file_path?: string;
@@ -150,7 +151,7 @@ async function imageUrlToPrintableDataUrl(url: string, mode: PrintMode): Promise
 }
 
 async function batchPresignUrls(paths: string[], reportId?: string | null, shareToken?: string | null): Promise<Record<string, string>> {
-  const objectKeys = paths.filter((path) => !isDirectPrintableUrl(path));
+  const objectKeys = paths.filter((path) => !isDirectPrintableUrl(path) && !/^https?:\/\//i.test(path));
   const directUrls = paths.filter(isDirectPrintableUrl);
   const directMap = Object.fromEntries(directUrls.map((url) => [url, url]));
   if (!objectKeys.length) return directMap;
@@ -174,7 +175,11 @@ async function batchPresignUrls(paths: string[], reportId?: string | null, share
 }
 
 function isDirectPrintableUrl(value: string): boolean {
-  return value.startsWith('http') || value.startsWith('/uploads/') || value.startsWith('/media/') || value.startsWith('data:');
+  return isAllowedMediaSource(value);
+}
+
+function isRejectedAbsoluteMediaUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value) && !isDirectPrintableUrl(value);
 }
 
 const pendingPrintableMediaDataUrl =
@@ -197,7 +202,13 @@ async function presignReportUrls(rpt: ReportData, shareToken?: string | null): P
     if (!obj || typeof obj !== 'object') return;
     const record = obj as Record<string, unknown>;
     for (const [key, val] of Object.entries(record)) {
-      if ((key === 'file_url' || key === 'file_path') && typeof val === 'string' && val && !isDirectPrintableUrl(val)) {
+      if (
+        (key === 'file_url' || key === 'file_path')
+        && typeof val === 'string'
+        && val
+        && !isDirectPrintableUrl(val)
+        && !isRejectedAbsoluteMediaUrl(val)
+      ) {
         filePaths.push(val);
       } else if (Array.isArray(val)) {
         val.forEach(item => collectPaths(item));
@@ -468,9 +479,9 @@ function PrintRecipeCard({ recipe }: { recipe: Record<string, unknown> }) {
           <div key={String(m.id)} style={{ width: '60px', height: '60px', overflow: 'hidden', borderRadius: '4px', border: '1px solid #e5e7eb', background: '#f9fafb' }}>
             {String(m.material_type || 'image') === 'image' ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={String(m.file_url || m.file_path || '')} alt={String(m.file_name || '')} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              <img src={toPublicMediaUrl(String(m.file_url || m.file_path || '')) || pendingPrintableMediaDataUrl} alt={String(m.file_name || '')} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             ) : (
-              <video src={String(m.file_url || m.file_path || '')} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
+              <video src={toPublicMediaUrl(String(m.file_url || m.file_path || '')) || undefined} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
             )}
           </div>
         ))}
@@ -1178,6 +1189,15 @@ function ReportPrintContent() {
   }, [report, siblingReports, printMode, liveIssuesMap, detailModelsMap, reportId, shareToken]);
 
   useEffect(() => {
+    if (!report) return;
+    const previousTitle = document.title;
+    document.title = reportFilenameBase(report.title);
+    return () => {
+      document.title = previousTitle;
+    };
+  }, [report]);
+
+  useEffect(() => {
     if (report && imagesLoaded) {
       const timer = setTimeout(() => window.print(), 800);
       return () => clearTimeout(timer);
@@ -1388,9 +1408,9 @@ function ReportPrintContent() {
                           <div key={String(m.id)} style={{ width: '60px', height: '60px', overflow: 'hidden', borderRadius: '4px', border: '1px solid #e5e7eb', background: '#f9fafb' }}>
                             {String(m.material_type || 'image') === 'image' ? (
                               // eslint-disable-next-line @next/next/no-img-element
-                              <img src={String(m.file_url || m.file_path || '')} alt={String(m.file_name || '')} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                              <img src={toPublicMediaUrl(String(m.file_url || m.file_path || '')) || pendingPrintableMediaDataUrl} alt={String(m.file_name || '')} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                             ) : (
-                              <video src={String(m.file_url || m.file_path || '')} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
+                              <video src={toPublicMediaUrl(String(m.file_url || m.file_path || '')) || undefined} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
                             )}
                           </div>
                         ))}

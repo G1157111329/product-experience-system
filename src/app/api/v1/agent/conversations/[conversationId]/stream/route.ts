@@ -22,6 +22,8 @@ import {
   SSE_RESPONSE_HEADERS,
   type SSESend,
 } from '@/lib/server/hermes/sse';
+import { canAccessConversationRow } from '@/lib/server/agent-access';
+import { stripAssistantReasoning } from '@/lib/assistant-output';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,7 +58,7 @@ export async function GET(
     return fail(traceId, { message: 'conversation 不存在', status: 404 });
   }
   const conv = convRows[0];
-  if (conv.platformUserId && conv.platformUserId !== user.id) {
+  if (!canAccessConversationRow(user, conv)) {
     return forbidden(traceId, '无权访问该会话');
   }
 
@@ -96,7 +98,7 @@ export async function GET(
             messageId: row.id,
             conversationId,
             role: row.role,
-            content: row.content,
+            content: row.role === 'assistant' ? stripAssistantReasoning(row.content) : row.content,
             eventSeq: seq,
             toolCallId: row.toolCallId,
             toolName: row.toolName,

@@ -11,7 +11,7 @@ function readField<T>(row: Record<string, unknown>, snakeKey: string, camelKey: 
 function formatSkillTemplateError(err: unknown, fallback: string) {
   const message = err instanceof Error ? err.message : fallback;
   if (message.includes('ECONNREFUSED') || message.includes('Failed query')) {
-    return 'Prompt 模板读取失败，请确认数据库已连接，并已执行 AI Agent Skills 初始化 SQL。';
+    return 'Prompt 模板读取失败，请确认数据库已连接，并已执行 AI助手技能初始化 SQL。';
   }
   return message || fallback;
 }

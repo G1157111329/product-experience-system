@@ -23,11 +23,12 @@
  *   throws for error.
  */
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Loader2, RefreshCw, AlertTriangle, Save } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { useDebouncedSave, type SaveStatus } from '@/hooks/use-debounced-save';
+import { createCompositionController } from '@/lib/input-composition';
 
 export interface InlineSaveResult {
   conflict?: boolean;
@@ -154,20 +155,32 @@ function useInlineEditableEngine(
 ) {
   const [draft, setDraft] = useState(value);
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
+  const compositionRef = useRef(createCompositionController());
 
   // Resync local draft when authoritative value changes externally.
   useEffect(() => {
-    setDraft(value);
+    if (!compositionRef.current.isComposing) setDraft(value);
   }, [value]);
 
   const { status, schedule, flush, reset, setStatus } = useDebouncedSave(onSave);
 
   const handleChange = (next: string) => {
     setDraft(next);
-    schedule(next);
+    const committed = compositionRef.current.change(next);
+    if (committed !== null) schedule(committed);
+  };
+
+  const handleCompositionStart = () => {
+    compositionRef.current.start();
+  };
+
+  const handleCompositionEnd = (next: string) => {
+    setDraft(next);
+    schedule(compositionRef.current.end(next));
   };
 
   const handleBlur = () => {
+    if (compositionRef.current.blur(draft) === null) return;
     // Only flush if the draft diverges from authoritative value.
     if (draft !== value) {
       flush();
@@ -201,9 +214,12 @@ function useInlineEditableEngine(
     status,
     inputRef,
     handleChange,
+    handleCompositionStart,
+    handleCompositionEnd,
     handleBlur,
     handleRetry,
     handleForceOverwrite: onForceSave ? handleForceOverwrite : undefined,
+    flush,
     setStatus,
   };
 }
@@ -218,7 +234,7 @@ function TextImpl({
   inputClassName,
   ariaLabel,
 }: InlineTextProps) {
-  const { draft, status, inputRef, handleChange, handleBlur, handleRetry, handleForceOverwrite } =
+  const { draft, status, inputRef, handleChange, handleCompositionStart, handleCompositionEnd, handleBlur, handleRetry, handleForceOverwrite } =
     useInlineEditableEngine(value, onSave, onForceSave);
 
   if (readOnly) {
@@ -237,6 +253,8 @@ function TextImpl({
         placeholder={placeholder}
         aria-label={ariaLabel}
         onChange={(e) => handleChange(e.target.value)}
+        onCompositionStart={handleCompositionStart}
+        onCompositionEnd={(e) => handleCompositionEnd(e.currentTarget.value)}
         onBlur={handleBlur}
         className={cn('h-8', inputClassName)}
       />
@@ -256,7 +274,7 @@ function TextareaImpl({
   ariaLabel,
   rows = 3,
 }: InlineTextareaProps) {
-  const { draft, status, inputRef, handleChange, handleBlur, handleRetry, handleForceOverwrite } =
+  const { draft, status, inputRef, handleChange, handleCompositionStart, handleCompositionEnd, handleBlur, handleRetry, handleForceOverwrite, flush } =
     useInlineEditableEngine(value, onSave, onForceSave);
 
   if (readOnly) {
@@ -269,16 +287,30 @@ function TextareaImpl({
 
   return (
     <span className={cn('inline-flex flex-col gap-0.5 min-w-0 w-full', className)}>
-      <Textarea
-        ref={inputRef as React.RefObject<HTMLTextAreaElement>}
-        value={draft}
-        placeholder={placeholder}
-        aria-label={ariaLabel}
-        rows={rows}
-        onChange={(e) => handleChange(e.target.value)}
-        onBlur={handleBlur}
-        className={cn('resize-y', inputClassName)}
-      />
+      <span className="flex min-w-0 items-start gap-1">
+        <Textarea
+          ref={inputRef as React.RefObject<HTMLTextAreaElement>}
+          value={draft}
+          placeholder={placeholder}
+          aria-label={ariaLabel}
+          rows={rows}
+          onChange={(e) => handleChange(e.target.value)}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={(e) => handleCompositionEnd(e.currentTarget.value)}
+          onBlur={handleBlur}
+          className={cn('resize-y', inputClassName)}
+        />
+        <button
+          type="button"
+          aria-label="保存"
+          title="保存"
+          className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => flush()}
+        >
+          <Save className="h-3.5 w-3.5" />
+        </button>
+      </span>
       <SaveStatusBadge status={status} onRetry={handleRetry} onForceOverwrite={handleForceOverwrite} />
     </span>
   );

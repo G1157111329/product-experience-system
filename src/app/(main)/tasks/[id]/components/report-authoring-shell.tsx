@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { cloneElement, isValidElement, useMemo, useState, type ComponentType, type ReactNode } from 'react';
 import {
@@ -7,26 +7,20 @@ import {
   GitCompareArrows,
   PanelLeftClose,
   PanelLeftOpen,
-  Sparkles,
   Table,
   WandSparkles,
   Wrench,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
-import { AgentAssistPanel } from './agent-assist-panel';
 
 type TaskTabKey = 'agent' | 'info' | 'materials' | 'senses' | 'functions' | 'comparison' | 'matrix';
 
 type ReportAuthoringShellProps = {
-  taskId: string;
   activeTab: TaskTabKey;
-  agentOpen: boolean;
   isComparisonTask?: boolean;
   hasMatrixInstance?: boolean;
   onTabChange: (tab: TaskTabKey) => void;
-  onAgentOpenChange: (open: boolean) => void;
   materialRail?: ReactNode;
   children: ReactNode;
 };
@@ -39,12 +33,9 @@ const baseNavItems: Array<{ key: TaskTabKey; label: string; icon: ComponentType<
 ];
 
 export function ReportAuthoringShell({
-  taskId,
   activeTab,
-  agentOpen,
   isComparisonTask = true,
   onTabChange,
-  onAgentOpenChange,
   materialRail,
   children,
 }: ReportAuthoringShellProps) {
@@ -70,11 +61,30 @@ export function ReportAuthoringShell({
   return (
     <div
       className={cn(
-        'grid gap-4 lg:items-start',
+        'lg:grid lg:gap-4 lg:items-start',
         navCollapsed ? 'lg:grid-cols-[56px_minmax(0,1fr)]' : 'lg:grid-cols-[240px_minmax(0,1fr)]',
       )}
     >
-      <aside className="rounded-lg border bg-card p-3 shadow-sm lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+      {/* Mobile: horizontal scrollable tab bar */}
+      <div className="lg:hidden -mx-3 px-0 sticky top-0 z-30 bg-background/95 pb-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <div className="flex items-center gap-1 overflow-x-auto scrollbar-none px-3">
+          {navItems.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => onTabChange(item.key)}
+              className={cn(
+                'flex shrink-0 items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium whitespace-nowrap transition-colors',
+                activeTab === item.key ? 'bg-primary text-primary-foreground' : 'bg-muted/40 hover:bg-muted',
+              )}
+            >
+              {item.icon && <item.icon className="h-3.5 w-3.5" />}
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <aside className="hidden lg:block rounded-lg border bg-card p-3 shadow-sm lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
         <div className={cn('mb-3 flex items-center gap-2', navCollapsed ? 'flex-col' : 'justify-between')}>
           {!navCollapsed && (
             <div className="min-w-0">
@@ -91,17 +101,6 @@ export function ReportAuthoringShell({
               title={navCollapsed ? '展开录入目录' : '隐藏录入目录'}
             >
               {navCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-            </Button>
-            <Button
-              variant={agentOpen ? 'default' : 'outline'}
-              size={navCollapsed ? 'icon' : 'sm'}
-              className={cn('h-9 shrink-0', !navCollapsed && 'gap-1.5 px-2.5', navCollapsed && 'w-full')}
-              onClick={() => onAgentOpenChange(!agentOpen)}
-              aria-label={agentOpen ? '关闭 AI辅助' : '打开 AI辅助'}
-              title="AI辅助"
-            >
-              <Sparkles className="h-4 w-4" />
-              {!navCollapsed && <span className="text-xs">AI辅助</span>}
             </Button>
           </div>
         </div>
@@ -133,6 +132,14 @@ export function ReportAuthoringShell({
       </aside>
 
       <div className="min-w-0 space-y-4">
+        {/* Mobile material rail */}
+        {materialRail && (
+          <div className="lg:hidden">
+            <div className="rounded-lg border bg-card p-2 shadow-sm">
+              {compactRail}
+            </div>
+          </div>
+        )}
         {navCollapsed && materialRail && (
           <div className="sticky top-0 z-30 bg-background/95 pb-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
             <div className="rounded-lg border bg-card p-3 shadow-sm">
@@ -141,20 +148,9 @@ export function ReportAuthoringShell({
           </div>
         )}
         {children}
+        {/* Spacing for bottom nav + floating agent on mobile */}
+        <div className="h-20 lg:hidden" />
       </div>
-
-      <Dialog open={agentOpen} onOpenChange={onAgentOpenChange}>
-        <DialogContent className="max-h-[90dvh] max-w-3xl overflow-y-auto p-0">
-          <DialogHeader className="sr-only">
-            <DialogTitle>AI辅助</DialogTitle>
-          </DialogHeader>
-          <AgentAssistPanel
-            taskId={taskId}
-            onClose={() => onAgentOpenChange(false)}
-            embedded
-          />
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

@@ -20,7 +20,7 @@ import { getDb } from '@/storage/database/pg-db';
 import { eq, sql } from 'drizzle-orm';
 import { matrixFormulaDefinitionsV3 } from '@/storage/database/shared/schema';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { requireUser, isAuthResponse } from '@/lib/server/auth';
+import { canAccessMatrix, requireUser, isAuthResponse } from '@/lib/server/auth';
 import { ok, fail } from '@/lib/server/api-v1/response';
 import { resolveTraceId } from '@/lib/server/api-v1/trace';
 import { compileA1Formula } from '@/lib/matrix/formula-engine-a1';
@@ -70,6 +70,9 @@ export async function PUT(
   if (!columnId) return fail(traceId, { message: 'columnId 不能为空', status: 400 });
   if (!expressionDisplay) {
     return fail(traceId, { message: 'expressionDisplay 不能为空', status: 400 });
+  }
+  if (!(await canAccessMatrix(client, user, matrixId))) {
+    return fail(traceId, { message: '无权访问该矩阵', status: 403 });
   }
 
   const applyScopeRaw = typeof body.applyScope === 'string' ? body.applyScope : 'matrix';

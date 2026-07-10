@@ -16,12 +16,11 @@
  * relative fill-down is handled server-side by recompute-v3.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { Plus, Table2, Loader2, Type, Hash, Image as ImageIcon, AlertCircle, Calculator, Sparkles, Settings2 } from 'lucide-react';
+import { Plus, Loader2, Type, Hash, Image as ImageIcon, AlertCircle, Calculator, Sparkles, Settings2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent } from '@/components/ui/card';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { InlineEditable } from '@/components/inline-editable';
@@ -190,12 +189,12 @@ export function MatrixV3Grid({
     setGridRows(buildGridRows(projection));
   }, [projection]);
 
-  const columns = projection.columns;
-  const frozenColumns = columns.filter((c) => c.isPinned || c.columnZone === 'hierarchy' || c.columnZone === 'primary_media' || c.columnZone === 'comparison_category');
-  const scrollableColumns = columns.filter((c) => !frozenColumns.includes(c));
-
-  // Group frozen + scrollable for header rendering.
-  const allColumns = [...frozenColumns, ...scrollableColumns];
+  const hasLevel3 = projection.hierarchy.some((level1) =>
+    level1.children.some((level2) => level2.children.some((child) => child.level === 3)),
+  );
+  const columns = projection.columns.filter((column) => column.zoneRole !== 'C' || hasLevel3);
+  const allColumns = columns;
+  const tableWidth = allColumns.reduce((total, column) => total + (column.zoneRole === 'B' ? Math.max(220, column.desktopWidthPx) : column.desktopWidthPx), 0);
 
   const formulaByColumnId = useCallback(
     (columnId: string): V3FormulaDefinition | undefined =>
@@ -301,6 +300,55 @@ export function MatrixV3Grid({
       }
     } catch {
       toast.error('创建失败，请重试');
+    }
+  }, [matrixId, onChanged]);
+
+  const handleAddLevel3 = useCallback(async (parentId: string) => {
+    const label = window.prompt('三级细项名称：', '新三级细项');
+    if (!label?.trim()) return;
+    try {
+      const res = await fetch(`/api/v1/matrices/${matrixId}/hierarchy-nodes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ level: 3, parentId, nodeLabel: label.trim() }),
+      });
+      const json = await res.json();
+      if (json.code === 0) {
+        toast.success('三级细项已创建');
+        onChanged();
+      } else {
+        toast.error(json.message || '创建失败');
+      }
+    } catch {
+      toast.error('创建失败，请重试');
+    }
+  }, [matrixId, onChanged]);
+
+  const handleDeleteHierarchyNode = useCallback(async (nodeId: string) => {
+    const remove = async (confirmArchive: boolean) => {
+      const response = await fetch(`/api/v1/matrices/${matrixId}/hierarchy-nodes`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nodeId, confirmArchive }),
+      });
+      return { response, json: await response.json() };
+    };
+
+    try {
+      let result = await remove(false);
+      if (result.response.status === 409 && result.json?.details?.errorCode === 'MX-HIER-003') {
+        const confirmed = window.confirm('该层级包含数据、素材或问题。继续后会归档该层级及其下级，已冻结报告不受影响。确认继续？');
+        if (!confirmed) return;
+        result = await remove(true);
+      }
+      if (result.json.code !== 0) {
+        toast.error(result.json.message || '删除层级失败');
+        return;
+      }
+      toast.success(result.json.data?.mode === 'archive' ? '层级已归档' : '空层级已删除');
+      onChanged();
+    } catch {
+      toast.error('删除层级失败，请重试');
     }
   }, [matrixId, onChanged]);
 
@@ -475,35 +523,6 @@ export function MatrixV3Grid({
     ? projection.styles[styleKey(styleTarget.type, styleTarget.id)]
     : undefined;
 
-  // Empty matrix: show the "create first level_1" prompt.
-  if (gridRows.length === 0 && projection.hierarchy.length === 0) {
-    return (
-      <Card>
-        <CardContent className="py-12 text-center">
-          <Table2 className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-          <h3 className="text-lg font-semibold mb-2">空白动态数据矩阵</h3>
-          <p className="text-muted-foreground mb-6 max-w-md mx-auto">
-            从添加第一个一级大类开始。系统会自动创建对应的二级细项和数据行，
-            您可以立即录入数据。
-          </p>
-          <div className="flex items-center justify-center gap-2">
-            <Input
-              value={newNodeLabel}
-              onChange={(e) => setNewNodeLabel(e.target.value)}
-              placeholder="一级大类名称（如：产品、食材、场景）"
-              className="max-w-xs"
-              onKeyDown={(e) => e.key === 'Enter' && handleAddLevel1()}
-            />
-            <Button onClick={handleAddLevel1} disabled={addingNode || !newNodeLabel.trim()}>
-              {addingNode ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-              添加一级大类
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
     <div className="space-y-3">
       {cellStyleEnabled && (
@@ -538,7 +557,7 @@ export function MatrixV3Grid({
 
       {/* Desktop grid */}
       <div className="border rounded-lg overflow-auto max-h-[70vh] hidden md:block" style={{ minWidth: 0 }}>
-        <table className="border-collapse text-sm" style={{ tableLayout: 'fixed' }}>
+        <table className="border-collapse text-sm" style={{ tableLayout: 'fixed', minWidth: tableWidth }}>
           {/* Header */}
           <thead className="sticky top-0 z-20 bg-muted/80 backdrop-blur">
             <tr>
@@ -551,16 +570,12 @@ export function MatrixV3Grid({
                   key={col.id}
                   className={cn(
                     'border-b border-r px-2 py-1.5 text-left font-medium whitespace-nowrap',
-                    frozenColumns.includes(col) && 'sticky bg-muted z-10',
                     styleToClass(headerStyle),
                     cellStyleEnabled && 'cursor-pointer',
                     isHeaderSelected && 'ring-2 ring-inset ring-primary/50',
                   )}
                   style={{
-                    width: col.desktopWidthPx,
-                    left: frozenColumns.includes(col)
-                      ? `${frozenColumnOffset(frozenColumns, col)}px`
-                      : undefined,
+                    width: col.zoneRole === 'B' ? Math.max(220, col.desktopWidthPx) : col.desktopWidthPx,
                   }}
                   onClick={() => handleColumnHeaderClick(col)}
                 >
@@ -623,16 +638,12 @@ export function MatrixV3Grid({
                         key={col.id}
                         className={cn(
                           'border-b border-r px-1 py-0.5 align-top',
-                          frozenColumns.includes(col) && 'sticky bg-background z-[1]',
                           styleToClass(style),
                           pickMode && 'cursor-crosshair hover:bg-primary/10',
                           !pickMode && cellStyleEnabled && 'cursor-pointer',
                           isCellSelected && 'ring-2 ring-inset ring-primary/50',
                         )}
                         style={{
-                          left: frozenColumns.includes(col)
-                            ? `${frozenColumnOffset(frozenColumns, col)}px`
-                            : undefined,
                         }}
                         rowSpan={span && span > 1 ? span : undefined}
                         onClick={
@@ -666,6 +677,8 @@ export function MatrixV3Grid({
                           hierarchyContext={{ level1: grow.level1, level2: grow.level2, level3: grow.level3 }}
                           mergeInfo={merges}
                           onAddLevel2={handleAddLevel2}
+                          onAddLevel3={handleAddLevel3}
+                          onDeleteNode={handleDeleteHierarchyNode}
                           onChanged={onChanged}
                           formulaEnabled={formulaEnabled}
                           formula={formulaByColumnId(col.id)}
@@ -826,6 +839,8 @@ interface MatrixV3CellProps {
   hierarchyContext: { level1: V3HierarchyNode; level2: V3HierarchyNode | null; level3: V3HierarchyNode | null };
   mergeInfo?: MergeInfo;
   onAddLevel2?: (parentId: string) => void;
+  onAddLevel3?: (parentId: string) => void;
+  onDeleteNode?: (nodeId: string) => void;
   onChanged: () => void;
   formulaEnabled?: boolean;
   formula?: V3FormulaDefinition;
@@ -843,6 +858,8 @@ function MatrixV3Cell({
   hierarchyContext,
   mergeInfo,
   onAddLevel2,
+  onAddLevel3,
+  onDeleteNode,
   onChanged,
   formulaEnabled,
   formula,
@@ -864,15 +881,34 @@ function MatrixV3Cell({
             }}
             inputClassName="h-7 text-xs font-medium"
           />
-          {onAddLevel2 && (
-            <button
-              type="button"
-              className="text-[10px] text-muted-foreground hover:text-primary"
-              onClick={() => onAddLevel2(hierarchyContext.level1.id)}
-            >
-              + 二级细项
-            </button>
-          )}
+          <div className="flex items-center justify-between gap-1">
+            {onAddLevel2 && (
+              <button
+                type="button"
+                className="text-[10px] text-muted-foreground hover:text-primary"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onAddLevel2(hierarchyContext.level1.id);
+                }}
+              >
+                + 二级细项
+              </button>
+            )}
+            {onDeleteNode && (
+              <button
+                type="button"
+                className="ml-auto inline-flex h-6 w-6 items-center justify-center text-muted-foreground hover:text-destructive"
+                title="删除一级大类"
+                aria-label="删除一级大类"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDeleteNode(hierarchyContext.level1.id);
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
         </div>
       );
     }
@@ -882,7 +918,8 @@ function MatrixV3Cell({
         return <span className="text-muted-foreground text-xs px-1">—</span>;
       }
       return (
-        <div className="px-1 py-1">
+        <div className="flex min-w-[200px] items-start gap-1 px-1 py-1">
+          <div className="min-w-0 flex-1 space-y-1">
           <InlineEditable.Text
             value={hierarchyContext.level2.nodeLabel}
             placeholder="二级细项"
@@ -892,6 +929,33 @@ function MatrixV3Cell({
             }}
             inputClassName="h-7 text-xs"
           />
+          {onAddLevel3 && (
+            <button
+              type="button"
+              className="text-[10px] text-muted-foreground hover:text-primary"
+              onClick={(event) => {
+                event.stopPropagation();
+                onAddLevel3(hierarchyContext.level2!.id);
+              }}
+            >
+              + 三级细项
+            </button>
+          )}
+          </div>
+          {onDeleteNode && (
+            <button
+              type="button"
+              className="inline-flex h-7 w-7 shrink-0 items-center justify-center text-muted-foreground hover:text-destructive"
+              title="删除二级细项"
+              aria-label="删除二级细项"
+              onClick={(event) => {
+                event.stopPropagation();
+                onDeleteNode(hierarchyContext.level2!.id);
+              }}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       );
     }
@@ -901,7 +965,7 @@ function MatrixV3Cell({
         return <span className="text-muted-foreground text-xs px-1">—</span>;
       }
       return (
-        <div className="px-1 py-1">
+        <div className="flex items-start gap-1 px-1 py-1">
           <InlineEditable.Text
             value={hierarchyContext.level3.nodeLabel}
             placeholder="三级细项"
@@ -911,6 +975,20 @@ function MatrixV3Cell({
             }}
             inputClassName="h-7 text-xs"
           />
+          {onDeleteNode && (
+            <button
+              type="button"
+              className="inline-flex h-7 w-7 shrink-0 items-center justify-center text-muted-foreground hover:text-destructive"
+              title="删除三级细项"
+              aria-label="删除三级细项"
+              onClick={(event) => {
+                event.stopPropagation();
+                onDeleteNode(hierarchyContext.level3!.id);
+              }}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       );
     }
@@ -963,6 +1041,12 @@ function MatrixV3Cell({
         leafRowId={leafRowId}
         column={column}
         media={media}
+        targetLabel={[
+          hierarchyContext.level1.nodeLabel,
+          hierarchyContext.level2?.nodeLabel,
+          hierarchyContext.level3?.nodeLabel,
+          column.columnLabel,
+        ].filter(Boolean).join(' / ')}
         onChanged={onChanged}
       />
     );
@@ -1310,13 +1394,4 @@ function getRowSpanForColumn(
   if (col.zoneRole === 'C') return merges.isLevel3Start ? merges.level3RowSpan : 0;
   void grow;
   return undefined;
-}
-
-function frozenColumnOffset(frozenColumns: V3Column[], col: V3Column): number {
-  let offset = 0;
-  for (const c of frozenColumns) {
-    if (c.id === col.id) break;
-    offset += c.desktopWidthPx;
-  }
-  return offset;
 }

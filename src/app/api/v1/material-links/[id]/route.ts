@@ -6,8 +6,11 @@
  * transitioned back to 'unassigned' (unless archived).
  */
 import { NextRequest } from 'next/server';
+import { eq } from 'drizzle-orm';
+import { getDb } from '@/storage/database/pg-db';
+import { materialLinks, matrixCellValues } from '@/storage/database/shared/schema';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { requireUser, isAuthResponse } from '@/lib/server/auth';
+import { canAccessMaterial, canAccessMatrix, requireUser, isAuthResponse } from '@/lib/server/auth';
 import { ok, fail } from '@/lib/server/api-v1/response';
 import { resolveTraceId } from '@/lib/server/api-v1/trace';
 import { unbindMaterial } from '@/lib/server/material-asset-service';
@@ -26,6 +29,23 @@ export async function DELETE(
   if (isAuthResponse(user)) return fail(traceId, { message: '未认证', status: 401 });
 
   try {
+    const db = await getDb();
+    const links = await db.select().from(materialLinks).where(eq(materialLinks.id, linkId)).limit(1).execute();
+    const link = links[0];
+    if (!link) return ok({ linkId }, traceId, 'deleted');
+    if (!(await canAccessMaterial(client, user, link.materialId))) {
+      return fail(traceId, { message: '无权解绑该素材', status: 403 });
+    }
+    if (link.targetType === 'dynamic_matrix_cell_value') {
+      const cells = await db.select({ matrixId: matrixCellValues.matrixId })
+        .from(matrixCellValues)
+        .where(eq(matrixCellValues.id, link.targetId))
+        .limit(1)
+        .execute();
+      if (!cells[0] || !(await canAccessMatrix(client, user, cells[0].matrixId))) {
+        return fail(traceId, { message: '无权修改该矩阵素材', status: 403 });
+      }
+    }
     await unbindMaterial(linkId);
     return ok({ linkId }, traceId, 'deleted');
   } catch (err) {

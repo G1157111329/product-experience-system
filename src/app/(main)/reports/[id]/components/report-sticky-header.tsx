@@ -1,11 +1,11 @@
 'use client';
 
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Share2, Download, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { copyToClipboard } from '@/lib/clipboard';
-import { toast } from 'sonner';
+import { ReportShareDialog } from '@/components/reports/report-share-dialog';
 
 interface ReportStickyHeaderProps {
   id: string;
@@ -30,35 +30,13 @@ export function ReportStickyHeader({
   onExport,
 }: ReportStickyHeaderProps) {
   const router = useRouter();
+  const [shareOpen, setShareOpen] = useState(false);
 
   // 从 AI 总结提取评分（关键要词是句段非词语，不符合≤4字要求，不显示）
   const score = aiSummary?.satisfaction_score != null ? String(aiSummary.satisfaction_score) : (aiSummary?.score != null ? String(aiSummary.score) : '');
 
-  const handleShare = async () => {
-    // 创建分享链接并复制
-    try {
-      const res = await fetch(`/api/reports/share`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ report_id: id, expires_in: 'permanent' }),
-      });
-      const data = await res.json();
-      if (data.code === 0 && data.data?.share_token) {
-        const shareUrl = `${window.location.origin}/reports/share/${data.data.share_token}`;
-        copyToClipboard(shareUrl);
-        toast.success('分享链接已复制');
-      } else {
-        // 回退：复制当前报告链接
-        copyToClipboard(`${window.location.origin}/reports/${id}`);
-        toast.success('链接已复制');
-      }
-    } catch {
-      copyToClipboard(`${window.location.origin}/reports/${id}`);
-      toast.success('链接已复制');
-    }
-  };
-
   return (
+    <>
     <header className="sticky top-0 z-40 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="flex items-center gap-3 px-4 py-3">
         <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => router.back()}>
@@ -78,7 +56,7 @@ export function ReportStickyHeader({
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleShare}>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShareOpen(true)} aria-label="分享报告">
             <Share2 className="h-4 w-4" />
           </Button>
           {onExport && (
@@ -89,5 +67,7 @@ export function ReportStickyHeader({
         </div>
       </div>
     </header>
+    <ReportShareDialog reportId={id} reportTitle={title} open={shareOpen} onOpenChange={setShareOpen} />
+    </>
   );
 }

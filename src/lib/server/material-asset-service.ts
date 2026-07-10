@@ -186,6 +186,16 @@ export async function bindMaterial(input: {
 }): Promise<{ linkId: string }> {
   const db = await getDb();
 
+  const orderRows = await db
+    .select({ nextOrder: sql<number>`COALESCE(MAX(${materialLinks.bindingOrder}), 0) + 1` })
+    .from(materialLinks)
+    .where(and(
+      eq(materialLinks.targetType, input.targetType),
+      eq(materialLinks.targetId, input.targetId),
+    ))
+    .execute();
+  const bindingOrder = orderRows[0]?.nextOrder ?? 1;
+
   // Insert the link; on conflict (same material+target), do nothing and return
   // the existing row id. Returning the id in both branches keeps the contract
   // uniform for callers.
@@ -196,6 +206,7 @@ export async function bindMaterial(input: {
       targetType: input.targetType,
       targetId: input.targetId,
       bindingMethod: input.bindingMethod,
+      bindingOrder,
       boundBy: input.boundBy,
     })
     .onConflictDoUpdate({

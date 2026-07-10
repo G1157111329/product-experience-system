@@ -12,6 +12,8 @@ import {
 import { createAssemblyFromComparisonTask, findAssemblyForTask } from '@/lib/server/comparison-assembly';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { isAgentActionAllowed } from '@/lib/agent-action-policy';
+import { toStoredIssueStatus } from '@/lib/server/issue-state-machine';
 
 type Row = Record<string, unknown>;
 type Client = ReturnType<typeof getSupabaseClient>;
@@ -36,7 +38,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const results: AgentActionResult[] = [];
   for (const action of actions) {
     try {
-      const result = await applyAction(client, taskId, action);
+      if (!isAgentActionAllowed(action.type)) {
+        throw new Error('AI助手不允许执行删除或设置类动作');
+      }
+      const result = await applyAction(client, taskId, action, user);
       results.push(result);
     } catch (error) {
       results.push({
@@ -70,14 +75,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }, { status: hasFailure ? 207 : 200 });
 }
 
-async function applyAction(client: Client, taskId: string, action: AgentAction): Promise<AgentActionResult> {
+async function applyAction(
+  client: Client,
+  taskId: string,
+  action: AgentAction,
+  actor: { id: string; role: string },
+): Promise<AgentActionResult> {
   switch (action.type) {
+    case 'recipe_create':
+      return applyRecipeCreate(client, taskId, action);
     case 'recipe_step_create':
       return applyRecipeStepCreate(client, taskId, action);
     case 'recipe_step_update':
       return applyRecipeStepUpdate(client, taskId, action);
-    case 'recipe_step_delete':
-      return applyRecipeStepDelete(client, taskId, action);
     case 'comparison_matrix_seed':
       return applyComparisonMatrixSeed(client, taskId, action);
     case 'comparison_cell_update':
@@ -86,7 +96,94 @@ async function applyAction(client: Client, taskId: string, action: AgentAction):
       return applyMaterialAiResultUpdate(client, taskId, action);
     case 'material_rename':
       return applyMaterialRename(client, taskId, action);
+    case 'material_bind':
+      return applyMaterialBind(client, taskId, action);
+    case 'issue_create':
+      return applyIssueCreate(client, taskId, action);
+    case 'issue_update':
+      return applyIssueUpdate(client, taskId, action);
+    case 'record_update':
+      return applyRecordUpdate(client, taskId, action);
+    case 'task_create':
+      return applyTaskCreate(client, action, actor.id);
+    case 'standard_item_create':
+      return applyStandardItemCreate(client, action, actor.role);
+    case 'data_matrix_cell_update':
+      return applyDataMatrixCellUpdate(client, taskId, action, actor.id);
   }
+}
+
+async function applyTaskCreate(client: Client, action: AgentAction, actorId: string): Promise<AgentActionResult> {
+  const taskName = requiredString(action.payload.task_name, '缺少体验计划名称');
+  const { data, error } = await client.from('experience_tasks').insert({
+    task_name: taskName,
+    product_category: optionalString(action.payload.product_category),
+    product: optionalString(action.payload.product),
+    product_model: optionalString(action.payload.product_model),
+    project_type: optionalString(action.payload.project_type),
+    project_phase: optionalString(action.payload.project_phase),
+    organizer: optionalString(action.payload.organizer),
+    test_purpose: optionalString(action.payload.test_purpose),
+    created_by: actorId,
+    status: '待执行',
+    task_mode: optionalString(action.payload.task_mode) || 'single',
+  }).select().single();
+  if (error) throw new Error(error.message || '新建体验计划失败');
+  return successResult(action, '已新建体验计划', data);
+}
+
+async function applyStandardItemCreate(client: Client, action: AgentAction, actorRole: string): Promise<AgentActionResult> {
+  if (actorRole !== 'admin') throw new Error('仅管理员可通过AI助手录入标准');
+  const standardId = requiredString(action.payload.standard_id, '缺少标准ID');
+  const { data: standard } = await client.from('standards').select('id').eq('id', standardId).maybeSingle();
+  if (!standard) throw new Error('标准不存在');
+  const insert: Row = { standard_id: standardId, sort_order: Number(action.payload.sort_order || 0) };
+  for (const key of ['sensory_dimension', 'test_phase', 'experience_flow', 'touch_point', 'check_dimension', 'sub_check_dimension', 'check_item', 'check_requirement', 'experience_standard', 'check_standard', 'measurement_position', 'check_tool', 'problem_level', 'evaluation_prep', 'subjective_rating'] as const) {
+    if (action.payload[key] !== undefined) insert[key] = optionalString(action.payload[key]);
+  }
+  const { data, error } = await client.from('standard_items').insert(insert).select().single();
+  if (error) throw new Error(error.message || '新增标准条目失败');
+  return successResult(action, '已新增标准条目', data);
+}
+
+async function applyDataMatrixCellUpdate(client: Client, taskId: string, action: AgentAction, actorId: string): Promise<AgentActionResult> {
+  const matrixId = requiredString(action.payload.matrix_id, '缺少数据矩阵ID');
+  const leafRowId = requiredString(action.payload.leaf_row_id, '缺少矩阵行ID');
+  const columnId = requiredString(action.payload.column_id, '缺少矩阵列ID');
+  const [{ data: matrix }, { data: row }, { data: column }] = await Promise.all([
+    client.from('task_matrices').select('id, task_id').eq('id', matrixId).maybeSingle(),
+    client.from('matrix_leaf_rows').select('id, matrix_id').eq('id', leafRowId).maybeSingle(),
+    client.from('matrix_column_definitions').select('id, matrix_id').eq('id', columnId).maybeSingle(),
+  ]);
+  if (!matrix || matrix.task_id !== taskId || row?.matrix_id !== matrixId || column?.matrix_id !== matrixId) {
+    throw new Error('矩阵、行或列不属于当前任务');
+  }
+  const valueText = optionalString(action.payload.value_text);
+  const valueNumber = action.payload.value_number === undefined ? null : String(action.payload.value_number);
+  const { data, error } = await client.from('matrix_cell_values').upsert({
+    matrix_id: matrixId,
+    leaf_row_id: leafRowId,
+    column_id: columnId,
+    value_text: valueText,
+    value_number: valueNumber,
+    display_text: optionalString(action.payload.display_text),
+    value_state: valueText !== null || valueNumber !== null ? 'filled' : 'empty',
+    updated_by: actorId,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'matrix_id,leaf_row_id,column_id' }).select().single();
+  if (error) throw new Error(error.message || '编辑数据矩阵单元格失败');
+  return successResult(action, '已编辑数据矩阵单元格', data);
+}
+
+async function applyRecipeCreate(client: Client, taskId: string, action: AgentAction): Promise<AgentActionResult> {
+  const name = requiredString(action.payload.name, '缺少食谱名称');
+  const { data, error } = await client.from('recipes').insert({
+    task_id: taskId,
+    name,
+    description: optionalString(action.payload.description),
+  }).select().single();
+  if (error) throw new Error(error.message || '新建食谱失败');
+  return successResult(action, '已新建食谱', data);
 }
 
 async function applyRecipeStepCreate(client: Client, taskId: string, action: AgentAction): Promise<AgentActionResult> {
@@ -130,16 +227,6 @@ async function applyRecipeStepUpdate(client: Client, taskId: string, action: Age
   const { data, error } = await client.from('recipe_steps').update(update).eq('id', stepId).select().single();
   if (error) throw new Error(error.message || '修改食谱步骤失败');
   return successResult(action, '已修改食谱步骤', data);
-}
-
-async function applyRecipeStepDelete(client: Client, taskId: string, action: AgentAction): Promise<AgentActionResult> {
-  const stepId = requiredString(action.payload.step_id, '缺少步骤ID');
-  await assertRecipeStepInTask(client, stepId, taskId);
-
-  await client.from('materials').update({ recipe_step_id: null }).eq('recipe_step_id', stepId);
-  const { error } = await client.from('recipe_steps').delete().eq('id', stepId);
-  if (error) throw new Error(error.message || '删除食谱步骤失败');
-  return successResult(action, '已删除食谱步骤');
 }
 
 async function applyComparisonMatrixSeed(client: Client, taskId: string, action: AgentAction): Promise<AgentActionResult> {
@@ -217,6 +304,76 @@ async function applyMaterialRename(client: Client, taskId: string, action: Agent
     .single();
   if (error) throw new Error(error.message || '重命名素材失败');
   return successResult(action, '已重命名素材', data);
+}
+
+async function applyMaterialBind(client: Client, taskId: string, action: AgentAction): Promise<AgentActionResult> {
+  const materialId = requiredString(action.payload.material_id, '缺少素材ID');
+  await assertMaterialInTask(client, materialId, taskId);
+  const allowedTargets = ['record_id', 'recipe_id', 'recipe_step_id', 'issue_id'] as const;
+  const update: Row = {};
+  for (const key of allowedTargets) {
+    if (action.payload[key] !== undefined) update[key] = optionalString(action.payload[key]);
+  }
+  if (Object.keys(update).length === 0) throw new Error('缺少素材绑定目标');
+  if (typeof update.record_id === 'string') {
+    const { data } = await client.from('check_records').select('id, task_id').eq('id', update.record_id).maybeSingle();
+    if (!data || data.task_id !== taskId) throw new Error('体验记录不属于当前任务');
+  }
+  if (typeof update.recipe_id === 'string') await assertRecipeInTask(client, update.recipe_id, taskId);
+  if (typeof update.recipe_step_id === 'string') await assertRecipeStepInTask(client, update.recipe_step_id, taskId);
+  if (typeof update.issue_id === 'string') {
+    const { data } = await client.from('issues').select('id, task_id').eq('id', update.issue_id).maybeSingle();
+    if (!data || data.task_id !== taskId) throw new Error('问题不属于当前任务');
+  }
+  const { data, error } = await client.from('materials').update(update).eq('id', materialId).select().single();
+  if (error) throw new Error(error.message || '绑定素材失败');
+  return successResult(action, '已绑定素材', data);
+}
+
+async function applyIssueCreate(client: Client, taskId: string, action: AgentAction): Promise<AgentActionResult> {
+  const title = requiredString(action.payload.title, '缺少问题标题');
+  const { data, error } = await client.from('issues').insert({
+    task_id: taskId,
+    title,
+    description: optionalString(action.payload.description),
+    level: optionalString(action.payload.level) || '二类',
+    source: optionalString(action.payload.source) || 'AI助手',
+    status: 'open',
+  }).select().single();
+  if (error) throw new Error(error.message || '新增问题点失败');
+  return successResult(action, '已新增问题点，状态为待整改', data);
+}
+
+async function applyIssueUpdate(client: Client, taskId: string, action: AgentAction): Promise<AgentActionResult> {
+  const issueId = requiredString(action.payload.issue_id, '缺少问题ID');
+  const { data: issue } = await client.from('issues').select('id, task_id').eq('id', issueId).maybeSingle();
+  if (!issue || issue.task_id !== taskId) throw new Error('问题不属于当前任务');
+  const update: Row = { updated_at: new Date().toISOString() };
+  for (const key of ['title', 'description', 'level', 'status', 'improve_plan', 'responsible_person', 'verification_note'] as const) {
+    if (action.payload[key] !== undefined) {
+      update[key] = key === 'status'
+        ? toStoredIssueStatus(String(action.payload[key] || ''))
+        : optionalString(action.payload[key]);
+    }
+  }
+  if (Object.keys(update).length === 1) throw new Error('没有可更新的问题字段');
+  const { data, error } = await client.from('issues').update(update).eq('id', issueId).select().single();
+  if (error) throw new Error(error.message || '修改问题点失败');
+  return successResult(action, '已修改问题点', data);
+}
+
+async function applyRecordUpdate(client: Client, taskId: string, action: AgentAction): Promise<AgentActionResult> {
+  const recordId = requiredString(action.payload.record_id, '缺少体验记录ID');
+  const { data: record } = await client.from('check_records').select('id, task_id').eq('id', recordId).maybeSingle();
+  if (!record || record.task_id !== taskId) throw new Error('体验记录不属于当前任务');
+  const update: Row = { updated_at: new Date().toISOString() };
+  for (const key of ['actual_result', 'problem_description', 'evaluation_result', 'experience_standard', 'check_standard'] as const) {
+    if (action.payload[key] !== undefined) update[key] = optionalString(action.payload[key]);
+  }
+  if (Object.keys(update).length === 1) throw new Error('没有可更新的体验记录字段');
+  const { data, error } = await client.from('check_records').update(update).eq('id', recordId).select().single();
+  if (error) throw new Error(error.message || '修改五感体验记录失败');
+  return successResult(action, '已修改五感体验记录', data);
 }
 
 async function assertRecipeInTask(client: Client, recipeId: string, taskId: string) {

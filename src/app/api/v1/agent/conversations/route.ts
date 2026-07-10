@@ -6,10 +6,10 @@
  * If agentInstanceId omitted, resolves/creates a default active instance.
  */
 import { NextRequest } from 'next/server';
-import { sql, eq, and } from 'drizzle-orm';
+import { sql, eq, and, desc, isNull, or } from 'drizzle-orm';
 import { getDb } from '@/storage/database/pg-db';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { requireUser, isAuthResponse } from '@/lib/server/auth';
+import { canAccessTask, requireUser, isAuthResponse } from '@/lib/server/auth';
 import { ok, fail, unauthorized, withTrace } from '@/lib/server/api-v1/response';
 import { conversations, agentInstances, aiModelConfigs } from '@/storage/database/shared/schema';
 import { getV3FeatureFlags } from '@/lib/feature-flags-v3';
@@ -23,16 +23,20 @@ interface CreateConversationBody {
   projectId?: string;
 }
 
-async function resolveOrCreateAgentInstance(userId: string, preferredId?: string): Promise<string | null> {
+async function resolveOrCreateAgentInstance(userId: string, isAdmin: boolean, preferredId?: string): Promise<string | null> {
   const db = await getDb();
   if (preferredId) {
     const rows = await db
-      .select({ id: agentInstances.id, status: agentInstances.status })
+      .select({ id: agentInstances.id, status: agentInstances.status, boundUserId: agentInstances.boundUserId })
       .from(agentInstances)
       .where(eq(agentInstances.id, preferredId))
       .limit(1)
       .execute();
-    if (rows[0] && rows[0].status !== 'archived' && rows[0].status !== 'frozen') {
+    if (
+      rows[0]
+      && rows[0].status === 'active'
+      && (isAdmin || !rows[0].boundUserId || rows[0].boundUserId === userId)
+    ) {
       return rows[0].id;
     }
   }
@@ -40,7 +44,11 @@ async function resolveOrCreateAgentInstance(userId: string, preferredId?: string
   const active = await db
     .select({ id: agentInstances.id })
     .from(agentInstances)
-    .where(and(eq(agentInstances.tenantId, 'default'), eq(agentInstances.status, 'active')))
+    .where(and(
+      eq(agentInstances.tenantId, 'default'),
+      eq(agentInstances.status, 'active'),
+      isAdmin ? sql`TRUE` : or(isNull(agentInstances.boundUserId), eq(agentInstances.boundUserId, userId)),
+    ))
     .limit(1)
     .execute();
   if (active[0]) return active[0].id;
@@ -87,8 +95,13 @@ export const POST = withTrace<[NextRequest]>(async (traceId, req) => {
   const tenantId = 'default';
   const db = await getDb();
 
+  if (body.taskId && !(await canAccessTask(client, user, body.taskId))) {
+    return fail(traceId, { message: '无权访问该体验任务', status: 403 });
+  }
+
   const agentInstanceId = await resolveOrCreateAgentInstance(
     user.id,
+    user.role === 'admin',
     typeof body.agentInstanceId === 'string' ? body.agentInstanceId : undefined,
   );
   if (!agentInstanceId) {
@@ -142,4 +155,40 @@ export const POST = withTrace<[NextRequest]>(async (traceId, req) => {
     const message = err instanceof Error ? err.message : '创建会话失败';
     return fail(traceId, { message, status: 500 });
   }
+});
+
+export const GET = withTrace<[NextRequest]>(async (traceId, req) => {
+  const client = getSupabaseClient();
+  const user = await requireUser(req, client);
+  if (isAuthResponse(user)) return unauthorized(traceId, 'unauthorized');
+
+  const flags = await getV3FeatureFlags();
+  if (!flags.hermesAgentGatewayEnabled) {
+    return fail(traceId, { message: '助手功能未启用', status: 403 });
+  }
+
+  const taskId = new URL(req.url).searchParams.get('task_id');
+  const db = await getDb();
+  const where = taskId
+    ? and(eq(conversations.platformUserId, user.id), eq(conversations.taskId, taskId))
+    : eq(conversations.platformUserId, user.id);
+  const rows = await db
+    .select({
+      id: conversations.id,
+      agentInstanceId: conversations.agentInstanceId,
+      taskId: conversations.taskId,
+      projectId: conversations.projectId,
+      title: conversations.title,
+      status: conversations.status,
+      lastEventId: conversations.lastEventId,
+      createdAt: conversations.createdAt,
+      updatedAt: conversations.updatedAt,
+    })
+    .from(conversations)
+    .where(where)
+    .orderBy(desc(conversations.updatedAt))
+    .limit(200)
+    .execute();
+
+  return ok({ items: rows }, traceId);
 });

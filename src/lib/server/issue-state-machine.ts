@@ -126,6 +126,51 @@ export function normalizeIssueStatus(status: string | null | undefined): IssueSt
   return allStatuses.includes(valid) ? valid : 'open';
 }
 
+export type IssueStatusPresentationKey = 'pending' | 'rectifying' | 'waived' | 'rectified';
+
+export interface IssueStatusPresentation {
+  key: IssueStatusPresentationKey;
+  label: '待整改' | '整改中' | '不整改' | '已整改';
+  className: string;
+}
+
+/**
+ * Keep the richer historical lifecycle in storage while presenting the four
+ * business states used by experience engineers throughout the UI.
+ */
+export function getIssueStatusPresentation(status: string | null | undefined): IssueStatusPresentation {
+  switch (normalizeIssueStatus(status)) {
+    case 'verified_closed':
+      return { key: 'rectified', label: '已整改', className: 'text-emerald-600' };
+    case 'waived':
+      return { key: 'waived', label: '不整改', className: 'text-muted-foreground' };
+    case 'open':
+      return { key: 'pending', label: '待整改', className: 'text-foreground' };
+    default:
+      return { key: 'rectifying', label: '整改中', className: 'text-amber-600' };
+  }
+}
+
+/** Convert the four visible states back to stable canonical storage codes. */
+export function toStoredIssueStatus(status: string): IssueStatus {
+  switch (status) {
+    case '待整改':
+    case 'pending':
+      return 'open';
+    case '整改中':
+    case 'rectifying':
+      return 'rectifying';
+    case '不整改':
+    case 'waived':
+      return 'waived';
+    case '已整改':
+    case 'rectified':
+      return 'verified_closed';
+    default:
+      return normalizeIssueStatus(status);
+  }
+}
+
 export function canTransition(
   currentStatus: IssueStatus,
   transition: IssueTransition,

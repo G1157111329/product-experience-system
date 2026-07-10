@@ -16,16 +16,17 @@
  */
 import { NextRequest } from 'next/server';
 import { getDb } from '@/storage/database/pg-db';
-import { eq, sql } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 import {
   matrixColumnDefinitions,
   matrixCellValues,
+  matrixLeafRows,
   materials,
   materialLinks,
   taskMatrices,
 } from '@/storage/database/shared/schema';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { requireUser, isAuthResponse } from '@/lib/server/auth';
+import { canAccessMaterial, canAccessMatrix, requireUser, isAuthResponse } from '@/lib/server/auth';
 import { ok, fail } from '@/lib/server/api-v1/response';
 import { resolveTraceId } from '@/lib/server/api-v1/trace';
 import { bindMaterial } from '@/lib/server/material-asset-service';
@@ -68,6 +69,9 @@ export async function GET(
   const client = getSupabaseClient();
   const user = await requireUser(req, client);
   if (isAuthResponse(user)) return fail(traceId, { message: '未认证', status: 401 });
+  if (!(await canAccessMatrix(client, user, matrixId))) {
+    return fail(traceId, { message: '无权访问该矩阵', status: 403 });
+  }
 
   try {
     const db = await getDb();
@@ -96,6 +100,7 @@ export async function GET(
         filePath: materials.filePath,
         thumbnailUrl: materials.thumbnailUrl,
         bindingMethod: materialLinks.bindingMethod,
+        bindingOrder: materialLinks.bindingOrder,
         boundAt: materialLinks.boundAt,
       })
       .from(materialLinks)
@@ -103,6 +108,7 @@ export async function GET(
       .where(
         sql`${materialLinks.targetType} = ${TARGET_TYPE} AND ${materialLinks.targetId} = ${cellId}`,
       )
+      .orderBy(asc(materialLinks.bindingOrder), asc(materialLinks.boundAt), asc(materialLinks.id))
       .execute();
 
     const { generatePresignedUrl } = await import('@/lib/server/storage');
@@ -151,20 +157,34 @@ export async function POST(
   const client = getSupabaseClient();
   const user = await requireUser(req, client);
   if (isAuthResponse(user)) return fail(traceId, { message: '未认证', status: 401 });
+  if (!(await canAccessMatrix(client, user, matrixId))) {
+    return fail(traceId, { message: '无权访问该矩阵', status: 403 });
+  }
 
   try {
     const db = await getDb();
 
     // 1. Load + validate the column is a media column.
-    const colRows = await db
-      .select({
-        id: matrixColumnDefinitions.id,
-        dataType: matrixColumnDefinitions.dataType,
-        maxMediaCount: matrixColumnDefinitions.maxMediaCount,
-      })
-      .from(matrixColumnDefinitions)
-      .where(eq(matrixColumnDefinitions.id, columnId))
-      .execute();
+    const [leafRows, colRows] = await Promise.all([
+      db
+        .select({ id: matrixLeafRows.id })
+        .from(matrixLeafRows)
+        .where(sql`${matrixLeafRows.id} = ${leafRowId} AND ${matrixLeafRows.matrixId} = ${matrixId}`)
+        .limit(1)
+        .execute(),
+      db
+        .select({
+          id: matrixColumnDefinitions.id,
+          dataType: matrixColumnDefinitions.dataType,
+          maxMediaCount: matrixColumnDefinitions.maxMediaCount,
+        })
+        .from(matrixColumnDefinitions)
+        .where(sql`${matrixColumnDefinitions.id} = ${columnId} AND ${matrixColumnDefinitions.matrixId} = ${matrixId}`)
+        .execute(),
+    ]);
+    if (leafRows.length === 0) {
+      return fail(traceId, { message: '行不属于该矩阵', status: 404 });
+    }
 
     const column = colRows[0];
     if (!column) {
@@ -294,6 +314,9 @@ export async function POST(
       }
       if (!body.materialId) {
         return fail(traceId, { message: 'materialId 必填', status: 400 });
+      }
+      if (!(await canAccessMaterial(client, user, body.materialId))) {
+        return fail(traceId, { message: '无权访问该素材', status: 403 });
       }
 
       // Verify the material exists.

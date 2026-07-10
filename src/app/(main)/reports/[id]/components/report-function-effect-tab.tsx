@@ -60,6 +60,12 @@ function parseProblemPoints(raw: string | null | undefined): Array<{ text: strin
   return [];
 }
 
+function materialsForIds(materials: Array<Record<string, unknown>> | undefined, ids: string[] | undefined) {
+  if (!materials?.length || !ids?.length) return [];
+  const idSet = new Set(ids);
+  return materials.filter((material) => idSet.has(String(material.id || '')));
+}
+
 function RecipeCard({ recipe }: { recipe: FunctionEffectRecipe }) {
   const [stepsExpanded, setStepsExpanded] = useState(false);
   const steps = recipe.recipe_steps || [];
@@ -161,6 +167,7 @@ function RecipeCard({ recipe }: { recipe: FunctionEffectRecipe }) {
             {effectPps.map((pp, idx) => (
               <div key={idx} className="rounded border border-amber-200/60 bg-amber-50/30 p-2">
                 <p className="text-xs">{pp.text}</p>
+                <EffectMediaGrid materials={materialsForIds(recipe.effect_materials, pp.material_ids)} />
               </div>
             ))}
           </div>

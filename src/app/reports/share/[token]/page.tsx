@@ -9,11 +9,13 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useImagePreview } from '@/components/image-preview';
 import { MediaGallery } from '@/components/app/media-gallery';
-import { ComparisonReportView, type ComparisonSnapshot } from '@/components/reports/comparison-report-view';
+import type { ComparisonSnapshot } from '@/components/reports/comparison-report-view';
 import { ReportSectionBlockStack } from '@/components/reports/report-section-block-renderer';
 import { buildDisplayReportContent, type AiSummaryLike, type ReportContentWithReview, type ReportReviewOverrides } from '@/lib/report-review-overrides';
 import { selectEffectEvaluationText } from '@/lib/report-content-rules';
 import type { ReportDetailModel } from '@/lib/server/report-detail';
+import { ReportSummaryTab } from '@/app/(main)/reports/[id]/components/report-summary-tab';
+import { ReportMatrixTab, type MatrixData } from '@/app/(main)/reports/[id]/components/report-matrix-tab';
 
 interface Material {
   id: string; material_type: string; file_name: string; file_url: string; file_path?: string; file_size: number;
@@ -282,7 +284,7 @@ export default function ShareReportPage() {
 
   const handleExportPDF = () => {
     if (!report) return;
-    if (report.report_type === 'comparison_report') {
+  if (report.report_type === 'comparison_report') {
       window.open(`/api/reports/${report.id}/pdf?share_token=${token}`, '_blank');
       return;
     }
@@ -340,8 +342,23 @@ export default function ShareReportPage() {
           </div>
         </div>
         <div className="mx-auto max-w-6xl px-3 py-4 sm:px-4 sm:py-6">
+          <ReportSummaryTab
+            data={{
+              aiSummary: (report.content?.ai_summary || null) as Record<string, unknown> | null,
+              taskInfo: (report.content?.task || null) as Record<string, unknown> | null,
+              stats: {
+                totalCheckItems: report.content?.records?.length || 0,
+                passCount: 0,
+                failCount: 0,
+                issueCount: liveIssuesMap[report.id]?.length || 0,
+                recipeCount: report.content?.recipes?.length || 0,
+              },
+              conclusion: { level: '', text: '' },
+              generatedAt: report.created_at,
+            }}
+          />
           {comparisonSnapshot ? (
-            <ComparisonReportView snapshot={comparisonSnapshot} title={report.title} compact onPreview={openPreview} />
+            <ReportMatrixTab data={{ matrixType: 'multi_matrix', matrix: comparisonSnapshot }} />
           ) : (
             <Card>
               <CardContent className="p-6 text-sm text-muted-foreground">
@@ -380,6 +397,16 @@ export default function ShareReportPage() {
     title: legacyReport.title,
     content: legacyReport.content as unknown as ReportContentWithReview,
   });
+  const snapshotJson = legacyReport.snapshot?.snapshot_json as unknown as Record<string, unknown> | undefined;
+  const reportContentRecord = legacyReport.content as unknown as Record<string, unknown>;
+  const frozenProjection = (snapshotJson?.matrix_projection || reportContentRecord.data_matrix_projection) as Record<string, unknown> | undefined;
+  const sharedMatrixData: MatrixData = frozenProjection?.projectionVersion === 'v3'
+    ? { matrixType: 'data_matrix_v3', dataMatrixV3: frozenProjection as unknown as MatrixData['dataMatrixV3'] }
+    : frozenProjection && Array.isArray(frozenProjection.groups)
+      ? { matrixType: 'data_matrix', dataMatrix: frozenProjection as MatrixData['dataMatrix'] }
+      : snapshotJson && (snapshotJson.objects || snapshotJson.comparison_objects)
+        ? { matrixType: 'multi_matrix', matrix: snapshotJson as unknown as ComparisonSnapshot }
+        : { matrixType: 'single_waterfall', waterfall: totalRecipes as unknown as Record<string, unknown>[] };
 
   return (
     <div className="min-h-screen bg-background overflow-x-hidden">
@@ -401,6 +428,27 @@ export default function ShareReportPage() {
         </div>
       </div>
 
+      <div data-testid="share-frozen-report-view" className="mx-auto max-w-6xl px-3 py-4 sm:px-4 sm:py-6">
+        <ReportSummaryTab
+          data={{
+            aiSummary: displayReport.content.ai_summary as Record<string, unknown> | null,
+            taskInfo: task || null,
+            stats: {
+              totalCheckItems: totalRecords.length,
+              passCount: totalPass,
+              failCount: totalFail,
+              issueCount: allLiveIssues.length,
+              recipeCount: totalRecipes.length,
+            },
+            conclusion: { level: '', text: String(displayReport.content.ai_summary?.summary || '') },
+            generatedAt: legacyReport.created_at,
+          }}
+        />
+        <ReportMatrixTab data={sharedMatrixData} />
+      </div>
+
+      {/* Frozen share contract: legacy report DOM must never mount or load media. */}
+      {false && (
       <div className="max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-4 sm:space-y-6">
         {/* Summary Stats */}
         <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
@@ -721,6 +769,7 @@ export default function ShareReportPage() {
           );
         })}
       </div>
+      )}
 
       {/* Media preview overlay */}
       <PreviewComponent />

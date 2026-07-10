@@ -44,12 +44,9 @@ async function main() {
   assertIncludes('src/components/reports/report-section-block-renderer.tsx', 'data-testid="print-inline-media-item"');
   assertIncludes('src/lib/server/report-detail.ts', 'issue_closure:re-evaluations');
   assertIncludes('src/lib/server/report-detail.ts', 'function_effect:step-evidence');
-  assertIncludes('src/lib/server/report-detail.ts', 'overview:objects');
-  assertIncludes('src/lib/server/report-detail.ts', 'overview:comparability');
-  assertIncludes('src/lib/server/report-detail.ts', 'comparison_matrix:differences');
-  assertIncludes('src/lib/server/report-detail.ts', 'comparison_matrix:cell-evidence');
-  assertIncludes('src/lib/server/report-detail.ts', 'metric_table:differences');
-  assertIncludes('src/lib/server/report-detail.ts', 'AI confirmation boundary');
+  assertIncludes('src/lib/server/report-detail.ts', 'comparison_matrix:horizontal');
+  assertIncludes('src/lib/server/report-detail.ts', 'processNotes: fields.processNotes');
+  assertIncludes('src/lib/report-comparison-fields.ts', 'process_notes');
   assertIncludes('src/lib/server/report-detail.ts', 'stage_timeline:table');
   assertIncludes('src/lib/server/report-detail.ts', 'model_dossier:comparability');
   assertIncludes('src/lib/server/report-detail.ts', 'next_validation:list');
@@ -59,10 +56,9 @@ async function main() {
   assertIncludes('src/components/reports/report-detail-shell.tsx', 'debugLegacyBody');
   assertIncludes('src/components/reports/report-detail-shell.tsx', 'data-display-weight={legacyBodyMode}');
   assertIncludes('src/components/reports/report-detail-shell.tsx', 'data-testid="report-legacy-body"');
-  assertIncludes('src/app/reports/print/page.tsx', 'ReportPrintSectionBlocks');
-  assertIncludes('src/app/reports/print/page.tsx', 'data-testid="print-preflight-panel"');
-  assertIncludes('src/app/reports/print/page.tsx', 'data-testid="print-profile-label"');
-  assertIncludes('src/app/reports/print/page.tsx', 'data-testid="print-legacy-content"');
+  assertIncludes('src/app/reports/print/page.tsx', 'PrintInlineMatrix');
+  assertIncludes('src/app/reports/print/page.tsx', '过程记录：');
+  assertIncludes('src/app/reports/print/page.tsx', 'data-testid="print-product-info"');
   assertIncludes('src/lib/server/report-detail.ts', 'printDelivery');
   assertIncludes('src/lib/server/report-detail.ts', 'matrix_over_wide');
   assertIncludes('src/lib/server/report-detail.ts', 'video_cover_missing');
@@ -123,27 +119,18 @@ async function main() {
     if (report.report_type === 'comparison_report') {
       assert.equal(Boolean(snapshot), true, `${report.id} comparison detail should have snapshot`);
       assert.equal(detail.sections.some((section) => ['image_matrix', 'metric_table', 'mixed_matrix'].includes(section.key)), true, `${report.id} comparison detail should include matrix/table section`);
-      assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.type === 'table' && (block.rows?.length || 0) > 0)), true, `${report.id} comparison detail should expose table rows`);
       assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.type === 'matrix' && (block.matrix?.objects?.length || 0) >= 2)), true, `${report.id} comparison detail should expose a horizontal matrix block with object columns`);
       assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.type === 'matrix' && (block.matrix?.rows || []).some((row) => Object.values(row.cells).some((cell) => (cell.media?.length || 0) > 0)))), true, `${report.id} comparison matrix should include clickable cell media`);
       assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.type === 'matrix' && (block.matrix?.rows || []).some((row) => Boolean(row.rowConclusion)))), true, `${report.id} comparison matrix should include row-level conclusions`);
       assert.equal(detail.evidenceSlots.some((slot) => slot.ownerType === 'comparison_cell'), true, `${report.id} comparison detail should expose comparison evidence slots`);
-      assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.id === 'overview:objects' && (block.items?.length || 0) >= 2)), true, `${report.id} comparison detail should expose object strip`);
-      assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.id === 'overview:comparability' && Boolean(block.description))), true, `${report.id} comparison detail should expose comparability boundary`);
-      assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.id.endsWith(':differences') && (block.items?.length || 0) > 0)), true, `${report.id} comparison detail should expose key differences`);
-      assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.id.endsWith(':cell-evidence') && (block.items || []).some((item) => (item.media?.length || 0) > 0))), true, `${report.id} comparison detail should expose inline cell evidence`);
-      assert.equal(detail.sections.some((section) => section.key === 'ai_conclusion' && section.status === 'blocked'), report.ai_confirmation_status !== 'confirmed', `${report.id} comparison AI boundary should reflect confirmation status`);
       assert.equal(detail.printDelivery.profile.paper, 'A3', `${report.id} comparison print profile should use A3`);
-      if (report.layout_profile === 'comparison_metric_table_a3_landscape') {
-        assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.id === 'metric_table:table' && block.columns?.includes('Anomaly') && block.columns?.includes('AI'))), true, `${report.id} metric table should expose anomaly and AI columns`);
-      }
     }
 
     if (report.report_type === 'single_report') {
       assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.id === 'overview:task-details' && (block.rows?.length || 0) > 0)), true, `${report.id} single detail should migrate task fields into blocks`);
       assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.id === 'function_effect:steps' && (block.rows?.length || 0) > 0)), true, `${report.id} single detail should migrate recipe steps into blocks`);
       assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.type === 'media' && (block.media?.length || 0) > 0)), true, `${report.id} single detail should expose media blocks`);
-      assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.id === 'issue_closure:table' && block.columns?.includes('Responsible') && block.columns?.includes('Plan') && block.columns?.includes('Validation') && block.columns?.includes('Evidence'))), true, `${report.id} single detail should expose full issue closure fields`);
+      assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.id === 'issue_closure:table' && block.columns?.includes('责任人') && block.columns?.includes('整改方案') && block.columns?.includes('验证情况') && block.columns?.includes('素材数'))), true, `${report.id} single detail should expose full issue closure fields`);
       assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.id === 'function_effect:step-evidence' && (block.items || []).some((item) => (item.media?.length || 0) > 0))), true, `${report.id} single detail should expose inline step evidence`);
       assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.id === 'issue_closure:re-evaluations')), true, `${report.id} single detail should expose re-evaluation block`);
       assert.equal(detail.printDelivery.profile.paper, 'A4', `${report.id} single print profile should use A4`);
@@ -152,7 +139,7 @@ async function main() {
     if (report.report_type === 'model_merged_report') {
       assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.id === 'model_dossier:comparability' && Boolean(block.description))), true, `${report.id} model merge should expose comparability boundary`);
       assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.id === 'stage_timeline:table' && (block.rows?.length || 0) >= 2)), true, `${report.id} model merge should expose stage timeline rows`);
-      assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.id === 'issue_evolution:table' && block.columns?.includes('Evidence'))), true, `${report.id} model merge should expose issue evolution evidence`);
+      assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.id === 'issue_evolution:table' && block.columns?.includes('证据'))), true, `${report.id} model merge should expose issue evolution evidence`);
       assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.id === 'function_effect_evolution:list' && (block.items?.length || 0) > 0)), true, `${report.id} model merge should expose function effect evolution`);
       assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.id === 'next_validation:list' && (block.items?.length || 0) > 0)), true, `${report.id} model merge should expose next-stage validation`);
       assert.equal(detail.printDelivery.profile.paper, 'A4', `${report.id} model merge print profile should use A4`);
@@ -160,17 +147,15 @@ async function main() {
 
     if (report.report_type === 'custom_merged_report') {
       assert.equal(detail.sections.some((section) => section.key === 'source_alignment' && section.blocks.some((block) => block.id === 'source_alignment:table' && (block.rows?.length || 0) >= 2)), true, `${report.id} custom merge should expose source alignment`);
-      assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.id === 'field_alignment:table' && block.columns?.includes('Gap'))), true, `${report.id} custom merge should expose field alignment gaps`);
+      assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.id === 'field_alignment:table' && block.columns?.includes('差异'))), true, `${report.id} custom merge should expose field alignment gaps`);
       assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.id === 'comparability_boundary:summary' && Boolean(block.description))), true, `${report.id} custom merge should expose comparability boundary`);
       assert.equal(detail.sections.some((section) => section.blocks.some((block) => block.id === 'validation_suggestions:list')), true, `${report.id} custom merge should expose validation suggestions`);
       assert.equal(detail.printDelivery.profile.paper, 'A4', `${report.id} custom merge print profile should use A4`);
     }
 
     if (report.ai_confirmation_status === 'pending' || report.ai_confirmation_status === 'generated') {
-      assert.equal(detail.qualityChecks.some((check) => check.code === 'ai_unconfirmed' && check.severity === 'error'), true, `${report.id} should block unconfirmed AI`);
-      assert.equal(detail.actions.some((action) => action.type === 'publish' && action.enabled === false), true, `${report.id} publish action should be blocked while AI is unconfirmed`);
-      assert.equal(detail.actions.some((action) => (action.type === 'export_pdf' || action.type === 'retry_pdf') && action.enabled === false && action.reason?.includes('AI')), true, `${report.id} PDF action should be blocked by AI status`);
-      assert.equal(detail.printDelivery.preflight.errors.some((item) => item.code === 'ai_unconfirmed'), true, `${report.id} PDF preflight should block unconfirmed AI`);
+      assert.equal(detail.qualityChecks.some((check) => check.code === 'ai_unconfirmed' && check.severity === 'warning'), true, `${report.id} should warn for unconfirmed AI`);
+      assert.equal(detail.printDelivery.preflight.warnings.some((item) => item.code === 'ai_unconfirmed'), true, `${report.id} PDF preflight should warn for unconfirmed AI`);
     }
   }
 

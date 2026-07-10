@@ -1478,6 +1478,7 @@ CREATE TABLE IF NOT EXISTS material_links (
   binding_method VARCHAR(30) NOT NULL DEFAULT 'click_select' CHECK (binding_method IN (
     'click_select','drag_attach','upload_at_slot','wecom_ingest','agent_suggested'
   )),
+  binding_order INT NOT NULL DEFAULT 0,
   bound_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
   bound_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   version INT NOT NULL DEFAULT 1,
@@ -1486,6 +1487,11 @@ CREATE TABLE IF NOT EXISTS material_links (
 );
 CREATE INDEX IF NOT EXISTS ml_material_id_idx ON material_links(material_id);
 CREATE INDEX IF NOT EXISTS ml_target_idx ON material_links(target_type, target_id);
+
+ALTER TABLE material_links
+  ADD COLUMN IF NOT EXISTS binding_order INT NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS ml_target_order_idx ON material_links(target_type, target_id, binding_order, bound_at);
 
 CREATE TABLE IF NOT EXISTS matrix_issue_points (
   id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1622,6 +1628,7 @@ CREATE TABLE IF NOT EXISTS wecom_bindings (
   platform_user_id VARCHAR(36) NOT NULL REFERENCES platform_users(id) ON DELETE CASCADE,
   wecom_user_id VARCHAR(100) NOT NULL,
   wecom_corp_id VARCHAR(100),
+  provider VARCHAR(20) NOT NULL DEFAULT 'wecom',
   agent_instance_id VARCHAR(36) REFERENCES agent_instances(id) ON DELETE SET NULL,
   project_scope JSONB,
   status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active','frozen','unbound')),
@@ -1631,6 +1638,23 @@ CREATE TABLE IF NOT EXISTS wecom_bindings (
   UNIQUE (wecom_user_id, wecom_corp_id)
 );
 CREATE INDEX IF NOT EXISTS wb_platform_user_idx ON wecom_bindings(platform_user_id);
+
+ALTER TABLE wecom_bindings ADD COLUMN IF NOT EXISTS provider VARCHAR(20) NOT NULL DEFAULT 'wecom';
+
+CREATE TABLE IF NOT EXISTS agent_binding_sessions (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  provider VARCHAR(20) NOT NULL CHECK (provider IN ('wecom','wechat')),
+  platform_user_id VARCHAR(36) NOT NULL REFERENCES platform_users(id) ON DELETE CASCADE,
+  agent_instance_id VARCHAR(36) REFERENCES agent_instances(id) ON DELETE SET NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','consumed','expired','cancelled')),
+  expires_at TIMESTAMPTZ NOT NULL,
+  external_user_id VARCHAR(200),
+  created_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  consumed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS abs_status_expires_idx ON agent_binding_sessions(status, expires_at);
+CREATE INDEX IF NOT EXISTS abs_platform_user_idx ON agent_binding_sessions(platform_user_id);
 
 CREATE TABLE IF NOT EXISTS wecom_media_ingest_jobs (
   id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),

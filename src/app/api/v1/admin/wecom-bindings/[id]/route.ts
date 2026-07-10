@@ -53,18 +53,22 @@ export const DELETE = withTrace<[NextRequest, { params: Promise<{ id: string }> 
     const client = getSupabaseClient();
     const admin = await requireAdmin(req, client);
     if (isAuthResponse(admin)) return unauthorized(traceId, 'unauthorized');
-    void admin;
-
     const { id } = await ctx.params;
     const db = await getDb();
     const [row] = await db
       .update(wecomBindings)
-      .set({ status: 'revoked', updatedAt: sql`NOW()` })
+      .set({ status: 'unbound', updatedAt: sql`NOW()` })
       .where(eq(wecomBindings.id, id))
       .returning()
       .execute();
 
     if (!row) return notFound(traceId, '绑定不存在');
-    return ok(row, traceId, 'revoked');
+    await db.execute(sql`
+      UPDATE agent_memory_namespaces
+      SET scope_config = COALESCE(scope_config, '{}'::jsonb) || '{"frozen":true,"freeze_reason":"binding_unbound"}'::jsonb,
+          updated_at = NOW()
+      WHERE binding_id = ${id}
+    `);
+    return ok(row, traceId, 'unbound');
   },
 );

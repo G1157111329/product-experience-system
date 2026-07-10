@@ -5,16 +5,9 @@ import { writeSecurityAudit } from '@/lib/server/security-audit';
 import { buildReportDetailModel, presignReportMediaUrls } from '@/lib/server/report-detail';
 import { renderReportDetailPdfHtml } from '@/lib/server/report-print-renderer';
 import { loadLatestReportSnapshot } from '@/lib/server/report-snapshots';
+import { buildReportFilename } from '@/lib/report-filename';
 
 type Row = Record<string, unknown>;
-
-function safeFilename(value: unknown) {
-  const base = String(value || 'report')
-    .replace(/[\\/:*?"<>|\r\n\t]+/g, '_')
-    .replace(/\s+/g, '_')
-    .slice(0, 120);
-  return base || 'report';
-}
 
 async function selectRows(
   query: PromiseLike<{ data: Row[] | null; error?: { message?: string } | null }>,
@@ -229,12 +222,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       metadata: { profile: delivery.profile.id, snapshotId: snapshot?.id || null, jobId: job?.id || null },
     });
 
-    const filename = `${safeFilename(report.title)}.pdf`;
+    const filename = buildReportFilename(report.title);
     return new NextResponse(new Uint8Array(pdfBuffer), {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        'Content-Disposition': `attachment; filename="report.pdf"; filename*=UTF-8''${encodeURIComponent(filename)}`,
         'Cache-Control': 'no-store',
         ...(job?.id ? { 'X-PDF-Job-Id': String(job.id) } : {}),
         'X-PDF-Profile': delivery.profile.id,

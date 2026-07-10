@@ -12,11 +12,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Plus, Table2, Edit3, AlertCircle, CheckCircle2, Clock, Archive, Loader2, Lock,
+  Trash2, RotateCcw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import type { MatrixReadProjectionV2 } from '@/lib/matrix/task-matrix-types';
@@ -90,8 +90,30 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [selectedMatrixId, setSelectedMatrixId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [createName, setCreateName] = useState('');
-  const [showCreateForm, setShowCreateForm] = useState(false);
+
+  const handleLifecycle = async (matrixId: string, action: 'archive' | 'restore') => {
+    const prompt = action === 'archive'
+      ? '删除后矩阵会进入回收区，已冻结报告不受影响。确认删除？'
+      : '确认恢复该数据矩阵？';
+    if (!window.confirm(prompt)) return;
+    try {
+      const res = await fetch(`/api/v1/matrices/${matrixId}/lifecycle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, reason: action === 'archive' ? 'user_delete' : undefined }),
+      });
+      const json = await res.json();
+      if (json.code !== 0) {
+        toast.error(json.message || '操作失败');
+        return;
+      }
+      if (selectedMatrixId === matrixId) setSelectedMatrixId(null);
+      await fetchTabState();
+      toast.success(action === 'archive' ? '矩阵已移入回收区' : '矩阵已恢复');
+    } catch {
+      toast.error('操作失败，请重试');
+    }
+  };
 
   const fetchTabState = useCallback(async () => {
     try {
@@ -131,7 +153,7 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
   }, [fetchTabState]);
 
   const handleCreate = async () => {
-    const name = (createName.trim() || `${taskName} - 数据矩阵`).trim();
+    const name = `${taskName} - 数据矩阵${matrices.length + 1}`;
     setCreating(true);
     try {
       const endpoint = excelLike
@@ -150,8 +172,6 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
       const created = json.data;
       if (json.code === 0 && created?.id) {
         toast.success(excelLike ? '矩阵已创建，可直接录入' : '矩阵创建成功，请设计结构');
-        setShowCreateForm(false);
-        setCreateName('');
         setSelectedMatrixId(created.id);
         await fetchTabState();
       } else {
@@ -182,6 +202,18 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
                   {STATUS_LABELS[matrix.status] ?? matrix.status}
                 </span>
               </Badge>
+              {matrix.status !== 'archived' && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="ml-auto h-8 w-8 text-destructive"
+                  title="删除矩阵"
+                  aria-label="删除矩阵"
+                  onClick={() => void handleLifecycle(matrix.id, 'archive')}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
             </>
           )}
         </div>
@@ -268,27 +300,9 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
           </p>
           {!canCreate ? (
             <p className="text-sm text-muted-foreground">功能暂未开放创建，请联系管理员开启。</p>
-          ) : showCreateForm ? (
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-2 max-w-md mx-auto">
-              <Input
-                value={createName}
-                onChange={(e) => setCreateName(e.target.value)}
-                placeholder={`${taskName} - 数据矩阵`}
-                className="h-9"
-                onKeyDown={(e) => e.key === 'Enter' && void handleCreate()}
-                autoFocus
-              />
-              <div className="flex gap-2">
-                <Button onClick={() => void handleCreate()} disabled={creating} className="h-9">
-                  {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                  创建
-                </Button>
-                <Button variant="ghost" className="h-9" onClick={() => setShowCreateForm(false)}>取消</Button>
-              </div>
-            </div>
           ) : (
-            <Button onClick={() => setShowCreateForm(true)}>
-              <Plus className="mr-2 h-4 w-4" />
+            <Button onClick={() => void handleCreate()} disabled={creating}>
+              {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
               新建数据矩阵
             </Button>
           )}
@@ -308,32 +322,15 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
           </p>
         </div>
         {canCreate && (
-          showCreateForm ? (
-            <div className="flex items-center gap-2">
-              <Input
-                value={createName}
-                onChange={(e) => setCreateName(e.target.value)}
-                placeholder="矩阵名称"
-                className="h-8 w-48"
-                onKeyDown={(e) => e.key === 'Enter' && void handleCreate()}
-                autoFocus
-              />
-              <Button size="sm" onClick={() => void handleCreate()} disabled={creating}>
-                {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : '创建'}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setShowCreateForm(false)}>取消</Button>
-            </div>
-          ) : (
-            <Button onClick={() => setShowCreateForm(true)} variant="outline" size="sm">
-              <Plus className="mr-2 h-4 w-4" />
+            <Button onClick={() => void handleCreate()} disabled={creating} variant="outline" size="sm">
+              {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
               新建
             </Button>
-          )
         )}
       </div>
 
       <div className="grid gap-3">
-        {matrices.map((m) => (
+        {matrices.filter((matrix) => matrix.status !== 'archived').map((m) => (
           <Card
             key={m.id}
             className="cursor-pointer transition-shadow hover:shadow-md hover:border-primary/30"
@@ -351,12 +348,27 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
                         : '点击进入矩阵录入'}
                   </CardDescription>
                 </div>
-                <Badge className={STATUS_COLORS[m.status] ?? 'bg-muted'} variant="outline">
-                  <span className="flex items-center gap-1">
-                    {STATUS_ICONS[m.status]}
-                    {STATUS_LABELS[m.status] ?? m.status}
-                  </span>
-                </Badge>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Badge className={STATUS_COLORS[m.status] ?? 'bg-muted'} variant="outline">
+                    <span className="flex items-center gap-1">
+                      {STATUS_ICONS[m.status]}
+                      {STATUS_LABELS[m.status] ?? m.status}
+                    </span>
+                  </Badge>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-destructive"
+                    title="删除矩阵"
+                    aria-label={`删除矩阵 ${m.name}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void handleLifecycle(m.id, 'archive');
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
@@ -367,6 +379,33 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
           </Card>
         ))}
       </div>
+
+      {matrices.some((matrix) => matrix.status === 'archived') && (
+        <details className="rounded-md border bg-muted/10 px-3 py-2">
+          <summary className="cursor-pointer text-sm font-medium">
+            回收区（{matrices.filter((matrix) => matrix.status === 'archived').length}）
+          </summary>
+          <div className="mt-2 divide-y">
+            {matrices.filter((matrix) => matrix.status === 'archived').map((matrix) => (
+              <div key={matrix.id} className="flex items-center justify-between gap-3 py-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm">{matrix.name}</p>
+                  <p className="text-xs text-muted-foreground">已删除，可恢复继续录入</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => void handleLifecycle(matrix.id, 'restore')}
+                >
+                  <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                  恢复
+                </Button>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
     </div>
   );
 }

@@ -1624,6 +1624,7 @@ export const materialLinks = pgTable("material_links", {
   targetType: varchar("target_type", { length: 40 }).notNull(),
   targetId: varchar("target_id", { length: 36 }).notNull(),
   bindingMethod: varchar("binding_method", { length: 30 }).default('click_select').notNull(),
+  bindingOrder: integer("binding_order").default(0).notNull(),
   boundBy: varchar("bound_by", { length: 36 }),
   boundAt: timestamp("bound_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
   version: integer("version").default(1).notNull(),
@@ -1744,6 +1745,7 @@ export const wecomBindings = pgTable("wecom_bindings", {
   platformUserId: varchar("platform_user_id", { length: 36 }).notNull(),
   wecomUserId: varchar("wecom_user_id", { length: 100 }).notNull(),
   wecomCorpId: varchar("wecom_corp_id", { length: 100 }),
+  provider: varchar("provider", { length: 20 }).default('wecom').notNull(),
   agentInstanceId: varchar("agent_instance_id", { length: 36 }),
   projectScope: jsonb("project_scope"),
   status: varchar("status", { length: 20 }).default('active').notNull(),
@@ -1777,4 +1779,22 @@ export const wecomMediaIngestJobs = pgTable("wecom_media_ingest_jobs", {
   index("wmij_status_idx").using("btree", table.downloadStatus.asc().nullsLast().op("text_ops")),
   index("wmij_expires_idx").using("btree", table.expiresAt.asc().nullsLast().op("text_ops")),
   index("wmij_binding_idx").using("btree", table.wecomBindingId.asc().nullsLast().op("text_ops")),
+]);
+
+export const agentBindingSessions = pgTable("agent_binding_sessions", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  provider: varchar("provider", { length: 20 }).notNull(),
+  platformUserId: varchar("platform_user_id", { length: 36 }).notNull(),
+  agentInstanceId: varchar("agent_instance_id", { length: 36 }),
+  status: varchar("status", { length: 20 }).default('pending').notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: 'string' }).notNull(),
+  externalUserId: varchar("external_user_id", { length: 200 }),
+  createdBy: varchar("created_by", { length: 36 }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+  index("abs_status_expires_idx").using("btree", table.status.asc().nullsLast().op("text_ops"), table.expiresAt.asc().nullsLast().op("timestamptz_ops")),
+  index("abs_platform_user_idx").using("btree", table.platformUserId.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.platformUserId], foreignColumns: [platformUsers.id], name: "abs_platform_user_fkey" }).onDelete("cascade"),
+  foreignKey({ columns: [table.agentInstanceId], foreignColumns: [agentInstances.id], name: "abs_agent_fkey" }).onDelete("set null"),
 ]);

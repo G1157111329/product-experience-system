@@ -221,6 +221,11 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
     }
   };
 
+  const markAsPending = async () => {
+    if (!current) return;
+    await updateIssueFields({ status: 'open', is_improve: true }, '已标记为待整改');
+  };
+
   // 直接标记为已整改（verified_closed），用户手动确认，不强制走完整状态机流转
   const markAsRectified = async () => {
     if (!current) return;
@@ -357,33 +362,43 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
               </div>
               <div className="space-y-1.5">
                 <Label>整改状态</Label>
-                <div className="grid grid-cols-3 gap-1">
+                <div className="grid grid-cols-2 gap-1 sm:grid-cols-4">
                   <button
                     type="button"
-                    onClick={() => updateImproveFlag(true)}
+                    onClick={() => void markAsPending()}
                     className={cn(
                       'min-h-9 rounded border px-2 py-1.5 text-xs font-medium transition-colors',
-                      willImprove && currentStatus !== 'verified_closed' ? 'bg-primary text-primary-foreground border-current' : 'bg-background border-border hover:bg-muted/50'
+                      currentStatus === 'open' ? 'border-current text-foreground' : 'bg-background border-border hover:bg-muted/50',
+                    )}
+                  >
+                    待整改
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void updateImproveFlag(true)}
+                    className={cn(
+                      'min-h-9 rounded border px-2 py-1.5 text-xs font-medium transition-colors',
+                      willImprove && currentStatus !== 'open' && currentStatus !== 'verified_closed' ? 'border-current text-amber-600' : 'bg-background border-border hover:bg-muted/50',
                     )}
                   >
                     整改中
                   </button>
                   <button
                     type="button"
-                    onClick={() => markAsRectified()}
+                    onClick={() => void markAsRectified()}
                     className={cn(
                       'min-h-9 rounded border px-2 py-1.5 text-xs font-medium transition-colors',
-                      currentStatus === 'verified_closed' ? 'bg-emerald-500 text-white border-current' : 'bg-background border-border hover:bg-muted/50'
+                      currentStatus === 'verified_closed' ? 'border-current text-emerald-600' : 'bg-background border-border hover:bg-muted/50',
                     )}
                   >
                     已整改
                   </button>
                   <button
                     type="button"
-                    onClick={() => updateImproveFlag(false)}
+                    onClick={() => void updateImproveFlag(false)}
                     className={cn(
                       'min-h-9 rounded border px-2 py-1.5 text-xs font-medium transition-colors',
-                      !willImprove ? 'bg-muted text-muted-foreground border-current' : 'bg-background border-border hover:bg-muted/50'
+                      !willImprove ? 'border-current text-muted-foreground' : 'bg-background border-border hover:bg-muted/50',
                     )}
                   >
                     不整改

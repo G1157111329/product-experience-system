@@ -14,7 +14,7 @@ import { getDb } from '@/storage/database/pg-db';
 import { eq } from 'drizzle-orm';
 import { matrixFormulaDefinitionsV3 } from '@/storage/database/shared/schema';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { requireUser, isAuthResponse } from '@/lib/server/auth';
+import { canAccessMatrix, requireUser, isAuthResponse } from '@/lib/server/auth';
 import { ok, fail } from '@/lib/server/api-v1/response';
 import { resolveTraceId } from '@/lib/server/api-v1/trace';
 import { recomputeMatrixFormulas } from '@/lib/matrix/recompute-v3';
@@ -50,6 +50,9 @@ export async function POST(
     const formula = rows[0];
     if (!formula) {
       return fail(traceId, { message: '公式定义不存在', status: 404 });
+    }
+    if (!(await canAccessMatrix(client, user, formula.matrixId))) {
+      return fail(traceId, { message: '无权访问该矩阵', status: 403 });
     }
     // Recompute even inactive formulas' matrices is allowed — the recompute
     // function only touches status='active' formulas, so this is safe and lets

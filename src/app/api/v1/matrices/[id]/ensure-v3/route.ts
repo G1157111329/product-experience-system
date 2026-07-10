@@ -5,7 +5,7 @@
  */
 import { NextRequest } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { requireUser, isAuthResponse } from '@/lib/server/auth';
+import { canAccessMatrix, requireUser, isAuthResponse } from '@/lib/server/auth';
 import { ensureV3ViewForMatrix } from '@/lib/matrix/bootstrap-v3';
 import { ok, fail } from '@/lib/server/api-v1/response';
 import { resolveTraceId } from '@/lib/server/api-v1/trace';
@@ -22,6 +22,9 @@ export async function POST(
   const client = getSupabaseClient();
   const user = await requireUser(req, client);
   if (isAuthResponse(user)) return fail(traceId, { message: '未认证', status: 401 });
+  if (!(await canAccessMatrix(client, user, matrixId))) {
+    return fail(traceId, { message: '无权访问该矩阵', status: 403 });
+  }
 
   try {
     const result = await ensureV3ViewForMatrix({ matrixId, userId: user.id });

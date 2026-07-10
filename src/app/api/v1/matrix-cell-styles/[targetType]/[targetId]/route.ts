@@ -10,7 +10,7 @@ import { getDb } from '@/storage/database/pg-db';
 import { sql } from 'drizzle-orm';
 import { matrixCellStyles } from '@/storage/database/shared/schema';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { requireUser, isAuthResponse } from '@/lib/server/auth';
+import { canAccessMatrix, requireUser, isAuthResponse } from '@/lib/server/auth';
 import { ok, fail } from '@/lib/server/api-v1/response';
 import { resolveTraceId } from '@/lib/server/api-v1/trace';
 
@@ -88,6 +88,9 @@ async function upsertStyle(
   }
   if (body.fontColorToken && !VALID_FONT_COLOR_TOKENS.has(body.fontColorToken)) {
     return fail(traceId, { message: `fontColorToken 无效: ${body.fontColorToken}`, status: 400 });
+  }
+  if (!(await canAccessMatrix(client, user, body.matrixId))) {
+    return fail(traceId, { message: '无权访问该矩阵', status: 403 });
   }
 
   try {

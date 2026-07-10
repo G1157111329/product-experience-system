@@ -14,6 +14,8 @@ import { ok, fail, unauthorized, withTrace } from '@/lib/server/api-v1/response'
 import { conversations, conversationMessages } from '@/storage/database/shared/schema';
 import { getV3FeatureFlags } from '@/lib/feature-flags-v3';
 import { executeHermesRun } from '@/lib/server/hermes/runtime';
+import { canAccessConversationRow } from '@/lib/server/agent-access';
+import { stripAssistantReasoning } from '@/lib/assistant-output';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,6 +59,9 @@ export const POST = withTrace<[NextRequest, { params: Promise<{ conversationId: 
     if (!conv) {
       return fail(traceId, { message: '对话不存在', status: 404 });
     }
+    if (!canAccessConversationRow(user, conv)) {
+      return fail(traceId, { message: '无权访问该对话', status: 403 });
+    }
 
     const lastSeqRows = await db
       .select({ eventSeq: conversationMessages.eventSeq })
@@ -99,16 +104,17 @@ export const POST = withTrace<[NextRequest, { params: Promise<{ conversationId: 
       conversationId,
       trigger: 'manual',
       systemPrompt:
-        '你是产品体验管理平台的任务助手。基于用户消息给出简洁、可执行的建议。不要编造未提供的数据。',
+        '你是产品体验管理平台的AI助手。基于用户消息给出简洁、可执行的建议。不要编造未提供的数据。只输出面向用户的最终答复，不要输出<think>、思考过程或内部推理。',
       userPrompt: `对话上下文：\n${historyText}\n\n请回复最新用户消息。`,
       userId: user.id,
       taskId: conv.taskId ?? undefined,
     });
 
-    const assistantContent =
+    const assistantContent = stripAssistantReasoning(
       run.status === 'succeeded' && run.output
         ? run.output
-        : `助手暂不可用${run.errorCode ? `（${run.errorCode}）` : ''}，请稍后重试。`;
+        : `助手暂不可用${run.errorCode ? `（${run.errorCode}）` : ''}，请稍后重试。`,
+    );
 
     const [assistantMsg] = await db
       .insert(conversationMessages)
@@ -138,5 +144,42 @@ export const POST = withTrace<[NextRequest, { params: Promise<{ conversationId: 
       traceId,
       'created',
     );
+  },
+);
+
+export const GET = withTrace<[NextRequest, { params: Promise<{ conversationId: string }> }]>(
+  async (traceId, req, ctx) => {
+    const { conversationId } = await ctx.params;
+    const client = getSupabaseClient();
+    const user = await requireUser(req, client);
+    if (isAuthResponse(user)) return unauthorized(traceId, 'unauthorized');
+
+    const db = await getDb();
+    const convRows = await db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .limit(1)
+      .execute();
+    const conv = convRows[0];
+    if (!conv) return fail(traceId, { message: '对话不存在', status: 404 });
+    if (!canAccessConversationRow(user, conv)) {
+      return fail(traceId, { message: '无权访问该对话', status: 403 });
+    }
+
+    const rows = await db
+      .select()
+      .from(conversationMessages)
+      .where(eq(conversationMessages.conversationId, conversationId))
+      .orderBy(conversationMessages.eventSeq)
+      .limit(500)
+      .execute();
+    return ok({
+      conversation: conv,
+      items: rows.map((row) => ({
+        ...row,
+        content: row.role === 'assistant' ? stripAssistantReasoning(row.content) : row.content,
+      })),
+    }, traceId);
   },
 );

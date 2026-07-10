@@ -5,6 +5,52 @@ import { loadLatestReportSnapshot } from '@/lib/server/report-snapshots';
 
 type Row = Record<string, unknown>;
 
+function text(value: unknown): string {
+  return String(value ?? '').trim();
+}
+
+function parseProblemPoints(value: unknown): Array<{ text: string; material_ids?: string[] }> {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(String(value));
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) => {
+        if (typeof item === 'string') return { text: item.trim() };
+        if (!item || typeof item !== 'object') return null;
+        const record = item as Row;
+        const ids = Array.isArray(record.material_ids)
+          ? record.material_ids.filter((id): id is string => typeof id === 'string' && id.trim() !== '')
+          : undefined;
+        return { text: text(record.text), material_ids: ids };
+      })
+      .filter((item): item is { text: string; material_ids?: string[] } => Boolean(item?.text));
+  } catch {
+    return String(value)
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => ({ text: line }));
+  }
+}
+
+function addUniqueMaterial(target: Row[], seen: Set<string>, material: Row | undefined) {
+  if (!material) return;
+  const key = text(material.id) || text(material.file_path) || text(material.file_url);
+  if (!key || seen.has(key)) return;
+  seen.add(key);
+  target.push(material);
+}
+
+function mergeMaterials(...groups: Array<Array<Row | undefined> | undefined>) {
+  const seen = new Set<string>();
+  const result: Row[] = [];
+  for (const group of groups) {
+    for (const material of group || []) addUniqueMaterial(result, seen, material);
+  }
+  return result;
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
@@ -58,6 +104,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       .select('*')
       .eq('task_id', String(report.task_id));
     const mats = (materials || []) as Row[];
+    const materialById = new Map(mats.map((material) => [text(material.id), material]));
 
     // 按 recipe_id 分组（效果素材）
     const effectMatsByRecipe = new Map<string, Row[]>();
@@ -80,12 +127,24 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       const steps = (recipe.recipe_steps ?? []) as Row[];
       const stepsWithMats = steps.map((step) => ({
         ...step,
-        materials: stepMatsByRecipe.get(String(step.id ?? '')) || [],
+        materials: mergeMaterials(
+          (step.materials ?? []) as Row[],
+          stepMatsByRecipe.get(String(step.id ?? '')),
+          parseProblemPoints(step.problem_points)
+            .flatMap((point) => point.material_ids || [])
+            .map((materialId) => materialById.get(materialId)),
+        ),
       }));
+      const effectPointMaterialIds = parseProblemPoints(recipe.effect_problem_point)
+        .flatMap((point) => point.material_ids || []);
       return {
         ...recipe,
         recipe_steps: stepsWithMats,
-        effect_materials: effectMatsByRecipe.get(String(recipe.id ?? '')) || [],
+        effect_materials: mergeMaterials(
+          (recipe.effect_materials ?? []) as Row[],
+          effectMatsByRecipe.get(String(recipe.id ?? '')),
+          effectPointMaterialIds.map((materialId) => materialById.get(materialId)),
+        ),
       };
     });
   }

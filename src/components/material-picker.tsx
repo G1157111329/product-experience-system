@@ -10,6 +10,7 @@ import { MediaCaptureDialog } from './media-capture-dialog';
 import { cn } from '@/lib/utils';
 import { getMediaSrc, pendingMediaDataUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import { toast } from 'sonner';
+import { orderMaterialsByIds } from '@/lib/material-selection-order';
 
 export interface Material {
   id: string;
@@ -231,7 +232,7 @@ export function MaterialPicker({
     setUploading(true);
     try {
       let nextSelected = [...selected];
-      const nextMaterials = materials.filter((material) => nextSelected.includes(material.id));
+      const nextMaterials = orderMaterialsByIds(nextSelected, materials);
       let uploadedCount = 0;
 
       for (const file of files) {
@@ -362,7 +363,7 @@ export function MaterialPicker({
 
     setSelected(nextSelected);
     if (onSelectionChange) {
-      notifySelectionChange(nextSelected, materials.filter((item) => nextSelected.includes(item.id)));
+      notifySelectionChange(nextSelected, orderMaterialsByIds(nextSelected, allKnownMaterials));
     }
   };
 
@@ -376,7 +377,7 @@ export function MaterialPicker({
     });
 
     if (onSelectionChange) {
-      notifySelectionChange(nextSelected, materials.filter((item) => nextSelected.includes(item.id)));
+      notifySelectionChange(nextSelected, orderMaterialsByIds(nextSelected, allKnownMaterials));
     }
   };
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { normalizeAgentActions } from '@/lib/agent-actions';
+import { stripAssistantReasoning } from '@/lib/assistant-output';
 import { extractJsonObject, invokeConfiguredAI } from '@/lib/server/ai';
 import { canAccessTask, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { findAssemblyForTask } from '@/lib/server/comparison-assembly';
@@ -70,7 +71,7 @@ function normalizeMessages(value: unknown): ChatMessage[] {
 }
 
 function buildAgentSystemPrompt() {
-  return `你是产品体验管理平台里的 AI Agent 助手。你要先理解用户意图，再输出可预览、可确认、可执行的动作计划。
+  return `你是产品体验管理平台里的AI助手。你要先理解用户意图，再输出可预览、可确认、可执行的动作计划。
 
 必须只返回 JSON，不要返回 Markdown。JSON 格式：
 {
@@ -88,20 +89,27 @@ function buildAgentSystemPrompt() {
 }
 
 允许的动作类型和 payload：
-1. recipe_step_create: { "recipe_id": "必须使用上下文里的食谱ID", "operation": "步骤描述", "problem_point": "可选问题点" }
-2. recipe_step_update: { "step_id": "必须使用上下文里的步骤ID", "operation": "新的步骤描述", "problem_point": "可选问题点" }
-3. recipe_step_delete: { "step_id": "必须使用上下文里的步骤ID", "step_label": "给用户看的步骤名" }
+1. recipe_create: { "name": "食谱名", "description": "可选说明" }
+2. recipe_step_create: { "recipe_id": "必须使用上下文里的食谱ID", "operation": "步骤描述", "problem_point": "可选问题点" }
+3. recipe_step_update: { "step_id": "必须使用上下文里的步骤ID", "operation": "新的步骤描述", "problem_point": "可选问题点" }
 4. comparison_matrix_seed: {
    "objects": [{ "name": "A对象", "type": "product_model" }],
    "sections": [{ "label": "大类", "items": ["对比项1", "对比项2"] }],
    "cells": [{ "object_name": "A对象", "item_label": "对比项1", "effect_summary": "结论", "process_notes": ["过程"], "problem_points": ["问题"], "manual_score": "8" }]
 }
 5. comparison_cell_update: { "object_name": "对象名", "item_label": "对比项", "effect_summary": "结论", "process_notes": ["过程"], "problem_points": ["问题"], "manual_score": "0-10可选" }
-6. material_ai_result_update: { "material_id": "必须使用上下文里的素材ID", "summary": "图片/视频内容整理", "tags": ["标签"] }
-7. material_rename: { "material_id": "必须使用上下文里的素材ID", "file_name": "新素材名称" }
+6. material_ai_result_update: { "material_id": "素材ID", "summary": "图片/视频内容整理", "tags": ["标签"] }
+7. material_rename: { "material_id": "素材ID", "file_name": "新素材名称" }
+8. material_bind: { "material_id": "素材ID", "record_id | recipe_id | recipe_step_id | issue_id": "绑定目标ID" }
+9. issue_create: { "title": "问题标题", "description": "描述", "level": "一类|二类|三类" }
+10. issue_update: { "issue_id": "问题ID", "title|description|level|status|improve_plan|responsible_person|verification_note": "新值" }
+11. record_update: { "record_id": "体验记录ID", "actual_result|problem_description|evaluation_result|experience_standard|check_standard": "新值" }
+12. task_create: { "task_name": "计划名称", "product_category|product|product_model|project_type|project_phase|organizer|test_purpose|task_mode": "可选值" }
+13. standard_item_create: { "standard_id": "标准ID", "check_item": "检查条目", "check_requirement|experience_standard|check_standard|sensory_dimension|experience_flow|touch_point|problem_level": "可选值" }
+14. data_matrix_cell_update: { "matrix_id": "数据矩阵ID", "leaf_row_id": "行ID", "column_id": "列ID", "value_text|value_number|display_text": "录入值" }
 
 规则：
-- 删除、覆盖已有步骤、重命名素材必须标记 medium 或 high；删除必须 high。
+- 不得生成删除、设置、配置或用户管理动作；覆盖已有步骤、重命名素材必须标记 medium 或 high。
 - 如果上下文没有足够 ID，不要编造 ID；可以给 reply 提醒用户先选择或补充信息，actions 返回空数组。
 - 对比矩阵允许通过对象名和对比项名称创建或更新，系统会在用户确认后补齐矩阵单元格。
 - 素材内容整理只基于上下文里已有文件名、AI结果和用户描述，不要声称看到了没有提供的图片细节。
@@ -228,9 +236,11 @@ function buildTaskContextText(context: Awaited<ReturnType<typeof loadTaskAgentCo
 
 function parseAgentReply(rawContent: string) {
   const parsed = extractJsonObject<Record<string, unknown>>(rawContent, {});
-  const reply = typeof parsed.reply === 'string' && parsed.reply.trim()
-    ? parsed.reply.trim()
-    : rawContent.trim();
+  const reply = stripAssistantReasoning(
+    typeof parsed.reply === 'string' && parsed.reply.trim()
+      ? parsed.reply
+      : rawContent,
+  );
   const actions = normalizeAgentActions(parsed.actions).slice(0, 8);
   return {
     reply: reply || '我没有生成有效回复，请换一种描述再试。',

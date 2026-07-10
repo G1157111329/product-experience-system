@@ -33,17 +33,35 @@ function isDataUrl(value: string): boolean {
   return value.startsWith('data:');
 }
 
-function isDirectMediaUrl(value: string): boolean {
-  return value.startsWith('http')
-    || value.startsWith('/api/materials/file/')
+function currentOrigin(): string | undefined {
+  return typeof window === 'undefined' ? undefined : window.location.origin;
+}
+
+export function isAllowedMediaSource(value: string, origin = currentOrigin()): boolean {
+  if (
+    value.startsWith('/api/materials/file/')
     || value.startsWith('/uploads/')
     || value.startsWith('/media/')
-    || isDataUrl(value);
+    || value.startsWith('blob:')
+    || isDataUrl(value)
+  ) return true;
+  if (value.startsWith('https://')) return true;
+  if (!value.startsWith('http://') || !origin) return false;
+  try {
+    return new URL(value).origin === new URL(origin).origin;
+  } catch {
+    return false;
+  }
+}
+
+function isDirectMediaUrl(value: string): boolean {
+  return isAllowedMediaSource(value);
 }
 
 export function toPublicMediaUrl(value: string | null | undefined): string | null {
   if (!value) return null;
   if (isDirectMediaUrl(value)) return value;
+  if (/^https?:\/\//i.test(value)) return null;
   return `/uploads/${value.replace(/^\/+/, '')}`;
 }
 
@@ -51,6 +69,7 @@ function toStorageKey(value: string | null | undefined): string | null {
   if (!value) return null;
   if (value.startsWith('/uploads/')) return value.slice('/uploads/'.length);
   if (value.startsWith('/api/materials/file/')) return null;
+  if (/^(https?:|blob:|data:)/i.test(value)) return null;
   return value;
 }
 
@@ -202,8 +221,10 @@ export function getMediaSrc(material: { file_url?: string | null; file_path?: st
     return fileUrl;
   }
 
-  // 兜底
-  return filePath || fileUrl || null;
+  // Never fall back to a non-HTTPS cross-origin URL. It may be an enterprise
+  // network block page rather than the requested media asset.
+  if (filePath && !/^https?:\/\//i.test(filePath)) return filePath;
+  return null;
 }
 
 /**
@@ -214,6 +235,7 @@ export function usePresignedUrl(filePath: string | null | undefined): string | n
   const [url, setUrl] = useState<string | null>(() => {
     if (!filePath) return null;
     if (isDirectMediaUrl(filePath)) return filePath;
+    if (/^https?:\/\//i.test(filePath)) return null;
     const cached = globalCache.get(filePath);
     if (cached && cached.expireAt > Date.now()) return cached.url;
     return null;
@@ -230,6 +252,10 @@ export function usePresignedUrl(filePath: string | null | undefined): string | n
     // 兼容旧数据：已经是完整URL
     if (isDirectMediaUrl(filePath)) {
       setUrl(filePath);
+      return;
+    }
+    if (/^https?:\/\//i.test(filePath)) {
+      setUrl(null);
       return;
     }
 
@@ -337,6 +363,7 @@ export function usePresignedUrls<T extends { id: string; file_url?: string | nul
  */
 export async function fetchPresignedUrl(filePath: string): Promise<string> {
   if (isDirectMediaUrl(filePath)) return filePath;
+  if (/^https?:\/\//i.test(filePath)) return '';
 
   const cached = globalCache.get(filePath);
   if (cached && cached.expireAt > Date.now()) return cached.url;

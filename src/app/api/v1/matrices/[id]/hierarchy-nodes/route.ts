@@ -14,15 +14,20 @@
  */
 import { NextRequest } from 'next/server';
 import { getDb } from '@/storage/database/pg-db';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import {
+  materialLinks,
+  matrixCellValues,
   matrixHierarchyNodes,
+  matrixIssuePoints,
   matrixLeafRows,
 } from '@/storage/database/shared/schema';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { requireUser, isAuthResponse } from '@/lib/server/auth';
+import { canAccessMatrix, requireUser, isAuthResponse } from '@/lib/server/auth';
 import { ok, fail } from '@/lib/server/api-v1/response';
 import { resolveTraceId } from '@/lib/server/api-v1/trace';
+import { decideHierarchyDeletion } from '@/lib/matrix/hierarchy-lifecycle';
+import { recomputeMatrixFormulas } from '@/lib/matrix/recompute-v3';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +41,9 @@ export async function POST(
   const client = getSupabaseClient();
   const user = await requireUser(req, client);
   if (isAuthResponse(user)) return fail(traceId, { message: '未认证', status: 401 });
+  if (!(await canAccessMatrix(client, user, matrixId))) {
+    return fail(traceId, { message: '无权访问该矩阵', status: 403 });
+  }
 
   let body: { level?: number; parentId?: string; nodeLabel?: string };
   try {
@@ -112,6 +120,16 @@ export async function POST(
     } else {
       // level 3
       level2NodeId = node.parentId;
+      const parentRows = level2NodeId
+        ? await db
+            .select({ parentId: matrixHierarchyNodes.parentId })
+            .from(matrixHierarchyNodes)
+            .where(and(eq(matrixHierarchyNodes.id, level2NodeId), eq(matrixHierarchyNodes.matrixId, matrixId)))
+            .limit(1)
+            .execute()
+        : [];
+      if (!parentRows[0]?.parentId) throw new Error('三级细项必须隶属于有效的二级细项');
+      level1NodeId = parentRows[0].parentId;
     }
 
     // Compute next visible_row_index.
@@ -141,6 +159,117 @@ export async function POST(
     return ok(created, traceId, 'created');
   } catch (err) {
     const message = err instanceof Error ? err.message : '创建失败';
+    return fail(traceId, { message, status: 500 });
+  }
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const traceId = resolveTraceId(req.headers);
+  const { id: matrixId } = await params;
+
+  const client = getSupabaseClient();
+  const user = await requireUser(req, client);
+  if (isAuthResponse(user)) return fail(traceId, { message: '未认证', status: 401 });
+  if (!(await canAccessMatrix(client, user, matrixId))) {
+    return fail(traceId, { message: '无权访问该矩阵', status: 403 });
+  }
+
+  let body: { nodeId?: string; confirmArchive?: boolean };
+  try {
+    body = await req.json();
+  } catch {
+    return fail(traceId, { message: '请求体不是合法 JSON', status: 400 });
+  }
+  if (!body.nodeId) return fail(traceId, { message: 'nodeId 不能为空', status: 400 });
+
+  try {
+    const db = await getDb();
+    const [nodes, rows] = await Promise.all([
+      db.select().from(matrixHierarchyNodes).where(eq(matrixHierarchyNodes.matrixId, matrixId)).execute(),
+      db.select().from(matrixLeafRows).where(eq(matrixLeafRows.matrixId, matrixId)).execute(),
+    ]);
+    const target = nodes.find((node) => node.id === body.nodeId && node.archivedAt === null);
+    if (!target) return fail(traceId, { message: '层级节点不存在', status: 404 });
+
+    const descendantIds = new Set<string>([target.id]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const node of nodes) {
+        if (node.parentId && descendantIds.has(node.parentId) && !descendantIds.has(node.id)) {
+          descendantIds.add(node.id);
+          changed = true;
+        }
+      }
+    }
+    const affectedRows = rows.filter((row) =>
+      descendantIds.has(row.level1NodeId)
+      || Boolean(row.level2NodeId && descendantIds.has(row.level2NodeId))
+      || Boolean(row.level3NodeId && descendantIds.has(row.level3NodeId)),
+    );
+    const rowIds = affectedRows.map((row) => row.id);
+    const cells = rowIds.length > 0
+      ? await db.select().from(matrixCellValues).where(inArray(matrixCellValues.leafRowId, rowIds)).execute()
+      : [];
+    const cellIds = cells.map((cell) => cell.id);
+    const [issues, links] = await Promise.all([
+      rowIds.length > 0
+        ? db.select({ id: matrixIssuePoints.id }).from(matrixIssuePoints).where(inArray(matrixIssuePoints.leafRowId, rowIds)).execute()
+        : Promise.resolve([]),
+      cellIds.length > 0
+        ? db.select({ id: materialLinks.id }).from(materialLinks).where(and(
+          eq(materialLinks.targetType, 'dynamic_matrix_cell_value'),
+          inArray(materialLinks.targetId, cellIds),
+        )).execute()
+        : Promise.resolve([]),
+    ]);
+    const meaningfulCells = cells.filter((cell) =>
+      cell.valueState !== 'empty'
+      || cell.valueText !== null
+      || cell.valueNumber !== null
+      || cell.valueDurationSeconds !== null
+      || cell.valuePercentage !== null,
+    );
+    const decision = decideHierarchyDeletion({
+      meaningfulCellCount: meaningfulCells.length,
+      mediaLinkCount: links.length,
+      issuePointCount: issues.length,
+    });
+
+    if (decision.requiresConfirmation && !body.confirmArchive) {
+      return fail(traceId, {
+        code: 31003,
+        message: '该节点包含数据、素材或问题，删除将归档整个下级结构',
+        status: 409,
+        details: { errorCode: 'MX-HIER-003', mode: 'archive' },
+      });
+    }
+
+    if (decision.mode === 'archive') {
+      await db.transaction(async (tx) => {
+        if (rowIds.length > 0) {
+          await tx.update(matrixLeafRows).set({ status: 'archived', archivedAt: sql`NOW()` })
+            .where(inArray(matrixLeafRows.id, rowIds)).execute();
+        }
+        await tx.update(matrixHierarchyNodes).set({ archivedAt: sql`NOW()`, updatedAt: sql`NOW()` })
+          .where(inArray(matrixHierarchyNodes.id, Array.from(descendantIds))).execute();
+      });
+    } else {
+      await db.transaction(async (tx) => {
+        if (rowIds.length > 0) {
+          await tx.delete(matrixLeafRows).where(inArray(matrixLeafRows.id, rowIds)).execute();
+        }
+        await tx.delete(matrixHierarchyNodes).where(eq(matrixHierarchyNodes.id, target.id)).execute();
+      });
+    }
+
+    await recomputeMatrixFormulas(matrixId);
+    return ok({ nodeId: target.id, mode: decision.mode, affectedRows: rowIds.length }, traceId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '删除层级节点失败';
     return fail(traceId, { message, status: 500 });
   }
 }

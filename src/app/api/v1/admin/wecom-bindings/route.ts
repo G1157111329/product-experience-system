@@ -64,6 +64,7 @@ export const POST = withTrace<[NextRequest]>(async (traceId, req) => {
         wecomCorpId: body.wecomCorpId || body.wecom_corp_id
           ? String(body.wecomCorpId || body.wecom_corp_id)
           : null,
+        provider: body.provider === 'wechat' ? 'wechat' : 'wecom',
         agentInstanceId: body.agentInstanceId || body.agent_instance_id
           ? String(body.agentInstanceId || body.agent_instance_id)
           : null,

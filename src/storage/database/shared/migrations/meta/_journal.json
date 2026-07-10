@@ -78,6 +78,13 @@
                         "when":  1783900000007,
                         "version":  "7",
                         "tag":  "0010_enable_wave4_wave5_flags"
+                    },
+                    {
+                        "idx":  11,
+                        "breakpoints":  true,
+                        "when":  1783930000000,
+                        "version":  "7",
+                        "tag":  "0011_agent_qr_binding"
                     }
                 ]
 }

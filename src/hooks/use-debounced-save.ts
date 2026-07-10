@@ -20,6 +20,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { registerPendingInlineSave } from '@/lib/inline-save-registry';
 
 export type SaveStatus =
   | 'idle'
@@ -87,7 +88,7 @@ export function useDebouncedSave<T>(
   }, []);
 
   const runSave = useCallback(
-    async (value: T) => {
+    (value: T) => registerPendingInlineSave((async () => {
       setStatusState('saving');
       try {
         const result = await saveFnRef.current(value);
@@ -103,7 +104,7 @@ export function useDebouncedSave<T>(
       } catch {
         setStatusState('error');
       }
-    },
+    })()),
     [savedFlashMs],
   );
 
@@ -141,6 +142,12 @@ export function useDebouncedSave<T>(
     pendingValueRef.current = null;
     setStatusState('idle');
   }, []);
+
+  useEffect(() => {
+    const handleGlobalFlush = () => flush();
+    window.addEventListener('inline-save:flush', handleGlobalFlush);
+    return () => window.removeEventListener('inline-save:flush', handleGlobalFlush);
+  }, [flush]);
 
   useEffect(() => {
     return () => {

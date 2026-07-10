@@ -2,7 +2,7 @@
 
 import type { KeyboardEvent } from 'react';
 import { useImagePreview } from '@/components/image-preview';
-import { isPendingMediaUrl, toPublicMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
+import { isAllowedMediaSource, isPendingMediaUrl, toPublicMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import { cn } from '@/lib/utils';
 
 interface Material {
@@ -30,10 +30,7 @@ const missingMediaDataUrl =
   )}`;
 
 function isDirectMediaUrl(value: string | null | undefined): boolean {
-  return Boolean(
-    value &&
-    (value.startsWith('http') || value.startsWith('/uploads/') || value.startsWith('/media/') || value.startsWith('data:'))
-  );
+  return Boolean(value && isAllowedMediaSource(value));
 }
 
 function getInitialMediaUrl(material: Material): string {

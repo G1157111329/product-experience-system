@@ -15,6 +15,8 @@ import { sql } from 'drizzle-orm';
 import {
   matrixViewDefinitions,
   matrixColumnDefinitions,
+  matrixHierarchyNodes,
+  matrixLeafRows,
 } from '@/storage/database/shared/schema';
 
 type DefaultColumn = {
@@ -31,7 +33,7 @@ type DefaultColumn = {
 /** Structural skeleton matching PRD §7 zones — labels are editable placeholders. */
 const DEFAULT_COLUMNS: DefaultColumn[] = [
   { columnZone: 'hierarchy', zoneRole: 'A', columnLabel: '一级大类', dataType: 'text', displayOrder: 10, desktopWidthPx: 120, isPinned: true },
-  { columnZone: 'hierarchy', zoneRole: 'B', columnLabel: '二级细项', dataType: 'text', displayOrder: 20, desktopWidthPx: 120, isPinned: true },
+  { columnZone: 'hierarchy', zoneRole: 'B', columnLabel: '二级细项', dataType: 'text', displayOrder: 20, desktopWidthPx: 220, isPinned: false },
   { columnZone: 'hierarchy', zoneRole: 'C', columnLabel: '三级细项', dataType: 'text', displayOrder: 30, desktopWidthPx: 120, isPinned: true },
   { columnZone: 'primary_media', zoneRole: 'D', columnLabel: '图片', dataType: 'image_slot', displayOrder: 40, desktopWidthPx: 100, isPinned: true, maxMediaCount: 3 },
   { columnZone: 'comparison_category', zoneRole: 'E', columnLabel: '一级对比类目', dataType: 'text', displayOrder: 50, desktopWidthPx: 140, isPinned: true },
@@ -53,7 +55,7 @@ export async function bootstrapV3MatrixView(opts: {
       matrixId,
       versionNo: 1,
       maxHierarchyLevel: 3,
-      leftFrozenColumnCount: 5,
+      leftFrozenColumnCount: 0,
       formulaMode: 'relative_cell_reference',
       styleMode: 'basic_text_style',
       status: 'confirmed',
@@ -82,6 +84,42 @@ export async function bootstrapV3MatrixView(opts: {
       })),
     )
     .execute();
+
+  const [level1] = await db
+    .insert(matrixHierarchyNodes)
+    .values({
+      matrixId,
+      parentId: null,
+      level: 1,
+      nodeLabel: '默认大类',
+      nodeType: 'level_1',
+      sortOrder: 1,
+      createdBy: userId,
+    })
+    .returning()
+    .execute();
+  const [level2] = await db
+    .insert(matrixHierarchyNodes)
+    .values({
+      matrixId,
+      parentId: level1.id,
+      level: 2,
+      nodeLabel: '默认细项',
+      nodeType: 'level_2',
+      sortOrder: 1,
+      createdBy: userId,
+    })
+    .returning()
+    .execute();
+  await db.insert(matrixLeafRows).values({
+    matrixId,
+    level1NodeId: level1.id,
+    level2NodeId: level2.id,
+    level3NodeId: null,
+    visibleRowIndex: 1,
+    groupRowIndex: 1,
+    status: 'active',
+  }).execute();
 
   // current_view_definition_id is added by migration 0004 and may not be on
   // the Drizzle taskMatrices table definition — update via raw SQL.

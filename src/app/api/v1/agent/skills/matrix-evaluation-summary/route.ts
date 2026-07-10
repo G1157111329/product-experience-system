@@ -48,7 +48,7 @@ async function ensureDefaultAgentInstance(userId: string): Promise<void> {
       name: '默认矩阵助手',
       status: 'active',
       modelConfigId: models[0]?.id ?? null,
-      description: 'Wave 5 自动创建的默认 Hermes 实例',
+      description: 'Wave 5 自动创建的默认 AI助手实例',
       createdBy: userId,
     })
     .execute();

@@ -97,6 +97,12 @@ export function MatrixV3Mobile({ matrixId, taskId, projection, onChanged }: Matr
                           leafRowId={leaf.id}
                           column={col}
                           media={projection.cellMedia?.[cellKey(leaf.id, col.id)] ?? []}
+                          targetLabel={[
+                            l1?.nodeLabel,
+                            l2?.nodeLabel,
+                            l3?.nodeLabel,
+                            col.columnLabel,
+                          ].filter(Boolean).join(' / ')}
                           onChanged={onChanged}
                         />
                       </div>

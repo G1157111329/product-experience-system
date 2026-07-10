@@ -59,6 +59,26 @@ function groupBy(rows: Row[], field: string) {
   return grouped;
 }
 
+function materialsByIds(ids: string[] | undefined, materialById: Map<string, Row>) {
+  return (ids || [])
+    .map((id) => materialById.get(id))
+    .filter((item): item is Row => Boolean(item));
+}
+
+function mergeRecipeMaterials(
+  primary: Row[] | undefined,
+  fallback: Row[] | undefined,
+  ids: string[] | undefined,
+  materialById: Map<string, Row>,
+) {
+  const materials: Row[] = [];
+  const seen = new Set<string>();
+  addUniqueMaterials(materials, seen, primary);
+  addUniqueMaterials(materials, seen, fallback);
+  addUniqueMaterials(materials, seen, materialsByIds(ids, materialById));
+  return materials;
+}
+
 async function attachMaterials(client: ReturnType<typeof getSupabaseClient>, issues: Row[], taskId: string | null, reportContent: Row | null) {
   if (issues.length === 0) return issues;
   const issueIds = issues.map((i) => String(i.id)).filter(Boolean);
@@ -72,7 +92,7 @@ async function attachMaterials(client: ReturnType<typeof getSupabaseClient>, iss
       ? client.from('materials').select('*').eq('task_id', taskId).order('media_display_order', { ascending: true })
       : Promise.resolve({ data: [] }),
     taskId
-      ? client.from('check_records').select('id, check_item').eq('task_id', taskId)
+      ? client.from('check_records').select('*').eq('task_id', taskId)
       : Promise.resolve({ data: [] }),
   ]);
 
@@ -87,16 +107,20 @@ async function attachMaterials(client: ReturnType<typeof getSupabaseClient>, iss
     const id = text(material.id);
     if (id) materialById.set(id, material);
   }
-  const recordsByTitle = new Map(((recordsResult.data || []) as Row[]).map((record) => [text(record.check_item), record]));
+  const recordRows = (recordsResult.data || []) as Row[];
+  const recordsById = new Map(recordRows.map((record) => [text(record.id), record]));
+  const recordsByTitle = new Map(recordRows.map((record) => [text(record.check_item), record]));
   const recipes = ((reportContent?.recipes ?? []) as Row[]) || [];
 
   return issues.map((issue) => {
     const materials: Row[] = [];
     const seen = new Set<string>();
+    let recipeContext: Row | null = null;
     addUniqueMaterials(materials, seen, byIssueId.get(text(issue.id)));
 
     const recordId = text(issue.record_id) || text(recordsByTitle.get(text(issue.title))?.id);
     if (recordId) addUniqueMaterials(materials, seen, byRecordId.get(recordId));
+    const recordContext = recordId ? recordsById.get(recordId) || null : null;
 
     const sourceCellId = text(issue.source_cell_id);
     if (sourceCellId) addUniqueMaterials(materials, seen, byComparisonCellId.get(sourceCellId));
@@ -110,28 +134,60 @@ async function attachMaterials(client: ReturnType<typeof getSupabaseClient>, iss
         if (recipeName && source && !source.includes(recipeName)) continue;
 
         const steps = ((recipe.recipe_steps ?? []) as Row[]) || [];
-        for (const step of steps) {
+        const stepsWithMaterials: Row[] = steps.map((step): Row => {
+          const points = parseProblemPoints(step.problem_points).length > 0
+            ? parseProblemPoints(step.problem_points)
+            : parseProblemPoints(step.problem_point);
+          const pointMaterialIds = points.flatMap((point) => point.material_ids || []);
+          return {
+            ...step,
+            materials: mergeRecipeMaterials(
+              (step.materials ?? []) as Row[],
+              byRecipeStepId.get(text(step.id)),
+              pointMaterialIds,
+              materialById,
+            ),
+          };
+        });
+        const effectPoints = parseProblemPoints(recipe.effect_problem_point);
+        const recipeForIssue = {
+          ...recipe,
+          recipe_steps: stepsWithMaterials,
+          effect_materials: mergeRecipeMaterials(
+            (recipe.effect_materials ?? []) as Row[],
+            byRecipeId.get(recipeId),
+            effectPoints.flatMap((point) => point.material_ids || []),
+            materialById,
+          ),
+        };
+
+        for (const step of stepsWithMaterials) {
           const points = parseProblemPoints(step.problem_points).length > 0
             ? parseProblemPoints(step.problem_points)
             : parseProblemPoints(step.problem_point);
           for (const point of points) {
             if (point.text !== issueTitle) continue;
             addUniqueMaterials(materials, seen, (step.materials ?? []) as Row[]);
-            addUniqueMaterials(materials, seen, byRecipeStepId.get(text(step.id)));
             addUniqueMaterials(materials, seen, point.material_ids?.map((id) => materialById.get(id)).filter((item): item is Row => Boolean(item)));
+            recipeContext = recipeForIssue;
           }
         }
 
-        for (const point of parseProblemPoints(recipe.effect_problem_point)) {
+        for (const point of effectPoints) {
           if (point.text !== issueTitle) continue;
-          addUniqueMaterials(materials, seen, (recipe.effect_materials ?? []) as Row[]);
-          addUniqueMaterials(materials, seen, byRecipeId.get(recipeId));
+          addUniqueMaterials(materials, seen, (recipeForIssue.effect_materials ?? []) as Row[]);
           addUniqueMaterials(materials, seen, point.material_ids?.map((id) => materialById.get(id)).filter((item): item is Row => Boolean(item)));
+          recipeContext = recipeForIssue;
         }
       }
     }
 
-    return { ...issue, materials };
+    return {
+      ...issue,
+      materials,
+      recordContext: recordContext ? { ...recordContext, materials: byRecordId.get(recordId) || [] } : null,
+      recipeContext,
+    };
   });
 }
 

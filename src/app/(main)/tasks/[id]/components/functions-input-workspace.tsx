@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { EvidenceBindingTarget, Recipe, RecipeStep } from '../types';
 import { toast } from 'sonner';
+import { getRecipeStatistics } from '@/lib/recipe-statistics';
 
 type FunctionsInputWorkspaceProps = {
   recipes: Recipe[];
@@ -180,31 +181,15 @@ export function FunctionsInputWorkspace({
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{recipe.name}</div>
                   <div className="mt-1 grid grid-cols-2 gap-1">
-                    <Badge variant="outline" className="justify-center text-[10px]">{recipe.recipe_steps?.length || 0} 步</Badge>
+                    <Badge variant="outline" className="justify-center text-[10px]">{getRecipeStatistics(recipe).stepCount} 步</Badge>
                     <Badge variant={recipe.effect_description ? 'secondary' : 'outline'} className="text-[10px]">
                       {recipe.effect_description ? '有效果评价' : '缺效果评价'}
                     </Badge>
                     <Badge
-                      variant={(() => {
-                        const stepPPs = (recipe.recipe_steps || []).reduce((sum, step) => {
-                          const pps = step.problem_points;
-                          if (Array.isArray(pps) && pps.length > 0) return sum + pps.filter((p) => p.text?.trim()).length;
-                          return sum + (step.problem_point?.trim() ? 1 : 0);
-                        }, 0);
-                        const effectPPs = recipe.effect_problem_points?.filter((p) => p.text?.trim()).length || 0;
-                        return (stepPPs + effectPPs) > 0 ? 'destructive' : 'outline';
-                      })()}
+                      variant={getRecipeStatistics(recipe).problemCount > 0 ? 'destructive' : 'outline'}
                       className="justify-center text-[10px]"
                     >
-                      {(() => {
-                        const stepPPs = (recipe.recipe_steps || []).reduce((sum, step) => {
-                          const pps = step.problem_points;
-                          if (Array.isArray(pps) && pps.length > 0) return sum + pps.filter((p) => p.text?.trim()).length;
-                          return sum + (step.problem_point?.trim() ? 1 : 0);
-                        }, 0);
-                        const effectPPs = recipe.effect_problem_points?.filter((p) => p.text?.trim()).length || 0;
-                        return stepPPs + effectPPs;
-                      })()} 问题
+                      {getRecipeStatistics(recipe).problemCount} 问题
                     </Badge>
                     {recipe.effect_score && <Badge className="justify-center text-[10px]">{recipe.effect_score} 分</Badge>}
                   </div>

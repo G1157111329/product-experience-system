@@ -7,7 +7,7 @@ import {
   LayoutDashboard, BookOpen, ClipboardList, AlertTriangle, FileText,
   BarChart3, Menu, ChevronRight, User, LogOut, Key, Pencil,
   Settings, Plus, Minus, Trash2, Sparkles, Monitor, Moon, Sun, ShieldCheck,
-  PanelLeftClose, PanelLeftOpen,
+  PanelLeftClose, PanelLeftOpen, Bot,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
@@ -58,6 +58,7 @@ const navItems = [
   { href: '/issues', label: '问题管理', icon: AlertTriangle },
   { href: '/reports', label: '报告中心', icon: FileText },
   { href: '/analysis', label: '数据分析', icon: BarChart3 },
+  { href: '/agent', label: 'AI 助手', icon: Bot },
 ];
 
 function NavContent({
@@ -746,7 +747,7 @@ function PlatformSettingsDialog({
       action: onOpenStandardOptions,
     },
     {
-      title: 'AI Agent / Prompt 模板',
+      title: 'AI助手 / Prompt 模板',
       description: '配置 AI 模型、API 信息，以及各模块使用的 Prompt 模板。',
       icon: Sparkles,
       action: onOpenAiAgent,
@@ -1000,7 +1001,7 @@ function UserSection({ collapsed = false }: { collapsed?: boolean }) {
                   </Button>
                 )}
               </div>
-              <p className="text-[11px] text-muted-foreground">集中管理品类产品、通用标准选项、AI Agent 与 Prompt 模板</p>
+              <p className="text-[11px] text-muted-foreground">集中管理品类产品、通用标准选项、AI助手与 Prompt 模板</p>
             </div>
 
             {/* Admin: Settings button in profile dialog */}
@@ -1176,7 +1177,7 @@ function MobileUserIcon() {
                 </Button>
               )}
             </div>
-            <p className="text-[11px] text-muted-foreground">集中管理品类产品、通用标准选项、AI Agent 与 Prompt 模板</p>
+            <p className="text-[11px] text-muted-foreground">集中管理品类产品、通用标准选项、AI助手与 Prompt 模板</p>
             {isAdmin && (
               <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setPlatformSettingsOpen(true), 100); }}>
                 <Settings className="h-4 w-4" /> 平台设置

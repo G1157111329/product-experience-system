@@ -406,6 +406,36 @@ export function buildGoldenTestData(adminUserId: string) {
     problem_points: [{ text: '步骤证据用于回归验证', material_ids: [stepMaterials[index].id] }],
   }));
 
+  const recipeLibraries = [
+    {
+      id: 'golden-recipe-library-juicer',
+      name: 'Golden Recipe Library - Juicer Baseline',
+      product_category: 'Golden Category',
+      product: 'Golden Juicer',
+      ingredients: 'Golden ingredient pack',
+      recipe_type: 'function',
+    },
+  ];
+
+  const recipeLibrarySteps = [
+    {
+      id: 'golden-recipe-library-step-1',
+      recipe_library_id: 'golden-recipe-library-juicer',
+      step_number: 1,
+      operation: 'Prepare golden baseline material and record visual state.',
+      problem_point: 'Keep this step for Docker smoke recipe-library expansion.',
+      problem_points: [{ text: 'Docker smoke recipe-library evidence point', material_ids: [] }],
+    },
+    {
+      id: 'golden-recipe-library-step-2',
+      recipe_library_id: 'golden-recipe-library-juicer',
+      step_number: 2,
+      operation: 'Run the baseline function effect check.',
+      problem_point: null,
+      problem_points: [],
+    },
+  ];
+
   const comparison = {
     assembly: {
       id: 'golden-assembly-hmj',
@@ -666,5 +696,20 @@ export function buildGoldenTestData(adminUserId: string) {
     },
   ];
 
-  return { tasks, reports, records, issues, issueReEvaluations, materials: [...materials, ...reEvaluationMaterials, ...stepMaterials], recipes, recipeSteps, comparison, metricComparison, snapshots, pdfJobs };
+  return {
+    tasks,
+    reports,
+    records,
+    issues,
+    issueReEvaluations,
+    materials: [...materials, ...reEvaluationMaterials, ...stepMaterials],
+    recipes,
+    recipeSteps,
+    recipeLibraries,
+    recipeLibrarySteps,
+    comparison,
+    metricComparison,
+    snapshots,
+    pdfJobs,
+  };
 }

@@ -318,6 +318,7 @@ export async function getV3MatrixProjection(
         linkId: materialLinks.id,
         targetId: materialLinks.targetId,
         bindingMethod: materialLinks.bindingMethod,
+        bindingOrder: materialLinks.bindingOrder,
         boundAt: materialLinks.boundAt,
         materialId: materials.id,
         materialType: materials.materialType,
@@ -334,6 +335,7 @@ export async function getV3MatrixProjection(
           inArray(materialLinks.targetId, cellIds),
         ),
       )
+      .orderBy(asc(materialLinks.bindingOrder), asc(materialLinks.boundAt), asc(materialLinks.id))
       .execute();
 
     const cellIdToKey = new Map<string, string>();

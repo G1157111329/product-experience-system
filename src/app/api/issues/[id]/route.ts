@@ -7,6 +7,7 @@ import {
   canTransition,
   type IssueStatus,
   normalizeIssueStatus,
+  toStoredIssueStatus,
 } from '@/lib/server/issue-state-machine';
 import { createRectificationAction } from '@/lib/server/issue-lifecycle';
 
@@ -43,7 +44,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   let targetStatus: IssueStatus | undefined;
   if (body.status !== undefined) {
     const allowed = await getDictCodeSet('issue_status_dict');
-    targetStatus = normalizeIssueStatus(body.status);
+    targetStatus = toStoredIssueStatus(String(body.status));
     // 字典校验失败时，回退到状态机合法状态集合（8 个英文枚举），避免字典表异常阻断业务
     const machineStatuses: IssueStatus[] = ['open', 'triaged', 'assigned', 'rectifying', 'pending_verification', 'verified_closed', 'waived', 'reopened'];
     const isAllowed = allowed.has(targetStatus) || machineStatuses.includes(targetStatus);

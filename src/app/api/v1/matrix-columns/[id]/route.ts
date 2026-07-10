@@ -13,7 +13,7 @@ import { getDb } from '@/storage/database/pg-db';
 import { eq, sql } from 'drizzle-orm';
 import { matrixColumnDefinitions } from '@/storage/database/shared/schema';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { requireUser, isAuthResponse } from '@/lib/server/auth';
+import { canAccessMatrix, requireUser, isAuthResponse } from '@/lib/server/auth';
 import { ok, fail, notFound } from '@/lib/server/api-v1/response';
 import { resolveTraceId } from '@/lib/server/api-v1/trace';
 
@@ -34,7 +34,6 @@ export async function PATCH(
   const client = getSupabaseClient();
   const user = await requireUser(req, client);
   if (isAuthResponse(user)) return fail(traceId, { message: '未认证', status: 401 });
-  void user;
 
   let body: Record<string, unknown>;
   try {
@@ -59,12 +58,15 @@ export async function PATCH(
   try {
     const db = await getDb();
     const existing = await db
-      .select({ id: matrixColumnDefinitions.id })
+      .select({ id: matrixColumnDefinitions.id, matrixId: matrixColumnDefinitions.matrixId })
       .from(matrixColumnDefinitions)
       .where(eq(matrixColumnDefinitions.id, columnId))
       .limit(1)
       .execute();
     if (existing.length === 0) return notFound(traceId, '列不存在');
+    if (!(await canAccessMatrix(client, user, existing[0].matrixId))) {
+      return fail(traceId, { message: '无权访问该矩阵', status: 403 });
+    }
 
     const set: Record<string, unknown> = { updatedAt: sql`NOW()` };
     if (body.columnLabel !== undefined) set.columnLabel = String(body.columnLabel).trim();
@@ -107,10 +109,20 @@ export async function DELETE(
   const client = getSupabaseClient();
   const user = await requireUser(req, client);
   if (isAuthResponse(user)) return fail(traceId, { message: '未认证', status: 401 });
-  void user;
 
   try {
     const db = await getDb();
+    const existing = await db
+      .select({ id: matrixColumnDefinitions.id, matrixId: matrixColumnDefinitions.matrixId })
+      .from(matrixColumnDefinitions)
+      .where(eq(matrixColumnDefinitions.id, columnId))
+      .limit(1)
+      .execute();
+    if (existing.length === 0) return notFound(traceId, '列不存在');
+    if (!(await canAccessMatrix(client, user, existing[0].matrixId))) {
+      return fail(traceId, { message: '无权访问该矩阵', status: 403 });
+    }
+
     const [updated] = await db
       .update(matrixColumnDefinitions)
       .set({ archivedAt: sql`NOW()`, updatedAt: sql`NOW()` })

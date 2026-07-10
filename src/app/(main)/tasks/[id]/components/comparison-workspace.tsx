@@ -1,7 +1,7 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, GitCompareArrows, Loader2, Plus, Table2, Trash2, X } from 'lucide-react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, ChevronRight, GitCompareArrows, Loader2, Plus, Table2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { MaterialPicker, type Material } from '@/components/material-picker';
 import { Badge } from '@/components/ui/badge';
@@ -138,6 +138,9 @@ export function ComparisonWorkspace({
   const [summaryDrafts, setSummaryDrafts] = useState<Record<string, string>>({});
   const [cellMediaById, setCellMediaById] = useState<CellMediaMap>({});
   const [cellMediaSavingId, setCellMediaSavingId] = useState('');
+  const [collapsedSectionIds, setCollapsedSectionIds] = useState<Set<string>>(new Set());
+  const [collapsedItemIds, setCollapsedItemIds] = useState<Set<string>>(new Set());
+  const collapseInitialized = useRef(false);
 
   const cellsByKey = useMemo(() => {
     const next = new Map<string, ComparisonCell>();
@@ -191,6 +194,11 @@ export function ComparisonWorkspace({
     const data = await res.json() as ApiResponse<MatrixData>;
     if (data.code === 0 && data.data) {
       setMatrix(data.data);
+      if (!collapseInitialized.current) {
+        setCollapsedSectionIds(new Set(data.data.item_nodes.filter(isSectionNode).map((node) => node.id)));
+        setCollapsedItemIds(new Set(data.data.item_nodes.filter(isMatrixCellNode).map((node) => node.id)));
+        collapseInitialized.current = true;
+      }
       setSummaryDrafts((current) => {
         const next: Record<string, string> = {};
         for (const node of data.data?.item_nodes || []) {
@@ -307,12 +315,15 @@ export function ComparisonWorkspace({
     }
   };
 
-  const updateObject = async (objectId: string) => {
-    if (!editingObjectName.trim()) return;
+  const updateObject = async (objectId: string, nextName = editingObjectName) => {
+    if (!nextName.trim()) {
+      setEditingObjectId('');
+      return;
+    }
     const res = await fetch(`/api/comparison-objects/${objectId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ object_name: editingObjectName.trim() }),
+      body: JSON.stringify({ object_name: nextName.trim() }),
     });
     const data = await res.json() as ApiResponse<unknown>;
     if (data.code === 0) {
@@ -330,12 +341,15 @@ export function ComparisonWorkspace({
     else toast.error(data.message || '删除对象失败');
   };
 
-  const updateNode = async (nodeId: string) => {
-    if (!editingNodeLabel.trim()) return;
+  const updateNode = async (nodeId: string, nextLabel = editingNodeLabel) => {
+    if (!nextLabel.trim()) {
+      setEditingNodeId('');
+      return;
+    }
     const res = await fetch(`/api/comparison-item-nodes/${nodeId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ node_label: editingNodeLabel.trim() }),
+      body: JSON.stringify({ node_label: nextLabel.trim() }),
     });
     const data = await res.json() as ApiResponse<unknown>;
     if (data.code === 0) {
@@ -664,11 +678,18 @@ export function ComparisonWorkspace({
                     {matrix.objects.map((object) => (
                       <TableHead key={object.id} style={{ width: OBJECT_COLUMN_WIDTH }} className="relative">
                         {editingObjectId === object.id ? (
-                          <div className="flex gap-1">
-                            <Input value={editingObjectName} onChange={(event) => setEditingObjectName(event.target.value)} className="h-8" />
-                            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => void updateObject(object.id)}><Check className="h-4 w-4" /></Button>
-                            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setEditingObjectId('')}><X className="h-4 w-4" /></Button>
-                          </div>
+                          <Input
+                            value={editingObjectName}
+                            onChange={(event) => setEditingObjectName(event.target.value)}
+                            onBlur={() => void updateObject(object.id)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' && !event.nativeEvent.isComposing) event.currentTarget.blur();
+                              if (event.key === 'Escape') setEditingObjectId('');
+                            }}
+                            aria-label="编辑对象名称"
+                            className="h-8"
+                            autoFocus
+                          />
                         ) : (
                           <>
                             <div className="flex items-center justify-center">
@@ -700,18 +721,42 @@ export function ComparisonWorkspace({
                 <TableBody>
                   {renderAddSectionRow()}
                   {orderedItemNodes.map((node) => {
+                    if (node.parent_id && collapsedSectionIds.has(node.parent_id)) return null;
                     if (isSectionNode(node)) {
+                      const sectionCollapsed = collapsedSectionIds.has(node.id);
                       return (
                         <Fragment key={node.id}>
                           <TableRow data-testid="comparison-section-row" className="bg-muted/20">
                             <TableCell colSpan={(matrix?.objects.length || 0) + 1} className="p-2">
                               <div className="flex flex-wrap items-center gap-2">
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-7 w-7 shrink-0"
+                                  onClick={() => setCollapsedSectionIds((current) => {
+                                    const next = new Set(current);
+                                    if (next.has(node.id)) next.delete(node.id); else next.add(node.id);
+                                    return next;
+                                  })}
+                                  aria-label={sectionCollapsed ? '展开大类' : '折叠大类'}
+                                  title={sectionCollapsed ? '展开大类' : '折叠大类'}
+                                >
+                                  {sectionCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                </Button>
                                 {editingNodeId === node.id ? (
-                                  <div className="flex min-w-0 gap-1">
-                                    <Input value={editingNodeLabel} onChange={(event) => setEditingNodeLabel(event.target.value)} className="h-8" />
-                                    <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => void updateNode(node.id)}><Check className="h-4 w-4" /></Button>
-                                    <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setEditingNodeId('')}><X className="h-4 w-4" /></Button>
-                                  </div>
+                                  <Input
+                                    value={editingNodeLabel}
+                                    onChange={(event) => setEditingNodeLabel(event.target.value)}
+                                    onBlur={() => void updateNode(node.id)}
+                                    onKeyDown={(event) => {
+                                      if (event.key === 'Enter' && !event.nativeEvent.isComposing) event.currentTarget.blur();
+                                      if (event.key === 'Escape') setEditingNodeId('');
+                                    }}
+                                    aria-label="编辑大类名称"
+                                    className="h-8 max-w-sm"
+                                    autoFocus
+                                  />
                                 ) : (
                                   <button
                                     type="button"
@@ -768,21 +813,44 @@ export function ComparisonWorkspace({
                       );
                     }
                     if (isSummaryNode(node)) return renderSummaryRow(node);
+                    const itemCollapsed = collapsedItemIds.has(node.id);
                     return (
                       <TableRow key={node.id}>
                         <TableCell className="relative align-top">
                           {editingNodeId === node.id ? (
-                            <div className="flex gap-1">
-                              <Input value={editingNodeLabel} onChange={(event) => setEditingNodeLabel(event.target.value)} className="h-8" />
-                              <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => void updateNode(node.id)}><Check className="h-4 w-4" /></Button>
-                              <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setEditingNodeId('')}><X className="h-4 w-4" /></Button>
-                            </div>
+                            <Input
+                              value={editingNodeLabel}
+                              onChange={(event) => setEditingNodeLabel(event.target.value)}
+                              onBlur={() => void updateNode(node.id)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter' && !event.nativeEvent.isComposing) event.currentTarget.blur();
+                                if (event.key === 'Escape') setEditingNodeId('');
+                              }}
+                              aria-label="编辑细项名称"
+                              className="h-8"
+                              autoFocus
+                            />
                           ) : (
                             <>
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                className="absolute left-1 top-1 h-6 w-6"
+                                onClick={() => setCollapsedItemIds((current) => {
+                                  const next = new Set(current);
+                                  if (next.has(node.id)) next.delete(node.id); else next.add(node.id);
+                                  return next;
+                                })}
+                                aria-label={itemCollapsed ? '展开细项' : '折叠细项'}
+                                title={itemCollapsed ? '展开细项' : '折叠细项'}
+                              >
+                                {itemCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                              </Button>
                               <button
                                 type="button"
                                 onClick={() => { setEditingNodeId(node.id); setEditingNodeLabel(node.node_label); }}
-                                className="block w-full truncate pr-6 text-left text-sm font-medium hover:text-primary"
+                                className="block w-full truncate px-7 text-left text-sm font-medium hover:text-primary"
                                 title="点击重命名"
                               >
                                 {node.node_label}
@@ -804,7 +872,19 @@ export function ComparisonWorkspace({
                           const cell = isMatrixCellNode(node) ? cellsByKey.get(cellKey(node.id, object.id)) || null : null;
                           return (
                             <TableCell key={object.id} className="align-top p-2">
-                              {renderCellEditor(cell)}
+                              {itemCollapsed ? (
+                                <button
+                                  type="button"
+                                  className="w-full py-2 text-center text-xs text-muted-foreground hover:text-foreground"
+                                  onClick={() => setCollapsedItemIds((current) => {
+                                    const next = new Set(current);
+                                    next.delete(node.id);
+                                    return next;
+                                  })}
+                                >
+                                  展开细项
+                                </button>
+                              ) : renderCellEditor(cell)}
                             </TableCell>
                           );
                         })}

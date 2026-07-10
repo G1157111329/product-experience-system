@@ -5,11 +5,11 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   ArrowUpRight, RotateCw, RotateCcw, Crop, Pencil, Type, Grid3x3,
-  Check, Undo2, Move, Minus, FlipHorizontal, FlipVertical
+  Check, Undo2, Move, Minus, FlipHorizontal, FlipVertical, ZoomIn, ZoomOut,
 } from 'lucide-react';
 
 type Tool = 'move' | 'crop' | 'draw' | 'arrow' | 'mosaic' | 'text';
-type SaveMode = 'overwrite' | 'save_new';
+export type SaveMode = 'overwrite' | 'save_new';
 type OutputFormat = 'image/jpeg' | 'image/png' | 'image/webp';
 type FilterPreset = 'none' | 'vintage' | 'film' | 'food' | 'portrait';
 
@@ -160,6 +160,7 @@ export function ImageEditorDialog({
   const [outputWidth, setOutputWidth] = useState<number | ''>('');
   const [outputHeight, setOutputHeight] = useState<number | ''>('');
   const [saveMode, setSaveMode] = useState<SaveMode>('save_new');
+  const [viewportZoom, setViewportZoom] = useState(1);
   const scaleRef = useRef(1);
 
   // Load image
@@ -171,6 +172,7 @@ export function ImageEditorDialog({
       imageRef.current = img;
       setImgSize({ w: img.width, h: img.height });
       setRotation(0);
+      setViewportZoom(1);
       setFlipX(false);
       setFlipY(false);
       setActions([]);
@@ -189,10 +191,10 @@ export function ImageEditorDialog({
     const isRotated = rotation % 180 !== 0;
     const iw = isRotated ? imgSize.h : imgSize.w;
     const ih = isRotated ? imgSize.w : imgSize.h;
-    const s = Math.min(cw / iw, ch / ih, 1);
+    const s = Math.min(cw / iw, ch / ih, 1) * viewportZoom;
     scaleRef.current = s;
     setDisplaySize({ w: Math.round(iw * s), h: Math.round(ih * s) });
-  }, [imgSize, rotation]);
+  }, [imgSize, rotation, viewportZoom]);
 
   // Redraw canvas
   const redraw = useCallback(() => {
@@ -527,6 +529,24 @@ export function ImageEditorDialog({
               <FlipVertical className="h-4 w-4" />
             </Button>
             <div className="w-px h-6 bg-border mx-1" />
+            <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => setViewportZoom((value) => Math.max(0.5, Number((value - 0.25).toFixed(2))))} title="缩小" aria-label="缩小图片">
+              <ZoomOut className="h-4 w-4" />
+            </Button>
+            <input
+              type="range"
+              min={0.5}
+              max={3}
+              step={0.1}
+              value={viewportZoom}
+              onChange={(event) => setViewportZoom(Number(event.target.value))}
+              className="h-1 w-24 accent-primary"
+              aria-label="图片缩放比例"
+            />
+            <span className="w-10 text-right text-[10px] tabular-nums text-muted-foreground">{Math.round(viewportZoom * 100)}%</span>
+            <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => setViewportZoom((value) => Math.min(3, Number((value + 0.25).toFixed(2))))} title="放大" aria-label="放大图片">
+              <ZoomIn className="h-4 w-4" />
+            </Button>
+            <div className="w-px h-6 bg-border mx-1" />
             <Button variant="ghost" size="sm" className="h-8 px-2" onClick={handleUndo} disabled={actions.length === 0}>
               <Undo2 className="h-4 w-4" />
             </Button>
@@ -618,9 +638,9 @@ export function ImageEditorDialog({
           )}
 
           {/* Canvas */}
-          <div ref={containerRef} className="relative bg-muted rounded-lg overflow-hidden" style={{ height: 420 }}>
+          <div ref={containerRef} className="flex items-center overflow-auto rounded-lg bg-muted" style={{ height: 420 }}>
             <canvas ref={canvasRef} style={{ width: displaySize.w, height: displaySize.h, cursor: cursorMap[tool] }}
-              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
+              className="m-auto shrink-0"
               onMouseDown={handlePointerDown} onMouseMove={handlePointerMove} onMouseUp={handlePointerUp}
               onTouchStart={handlePointerDown} onTouchMove={handlePointerMove} onTouchEnd={handlePointerUp}
             />

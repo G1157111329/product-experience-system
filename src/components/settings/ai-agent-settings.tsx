@@ -291,7 +291,7 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
       <DialogContent className="w-[calc(100vw-1rem)] max-w-none sm:!w-[min(1180px,calc(100vw-3rem))] sm:!max-w-[1180px] xl:!w-[1180px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5" /> AI Agent 设置
+            <Sparkles className="h-5 w-5" /> AI助手设置
           </DialogTitle>
           <DialogDescription>管理模型接入、Prompt 模板版本、启停与审计能力</DialogDescription>
         </DialogHeader>

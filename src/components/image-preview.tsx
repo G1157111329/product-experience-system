@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useState, useCallback, useEffect, useMemo, type KeyboardEvent } from 'react';
-import { X, ZoomIn, ZoomOut, Play, ImageOff, VideoOff } from 'lucide-react';
+import { X, ZoomIn, ZoomOut, Play, ImageOff, VideoOff, Crop } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { usePresignedUrl } from '@/lib/use-presigned-url';
 
@@ -23,9 +23,10 @@ function toStorageKey(value: string | null | undefined): string | null {
 interface ImagePreviewProps {
   url: string | null;
   onClose: () => void;
+  onEdit?: (resolvedUrl: string) => void;
 }
 
-export function ImagePreview({ url, onClose }: ImagePreviewProps) {
+export function ImagePreview({ url, onClose, onEdit }: ImagePreviewProps) {
   const [zoomed, setZoomed] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const presignedUrl = usePresignedUrl(url);
@@ -74,6 +75,21 @@ export function ImagePreview({ url, onClose }: ImagePreviewProps) {
             </div>
           )}
           <div className="absolute top-3 right-3 flex gap-2">
+            {!isVideo && !loadFailed && onEdit && displayUrl && (
+              <button
+                aria-label="编辑图片"
+                title="编辑图片"
+                className="w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-black/70"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onEdit(displayUrl);
+                  setZoomed(false);
+                  onClose();
+                }}
+              >
+                <Crop className="h-4 w-4" />
+              </button>
+            )}
             {!isVideo && !loadFailed && (
               <button
                 aria-label={zoomed ? '缩小预览' : '放大预览'}
@@ -188,9 +204,16 @@ export function MediaThumbnail({ url, type, onClick, size = 'md', responsive }: 
 }
 
 export function useImagePreview() {
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const open = useCallback((url: string) => setPreviewUrl(url), []);
-  const close = useCallback(() => setPreviewUrl(null), []);
+  const [preview, setPreview] = useState<{ url: string; onEdit?: (resolvedUrl: string) => void } | null>(null);
+  const open = useCallback((url: string, options?: { onEdit?: (resolvedUrl: string) => void }) => {
+    setPreview({ url, onEdit: options?.onEdit });
+  }, []);
+  const close = useCallback(() => setPreview(null), []);
 
-  return { previewUrl, open, close, PreviewComponent: () => <ImagePreview url={previewUrl} onClose={close} /> };
+  return {
+    previewUrl: preview?.url || null,
+    open,
+    close,
+    PreviewComponent: () => <ImagePreview url={preview?.url || null} onClose={close} onEdit={preview?.onEdit} />,
+  };
 }

@@ -23,8 +23,17 @@
  * Response: 200 { version } + ETag header, or 409 on version mismatch.
  */
 import { NextRequest } from 'next/server';
+import { eq } from 'drizzle-orm';
+import { getDb } from '@/storage/database/pg-db';
+import {
+  matrixCellValues,
+  matrixColumnDefinitions,
+  matrixHierarchyNodes,
+  matrixIssuePoints,
+  matrixNarrativeBlocks,
+} from '@/storage/database/shared/schema';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { requireUser, isAuthResponse } from '@/lib/server/auth';
+import { canAccessMatrix, requireUser, isAuthResponse } from '@/lib/server/auth';
 import { ok, fail } from '@/lib/server/api-v1/response';
 import { resolveTraceId } from '@/lib/server/api-v1/trace';
 import { handleInlineValueUpdate, type InlineEntityType } from '@/lib/server/inline-values';
@@ -48,6 +57,56 @@ const SUPPORTED_ENTITY_TYPES = new Set<InlineEntityType>([
   'matrix_issue_point',
 ]);
 
+async function resolveMatrixIdForInlineEntity(entityType: InlineEntityType, entityId: string): Promise<string | null | undefined> {
+  const db = await getDb();
+  if (entityType === 'dynamic_matrix_cell_value') {
+    const rows = await db
+      .select({ matrixId: matrixCellValues.matrixId })
+      .from(matrixCellValues)
+      .where(eq(matrixCellValues.id, entityId))
+      .limit(1)
+      .execute();
+    return rows[0]?.matrixId ?? null;
+  }
+  if (entityType === 'dynamic_matrix_column_definition') {
+    const rows = await db
+      .select({ matrixId: matrixColumnDefinitions.matrixId })
+      .from(matrixColumnDefinitions)
+      .where(eq(matrixColumnDefinitions.id, entityId))
+      .limit(1)
+      .execute();
+    return rows[0]?.matrixId ?? null;
+  }
+  if (entityType === 'dynamic_matrix_hierarchy_node') {
+    const rows = await db
+      .select({ matrixId: matrixHierarchyNodes.matrixId })
+      .from(matrixHierarchyNodes)
+      .where(eq(matrixHierarchyNodes.id, entityId))
+      .limit(1)
+      .execute();
+    return rows[0]?.matrixId ?? null;
+  }
+  if (entityType === 'dynamic_matrix_narrative_block') {
+    const rows = await db
+      .select({ matrixId: matrixNarrativeBlocks.matrixId })
+      .from(matrixNarrativeBlocks)
+      .where(eq(matrixNarrativeBlocks.id, entityId))
+      .limit(1)
+      .execute();
+    return rows[0]?.matrixId ?? null;
+  }
+  if (entityType === 'matrix_issue_point') {
+    const rows = await db
+      .select({ matrixId: matrixIssuePoints.matrixId })
+      .from(matrixIssuePoints)
+      .where(eq(matrixIssuePoints.id, entityId))
+      .limit(1)
+      .execute();
+    return rows[0]?.matrixId ?? null;
+  }
+  return undefined;
+}
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ entity_type: string; entity_id: string; field_id: string }> },
@@ -68,6 +127,14 @@ export async function PATCH(
       status: 501,
       code: 1,
     });
+  }
+
+  const matrixId = await resolveMatrixIdForInlineEntity(entity_type as InlineEntityType, entity_id);
+  if (matrixId === null) {
+    return fail(traceId, { message: '目标不存在', status: 404 });
+  }
+  if (matrixId && !(await canAccessMatrix(client, user, matrixId))) {
+    return fail(traceId, { message: '无权访问该矩阵', status: 403 });
   }
 
   // Parse body.

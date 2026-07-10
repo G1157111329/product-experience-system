@@ -82,6 +82,8 @@ async function deleteGoldenRows(pool: Pool) {
   await pool.query("DELETE FROM comparison_assemblies WHERE id LIKE 'golden-%'");
   await pool.query("DELETE FROM materials WHERE id LIKE 'golden-%' OR task_id LIKE 'golden-%'");
   await pool.query("DELETE FROM issue_re_evaluations WHERE id LIKE 'golden-%' OR issue_id LIKE 'golden-%'");
+  await pool.query("DELETE FROM recipe_library_steps WHERE id LIKE 'golden-%' OR recipe_library_id LIKE 'golden-%'");
+  await pool.query("DELETE FROM recipe_library WHERE id LIKE 'golden-%'");
   await pool.query("DELETE FROM recipe_steps WHERE id LIKE 'golden-%' OR recipe_id LIKE 'golden-%'");
   await pool.query("DELETE FROM recipes WHERE id LIKE 'golden-%' OR task_id LIKE 'golden-%'");
   await pool.query("DELETE FROM issues WHERE id LIKE 'golden-%' OR task_id LIKE 'golden-%'");
@@ -133,6 +135,8 @@ async function main() {
       await insertRows(pool, 'check_records', data.records);
       await insertRows(pool, 'recipes', data.recipes);
       await insertRows(pool, 'recipe_steps', data.recipeSteps);
+      await insertRows(pool, 'recipe_library', data.recipeLibraries);
+      await insertRows(pool, 'recipe_library_steps', data.recipeLibrarySteps);
       await insertRows(pool, 'reports', data.reports);
       await insertRows(pool, 'issues', data.issues);
       await insertRows(pool, 'issue_re_evaluations', data.issueReEvaluations);
@@ -154,6 +158,7 @@ async function main() {
       account,
       tasks: data.tasks.length,
       reports: data.reports.length,
+      recipeLibraries: data.recipeLibraries.length,
       reportTypes: data.reports.map((report) => report.report_type),
       comparisonObjects: data.comparison.objects.length + data.metricComparison.objects.length,
       comparisonCells: data.comparison.cells.length + data.metricComparison.cells.length,

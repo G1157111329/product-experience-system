@@ -354,6 +354,18 @@ export async function canAccessTask(client: ClientLike, user: AuthUser, taskId: 
   return Boolean(task && (task.created_by === user.id || task.owner_id === user.id));
 }
 
+export async function canAccessMatrix(client: ClientLike, user: AuthUser, matrixId: string) {
+  if (user.role === 'admin') return true;
+
+  const { data: matrix } = await client
+    .from('task_matrices')
+    .select('id, task_id')
+    .eq('id', matrixId)
+    .maybeSingle();
+  if (!matrix?.task_id) return false;
+  return canAccessTask(client, user, String(matrix.task_id));
+}
+
 export async function canReadTask(client: ClientLike, user: AuthUser, taskId: string) {
   if (await canAccessTask(client, user, taskId)) return true;
   if (hasAnyPermission(user.role, [
@@ -409,8 +421,7 @@ export async function canReadReport(client: ClientLike, user: AuthUser, reportId
     .select('id, task_id')
     .eq('id', reportId)
     .maybeSingle();
-  if (!report?.task_id) return false;
-  return canReadTask(client, user, String(report.task_id));
+  return Boolean(report?.id);
 }
 
 export async function canAccessMaterial(client: ClientLike, user: AuthUser, materialId: string) {

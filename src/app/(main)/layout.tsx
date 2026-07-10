@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AppSidebar, MobileNav, BottomNav } from '@/components/navigation';
 import { Button } from '@/components/ui/button';
+import { AgentFloatingAssistant } from '@/components/agent/agent-floating-assistant';
 
 function hasOpenModalLayer() {
   return Boolean(
@@ -80,6 +81,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       <main className="flex-1 min-w-0 overflow-y-auto pt-14 lg:pt-0">
         {children}
       </main>
+      <AgentFloatingAssistant />
       <BottomNav />
     </div>
   );

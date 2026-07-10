@@ -18,7 +18,7 @@ import { getDb } from '@/storage/database/pg-db';
 import { eq } from 'drizzle-orm';
 import { taskMatrices } from '@/storage/database/shared/schema';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { requireUser, isAuthResponse } from '@/lib/server/auth';
+import { canAccessTask, requireUser, isAuthResponse } from '@/lib/server/auth';
 import { getV3FeatureFlags, resolveMatrixTabStateFromFlags } from '@/lib/feature-flags-v3';
 import { ok } from '@/lib/server/api-v1/response';
 import { resolveTraceId } from '@/lib/server/api-v1/trace';
@@ -83,7 +83,28 @@ export async function GET(
         traceId,
       );
     }
-    void user;
+    if (!(await canAccessTask(client, user, taskId))) {
+      return ok<MatrixTabStateResponse>(
+        {
+          enabled: true,
+          permission: 'none',
+          state: 'forbidden',
+          matrices: [],
+          cta: { primary: null },
+          flags: {
+            taskMatrixEnabled: false,
+            dynamicMatrixExcelLikeViewEnabled: false,
+            dynamicMatrixFormulaEnabled: false,
+            dynamicMatrixCellStyleEnabled: false,
+            inlineEditEnabled: false,
+            materialStagingEnabled: false,
+            hermesAgentGatewayEnabled: false,
+            wecomMaterialIngestEnabled: false,
+          },
+        },
+        traceId,
+      );
+    }
 
     const flags = await getV3FeatureFlags();
     const flagState = resolveMatrixTabStateFromFlags(flags);

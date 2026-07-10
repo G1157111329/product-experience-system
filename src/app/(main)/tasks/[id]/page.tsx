@@ -23,17 +23,19 @@ import { useDictLabels } from '@/hooks/useDictionary';
 import { useImagePreview } from '@/components/image-preview';
 import { MaterialPicker } from '@/components/material-picker';
 import { MediaCaptureDialog } from '@/components/media-capture-dialog';
-import { ImageEditorDialog } from '@/components/image-editor-dialog';
+import { ImageEditorDialog, type SaveMode } from '@/components/image-editor-dialog';
 import { PageShell } from '@/components/app';
 import { MediaGallery } from '@/components/app/media-gallery';
 import { buildReportReadiness } from '@/lib/report-readiness';
 import { formatAiSummaryText, parseAiSummaryText } from '@/lib/report-content-rules';
+import { waitForPendingInlineSaves } from '@/lib/inline-save-registry';
 import {
   buildEffectAutosavePayload,
   initializeEffectProblemPoints,
   updateEffectProblemPoints,
 } from '@/lib/effect-problem-points';
 import { AgentPresetPanel } from './components/agent-preset-panel';
+import { AgentAssistPanel } from './components/agent-assist-panel';
 import { MaterialEvidenceRail } from './components/material-evidence-rail';
 import { ReportAuthoringShell } from './components/report-authoring-shell';
 import { SensesInputWorkspace } from './components/senses-input-workspace';
@@ -160,7 +162,6 @@ export default function TaskDetailPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'agent' | 'info' | 'materials' | 'senses' | 'functions' | 'comparison' | 'matrix'>('agent');
   const [evidenceBindingTarget, setEvidenceBindingTarget] = useState<EvidenceBindingTarget | null>(null);
-  const [agentAssistOpen, setAgentAssistOpen] = useState(false);
   const [generateConfirmOpen, setGenerateConfirmOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferUsers, setTransferUsers] = useState<Array<{ id: string; name: string; account: string }>>([]);
@@ -309,6 +310,8 @@ export default function TaskDetailPage() {
     setGenerateConfirmOpen(false);
     setGeneratingReport(true);
     try {
+      window.dispatchEvent(new Event('inline-save:flush'));
+      await waitForPendingInlineSaves();
       const res = await fetch('/api/reports', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ task_id: id }),
@@ -419,11 +422,8 @@ export default function TaskDetailPage() {
       </div>
 
       <ReportAuthoringShell
-        taskId={id}
         activeTab={activeTab}
-        agentOpen={agentAssistOpen}
         onTabChange={setActiveTab}
-        onAgentOpenChange={setAgentAssistOpen}
         hasMatrixInstance={hasMatrixInstance}
         materialRail={(activeTab === 'senses' || activeTab === 'functions' || activeTab === 'comparison' || activeTab === 'matrix') ? (
           <MaterialEvidenceRail
@@ -437,7 +437,10 @@ export default function TaskDetailPage() {
 
       {/* Tab Content */}
       {activeTab === 'agent' && (
-        <AgentPresetPanel taskId={id} onAccepted={handleAgentAccepted} />
+        <div className="space-y-4">
+          <AgentPresetPanel taskId={id} onAccepted={handleAgentAccepted} />
+          <AgentAssistPanel taskId={id} embedded onClose={() => undefined} />
+        </div>
       )}
       {activeTab === 'info' && (
         <div className="space-y-4">
@@ -837,21 +840,23 @@ function MaterialsTab({ taskId }: { taskId: string }) {
     }
   };
 
-  const handleEditImageSave = async (editedFile: File) => {
-    // Upload the edited image as a new material, then delete the old one
+  const handleEditImageSave = async (editedFile: File, mode: SaveMode) => {
     setUploading(true);
     try {
       const formData = new FormData();
       formData.append('file', editedFile);
-      formData.append('task_id', taskId);
-      const res = await fetch('/api/materials/upload', { method: 'POST', body: formData });
+      const overwrite = mode === 'overwrite' && Boolean(editingImage?.id);
+      if (!overwrite) {
+        formData.append('task_id', taskId);
+        if (editingImage?.name) formData.append('copy_source_file_name', editingImage.name);
+      }
+      const res = await fetch(
+        overwrite ? `/api/materials/${editingImage!.id}/replace` : '/api/materials/upload',
+        { method: 'POST', body: formData },
+      );
       const data = await res.json();
       if (data.code === 0) {
-        toast.success('图片编辑已保存');
-        // Delete the original image
-        if (editingImage?.id) {
-          await fetch(`/api/materials?id=${editingImage.id}`, { method: 'DELETE' });
-        }
+        toast.success(overwrite ? '图片已覆盖保存，原关联保持不变' : '编辑副本已保存');
         fetchMaterials();
       } else {
         toast.error(data.message || '保存失败');
@@ -924,7 +929,12 @@ function MaterialsTab({ taskId }: { taskId: string }) {
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
                 {images.map((mat) => (
                   <div key={mat.id} className="group relative rounded-lg overflow-hidden bg-muted border border-border">
-                    <div className="aspect-square cursor-pointer" onClick={() => open(mat.file_path || mat.file_url)}>
+                    <div
+                      className="aspect-square cursor-pointer"
+                      onClick={() => open(mat.file_path || mat.file_url, {
+                        onEdit: (resolvedUrl) => setEditingImage({ id: mat.id, url: resolvedUrl, name: mat.file_name }),
+                      })}
+                    >
                       <PresignedImage filePath={mat.file_path || mat.file_url} alt={mat.file_name} className="w-full h-full object-cover" />
                     </div>
                     <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">

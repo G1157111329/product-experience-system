@@ -7,7 +7,7 @@
  */
 import { NextRequest } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { requireUser, isAuthResponse } from '@/lib/server/auth';
+import { canAccessMatrix, requireUser, isAuthResponse } from '@/lib/server/auth';
 import { getV3MatrixProjection } from '@/lib/matrix/projection-v3';
 import { ok, fail } from '@/lib/server/api-v1/response';
 import { resolveTraceId } from '@/lib/server/api-v1/trace';
@@ -24,7 +24,9 @@ export async function GET(
   const client = getSupabaseClient();
   const user = await requireUser(req, client);
   if (isAuthResponse(user)) return fail(traceId, { message: '未认证', status: 401 });
-  void user;
+  if (!(await canAccessMatrix(client, user, id))) {
+    return fail(traceId, { message: '无权访问该矩阵', status: 403 });
+  }
 
   try {
     const projection = await getV3MatrixProjection(id);

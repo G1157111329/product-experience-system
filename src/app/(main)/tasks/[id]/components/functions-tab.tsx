@@ -16,6 +16,7 @@ import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { isPendingMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import { toast } from 'sonner';
+import { getRecipeStatistics } from '@/lib/recipe-statistics';
 import { useImagePreview } from '@/components/image-preview';
 import { MaterialPicker } from '@/components/material-picker';
 import { InlineEditable } from '@/components/inline-editable';
@@ -532,8 +533,8 @@ export function FunctionsTab({ taskId, onStatusUpdate }: { taskId: string; onSta
                     <p className="text-xs text-muted-foreground truncate">{recipe.ingredients || '-'}</p>
                   </div>
                   <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
-                    <span>{recipe.recipe_steps?.length || 0} 步骤</span>
-                    <span>{recipe.problem_count || 0} 问题</span>
+                    <span>{getRecipeStatistics(recipe).stepCount} 步骤</span>
+                    <span>{getRecipeStatistics(recipe).problemCount} 问题</span>
                   </div>
                   <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={(e) => { e.stopPropagation(); handleEditRecipe(recipe); }}>
                     <Pencil className="h-3 w-3 text-muted-foreground" />

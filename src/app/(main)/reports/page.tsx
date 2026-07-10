@@ -15,7 +15,7 @@ import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
-import { getReportMergeModel, isMergeableReportProjectType, sortReportsByCreatedAtDesc } from '@/lib/report-merge';
+import { sortReportsByCreatedAtDesc } from '@/lib/report-merge';
 import {
   ActionDock,
   EmptyState,
@@ -269,27 +269,8 @@ export default function ReportsPage() {
     }
   };
 
-  // Group self-developed and cost-optimization reports by product model.
   const grouped: Array<{ key: string; model: string; projectTypes: string[]; reports: Report[] }> = [];
-  const modelMap = new Map<string, { model: string; projectTypes: string[]; reports: Report[] }>();
-  const ungrouped: Report[] = [];
-
-  for (const r of visibleReports) {
-    const pt = r.project_type || '';
-    const model = getReportMergeModel(r.product_model);
-    if (isMergeableReportProjectType(pt) && model) {
-      const key = model;
-      if (!modelMap.has(key)) {
-        modelMap.set(key, { model, projectTypes: [], reports: [] });
-      }
-      const group = modelMap.get(key)!;
-      if (pt && !group.projectTypes.includes(pt)) group.projectTypes.push(pt);
-      group.reports.push(r);
-    } else {
-      ungrouped.push(r);
-    }
-  }
-  modelMap.forEach((v) => grouped.push({ key: v.model, ...v, reports: sortReportsByCreatedAtDesc(v.reports) }));
+  const ungrouped: Report[] = sortReportsByCreatedAtDesc(visibleReports);
 
   const toggleCompare = (id: string) => {
     setCompareResult(null);

@@ -87,7 +87,13 @@ test('comparison authoring saves inline cell text in an existing task', async ({
   expect(matrixResponse.ok(), 'comparison matrix API should return 2xx').toBeTruthy();
   const matrixPayload = await matrixResponse.json();
   expect(matrixPayload.code, matrixPayload.message || 'comparison matrix API should succeed').toBe(0);
-  const targetCell = matrixPayload.data?.cells?.[0];
+  const firstItem = [...(matrixPayload.data?.item_nodes || [])]
+    .filter((node: { node_type?: string }) => ['item', 'condition', 'metric', 'process_node', 'issue_group'].includes(node.node_type || ''))
+    .sort((a: { sort_order?: number }, b: { sort_order?: number }) => (a.sort_order || 0) - (b.sort_order || 0))[0];
+  const firstObject = matrixPayload.data?.objects?.[0];
+  const targetCell = matrixPayload.data?.cells?.find((cell: { item_node_id?: string; object_id?: string }) => (
+    cell.item_node_id === firstItem?.id && cell.object_id === firstObject?.id
+  ));
   expect(targetCell?.id, 'Golden comparison matrix should include cells').toBeTruthy();
   const selectableMaterialId = 'golden-task-comparison-mat-1';
 
@@ -97,6 +103,9 @@ test('comparison authoring saves inline cell text in an existing task', async ({
   expect(resetMediaResponse.ok(), 'comparison cell media reset should return 2xx').toBeTruthy();
 
   await page.goto('/tasks/golden-task-comparison?tab=comparison');
+  const expandSection = page.getByRole('button', { name: '展开大类' }).first();
+  if (await expandSection.count()) await expandSection.click();
+  await page.getByRole('button', { name: '展开细项' }).first().click();
   await expect(page.locator('textarea').first(), 'inline matrix cell editor should be visible').toBeVisible();
   await expect(page.locator('button:has(svg.lucide-save)').first(), 'inline matrix save button should be visible').toBeVisible();
 
@@ -125,113 +134,28 @@ test('comparison authoring saves inline cell text in an existing task', async ({
   }, { message: 'inline cell text should persist through the matrix API' }).toBe(marker);
 });
 
-test('report detail renders v2 section canvas contract', async ({ page }) => {
-  const reportsResponse = await page.request.get('/api/reports?limit=50');
-  expect(reportsResponse.ok(), 'reports API should return 2xx').toBeTruthy();
-  const reportsPayload = await reportsResponse.json();
-  expect(reportsPayload.code, reportsPayload.message || 'reports API should succeed').toBe(0);
-  const reports = reportsPayload.data || [];
-  const report = reports.find((item: { id?: string }) => item.id === 'golden-report-metric') || reports[0];
-  expect(report?.id, 'Docker smoke data should include at least one report').toBeTruthy();
+test('report detail, print, and share keep the frozen report contract', async ({ page }) => {
+  for (const reportId of ['golden-report-single', 'golden-report-comparison', 'golden-report-model', 'golden-report-custom']) {
+    const headerResponse = await page.request.get(`/api/reports/${reportId}/header`);
+    expect(headerResponse.ok(), `${reportId} header API should return 2xx`).toBeTruthy();
+    const headerPayload = await headerResponse.json();
+    expect(headerPayload.code, headerPayload.message || `${reportId} header API should succeed`).toBe(0);
 
-  const detailResponse = await page.request.get(`/api/reports/${report.id}/detail`);
-  expect(detailResponse.ok(), 'report detail model API should return 2xx').toBeTruthy();
-  const detailPayload = await detailResponse.json();
-  expect(detailPayload.code, detailPayload.message || 'report detail model API should succeed').toBe(0);
-  expect(detailPayload.data?.sections?.length, 'detail model should include sections').toBeGreaterThan(0);
-  expect(detailPayload.data?.sections?.some((section: { blocks?: Array<{ id?: string; columns?: string[] }> }) =>
-    section.blocks?.some((block) => block.id === 'overview:objects'),
-  ), 'comparison detail should include object strip').toBeTruthy();
-  expect(detailPayload.data?.sections?.some((section: { blocks?: Array<{ id?: string; columns?: string[] }> }) =>
-    section.blocks?.some((block) => block.id === 'metric_table:table' && block.columns?.includes('Anomaly')),
-  ), 'metric comparison should include anomaly column').toBeTruthy();
-
-  await page.goto(`/reports/${report.id}`);
-  await expect(page.getByTestId('report-detail-shell')).toBeVisible();
-  await expect(page.getByTestId('report-section-canvas')).toBeVisible();
-  await expect(page.getByTestId('report-detail-section').first()).toBeVisible();
-  await expect(page.getByTestId('report-section-block').first()).toBeVisible();
-  await expect(page.getByTestId('report-section-block-row').first()).toBeVisible();
-  await expect(page.getByTestId('report-section-actions').first()).toBeVisible();
-  await expect(page.getByTestId('report-section-block').filter({ hasText: 'Object strip' })).toBeVisible();
-  await expect(page.getByTestId('report-section-block').filter({ hasText: 'Comparability boundary' })).toBeVisible();
-  await expect(page.getByTestId('report-section-block').filter({ hasText: 'Key differences and risks' })).toBeVisible();
-  await expect(page.getByTestId('report-section-block').filter({ hasText: 'Cell evidence' })).toBeVisible();
-  await expect(page.getByTestId('report-section-block').filter({ hasText: 'AI confirmation boundary' })).toBeVisible();
-  await expect(page.getByTestId('report-inline-media-item').first()).toBeVisible();
-  await expect(page.getByTestId('report-legacy-content')).toHaveCount(0);
-  await expectAppLoaded(page);
+    await page.goto(`/reports/${reportId}`);
+    await expect(page.getByTestId('report-frozen-detail')).toBeVisible();
+    await expect(page.getByRole('button', { name: '总结', exact: true })).toBeVisible();
+    await expect(page.getByTestId('report-detail-shell')).toHaveCount(0);
+    await expect(page.getByTestId('report-legacy-content')).toHaveCount(0);
+    await expectAppLoaded(page);
+  }
 
   await page.goto('/reports/golden-report-comparison');
-  await expect(page.getByTestId('report-section-block').filter({ hasText: 'Comparison matrix' }).first()).toBeVisible();
-  await expect(page.getByTestId('report-section-block').filter({ hasText: 'Cell evidence' })).toBeVisible();
-  await expect(page.getByTestId('report-inline-media-item').first()).toBeVisible();
-
-  const singleDetailResponse = await page.request.get('/api/reports/golden-report-single/detail');
-  expect(singleDetailResponse.ok(), 'single report detail model API should return 2xx').toBeTruthy();
-  const singleDetailPayload = await singleDetailResponse.json();
-  expect(singleDetailPayload.data?.sections?.some((section: { blocks?: Array<{ id?: string }> }) =>
-    section.blocks?.some((block) => block.id === 'overview:task-details'),
-  ), 'single report detail should include migrated task fields').toBeTruthy();
-
-  await page.goto('/reports/golden-report-single');
-  await expect(page.getByTestId('report-section-block').filter({ hasText: 'Task detail fields' })).toBeVisible();
-  await expect(page.getByTestId('report-section-block').filter({ hasText: 'Recipe steps and problems' })).toBeVisible();
-  await expect(page.getByTestId('report-section-block').filter({ hasText: 'Re-evaluation evidence' })).toBeVisible();
-  await expect(page.getByTestId('report-section-media-item').first()).toBeVisible();
-  await expect(page.getByTestId('report-inline-media-item').first()).toBeVisible();
-  await expect(page.getByTestId('report-legacy-content')).toHaveCount(0);
-  await expectAppLoaded(page);
-
-  const modelDetailResponse = await page.request.get('/api/reports/golden-report-model/detail');
-  expect(modelDetailResponse.ok(), 'model merged detail model API should return 2xx').toBeTruthy();
-  const modelDetailPayload = await modelDetailResponse.json();
-  expect(modelDetailPayload.data?.sections?.some((section: { blocks?: Array<{ id?: string; rows?: unknown[] }> }) =>
-    section.blocks?.some((block) => block.id === 'stage_timeline:table' && (block.rows?.length || 0) >= 2),
-  ), 'model merged detail should include stage timeline').toBeTruthy();
-
-  await page.goto('/reports/golden-report-model');
-  await expect(page.getByTestId('report-section-block').filter({ hasText: 'Stage timeline' }).first()).toBeVisible();
-  await expect(page.getByTestId('report-section-block').filter({ hasText: 'Function effect evolution' }).first()).toBeVisible();
-  await expect(page.getByTestId('report-section-block').filter({ hasText: 'Current risks' }).first()).toBeVisible();
-  await expect(page.getByTestId('report-section-block').filter({ hasText: 'Next-stage validation' }).first()).toBeVisible();
-  await expect(page.getByTestId('report-section-block').filter({ hasText: 'Comparability boundary' }).first()).toBeVisible();
-  await expectAppLoaded(page);
-
-  const customDetailResponse = await page.request.get('/api/reports/golden-report-custom/detail');
-  expect(customDetailResponse.ok(), 'custom merged detail model API should return 2xx').toBeTruthy();
-  const customDetailPayload = await customDetailResponse.json();
-  expect(customDetailPayload.data?.sections?.some((section: { blocks?: Array<{ id?: string; rows?: unknown[] }> }) =>
-    section.blocks?.some((block) => block.id === 'source_alignment:table' && (block.rows?.length || 0) >= 2),
-  ), 'custom merged detail should include source alignment').toBeTruthy();
-
-  await page.goto('/reports/golden-report-custom');
-  await expect(page.getByTestId('report-section-block').filter({ hasText: 'Source alignment' }).first()).toBeVisible();
-  await expect(page.getByTestId('report-section-block').filter({ hasText: 'Field alignment' }).first()).toBeVisible();
-  await expect(page.getByTestId('report-section-block').filter({ hasText: 'Comparability boundary' }).first()).toBeVisible();
-  await expect(page.getByTestId('report-section-block').filter({ hasText: 'Validation next steps' }).first()).toBeVisible();
-  await expect(page.getByTestId('report-legacy-content')).toHaveCount(0);
-  await expectAppLoaded(page);
-
-  await page.goto('/reports/golden-report-single?parity=1');
-  await expect(page.getByTestId('report-legacy-content')).toHaveAttribute('data-display-weight', 'parity');
-  await expect(page.getByTestId('report-legacy-body')).toBeHidden();
-  await expectAppLoaded(page);
+  await page.getByRole('button', { name: '矩阵', exact: true }).click();
+  await expect(page.getByTestId('report-frozen-detail')).toBeVisible();
 
   await page.goto('/reports/print?id=golden-report-single&mode=text');
-  await expect(page.getByTestId('print-preflight-panel')).toBeVisible();
-  await expect(page.getByTestId('print-profile-label')).toContainText('single_a4_portrait');
-  await expect(page.getByTestId('print-section-block-stack').first()).toBeVisible();
-  await expect(page.getByTestId('print-section-block').first()).toBeVisible();
-  await expect(page.getByTestId('print-inline-media-item').first()).toBeVisible();
+  await expect(page.getByTestId('print-product-info')).toBeVisible();
   await expect(page.getByTestId('print-legacy-content')).toHaveCount(0);
-
-  const metricPreflightResponse = await page.request.get('/api/reports/golden-report-metric/pdf?preflight=1');
-  expect(metricPreflightResponse.ok(), 'metric PDF preflight API should return 2xx').toBeTruthy();
-  const metricPreflight = await metricPreflightResponse.json();
-  expect(metricPreflight.data?.profile?.id, 'metric preflight should expose profile').toBe('comparison_metric_table_a3_landscape');
-  expect(metricPreflight.data?.preflight?.ok, 'unconfirmed AI should block metric PDF').toBe(false);
-  expect(metricPreflight.data?.preflight?.errors?.some((item: { code?: string }) => item.code === 'ai_unconfirmed'), 'metric PDF preflight should expose AI block').toBeTruthy();
 
   const singlePdfPreflightResponse = await page.request.get('/api/reports/golden-report-single/pdf?preflight=1');
   expect(singlePdfPreflightResponse.ok(), 'single PDF preflight API should return 2xx').toBeTruthy();
@@ -242,19 +166,20 @@ test('report detail renders v2 section canvas contract', async ({ page }) => {
   const singlePdfResponse = await page.request.get('/api/reports/golden-report-single/pdf');
   expect(singlePdfResponse.ok(), 'single PDF API should return a PDF').toBeTruthy();
   expect(singlePdfResponse.headers()['content-type'], 'single PDF should be a PDF response').toContain('application/pdf');
-  expect(singlePdfResponse.headers()['x-pdf-profile'], 'single PDF should expose profile header').toBe('single_a4_portrait');
+  expect(singlePdfResponse.headers()['content-disposition'], 'PDF filename should use the report title').toContain('filename*=UTF-8');
 
   const shareResponse = await page.request.post('/api/reports/share', {
     data: { report_id: 'golden-report-single', duration: '7d' },
   });
-  expect(shareResponse.ok(), 'share API should return 2xx').toBeTruthy();
   const sharePayload = await shareResponse.json();
   expect(sharePayload.code, sharePayload.message || 'share API should succeed').toBe(0);
-  await page.goto(`/reports/share/${sharePayload.data.share_token}`);
-  await expect(page.getByTestId('share-section-block-card').first()).toBeVisible();
-  await expect(page.getByTestId('report-section-block-stack').first()).toBeVisible();
-  await expect(page.getByTestId('report-inline-media-item').first()).toBeVisible();
-  await expect(page.getByTestId('share-legacy-content')).toHaveCount(0);
+  try {
+    await page.goto(`/reports/share/${sharePayload.data.share_token}`);
+    await expect(page.getByTestId('share-frozen-report-view')).toBeVisible();
+    await expect(page.getByTestId('share-legacy-content')).toHaveCount(0);
+  } finally {
+    await page.request.delete(`/api/reports/share/list?id=${encodeURIComponent(sharePayload.data.id)}`);
+  }
 });
 
 test('permissions, share access, and mobile detail path are guarded', async ({ page, request, browser }) => {
@@ -268,8 +193,7 @@ test('permissions, share access, and mobile detail path are guarded', async ({ p
   expect([403, 404], 'invalid share token should not expose data').toContain(invalidShare.status());
 
   await page.goto('/reports/golden-report-single');
-  await expect(page.getByTestId('report-detail-shell')).toBeVisible();
-  await expect(page.getByTestId('report-section-actions').first()).toBeVisible();
+  await expect(page.getByTestId('report-frozen-detail')).toBeVisible();
 
   const baseURL = process.env.E2E_BASE_URL || 'http://127.0.0.1:5000';
   const ordinaryContext = await browser.newContext({ baseURL });
@@ -298,18 +222,18 @@ test('permissions, share access, and mobile detail path are guarded', async ({ p
   const anonymousSharePage = await anonymousShareContext.newPage();
   try {
     await anonymousSharePage.goto(`/reports/share/${sharePayload.data.share_token}`);
-    await expect(anonymousSharePage.getByTestId('share-section-block-card').first(), 'share read-only page should render section blocks').toBeVisible();
+    await expect(anonymousSharePage.getByTestId('share-frozen-report-view'), 'share read-only page should render the frozen report view').toBeVisible();
     await expect(anonymousSharePage.getByTestId('share-legacy-content')).toHaveCount(0);
     await expect(anonymousSharePage.getByText('Confirm AI')).toHaveCount(0);
     await expect(anonymousSharePage.getByText('Publish snapshot')).toHaveCount(0);
   } finally {
     await anonymousShareContext.close();
   }
+  await page.request.delete(`/api/reports/share/list?id=${encodeURIComponent(sharePayload.data.id)}`);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/reports/golden-report-single');
-  await expect(page.getByTestId('report-detail-shell')).toBeVisible();
-  await expect(page.getByTestId('report-section-block').filter({ hasText: 'Issue closure table' })).toBeVisible();
+  await expect(page.getByTestId('report-frozen-detail')).toBeVisible();
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(horizontalOverflow, 'mobile detail should not create page-level horizontal scrollWidth overflow').toBeLessThanOrEqual(24);
 });

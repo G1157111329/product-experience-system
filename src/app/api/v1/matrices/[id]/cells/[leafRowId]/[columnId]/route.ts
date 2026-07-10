@@ -9,9 +9,9 @@
 import { NextRequest } from 'next/server';
 import { getDb } from '@/storage/database/pg-db';
 import { sql } from 'drizzle-orm';
-import { matrixCellValues } from '@/storage/database/shared/schema';
+import { matrixCellValues, matrixColumnDefinitions, matrixLeafRows } from '@/storage/database/shared/schema';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { requireUser, isAuthResponse } from '@/lib/server/auth';
+import { canAccessMatrix, requireUser, isAuthResponse } from '@/lib/server/auth';
 import { ok, fail } from '@/lib/server/api-v1/response';
 import { resolveTraceId } from '@/lib/server/api-v1/trace';
 
@@ -27,6 +27,9 @@ export async function PUT(
   const client = getSupabaseClient();
   const user = await requireUser(req, client);
   if (isAuthResponse(user)) return fail(traceId, { message: '未认证', status: 401 });
+  if (!(await canAccessMatrix(client, user, matrixId))) {
+    return fail(traceId, { message: '无权访问该矩阵', status: 403 });
+  }
 
   let body: {
     valueText?: string;
@@ -54,6 +57,23 @@ export async function PUT(
 
   try {
     const db = await getDb();
+    const [leafRow, column] = await Promise.all([
+      db
+        .select({ id: matrixLeafRows.id })
+        .from(matrixLeafRows)
+        .where(sql`${matrixLeafRows.id} = ${leafRowId} AND ${matrixLeafRows.matrixId} = ${matrixId}`)
+        .limit(1)
+        .execute(),
+      db
+        .select({ id: matrixColumnDefinitions.id })
+        .from(matrixColumnDefinitions)
+        .where(sql`${matrixColumnDefinitions.id} = ${columnId} AND ${matrixColumnDefinitions.matrixId} = ${matrixId}`)
+        .limit(1)
+        .execute(),
+    ]);
+    if (leafRow.length === 0 || column.length === 0) {
+      return fail(traceId, { message: '行或列不属于该矩阵', status: 404 });
+    }
 
     const valueNumberStr =
       body.valueNumber !== undefined && body.valueNumber !== null

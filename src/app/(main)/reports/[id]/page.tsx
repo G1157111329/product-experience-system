@@ -199,7 +199,7 @@ export default function ReportDetailPage() {
   }));
 
   return (
-    <PageShell size="wide" className="space-y-0">
+    <PageShell size="wide" className="space-y-0" data-testid="report-frozen-detail">
       <PreviewComponent />
       <ReportStickyHeader
         id={header.id}

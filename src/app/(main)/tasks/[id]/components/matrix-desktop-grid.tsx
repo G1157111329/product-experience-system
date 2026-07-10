@@ -23,6 +23,7 @@ import type {
   MatrixRowProjection,
   ValidationResult,
 } from '@/lib/matrix/task-matrix-types';
+import { createCompositionController } from '@/lib/input-composition';
 
 interface DesktopMatrixGridProps {
   projection: MatrixReadProjectionV2;
@@ -308,7 +309,7 @@ function CreateRowInline({ groupId, onRefresh }: { groupId: string; onRefresh: (
       <Input
         value={name}
         onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter') createRow(); }}
+        onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) createRow(); }}
         placeholder="添加行，如：口径 1 / 批次 1"
         className="h-8 text-xs"
       />
@@ -334,6 +335,7 @@ function MatrixCell({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const compositionRef = useRef(createCompositionController());
 
   // Initialize draft from value
   useEffect(() => {
@@ -478,8 +480,16 @@ function MatrixCell({
         <Input
           className="h-7 min-w-[80px] text-xs"
           value={draft}
-          onChange={(e) => schedule(e.target.value)}
-          onBlur={handleBlur}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            const committed = compositionRef.current.change(e.target.value);
+            if (committed !== null) schedule(committed);
+          }}
+          onCompositionStart={() => compositionRef.current.start()}
+          onCompositionEnd={(e) => schedule(compositionRef.current.end(e.currentTarget.value))}
+          onBlur={() => {
+            if (compositionRef.current.blur(draft) !== null) handleBlur();
+          }}
           placeholder="—"
           disabled={saving}
         />

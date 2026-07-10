@@ -37,6 +37,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { createCompositionController } from '@/lib/input-composition';
 import type { DimensionBinding, ResultStatusOption, ValueKind } from '@/lib/matrix/types';
 import type {
   MatrixMetricReadValue,
@@ -305,6 +306,7 @@ export function ResultSlotCell({
   resultStatusOptions?: ResultStatusOption[];
 }) {
   const [summary, setSummary] = useState(row.slots.result.summary ?? '');
+  const summaryComposition = useRef(createCompositionController());
   // Reset the draft when the authoritative summary changes (refetch / 409 revert).
   useEffect(() => {
     setSummary(row.slots.result.summary ?? '');
@@ -337,9 +339,14 @@ export function ResultSlotCell({
         value={summary}
         onChange={(e) => {
           setSummary(e.target.value);
-          schedule(e.target.value);
+          const committed = summaryComposition.current.change(e.target.value);
+          if (committed !== null) schedule(committed);
         }}
-        onBlur={flush}
+        onCompositionStart={() => summaryComposition.current.start()}
+        onCompositionEnd={(e) => schedule(summaryComposition.current.end(e.currentTarget.value))}
+        onBlur={() => {
+          if (summaryComposition.current.blur(summary) !== null) flush();
+        }}
         rows={2}
         placeholder="效果结论"
         className="min-h-12 resize-y text-xs"
@@ -363,6 +370,7 @@ export function ProcessSlotCell({
   busy: boolean;
 }) {
   const [note, setNote] = useState(row.slots.process.note ?? '');
+  const noteComposition = useRef(createCompositionController());
   useEffect(() => {
     setNote(row.slots.process.note ?? '');
   }, [row.slots.process.note]);
@@ -375,9 +383,14 @@ export function ProcessSlotCell({
         value={note}
         onChange={(e) => {
           setNote(e.target.value);
-          schedule(e.target.value);
+          const committed = noteComposition.current.change(e.target.value);
+          if (committed !== null) schedule(committed);
         }}
-        onBlur={flush}
+        onCompositionStart={() => noteComposition.current.start()}
+        onCompositionEnd={(e) => schedule(noteComposition.current.end(e.currentTarget.value))}
+        onBlur={() => {
+          if (noteComposition.current.blur(note) !== null) flush();
+        }}
         rows={2}
         placeholder="过程记录"
         className="min-h-12 resize-y text-xs"
@@ -461,6 +474,7 @@ export function ObservedMetricCell({
     return metric.text ?? '';
   })();
   const [draft, setDraft] = useState(seed);
+  const metricComposition = useRef(createCompositionController());
   useEffect(() => {
     setDraft(seed);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -523,12 +537,17 @@ export function ObservedMetricCell({
         value={draft}
         onChange={(e) => {
           setDraft(e.target.value);
-          schedule(e.target.value);
+          const committed = metricComposition.current.change(e.target.value);
+          if (committed !== null) schedule(committed);
           clearFailure();
         }}
+        onCompositionStart={() => metricComposition.current.start()}
+        onCompositionEnd={(e) => schedule(metricComposition.current.end(e.currentTarget.value))}
         onFocus={clearFailure}
         onKeyDown={clearFailure}
-        onBlur={flush}
+        onBlur={() => {
+          if (metricComposition.current.blur(draft) !== null) flush();
+        }}
         placeholder="—"
         disabled={busy}
         className="h-7 min-w-0 text-xs"

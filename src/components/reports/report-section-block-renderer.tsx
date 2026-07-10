@@ -3,7 +3,7 @@
 import { Fragment, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { isPendingMediaUrl, pendingMediaDataUrl, usePresignedUrls } from '@/lib/use-presigned-url';
+import { isPendingMediaUrl, pendingMediaDataUrl, toPublicMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import { cn } from '@/lib/utils';
 import type { ReportDetailMediaItem, ReportDetailModel, ReportDetailSection, ReportDetailSectionBlock } from '@/lib/server/report-detail';
 import { ReportV3MatrixView } from '@/app/(main)/reports/[id]/components/report-v3-matrix-view';
@@ -82,18 +82,11 @@ function aiStatusLabel(status: string) {
 }
 
 function toRenderableMediaUrl(url: string) {
-  if (
-    url.startsWith('http')
-    || url.startsWith('/')
-    || url.startsWith('data:')
-  ) {
-    return url;
-  }
-  return pendingMediaDataUrl;
+  return toPublicMediaUrl(url) || pendingMediaDataUrl;
 }
 
 function usableResolvedMediaUrl(originalUrl: string, resolvedUrl: string | undefined) {
-  if (resolvedUrl) return resolvedUrl;
+  if (resolvedUrl) return toRenderableMediaUrl(resolvedUrl);
   return toRenderableMediaUrl(originalUrl);
 }
 
