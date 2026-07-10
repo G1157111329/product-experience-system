@@ -25,6 +25,7 @@ export interface AgentAction {
   title: string;
   description?: string;
   risk: AgentActionRisk;
+  idempotencyKey: string;
   payload: Record<string, unknown>;
 }
 
@@ -90,6 +91,7 @@ export function normalizeAgentActions(input: unknown): AgentAction[] {
         type: actionType,
         title: title || AGENT_ACTION_LABELS[actionType],
         risk: normalizeRisk(row.risk, fallbackRisk(actionType)),
+        idempotencyKey: String(row.idempotency_key || row.id || `${actionType}_${index + 1}`),
         payload: asRecord(row.payload),
       };
       if (row.description) action.description = String(row.description).slice(0, 500);
