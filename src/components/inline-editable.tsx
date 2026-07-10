@@ -67,6 +67,14 @@ export interface InlineTextareaProps extends InlineEditableBaseProps {
   rows?: number;
 }
 
+export type InlineEditKeyAction = 'save' | 'cancel' | 'none';
+
+export function getInlineEditKeyAction(key: string, isComposing: boolean, isMultiline: boolean): InlineEditKeyAction {
+  if (key === 'Escape') return 'cancel';
+  if (key === 'Enter' && !isComposing && !isMultiline) return 'save';
+  return 'none';
+}
+
 const STATUS_LABEL: Partial<Record<SaveStatus, string>> = {
   dirty: '未保存',
   saving: '保存中',
@@ -195,6 +203,11 @@ function useInlineEditableEngine(
     flush();
   };
 
+  const handleCancel = () => {
+    setDraft(value);
+    reset();
+  };
+
   const handleForceOverwrite = () => {
     if (!onForceSave) {
       handleRetry();
@@ -218,6 +231,7 @@ function useInlineEditableEngine(
     handleCompositionEnd,
     handleBlur,
     handleRetry,
+    handleCancel,
     handleForceOverwrite: onForceSave ? handleForceOverwrite : undefined,
     flush,
     setStatus,
@@ -234,7 +248,7 @@ function TextImpl({
   inputClassName,
   ariaLabel,
 }: InlineTextProps) {
-  const { draft, status, inputRef, handleChange, handleCompositionStart, handleCompositionEnd, handleBlur, handleRetry, handleForceOverwrite } =
+  const { draft, status, inputRef, handleChange, handleCompositionStart, handleCompositionEnd, handleBlur, handleRetry, handleCancel, handleForceOverwrite, flush } =
     useInlineEditableEngine(value, onSave, onForceSave);
 
   if (readOnly) {
@@ -256,6 +270,19 @@ function TextImpl({
         onCompositionStart={handleCompositionStart}
         onCompositionEnd={(e) => handleCompositionEnd(e.currentTarget.value)}
         onBlur={handleBlur}
+        onKeyDown={(event) => {
+          const action = getInlineEditKeyAction(event.key, event.nativeEvent.isComposing, false);
+          if (action === 'save') {
+            event.preventDefault();
+            flush();
+            event.currentTarget.blur();
+          }
+          if (action === 'cancel') {
+            event.preventDefault();
+            handleCancel();
+            event.currentTarget.blur();
+          }
+        }}
         className={cn('h-8', inputClassName)}
       />
       <SaveStatusBadge status={status} onRetry={handleRetry} onForceOverwrite={handleForceOverwrite} />
@@ -274,7 +301,7 @@ function TextareaImpl({
   ariaLabel,
   rows = 3,
 }: InlineTextareaProps) {
-  const { draft, status, inputRef, handleChange, handleCompositionStart, handleCompositionEnd, handleBlur, handleRetry, handleForceOverwrite, flush } =
+  const { draft, status, inputRef, handleChange, handleCompositionStart, handleCompositionEnd, handleBlur, handleRetry, handleCancel, handleForceOverwrite, flush } =
     useInlineEditableEngine(value, onSave, onForceSave);
 
   if (readOnly) {
@@ -298,13 +325,21 @@ function TextareaImpl({
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={(e) => handleCompositionEnd(e.currentTarget.value)}
           onBlur={handleBlur}
+          onKeyDown={(event) => {
+            const action = getInlineEditKeyAction(event.key, event.nativeEvent.isComposing, true);
+            if (action === 'cancel') {
+              event.preventDefault();
+              handleCancel();
+              event.currentTarget.blur();
+            }
+          }}
           className={cn('resize-y', inputClassName)}
         />
         <button
           type="button"
           aria-label="保存"
           title="保存"
-          className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="hidden"
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => flush()}
         >
