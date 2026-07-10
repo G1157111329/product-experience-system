@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessRecipe, isAuthResponse, requireUser } from '@/lib/server/auth';
+import { normalizeIngredientItems } from '@/lib/task-context-contract';
 
 function collectProblemPointMaterialIds(value: unknown): string[] {
   if (!value) return [];
@@ -68,6 +69,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     problem_count: body.problem_count,
     updated_at: new Date().toISOString(),
   };
+  if (body.ingredient_items !== undefined) {
+    updateData.ingredient_items = normalizeIngredientItems(body.ingredient_items);
+  }
 
   // Effect evaluation fields
   if (body.effect_description !== undefined) updateData.effect_description = body.effect_description;

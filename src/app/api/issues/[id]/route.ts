@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { canAccessTask, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
+import { canAccessTask, forbidden, isAuthResponse, isRecipeContextInTask, requireUser } from '@/lib/server/auth';
 import { getDictCodeSet } from '@/lib/server/dictionaries';
 import {
   applyTransition,
@@ -38,6 +38,24 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const user = auth;
 
   const body = await request.json();
+
+  if (body.recipe_id !== undefined || body.recipe_step_id !== undefined) {
+    const { data: currentIssue } = await client
+      .from('issues')
+      .select('task_id, recipe_id, recipe_step_id')
+      .eq('id', id)
+      .maybeSingle();
+    const recipeId = body.recipe_id === undefined ? currentIssue?.recipe_id : body.recipe_id;
+    const recipeStepId = body.recipe_step_id === undefined ? currentIssue?.recipe_step_id : body.recipe_step_id;
+    if (!currentIssue?.task_id || !(await isRecipeContextInTask(
+      client,
+      String(currentIssue.task_id),
+      recipeId as string | null | undefined,
+      recipeStepId as string | null | undefined,
+    ))) {
+      return NextResponse.json({ code: 1, message: '食谱或步骤不属于当前体验计划' }, { status: 400 });
+    }
+  }
 
   // V3.1.1 §27.2.6: validate against server-side dictionaries with frozen fallback.
   // V4.0: transitions are validated against the state machine.
@@ -85,6 +103,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     'is_improve', 'no_improve_reason', 'improve_plan', 'responsible_dept',
     'responsible_person', 'plan_complete_date', 'actual_complete_date',
     'is_closed', 'status', 'verification_note', 'product_model',
+    'recipe_id', 'recipe_step_id',
   ];
 
   for (const field of allowedFields) {

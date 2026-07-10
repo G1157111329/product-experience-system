@@ -457,6 +457,31 @@ export async function canAccessRecipeStep(client: ClientLike, user: AuthUser, st
   return canAccessRecipe(client, user, String(step.recipe_id));
 }
 
+/** Ensures an optional recipe/step pair is scoped to a single experience task. */
+export async function isRecipeContextInTask(
+  client: ClientLike,
+  taskId: string,
+  recipeId?: string | null,
+  recipeStepId?: string | null,
+) {
+  const normalizedRecipeId = recipeId?.trim() || null;
+  const normalizedStepId = recipeStepId?.trim() || null;
+
+  if (normalizedRecipeId) {
+    const { data: recipe } = await client.from('recipes').select('id, task_id').eq('id', normalizedRecipeId).maybeSingle();
+    if (!recipe || String(recipe.task_id) !== taskId) return false;
+  }
+  if (!normalizedStepId) return true;
+
+  const { data: step } = await client.from('recipe_steps').select('id, recipe_id').eq('id', normalizedStepId).maybeSingle();
+  if (!step?.recipe_id) return false;
+  if (normalizedRecipeId && String(step.recipe_id) !== normalizedRecipeId) return false;
+  if (normalizedRecipeId) return true;
+
+  const { data: recipe } = await client.from('recipes').select('id, task_id').eq('id', String(step.recipe_id)).maybeSingle();
+  return Boolean(recipe && String(recipe.task_id) === taskId);
+}
+
 export async function canAccessIssue(client: ClientLike, user: AuthUser, issueId: string) {
   if (user.role === 'admin') return true;
   if (hasPermission(user.role, Permission.ISSUE_VIEW_ALL)) return true;

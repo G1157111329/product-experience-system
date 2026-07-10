@@ -165,12 +165,16 @@ CREATE TABLE IF NOT EXISTS check_records (
   check_tool TEXT,
   problem_level TEXT,                               -- 一类/二类/三类
   tester VARCHAR(50),
+  recipe_id VARCHAR(36),
+  recipe_step_id VARCHAR(36),
   sort_order INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS check_records_task_id_idx ON check_records(task_id);
 CREATE INDEX IF NOT EXISTS check_records_standard_item_id_idx ON check_records(standard_item_id);
+CREATE INDEX IF NOT EXISTS check_records_recipe_id_idx ON check_records(recipe_id);
+CREATE INDEX IF NOT EXISTS check_records_recipe_step_id_idx ON check_records(recipe_step_id);
 
 -- ============================================================
 -- 9. 问题整改表
@@ -210,6 +214,9 @@ CREATE TABLE IF NOT EXISTS issues (
   is_closed BOOLEAN DEFAULT false,
   status VARCHAR(20) NOT NULL DEFAULT '待整改',
   verification_note TEXT,
+  -- 食谱表在本初始化脚本的后面创建；外键由增量迁移补齐，避免全新库建表顺序失败。
+  recipe_id VARCHAR(36),
+  recipe_step_id VARCHAR(36),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE(title, source_type, task_id)
@@ -222,6 +229,8 @@ CREATE INDEX IF NOT EXISTS issues_severity_code_idx ON issues(severity_code);
 CREATE INDEX IF NOT EXISTS issues_due_at_idx ON issues(due_at);
 CREATE INDEX IF NOT EXISTS issues_source_assembly_id_idx ON issues(source_assembly_id);
 CREATE INDEX IF NOT EXISTS issues_created_at_idx ON issues(created_at);
+CREATE INDEX IF NOT EXISTS issues_recipe_id_idx ON issues(recipe_id);
+CREATE INDEX IF NOT EXISTS issues_recipe_step_id_idx ON issues(recipe_step_id);
 
 -- 对比矩阵溯源字段：将矩阵单元格问题点关联回矩阵（幂等迁移）
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS source_assembly_id VARCHAR(36);
@@ -252,6 +261,7 @@ CREATE TABLE IF NOT EXISTS recipes (
   task_id VARCHAR(36) NOT NULL REFERENCES experience_tasks(id) ON DELETE CASCADE,
   name VARCHAR(200) NOT NULL,
   ingredients TEXT,
+  ingredient_items JSONB NOT NULL DEFAULT '[]'::jsonb,
   recipe_type VARCHAR(20) DEFAULT '食谱',           -- 食谱 / 功能
   problem_count INTEGER DEFAULT 0,
   sort_order INTEGER DEFAULT 0,
@@ -275,6 +285,7 @@ CREATE TABLE IF NOT EXISTS recipe_steps (
   operation TEXT NOT NULL,
   problem_point TEXT,
   problem_points JSONB DEFAULT '[]',
+  parameters JSONB NOT NULL DEFAULT '{}'::jsonb,
   sort_order INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()

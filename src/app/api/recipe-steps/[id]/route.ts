@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessRecipeStep, isAuthResponse, requireUser } from '@/lib/server/auth';
+import { normalizeStepParameters } from '@/lib/task-context-contract';
 
 /** Recalculate and update problem_count for a recipe based on its steps */
 async function updateRecipeProblemCount(client: ReturnType<typeof getSupabaseClient>, recipeId: string) {
@@ -34,6 +35,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (body.problem_point !== undefined) updateData.problem_point = body.problem_point;
   if (body.problem_points !== undefined) updateData.problem_points = body.problem_points;
   if (body.sort_order !== undefined) updateData.sort_order = body.sort_order;
+  if (body.parameters !== undefined) updateData.parameters = normalizeStepParameters(body.parameters);
 
   const { data, error } = await client.from('recipe_steps').update(updateData).eq('id', id).select().single();
 

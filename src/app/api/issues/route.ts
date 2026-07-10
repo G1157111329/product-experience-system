@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { canAccessTask, canReadReport, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
+import { canAccessTask, canReadReport, forbidden, isAuthResponse, isRecipeContextInTask, requireUser } from '@/lib/server/auth';
 import { createIssueOccurrence } from '@/lib/server/issue-lifecycle';
 import { normalizeIssueStatus } from '@/lib/server/issue-state-machine';
 
@@ -16,6 +16,8 @@ export async function GET(request: NextRequest) {
   const keyword = searchParams.get('keyword');
   const source_report_id = searchParams.get('source_report_id');
   const task_ids = searchParams.get('task_ids'); // comma-separated, for user data isolation
+  const recipe_id = searchParams.get('recipe_id');
+  const recipe_step_id = searchParams.get('recipe_step_id');
   const include_archived = searchParams.get('include_archived') === '1';
   const limit = Math.min(500, Math.max(1, parseInt(searchParams.get('limit') || '100', 10)));
   const offset = Math.max(0, parseInt(searchParams.get('offset') || '0', 10) || 0);
@@ -25,6 +27,8 @@ export async function GET(request: NextRequest) {
     query = query.or('source_type.is.null,source_type.not.like.%_old');
   }
   if (task_id) query = query.eq('task_id', task_id);
+  if (recipe_id) query = query.eq('recipe_id', recipe_id);
+  if (recipe_step_id) query = query.eq('recipe_step_id', recipe_step_id);
   if (source_report_id) {
     if (!(await canReadReport(client, user, source_report_id))) return forbidden();
     query = query.eq('source_report_id', source_report_id);
@@ -56,6 +60,9 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json();
   if (!body.task_id || !(await canAccessTask(client, user, body.task_id))) return forbidden();
+  if (!(await isRecipeContextInTask(client, body.task_id, body.recipe_id, body.recipe_step_id))) {
+    return NextResponse.json({ code: 1, message: '食谱或步骤不属于当前体验计划' }, { status: 400 });
+  }
 
   const { data: task } = await client
     .from('experience_tasks')
@@ -66,6 +73,8 @@ export async function POST(request: NextRequest) {
   const { data, error } = await client.from('issues').insert({
     task_id: body.task_id,
     record_id: body.record_id || null,
+    recipe_id: body.recipe_id || null,
+    recipe_step_id: body.recipe_step_id || null,
     title: body.title,
     product_model: body.product_model || null,
     category: body.category || null,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { canAccessTask, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
+import { canAccessTask, forbidden, isAuthResponse, isRecipeContextInTask, requireUser } from '@/lib/server/auth';
 
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
@@ -37,9 +37,22 @@ export async function POST(request: NextRequest) {
   // 批量插入支持（从标准加载检查项时使用）
   if (Array.isArray(body)) {
     if (!body.every((row) => row?.task_id === targetTaskId)) return forbidden();
+    const contextsAreValid = (await Promise.all(body.map((row) => isRecipeContextInTask(
+      client,
+      targetTaskId,
+      row.recipe_id,
+      row.recipe_step_id,
+    )))).every(Boolean);
+    if (!contextsAreValid) {
+      return NextResponse.json({ code: 1, message: '食谱或步骤不属于当前体验计划' }, { status: 400 });
+    }
     const { data, error } = await client.from('check_records').insert(body).select();
     if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
     return NextResponse.json({ code: 0, message: '批量创建成功', data });
+  }
+
+  if (!(await isRecipeContextInTask(client, body.task_id, body.recipe_id, body.recipe_step_id))) {
+    return NextResponse.json({ code: 1, message: '食谱或步骤不属于当前体验计划' }, { status: 400 });
   }
 
   const { data, error } = await client.from('check_records').insert({
@@ -61,6 +74,8 @@ export async function POST(request: NextRequest) {
     measurement_position: body.measurement_position || null,
     measurement_value: body.measurement_value || null,
     tester: body.tester || null,
+    recipe_id: body.recipe_id || null,
+    recipe_step_id: body.recipe_step_id || null,
     sort_order: body.sort_order || 0,
   }).select().single();
 

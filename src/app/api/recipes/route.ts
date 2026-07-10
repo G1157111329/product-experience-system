@@ -4,6 +4,7 @@ import { getDb } from '@/storage/database/pg-db';
 import { recipeSteps, recipes } from '@/storage/database/shared/schema';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessRecipe, canAccessTask, isAuthResponse, requireUser } from '@/lib/server/auth';
+import { normalizeIngredientItems } from '@/lib/task-context-contract';
 
 function toApiStep(step: typeof recipeSteps.$inferSelect) {
   return {
@@ -25,6 +26,7 @@ function toApiRecipe(recipe: typeof recipes.$inferSelect, steps: Array<typeof re
     task_id: recipe.taskId,
     name: recipe.name,
     ingredients: recipe.ingredients,
+    ingredient_items: recipe.ingredientItems,
     recipe_type: recipe.recipeType,
     problem_count: recipe.problemCount,
     created_at: recipe.createdAt,
@@ -106,6 +108,7 @@ export async function POST(request: NextRequest) {
     taskId: body.task_id,
     name: body.name,
     ingredients: body.ingredients || null,
+    ingredientItems: normalizeIngredientItems(body.ingredient_items),
     recipeType: body.recipe_type || '食谱',
   }).returning();
 

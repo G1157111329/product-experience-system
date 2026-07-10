@@ -102,6 +102,7 @@ export const recipes = pgTable("recipes", {
 	taskId: varchar("task_id", { length: 36 }).notNull(),
 	name: varchar({ length: 200 }).notNull(),
 	ingredients: text(),
+	ingredientItems: jsonb("ingredient_items").default([]),
 	recipeType: varchar("recipe_type", { length: 20 }).default('食谱'),
 	problemCount: integer("problem_count").default(0),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
@@ -131,6 +132,7 @@ export const recipeSteps = pgTable("recipe_steps", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 	problemPoints: jsonb("problem_points").default([]),
+	parameters: jsonb().default({}),
 }, (table) => [
 	index("recipe_steps_recipe_id_idx").using("btree", table.recipeId.asc().nullsLast().op("text_ops")),
 	foreignKey({
@@ -200,6 +202,8 @@ export const checkRecords = pgTable("check_records", {
 	subCheckDimension: varchar("sub_check_dimension", { length: 100 }),
 	checkTool: text("check_tool"),
 	problemLevel: text("problem_level"),
+	recipeId: varchar("recipe_id", { length: 36 }),
+	recipeStepId: varchar("recipe_step_id", { length: 36 }),
 }, (table) => [
 	index("check_records_standard_item_id_idx").using("btree", table.standardItemId.asc().nullsLast().op("text_ops")),
 	index("check_records_task_id_idx").using("btree", table.taskId.asc().nullsLast().op("text_ops")),
@@ -231,6 +235,8 @@ export const issues = pgTable("issues", {
 	isClosed: boolean("is_closed").default(false),
 	status: varchar({ length: 20 }).default('待整改').notNull(),
 	verificationNote: text("verification_note"),
+	recipeId: varchar("recipe_id", { length: 36 }),
+	recipeStepId: varchar("recipe_step_id", { length: 36 }),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 	level: varchar({ length: 20 }),
