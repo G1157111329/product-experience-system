@@ -231,6 +231,7 @@ export function FunctionsInputWorkspace({
               </div>
               {shouldShowIngredientEditor(selectedRecipe.recipe_type) && (
                 <RecipeIngredientEditor
+                  key={selectedRecipe.id}
                   items={selectedRecipe.ingredient_items || []}
                   legacyText={selectedRecipe.ingredients}
                   onSave={(items) => onSaveIngredients(selectedRecipe, items)}

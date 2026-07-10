@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,31 +38,57 @@ export function RecipeIngredientEditor({
 }) {
   const [draft, setDraft] = useState<IngredientDraftItem[]>(() => createIngredientDraft(items, legacyText));
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const draftRef = useRef(draft);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveChainRef = useRef<Promise<void>>(Promise.resolve());
+  const saveVersionRef = useRef(0);
 
   useEffect(() => {
-    setDraft(createIngredientDraft(items, legacyText));
-    setStatus('idle');
-  }, [items, legacyText]);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, []);
 
-  const save = async (next: IngredientDraftItem[]) => {
-    setStatus('saving');
-    try {
-      await onSave(toIngredientPayload(next));
-      setStatus('saved');
-    } catch {
-      setStatus('error');
-    }
+  const queueSave = (next: IngredientDraftItem[]) => {
+    const payload = toIngredientPayload(next);
+    const version = ++saveVersionRef.current;
+    saveChainRef.current = saveChainRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        setStatus('saving');
+        try {
+          await onSave(payload);
+          if (saveVersionRef.current === version) setStatus('saved');
+        } catch {
+          if (saveVersionRef.current === version) setStatus('error');
+        }
+      });
+  };
+
+  const scheduleSave = (next: IngredientDraftItem[], delay = 500) => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
+      queueSave(next);
+    }, delay);
+  };
+
+  const commitDraft = (next: IngredientDraftItem[], saveDelay = 500) => {
+    draftRef.current = next;
+    setDraft(next);
+    setStatus('idle');
+    scheduleSave(next, saveDelay);
   };
 
   const update = (index: number, patch: Partial<IngredientDraftItem>) => {
-    setDraft((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
+    const next = draftRef.current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item);
+    commitDraft(next);
   };
 
   const remove = (index: number) => {
-    const next = draft.filter((_, itemIndex) => itemIndex !== index);
+    const next = draftRef.current.filter((_, itemIndex) => itemIndex !== index);
     const safeNext = next.length > 0 ? next : [{ name: '' }];
-    setDraft(safeNext);
-    void save(safeNext);
+    commitDraft(safeNext, 0);
   };
 
   return (
@@ -80,7 +106,7 @@ export function RecipeIngredientEditor({
           type="button"
           variant="ghost"
           size="sm"
-          onClick={() => setDraft((current) => [...current, { name: '' }])}
+          onClick={() => commitDraft([...draftRef.current, { name: '' }])}
         >
           <Plus className="mr-1 h-3.5 w-3.5" />添加食材
         </Button>
@@ -89,10 +115,10 @@ export function RecipeIngredientEditor({
       <div className="space-y-2">
         {draft.map((item, index) => (
           <div key={index} className="grid grid-cols-[minmax(0,1.6fr)_90px_80px_minmax(0,1fr)_32px] gap-2 max-md:grid-cols-[minmax(0,1fr)_72px_64px_32px]">
-            <Input aria-label={`食材 ${index + 1} 名称`} value={item.name} placeholder="食材名称" onChange={(event) => update(index, { name: event.target.value })} onBlur={() => void save(draft)} />
-            <Input aria-label={`食材 ${index + 1} 克重`} inputMode="decimal" value={item.quantity ?? ''} placeholder="克重" onChange={(event) => update(index, { quantity: event.target.value })} onBlur={() => void save(draft)} />
-            <Input aria-label={`食材 ${index + 1} 单位`} value={item.unit ?? ''} placeholder="单位" onChange={(event) => update(index, { unit: event.target.value })} onBlur={() => void save(draft)} />
-            <Input aria-label={`食材 ${index + 1} 备注`} value={item.note ?? ''} placeholder="备注" onChange={(event) => update(index, { note: event.target.value })} onBlur={() => void save(draft)} className="max-md:col-span-3" />
+            <Input aria-label={`食材 ${index + 1} 名称`} value={item.name} placeholder="食材名称" onChange={(event) => update(index, { name: event.target.value })} onBlur={() => scheduleSave(draftRef.current, 120)} />
+            <Input aria-label={`食材 ${index + 1} 克重`} inputMode="decimal" value={item.quantity ?? ''} placeholder="克重" onChange={(event) => update(index, { quantity: event.target.value })} onBlur={() => scheduleSave(draftRef.current, 120)} />
+            <Input aria-label={`食材 ${index + 1} 单位`} value={item.unit ?? ''} placeholder="单位" onChange={(event) => update(index, { unit: event.target.value })} onBlur={() => scheduleSave(draftRef.current, 120)} />
+            <Input aria-label={`食材 ${index + 1} 备注`} value={item.note ?? ''} placeholder="备注" onChange={(event) => update(index, { note: event.target.value })} onBlur={() => scheduleSave(draftRef.current, 120)} className="max-md:col-span-3" />
             <Button type="button" variant="ghost" size="icon" aria-label={`删除食材 ${index + 1}`} className="h-9 w-8" onClick={() => remove(index)}>
               <X className="h-3.5 w-3.5" />
             </Button>
