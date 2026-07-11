@@ -67,17 +67,21 @@ test('report detail share requires an expiry choice', async ({ page }) => {
   await expect(page.getByRole('dialog')).toContainText('永久');
 });
 
-test('public share uses only the frozen report layout', async ({ page }) => {
+test('public share uses only the frozen report layout without a login session', async ({ page, browser }) => {
   const created = await page.request.post('/api/reports/share', {
     data: { report_id: 'golden-report-single', duration: '7d' },
   });
   const payload = await created.json();
   expect(payload.code, payload.message).toBe(0);
+  const anonymousContext = await browser.newContext();
+  const anonymousPage = await anonymousContext.newPage();
   try {
-    await page.goto(`/reports/share/${payload.data.share_token}`);
-    await expect(page.getByTestId('share-frozen-report-view')).toBeVisible();
-    await expect(page.getByTestId('share-legacy-content')).toHaveCount(0);
+    await anonymousPage.goto(`/reports/share/${payload.data.share_token}`);
+    await expect(anonymousPage).not.toHaveURL(/\/login/);
+    await expect(anonymousPage.getByTestId('share-frozen-report-view')).toBeVisible();
+    await expect(anonymousPage.getByTestId('share-legacy-content')).toHaveCount(0);
   } finally {
+    await anonymousContext.close();
     await page.request.delete(`/api/reports/share/list?id=${encodeURIComponent(payload.data.id)}`);
   }
 });
@@ -105,32 +109,172 @@ test('print export uses the report name as the suggested filename', async ({ pag
   await expect(page).toHaveTitle(title.replace(/\.pdf$/i, '').replace(/[\\/:*?"<>|\r\n\t]+/g, '_'));
 });
 
-test('new data matrix has direct editable default hierarchy and no level-three column', async ({ page }) => {
-  const created = await page.request.post('/api/v1/tasks/golden-task-single/matrices', {
-    data: { name: `E2E直接录入矩阵-${Date.now()}`, view_mode: 'excel_like_dynamic_matrix' },
+test('new data matrix keeps the first level-three item editable without an orphan row', async ({ page }) => {
+  const marker = `E2E三级细项-${Date.now()}`;
+  const taskResponse = await page.request.post('/api/tasks', {
+    data: { task_name: marker, product_category: '通用标准', product: 'E2E', product_model: marker, task_mode: 'single' },
   });
-  expect(created.ok()).toBeTruthy();
-  const payload = await created.json();
-  expect(payload.code, payload.message).toBe(0);
-  const matrixId = payload.data.id as string;
+  const taskPayload = await taskResponse.json();
+  expect(taskPayload.code, taskPayload.message).toBe(0);
+  const taskId = taskPayload.data.id as string;
+  let matrixId = '';
+  try {
+    const created = await page.request.post(`/api/v1/tasks/${taskId}/matrices`, {
+      data: { name: `${marker}-矩阵`, view_mode: 'excel_like_dynamic_matrix' },
+    });
+    const payload = await created.json();
+    expect(payload.code, payload.message).toBe(0);
+    matrixId = payload.data.id as string;
 
-  const projectionResponse = await page.request.get(`/api/v1/matrices/${matrixId}/v3-projection`);
-  const projectionPayload = await projectionResponse.json();
-  expect(projectionPayload.code, projectionPayload.message).toBe(0);
-  expect(projectionPayload.data.hierarchy[0].nodeLabel).toBe('默认大类');
-  expect(projectionPayload.data.hierarchy[0].children[0].nodeLabel).toBe('默认细项');
-  expect(projectionPayload.data.rows).toHaveLength(1);
-  expect(projectionPayload.data.rows[0].level3NodeId).toBeNull();
+    const projectionResponse = await page.request.get(`/api/v1/matrices/${matrixId}/v3-projection`);
+    const projectionPayload = await projectionResponse.json();
+    expect(projectionPayload.code, projectionPayload.message).toBe(0);
+    const level2Id = projectionPayload.data.hierarchy[0].children[0].id as string;
+    expect(projectionPayload.data.rows).toHaveLength(1);
 
-  await page.goto('/tasks/golden-task-single');
-  await page.getByRole('button', { name: '数据矩阵', exact: true }).click();
-  await page.getByText(`E2E直接录入矩阵-`, { exact: false }).first().click();
-  await expect(page.locator('input[value="默认大类"]')).toBeVisible();
-  await expect(page.locator('input[value="默认细项"]')).toBeVisible();
-  await expect(page.getByText('空白动态数据矩阵')).toHaveCount(0);
-  await expect(page.getByRole('columnheader', { name: /三级细项/ })).toHaveCount(0);
+    const level3Response = await page.request.post(`/api/v1/matrices/${matrixId}/hierarchy-nodes`, {
+      data: { level: 3, parentId: level2Id, nodeLabel: '首个三级细项' },
+    });
+    const level3Payload = await level3Response.json();
+    expect(level3Payload.code, level3Payload.message).toBe(0);
 
-  await page.request.post(`/api/v1/matrices/${matrixId}/lifecycle`, { data: { action: 'archive', reason: 'e2e_cleanup' } });
+    const updatedResponse = await page.request.get(`/api/v1/matrices/${matrixId}/v3-projection`);
+    const updatedPayload = await updatedResponse.json();
+    expect(updatedPayload.data.rows).toHaveLength(1);
+    expect(updatedPayload.data.rows[0].level3NodeId).toBe(level3Payload.data.node.id);
+
+    await page.goto(`/tasks/${taskId}?tab=matrix`);
+    await expect(page.locator('input[value="默认大类"]')).toBeVisible();
+    await expect(page.locator('input[value="默认细项"]')).toBeVisible();
+    await expect(page.locator('input[value="首个三级细项"]')).toBeVisible();
+    await expect(page.getByText('素材池', { exact: true })).toHaveCount(0);
+  } finally {
+    if (matrixId) await page.request.post(`/api/v1/matrices/${matrixId}/lifecycle`, { data: { action: 'archive', reason: 'e2e_cleanup' } });
+    await page.request.delete(`/api/tasks/${taskId}`);
+  }
+});
+
+test('matrix cell saves on blur and new columns stay inside their semantic zones', async ({ page }) => {
+  const marker = `E2E矩阵失焦保存-${Date.now()}`;
+  const taskResponse = await page.request.post('/api/tasks', {
+    data: { task_name: marker, product_category: '通用标准', product: 'E2E', product_model: marker, task_mode: 'single' },
+  });
+  const taskPayload = await taskResponse.json();
+  expect(taskPayload.code, taskPayload.message).toBe(0);
+  const taskId = taskPayload.data.id as string;
+  let matrixId = '';
+  try {
+    const created = await page.request.post(`/api/v1/tasks/${taskId}/matrices`, {
+      data: { name: `${marker}-矩阵`, view_mode: 'excel_like_dynamic_matrix' },
+    });
+    const createdPayload = await created.json();
+    matrixId = createdPayload.data.id as string;
+
+    const calculationResponse = await page.request.post(`/api/v1/matrices/${matrixId}/columns`, {
+      data: { columnZone: 'calculation_dimension', columnLabel: '计算结果', dataType: 'formula' },
+    });
+    expect((await calculationResponse.json()).code).toBe(0);
+    const detailResponse = await page.request.post(`/api/v1/matrices/${matrixId}/columns`, {
+      data: { columnZone: 'detail_dimension', columnLabel: '新增对比指标', dataType: 'text' },
+    });
+    expect((await detailResponse.json()).code).toBe(0);
+
+    const orderedProjectionResponse = await page.request.get(`/api/v1/matrices/${matrixId}/v3-projection`);
+    const orderedProjection = (await orderedProjectionResponse.json()).data;
+    const labels = orderedProjection.columns.map((column: { columnLabel: string }) => column.columnLabel);
+    expect(labels.indexOf('新增对比指标')).toBeLessThan(labels.indexOf('计算结果'));
+    expect(labels.indexOf('计算结果')).toBeLessThan(labels.indexOf('效果素材'));
+
+    await page.goto(`/tasks/${taskId}?tab=matrix`);
+    const header = page.getByRole('columnheader', { name: /效果评价/ });
+    await expect(header).toBeVisible();
+    const columnIndex = await header.evaluate((element) => (element as HTMLTableCellElement).cellIndex);
+    const input = page.locator('tbody tr').first().locator('td').nth(columnIndex).getByLabel('矩阵单元格');
+    await input.fill('离开单元格后保存');
+
+    const beforeBlurResponse = await page.request.get(`/api/v1/matrices/${matrixId}/v3-projection`);
+    expect(JSON.stringify((await beforeBlurResponse.json()).data)).not.toContain('离开单元格后保存');
+
+    await input.blur();
+    await expect.poll(async () => {
+      const response = await page.request.get(`/api/v1/matrices/${matrixId}/v3-projection`);
+      return JSON.stringify((await response.json()).data);
+    }).toContain('离开单元格后保存');
+    await expect(page.getByText('加载矩阵数据…')).toHaveCount(0);
+  } finally {
+    if (matrixId) await page.request.post(`/api/v1/matrices/${matrixId}/lifecycle`, { data: { action: 'archive', reason: 'e2e_cleanup' } });
+    await page.request.delete(`/api/tasks/${taskId}`);
+  }
+});
+
+test('data-matrix problem and appendix material reach report detail and print', async ({ page }) => {
+  const marker = `E2E矩阵报告问题-${Date.now()}`;
+  const issueTitle = `效果波动-${Date.now()}`;
+  const taskResponse = await page.request.post('/api/tasks', {
+    data: { task_name: marker, product_category: '通用标准', product: 'E2E', product_model: marker, task_mode: 'single' },
+  });
+  const taskPayload = await taskResponse.json();
+  const taskId = taskPayload.data.id as string;
+  let matrixId = '';
+  let materialId = '';
+  let reportId = '';
+  try {
+    const matrixResponse = await page.request.post(`/api/v1/tasks/${taskId}/matrices`, {
+      data: { name: `${marker}-矩阵`, view_mode: 'excel_like_dynamic_matrix' },
+    });
+    matrixId = (await matrixResponse.json()).data.id as string;
+    const projectionResponse = await page.request.get(`/api/v1/matrices/${matrixId}/v3-projection`);
+    const projection = (await projectionResponse.json()).data;
+    const leafRowId = projection.rows[0].id as string;
+    const mediaColumnId = projection.columns.find((column: { columnZone: string }) => column.columnZone === 'effect_media').id as string;
+    const issueColumnId = projection.columns.find((column: { columnZone: string }) => column.columnZone === 'issue_point').id as string;
+
+    const uploadResponse = await page.request.post('/api/materials/upload', {
+      multipart: {
+        task_id: taskId,
+        file: {
+          name: `${marker}.png`,
+          mimeType: 'image/png',
+          buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'),
+        },
+      },
+    });
+    const uploadPayload = await uploadResponse.json();
+    expect(uploadPayload.code, uploadPayload.message).toBe(0);
+    materialId = uploadPayload.data.id as string;
+
+    const bindResponse = await page.request.post(`/api/v1/matrices/${matrixId}/cells/${leafRowId}/${mediaColumnId}/media`, {
+      data: { materialId },
+    });
+    expect((await bindResponse.json()).code).toBe(0);
+    const issueResponse = await page.request.post(`/api/v1/matrices/${matrixId}/issue-points`, {
+      data: { leafRowId, columnId: issueColumnId, issueText: issueTitle },
+    });
+    expect((await issueResponse.json()).code).toBe(0);
+
+    const reportResponse = await page.request.post('/api/reports', { data: { task_id: taskId, title: `${marker}报告` } });
+    const reportPayload = await reportResponse.json();
+    expect(reportPayload.code, reportPayload.message).toBe(0);
+    reportId = reportPayload.data.id as string;
+
+    const headerResponse = await page.request.get(`/api/reports/${reportId}/header`);
+    expect((await headerResponse.json()).data.availableTabs).toContain('matrix');
+    const issuesResponse = await page.request.get(`/api/reports/${reportId}/issues`);
+    const reportIssues = (await issuesResponse.json()).data as Array<Record<string, unknown>>;
+    const reportIssue = reportIssues.find((issue) => issue.title === issueTitle);
+    expect(reportIssue?.source_type).toBe('matrix_problem');
+    expect((reportIssue?.materials as Array<{ id: string }>).map((material) => material.id)).toContain(materialId);
+
+    await page.goto(`/reports/print?id=${reportId}&mode=fast`);
+    await expect(page.getByText(issueTitle, { exact: true }).first()).toBeVisible();
+    await expect(page.getByText('附录素材：', { exact: true })).toBeVisible();
+    await expect(page.getByText(/整改：/).first()).toBeVisible();
+  } finally {
+    if (reportId) await page.request.delete(`/api/reports/${reportId}`);
+    if (materialId) await page.request.delete(`/api/materials?id=${materialId}`);
+    if (matrixId) await page.request.post(`/api/v1/matrices/${matrixId}/lifecycle`, { data: { action: 'archive', reason: 'e2e_cleanup' } });
+    await page.request.delete(`/api/tasks/${taskId}`);
+  }
 });
 
 test('first matrix entry auto-creates one default matrix and reuses it after tab switching', async ({ page }) => {

@@ -39,6 +39,7 @@ interface IssueRowProps {
 
 function sourceLabelV2(issue: Record<string, unknown>): string {
   const sourceType = String(issue.source_type || '');
+  if (sourceType === 'matrix_problem') return '数据矩阵';
   if (sourceType === 'recipe_problem') return '食谱/功能';
   if (sourceType === 'record_fail') return '五感体验';
   return '其他';
@@ -46,21 +47,15 @@ function sourceLabelV2(issue: Record<string, unknown>): string {
 
 function RecipeIssueDetails({
   recipe,
-  issueTitle,
-  issueMaterials,
   stepsExpanded,
   onToggleSteps,
 }: {
   recipe: Row;
-  issueTitle: string;
-  issueMaterials: Row[];
   stepsExpanded: boolean;
   onToggleSteps: () => void;
 }) {
   const steps = (Array.isArray(recipe.recipe_steps) ? recipe.recipe_steps : []) as Row[];
   const effectMaterials = (Array.isArray(recipe.effect_materials) ? recipe.effect_materials : []) as Row[];
-  const effectPoints = parseProblemPoints(recipe.effect_problem_point);
-  const matchedEffectPoint = effectPoints.find((point) => point.text === issueTitle);
 
   return (
     <div className="space-y-2">
@@ -110,12 +105,6 @@ function RecipeIssueDetails({
           <MaterialGrid materials={effectMaterials} />
         </div>
       )}
-      <div>
-        <div className="font-medium text-amber-600">问题点</div>
-        <div className="whitespace-pre-wrap">{matchedEffectPoint?.text || issueTitle}</div>
-        <MaterialGrid materials={materialsForIds(effectMaterials, matchedEffectPoint?.material_ids)} />
-        <MaterialGrid materials={issueMaterials} />
-      </div>
     </div>
   );
 }
@@ -213,11 +202,19 @@ export function IssueRow({ issue, onStatusClick }: IssueRowProps) {
 
       {expanded && (
         <div className="border-t px-3 py-3 space-y-2 text-xs">
+          <div>
+            <div className="font-medium text-foreground">问题点</div>
+            <div className="mt-1 whitespace-pre-wrap">{issue.title}</div>
+          </div>
+          {issue.description && issue.description !== issue.title && (
+            <div>
+              <div className="font-medium text-foreground">问题详情</div>
+              <div className="mt-1 whitespace-pre-wrap text-muted-foreground">{issue.description}</div>
+            </div>
+          )}
           {recipeContext ? (
             <RecipeIssueDetails
               recipe={recipeContext}
-              issueTitle={issue.title}
-              issueMaterials={materials}
               stepsExpanded={stepsExpanded}
               onToggleSteps={() => setStepsExpanded((v) => !v)}
             />
@@ -232,25 +229,21 @@ export function IssueRow({ issue, onStatusClick }: IssueRowProps) {
             <span className="text-muted-foreground">问题：</span>
             {descMap['问题'] || issue.title}
           </div>
-          {/* 非矩阵问题的补充描述 */}
-          {!descMap['对象'] && issue.description && issue.description !== issue.title && (
-            <div className="text-muted-foreground">{issue.description}</div>
-          )}
-
-          {/* 素材 */}
-          {materials.length > 0 && (
-            <div className="space-y-1">
-              <span className="text-muted-foreground">素材：</span>
-              <MaterialGrid materials={materials} />
-            </div>
-          )}
             </>
           )}
 
-          {/* 已整改状态：显示整改评价/整改素材/复测记录数 */}
-          {isRectified && (
-            <div className="mt-3 space-y-2 rounded-md border border-emerald-200 bg-emerald-50/40 p-2">
-              <div className="text-[11px] font-medium text-emerald-700">整改效果评价</div>
+          {materials.length > 0 && (
+            <div className="space-y-1">
+              <div className="font-medium text-foreground">附录素材</div>
+              <MaterialGrid materials={materials} />
+            </div>
+          )}
+
+          <div className={cn('mt-3 space-y-2 rounded-md border p-2', isRectified ? 'border-emerald-200 bg-emerald-50/40' : 'bg-muted/20')}>
+              <div className={cn('text-[11px] font-medium', isRectified && 'text-emerald-700')}>整改</div>
+              {!isRectified && <div className="text-muted-foreground">{statusPresentation.label}</div>}
+              {isRectified && (
+                <>
               {latestReEval ? (
                 <>
                   {String(latestReEval.description || '') && (
@@ -290,8 +283,9 @@ export function IssueRow({ issue, onStatusClick }: IssueRowProps) {
               {reEvalCount > 0 && (
                 <div className="text-[11px] text-muted-foreground">整改复测记录数：{reEvalCount}</div>
               )}
-            </div>
-          )}
+                </>
+              )}
+          </div>
         </div>
       )}
     </div>

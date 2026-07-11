@@ -71,36 +71,28 @@ async function loadTaskMatrixForReport(
     WHERE task_id = ${taskId}
       AND status <> 'archived'
     ORDER BY updated_at DESC
-    LIMIT 1
   `);
-  const row = matrixRows.rows[0] as
-    | { id?: string; current_view_definition_id?: string | null }
-    | undefined;
-  const matrixId = row?.id ? String(row.id) : '';
-  if (!matrixId) return null;
+  const candidates = matrixRows.rows as Array<{ id?: string; current_view_definition_id?: string | null }>;
+  for (const row of candidates) {
+    const matrixId = row.id ? String(row.id) : '';
+    if (!matrixId) continue;
+    const viewDefinitionId = row.current_view_definition_id ? String(row.current_view_definition_id) : '';
 
-  const viewDefinitionId = row?.current_view_definition_id
-    ? String(row.current_view_definition_id)
-    : '';
+    if (viewDefinitionId) {
+      const v3 = await getV3MatrixProjection(matrixId);
+      if (!v3) continue;
+      const frozen = { projectionVersion: 'v3' as const, ...freezeV3MatrixForReport(v3) };
+      if (!hasMeaningfulV3Projection(frozen)) continue;
+      return { kind: 'v3', matrixId, projection: frozen };
+    }
 
-  if (viewDefinitionId) {
-    const v3 = await getV3MatrixProjection(matrixId);
-    if (!v3) return null;
-    const frozen = freezeV3MatrixForReport(v3);
-    return {
-      kind: 'v3',
-      matrixId,
-      projection: { projectionVersion: 'v3', ...frozen },
-    };
+    const v2Projection = await getMatrixReadProjection(matrixId);
+    if (!v2Projection) continue;
+    const projection = adaptTaskMatrixProjectionForReport(v2Projection);
+    if (!hasMeaningfulV2Projection(projection)) continue;
+    return { kind: 'v2', matrixId, projection };
   }
-
-  const v2Projection = await getMatrixReadProjection(matrixId);
-  if (!v2Projection) return null;
-  return {
-    kind: 'v2',
-    matrixId,
-    projection: adaptTaskMatrixProjectionForReport(v2Projection),
-  };
+  return null;
 }
 
 async function loadDataMatrixProjection(
@@ -830,6 +822,32 @@ export async function POST(request: NextRequest) {
           });
           createdKeys.add(issueKey);
         }
+      }
+    }
+
+    if (dataMatrixProjection && isFrozenV3MatrixProjection(dataMatrixProjection)) {
+      for (const point of dataMatrixProjection.issuePoints || []) {
+        const issueTitle = String(point.issueText || '').trim().substring(0, 200);
+        if (!issueTitle) continue;
+        const issueKey = `matrix_problem::${issueTitle}`;
+        if (createdKeys.has(issueKey)) continue;
+        const row = dataMatrixProjection.rows.find((item) => item.id === point.leafRowId);
+        const hierarchy = row
+          ? [row.level1Label, row.level2Label, row.level3Label].filter(Boolean).join(' / ')
+          : '';
+        issueRows.push({
+          taskId: body.task_id,
+          title: issueTitle,
+          productModel: (task as Record<string, unknown>)?.product_model as string || null,
+          level: '二类',
+          source: sourceText(`${reportTitle} - 数据矩阵问题`),
+          sourceReportId: report.id,
+          sourceType: 'matrix_problem',
+          description: hierarchy ? `矩阵位置：${hierarchy}` : null,
+          status: '待整改',
+          sourceCellId: point.id,
+        });
+        createdKeys.add(issueKey);
       }
     }
 

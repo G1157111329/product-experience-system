@@ -125,6 +125,31 @@ async function attachMaterials(client: ReturnType<typeof getSupabaseClient>, iss
     const sourceCellId = text(issue.source_cell_id);
     if (sourceCellId) addUniqueMaterials(materials, seen, byComparisonCellId.get(sourceCellId));
 
+    if (text(issue.source_type) === 'matrix_problem') {
+      const projection = reportContent?.data_matrix_projection as Row | undefined;
+      const points = Array.isArray(projection?.issuePoints) ? projection.issuePoints as Row[] : [];
+      const matchingPoint = points.find((point) => text(point.issueText) === text(issue.title));
+      const ids = Array.isArray(matchingPoint?.materialIds)
+        ? matchingPoint.materialIds.filter((id): id is string => typeof id === 'string')
+        : [];
+      addUniqueMaterials(materials, seen, materialsByIds(ids, materialById));
+      if (ids.length > 0 && projection?.cellMedia && typeof projection.cellMedia === 'object') {
+        const frozenMedia = Object.values(projection.cellMedia as Row)
+          .flatMap((value) => Array.isArray(value) ? value : [])
+          .filter((material) => material && typeof material === 'object' && ids.includes(text((material as Row).materialId)))
+          .map((material) => {
+            const frozen = material as Row;
+            return {
+              id: frozen.materialId,
+              material_type: frozen.materialType,
+              file_name: frozen.fileName,
+              file_url: frozen.fileUrl,
+            };
+          });
+        addUniqueMaterials(materials, seen, frozenMedia);
+      }
+    }
+
     if (text(issue.source_type) === 'recipe_problem' && !sourceCellId) {
       const issueTitle = text(issue.title);
       for (const recipe of recipes) {

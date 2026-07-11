@@ -47,9 +47,13 @@ export interface ReportV3NarrativeBlock {
 }
 
 export interface ReportV3IssuePoint {
+  id: string;
+  leafRowId: string;
+  columnId: string;
   leafRowIndex: number;
   issueText: string;
   status: string;
+  materialIds: string[];
 }
 
 export interface ReportV3CellMedia {
@@ -164,9 +168,15 @@ export function freezeV3MatrixForReport(
   const issuePoints: ReportV3IssuePoint[] = projection.issuePoints.map((ip) => {
     const leafRow = projection.rows.find((r) => r.id === ip.leafRowId);
     return {
+      id: ip.id,
+      leafRowId: ip.leafRowId,
+      columnId: ip.columnId,
       leafRowIndex: leafRow?.visibleRowIndex ?? -1,
       issueText: ip.issueText,
       status: ip.status,
+      materialIds: Object.entries(projection.cellMedia ?? {})
+        .filter(([key]) => key.startsWith(`${ip.leafRowId}:`))
+        .flatMap(([, items]) => items.map((item) => item.materialId)),
     };
   });
 

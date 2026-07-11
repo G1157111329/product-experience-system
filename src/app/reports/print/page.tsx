@@ -117,6 +117,7 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
 }
 
 async function imageUrlToPrintableDataUrl(url: string, mode: PrintMode): Promise<string> {
+  if (url.startsWith('data:')) return url;
   try {
     const response = await fetch(url);
     const blob = await response.blob();
@@ -1022,11 +1023,10 @@ function ReportPrintContent() {
           }
         }
         // Fetch live issues
-        const issuesRes = await fetch(`/api/issues?source_report_id=${rpt.id}&limit=500`);
+        const issuesRes = await fetch(`/api/reports/${rpt.id}/issues`);
         const issuesData = await issuesRes.json();
         const raw = issuesData.data;
-        const allIssues: IssueItem[] = Array.isArray(raw) ? raw : (raw?.list || []);
-        const reportIssues = allIssues.filter((i: IssueItem) => i.source_report_id === rpt.id);
+        const reportIssues: IssueItem[] = Array.isArray(raw) ? raw : (raw?.list || []);
         // Fetch re-evaluations for recipe_problem issues
         const recipeIssues = reportIssues.filter((i: IssueItem) => i.source_type === 'recipe_problem');
         if (recipeIssues.length > 0) {
@@ -1055,11 +1055,11 @@ function ReportPrintContent() {
   useEffect(() => {
     if (siblingReports.length === 0) return;
     Promise.all(siblingReports.map(async (rpt) => {
-      const res = await fetch(`/api/issues?source_report_id=${rpt.id}&limit=500`);
+      const res = await fetch(`/api/reports/${rpt.id}/issues`);
       const data = await res.json();
       const raw = data.data;
       const allIssues: IssueItem[] = Array.isArray(raw) ? raw : (raw?.list || []);
-      return { reportId: rpt.id, issues: allIssues.filter((i: IssueItem) => i.source_report_id === rpt.id) };
+      return { reportId: rpt.id, issues: allIssues };
     })).then(async results => {
       const map: Record<string, IssueItem[]> = {};
       results.forEach(result => { map[result.reportId] = result.issues; });
@@ -1141,6 +1141,10 @@ function ReportPrintContent() {
 
       // Also include re-evaluation materials
       Object.values(liveIssuesMap).flat().forEach(issue => {
+        const issueMaterials = (issue as Record<string, unknown>).materials as Material[] | undefined;
+        issueMaterials?.forEach(m => {
+          if (m.material_type === 'image') allFilePaths.push(m.file_path || m.file_url);
+        });
         const reEvals = (issue as Record<string, unknown>)._reEvaluations as ReEvaluation[] | undefined;
         reEvals?.forEach(reEval => {
           reEval.materials?.forEach(m => {
@@ -1366,7 +1370,7 @@ function ReportPrintContent() {
               const level = String(iss.level || '三类');
               const levelColor = level === '一类' ? '#dc2626' : level === '二类' ? '#d97706' : '#2563eb';
               const sourceType = String(iss.source_type || '');
-              const sourceLabel = sourceType === 'recipe_problem' ? (iss.source_assembly_id ? '对比项' : '食谱/功能') : sourceType === 'record_fail' ? '五感体验' : '其他';
+              const sourceLabel = sourceType === 'matrix_problem' ? '数据矩阵' : sourceType === 'recipe_problem' ? (iss.source_assembly_id ? '对比项' : '食谱/功能') : sourceType === 'record_fail' ? '五感体验' : '其他';
               const status = String(iss.status || '');
               const statusMap: Record<string, string> = { open: '待整改', triaged: '待整改', assigned: '整改中', rectifying: '整改中', pending_verification: '待验证', verified_closed: '已整改', waived: '不整改', reopened: '待整改', '待整改': '待整改', '整改中': '整改中', '已验证': '已整改', '已整改': '已整改', '不整改': '不整改' };
               const statusLabel = statusMap[status] || status || '待整改';
@@ -1391,7 +1395,7 @@ function ReportPrintContent() {
                   {objText && <div style={{ color: '#6b7280' }}>对象：{objText}</div>}
                   {projText && <div style={{ color: '#6b7280' }}>项目：{projText}</div>}
                   {detailText && <div style={{ color: '#6b7280' }}>细项：{detailText}</div>}
-                  <div style={{ color: '#6b7280' }}>问题：{problemText}</div>
+                  <div><strong>问题点：</strong>{problemText}</div>
                   {(() => {
                     const descStr = iss.description ? String(iss.description) : '';
                     if (!objText && descStr && descStr !== problemText) {
@@ -1402,7 +1406,7 @@ function ReportPrintContent() {
                   {/* 素材 */}
                   {mats.length > 0 && (
                     <div style={{ marginTop: '4px' }}>
-                      <span style={{ color: '#6b7280' }}>素材：</span>
+                      <span style={{ color: '#6b7280' }}>附录素材：</span>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
                         {mats.map((m) => (
                           <div key={String(m.id)} style={{ width: '60px', height: '60px', overflow: 'hidden', borderRadius: '4px', border: '1px solid #e5e7eb', background: '#f9fafb' }}>
@@ -1417,6 +1421,9 @@ function ReportPrintContent() {
                       </div>
                     </div>
                   )}
+                  <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px solid #e5e7eb' }}>
+                    <strong>整改：</strong>{statusLabel}
+                  </div>
                 </div>
               );
             })}
