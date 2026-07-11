@@ -5,6 +5,25 @@ test.beforeEach(async ({ page }) => {
   await loginForE2E(page, 'dockeradmin', 'DockerLocal2026');
 });
 
+test('顶部任务栏呈现上下文状态和两个主操作', async ({ page }) => {
+  await page.goto('/tasks/golden-task-single');
+
+  const context = page.getByRole('region', { name: '任务上下文' });
+  await expect(context).toBeVisible();
+  await expect(context.getByRole('heading', { name: 'GT-01 原汁机双口径指标表', exact: true })).toBeVisible();
+  await expect(context.getByRole('button', { name: '生成总结', exact: true })).toHaveCount(1);
+  await expect(context.getByRole('button', { name: '生成报告', exact: true })).toHaveCount(1);
+  await expect(page.getByRole('button', { name: '生成总结', exact: true })).toHaveCount(1);
+  await expect(page.getByRole('button', { name: '生成报告', exact: true })).toHaveCount(1);
+
+  for (const label of ['五感体验', '单一食谱功能', '数据矩阵', '对比矩阵', '报告信息', '问题管理']) {
+    await expect(context.getByText(label, { exact: true })).toBeVisible();
+  }
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
+});
+
 test('素材证据位于主工作区底部而非录入目录', async ({ page }) => {
   await page.goto('/tasks/golden-task-single');
   await page.getByRole('button', { name: '功能效果', exact: true }).click();

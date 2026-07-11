@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { PresignedImage, PresignedVideo } from '@/components/presigned-media';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, ArrowRightLeft, FileText, Eye, Package, Plus, Camera, Video, Film, Image as ImageIcon, Pencil, Trash2, Check, X, Play, Sparkles, Save, Star, AlertTriangle, Crop } from 'lucide-react';
+import { ArrowRightLeft, FileText, Eye, Package, Plus, Camera, Video, Film, Image as ImageIcon, Pencil, Trash2, Check, X, Play, Sparkles, Save, Star, AlertTriangle, Crop } from 'lucide-react';
 import { InlineEditable } from '@/components/inline-editable';
 import { patchInlineValue } from '@/lib/inline-save-helpers';
 import { Button } from '@/components/ui/button';
@@ -43,6 +43,7 @@ import { FunctionsInputWorkspace } from './components/functions-input-workspace'
 import { RecipeIssueOutputPanel } from './components/recipe-issue-output-panel';
 import { ComparisonWorkspace } from './components/comparison-workspace';
 import { MatrixTab } from './components/matrix-tab';
+import { TaskAuthoringHeader, type TaskAuthoringSection } from './components/task-authoring-header';
 import { toIngredientPayload, type IngredientDraftItem } from './components/recipe-ingredient-editor';
 import type { EvidenceBindingTarget } from './types';
 
@@ -228,6 +229,7 @@ export default function TaskDetailPage() {
     }
   }, [searchParams]);
   const [hasMatrixInstance, setHasMatrixInstance] = useState(false);
+  const [hasComparisonInstance, setHasComparisonInstance] = useState(false);
   useEffect(() => {
     (async () => {
       try {
@@ -237,6 +239,15 @@ export default function TaskDetailPage() {
           setHasMatrixInstance(true);
         }
       } catch { /* ignore — tab just won't show */ }
+    })();
+  }, [id]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`/api/tasks/${id}/comparison/init`, { cache: 'no-store' });
+        const json = await res.json();
+        setHasComparisonInstance(json.code === 0 && Boolean(json.data));
+      } catch { /* ignore — card remains in its actual unavailable state */ }
     })();
   }, [id]);
   useEffect(() => {
@@ -400,28 +411,35 @@ export default function TaskDetailPage() {
 
   return (
     <PageShell size="wide" className="space-y-4">
-      {/* Header */}
-      <div className="flex items-start gap-3 flex-wrap sm:flex-nowrap rounded-lg border bg-card p-3 shadow-sm sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none">
-        <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => router.back()}>
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-lg sm:text-xl font-semibold break-all sm:truncate">{task.task_name}</h1>
-            <Badge variant="secondary" className={cn('text-[10px]', statusConfig[task.status]?.color)}>
-              {statusConfig[task.status]?.label || task.status}
-            </Badge>
-          </div>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-1 break-all">{task.product_model}{task.project_number ? ` | ${task.project_number}` : ''} | {task.product_category}{task.product ? ` - ${task.product}` : ''}{task.project_type ? ` | ${task.project_type}` : ''}{task.project_phase ? ` | ${task.project_phase}` : ''}</p>
-        </div>
-        <div className="grid grid-cols-2 gap-2 shrink-0 w-full sm:flex sm:w-auto sm:justify-end">
-          {isAdmin && (
-            <Button variant="outline" size="sm" className="min-w-0 sm:flex-none" onClick={handleOpenTransfer}>
-              <ArrowRightLeft className="h-4 w-4 mr-1.5" /> 转移
-            </Button>
-          )}
-        </div>
-      </div>
+      <TaskAuthoringHeader
+        title={task.task_name}
+        metadata={[task.product_model, task.project_number, task.product_category, task.product, task.project_type, task.project_phase].filter(Boolean).join(' | ')}
+        statusLabel={statusConfig[task.status]?.label || task.status}
+        statusClassName={cn('text-xs', statusConfig[task.status]?.color)}
+        issueCount={task.issues?.length || 0}
+        recipeCount={reportRecipes.length}
+        sensesCount={task.records?.length || 0}
+        hasMatrixInstance={hasMatrixInstance}
+        hasComparisonInstance={hasComparisonInstance}
+        hasAiSummary={Boolean(aiSummary)}
+        generatingReport={generatingReport}
+        summarizing={aiSummarizing}
+        onBack={() => router.back()}
+        onGenerateSummary={aiSummary ? openAiSummaryDialog : handleGenerateAiSummary}
+        onGenerateReport={handleRequestGenerateReport}
+        onOpenSection={(section: TaskAuthoringSection) => {
+          if (section === 'issues') {
+            router.push(`/issues?task_id=${encodeURIComponent(id)}`);
+            return;
+          }
+          setActiveTab(section);
+        }}
+        transferAction={isAdmin ? (
+          <Button variant="outline" size="sm" className="w-full min-w-0 sm:w-auto" onClick={handleOpenTransfer}>
+            <ArrowRightLeft className="mr-1.5 h-4 w-4" /> 转移
+          </Button>
+        ) : undefined}
+      />
 
       <ReportAuthoringShell
         activeTab={activeTab}
@@ -447,14 +465,7 @@ export default function TaskDetailPage() {
       {activeTab === 'info' && (
         <div className="space-y-4">
           <BasicInfoTab task={task} onRefresh={fetchTask} />
-          <ReportActionsPanel
-            aiSummary={aiSummary}
-            aiSummarizing={aiSummarizing}
-            generatingReport={generatingReport}
-            onOpenAiSummary={openAiSummaryDialog}
-            onGenerateAiSummary={handleGenerateAiSummary}
-            onGenerateReport={handleRequestGenerateReport}
-          />
+          <AiSummaryContent aiSummary={aiSummary} onOpenAiSummary={openAiSummaryDialog} />
         </div>
       )}
       {activeTab === 'materials' && <MaterialsTab taskId={id} />}
@@ -584,27 +595,19 @@ export default function TaskDetailPage() {
 }
 
 /* ─── Tab: 基本信息 ─── */
-function ReportActionsPanel({
+function AiSummaryContent({
   aiSummary,
-  aiSummarizing,
-  generatingReport,
   onOpenAiSummary,
-  onGenerateAiSummary,
-  onGenerateReport,
 }: {
   aiSummary: AiTaskSummary | null;
-  aiSummarizing: boolean;
-  generatingReport: boolean;
   onOpenAiSummary: () => void;
-  onGenerateAiSummary: () => void;
-  onGenerateReport: () => void;
 }) {
   return (
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
           <FileText className="h-4 w-4 text-primary" />
-          AI总结/报告
+          AI总结
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -628,16 +631,6 @@ function ReportActionsPanel({
             尚未生成AI总结。
           </div>
         )}
-        <div className="grid gap-2 sm:grid-cols-2">
-          <Button variant="outline" onClick={aiSummary ? onOpenAiSummary : onGenerateAiSummary} disabled={aiSummarizing}>
-            <Sparkles className="mr-1.5 h-4 w-4" />
-            {aiSummarizing ? '总结中...' : aiSummary ? '编辑AI总结' : '生成AI总结'}
-          </Button>
-          <Button onClick={onGenerateReport} disabled={generatingReport}>
-            <FileText className="mr-1.5 h-4 w-4" />
-            {generatingReport ? '生成中...' : '生成报告'}
-          </Button>
-        </div>
       </CardContent>
     </Card>
   );
