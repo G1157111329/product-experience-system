@@ -1,4 +1,4 @@
-export type MatrixLifecycleAction = 'archive' | 'restore';
+export type MatrixLifecycleAction = 'archive' | 'clear_and_archive' | 'restore';
 
 export function matrixLifecyclePatch(
   action: MatrixLifecycleAction,
@@ -6,11 +6,11 @@ export function matrixLifecyclePatch(
   reason?: string,
   restoreStatus: 'active' | 'designing' = 'active',
 ) {
-  if (action === 'archive') {
+  if (action === 'archive' || action === 'clear_and_archive') {
     return {
       status: 'archived',
       archived_at: now,
-      archived_reason: reason || 'user_delete',
+      archived_reason: reason || (action === 'clear_and_archive' ? 'user_clear' : 'user_delete'),
       updated_at: now,
     };
   }

@@ -17,6 +17,7 @@ import { patchInlineValue } from '@/lib/inline-save-helpers';
 type ComparisonAssembly = {
   id: string;
   name: string;
+  status?: string | null;
   layout_type?: string | null;
 };
 
@@ -264,6 +265,38 @@ export function ComparisonWorkspace({
 
   const refreshMatrix = async () => {
     if (assembly?.id) await loadMatrix(assembly.id);
+  };
+
+  const deactivateAssembly = async () => {
+    if (!assembly?.id) return;
+    const confirmed = window.confirm(
+      '将清空并停用本对比矩阵，后续生成的报告不再呈现；已冻结报告不受影响。是否继续？',
+    );
+    if (!confirmed) return;
+
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/comparison-assemblies/${assembly.id}`, {
+        method: assembly.status === 'draft' ? 'DELETE' : 'PUT',
+        headers: assembly.status === 'draft' ? undefined : { 'Content-Type': 'application/json' },
+        body: assembly.status === 'draft' ? undefined : JSON.stringify({ status: 'archived' }),
+      });
+      const data = await res.json() as ApiResponse<unknown>;
+      if (data.code !== 0) {
+        toast.error(data.message || '对比矩阵停用失败');
+        return;
+      }
+      setAssembly(null);
+      setMatrix(null);
+      setCellMediaById({});
+      collapseInitialized.current = false;
+      await loadAssembly();
+      toast.success('对比矩阵已清空并停用');
+    } catch {
+      toast.error('对比矩阵停用失败，请重试');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const createObject = async () => {
@@ -572,8 +605,16 @@ export function ComparisonWorkspace({
         <div className="space-y-2">
           <div className="flex items-start justify-between gap-2">
             <span className="text-sm font-semibold text-amber-950">{node.node_label || '本大类小结'}</span>
-            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => void deleteNode(node.id)}>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1 px-2 text-destructive"
+              onClick={() => void deleteNode(node.id)}
+              aria-label={`删除小结 ${node.node_label}`}
+              title={`删除小结 ${node.node_label}`}
+            >
               <Trash2 className="h-3.5 w-3.5" />
+              删除
             </Button>
           </div>
           <p className="text-[11px] leading-4 text-amber-900/80">报告中横跨全部对比对象展示</p>
@@ -653,6 +694,18 @@ export function ComparisonWorkspace({
               <Badge variant="secondary">{nodeStats.sections} 个大类</Badge>
               <Badge variant="secondary">{nodeStats.items} 个细项</Badge>
               <Badge variant="secondary">{nodeStats.summaries} 个小结</Badge>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5 text-destructive"
+                onClick={() => void deactivateAssembly()}
+                disabled={busy}
+                aria-label="清空并停用对比矩阵"
+                title="清空并停用对比矩阵"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                清空并停用对比矩阵
+              </Button>
             </div>
           </div>
           <div className="grid gap-3 lg:grid-cols-2">
@@ -703,14 +756,15 @@ export function ComparisonWorkspace({
                               </button>
                             </div>
                             <Button
-                              size="icon"
-                              variant="ghost"
-                              className="absolute right-1 top-1 h-7 w-7"
+                              size="sm"
+                              variant="outline"
+                              className="absolute right-1 top-1 h-7 gap-1 px-2 text-destructive"
                               onClick={() => void deleteObject(object.id)}
-                              aria-label="删除对象"
-                              title="删除对象"
+                              aria-label={`删除对象 ${object.object_name}`}
+                              title={`删除对象 ${object.object_name}`}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
+                              删除
                             </Button>
                           </>
                         )}
@@ -796,14 +850,15 @@ export function ComparisonWorkspace({
                                     小结
                                   </Button>
                                   <Button
-                                    size="icon"
-                                    variant="ghost"
-                                    className="h-8 w-8"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 gap-1 px-2 text-destructive"
                                     onClick={() => void deleteNode(node.id)}
-                                    aria-label="删除大类"
-                                    title="删除大类"
+                                    aria-label={`删除大类 ${node.node_label}`}
+                                    title={`删除大类 ${node.node_label}`}
                                   >
                                     <Trash2 className="h-3.5 w-3.5" />
+                                    删除
                                   </Button>
                                 </div>
                               </div>
@@ -856,14 +911,15 @@ export function ComparisonWorkspace({
                                 {node.node_label}
                               </button>
                               <Button
-                                size="icon"
-                                variant="ghost"
-                                className="absolute right-1 top-1 h-6 w-6"
+                                size="sm"
+                                variant="outline"
+                                className="absolute right-1 top-1 h-6 gap-1 px-1.5 text-destructive"
                                 onClick={() => void deleteNode(node.id)}
-                                aria-label="删除细项"
-                                title="删除细项"
+                                aria-label={`删除细项 ${node.node_label}`}
+                                title={`删除细项 ${node.node_label}`}
                               >
                                 <Trash2 className="h-3 w-3" />
+                                删除
                               </Button>
                             </>
                           )}

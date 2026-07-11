@@ -77,6 +77,14 @@ function asRows(value: unknown): Row[] {
   return Array.isArray(value) ? (value as Row[]) : [];
 }
 
+export function selectActiveAssemblyForTask(rows: Row[], taskId: string): Row | null {
+  return rows.find((assembly) =>
+    assembly.status !== 'archived'
+      && Array.isArray(assembly.source_task_ids)
+      && assembly.source_task_ids.includes(taskId),
+  ) || null;
+}
+
 function stringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.map((item) => String(item || '')).filter(Boolean)
@@ -209,11 +217,7 @@ export async function findAssemblyForTask(
     .select('*')
     .order('created_at', { ascending: false });
 
-  const assemblyFromSource = Array.isArray(assemblies)
-    ? assemblies.find((assembly: Record<string, unknown>) =>
-      Array.isArray(assembly.source_task_ids) && assembly.source_task_ids.includes(taskId)
-    )
-    : null;
+  const assemblyFromSource = selectActiveAssemblyForTask(asRows(assemblies), taskId);
   if (assemblyFromSource) return rowToDTO(assemblyFromSource);
 
   const { data: objectRow } = await client
@@ -370,7 +374,7 @@ export async function getAssembly(client: ClientLike, id: string): Promise<Assem
     .select('*')
     .eq('id', id)
     .maybeSingle();
-  return data ? rowToDTO(data) : null;
+  return data && data.status !== 'archived' ? rowToDTO(data) : null;
 }
 
 /**

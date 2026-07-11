@@ -10,6 +10,13 @@ assert.deepEqual(matrixLifecyclePatch('archive', now, 'user_delete'), {
   updated_at: now,
 });
 
+assert.deepEqual(matrixLifecyclePatch('clear_and_archive', now, 'user_clear'), {
+  status: 'archived',
+  archived_at: now,
+  archived_reason: 'user_clear',
+  updated_at: now,
+});
+
 assert.deepEqual(matrixLifecyclePatch('restore', now), {
   status: 'active',
   archived_at: null,

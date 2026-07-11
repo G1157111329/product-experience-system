@@ -182,8 +182,11 @@ test('first matrix entry auto-creates one default matrix and reuses it after tab
     const duplicatePayloads = await Promise.all(duplicatePosts.map((response) => response.json()));
     expect(duplicatePayloads.map((payload) => payload.data.created).sort()).toEqual([false, false]);
 
-    page.once('dialog', (dialog) => dialog.accept());
-    await page.getByRole('button', { name: '删除矩阵', exact: true }).click();
+    page.once('dialog', (dialog) => {
+      expect(dialog.message()).toBe('将清空本矩阵的单元格、问题、小结和素材关联，并移入回收区。矩阵将不进入后续生成的报告；已冻结报告不受影响。是否继续？');
+      void dialog.accept();
+    });
+    await page.getByRole('button', { name: /清空并停用矩阵/ }).first().click();
     await expect.poll(async () => {
       const response = await page.request.get(`/api/v1/tasks/${taskId}/matrix-tab-state`);
       const payload = await response.json();
@@ -196,6 +199,7 @@ test('first matrix entry auto-creates one default matrix and reuses it after tab
     const activeMatrices = recreatedPayload.data.matrices.filter((matrix: { status: string }) => matrix.status !== 'archived');
     expect(activeMatrices).toHaveLength(1);
     expect(activeMatrices[0].id).not.toBe(matrixId);
+    expect(recreatedPayload.data.matrices).toContainEqual(expect.objectContaining({ id: matrixId, status: 'archived' }));
     matrixId = activeMatrices[0].id as string;
   } finally {
     if (matrixId) {

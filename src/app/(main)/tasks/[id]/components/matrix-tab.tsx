@@ -94,26 +94,26 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
   const autoCreateStartedRef = useRef(false);
   const activeMatrixCount = matrices.filter((matrix) => matrix.status !== 'archived').length;
 
-  const handleLifecycle = async (matrixId: string, action: 'archive' | 'restore') => {
-    const prompt = action === 'archive'
-      ? '删除后矩阵会进入回收区，已冻结报告不受影响。确认删除？'
+  const handleLifecycle = async (matrixId: string, action: 'clear_and_archive' | 'restore') => {
+    const prompt = action === 'clear_and_archive'
+      ? '将清空本矩阵的单元格、问题、小结和素材关联，并移入回收区。矩阵将不进入后续生成的报告；已冻结报告不受影响。是否继续？'
       : '确认恢复该数据矩阵？';
     if (!window.confirm(prompt)) return;
     try {
       const res = await fetch(`/api/v1/matrices/${matrixId}/lifecycle`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, reason: action === 'archive' ? 'user_delete' : undefined }),
+        body: JSON.stringify({ action, reason: action === 'clear_and_archive' ? 'user_clear' : undefined }),
       });
       const json = await res.json();
       if (json.code !== 0) {
         toast.error(json.message || '操作失败');
         return;
       }
-      if (action === 'archive') autoCreateStartedRef.current = false;
+      if (action === 'clear_and_archive') autoCreateStartedRef.current = false;
       if (selectedMatrixId === matrixId) setSelectedMatrixId(null);
       await fetchTabState();
-      toast.success(action === 'archive' ? '矩阵已移入回收区' : '矩阵已恢复');
+      toast.success(action === 'clear_and_archive' ? '矩阵内容已停用并移入回收区' : '矩阵已恢复');
     } catch {
       toast.error('操作失败，请重试');
     }
@@ -225,14 +225,15 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
               </Badge>
               {matrix.status !== 'archived' && (
                 <Button
-                  variant="ghost"
-                  size="icon"
-                  className="ml-auto h-8 w-8 text-destructive"
-                  title="删除矩阵"
-                  aria-label="删除矩阵"
-                  onClick={() => void handleLifecycle(matrix.id, 'archive')}
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto gap-1.5 text-destructive"
+                  title="清空并停用矩阵"
+                  aria-label="清空并停用矩阵"
+                  onClick={() => void handleLifecycle(matrix.id, 'clear_and_archive')}
                 >
                   <Trash2 className="h-4 w-4" />
+                  清空并停用
                 </Button>
               )}
             </>
@@ -371,17 +372,18 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
                     </span>
                   </Badge>
                   <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-destructive"
-                    title="删除矩阵"
-                    aria-label={`删除矩阵 ${m.name}`}
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 text-destructive"
+                    title="清空并停用矩阵"
+                    aria-label={`清空并停用矩阵 ${m.name}`}
                     onClick={(event) => {
                       event.stopPropagation();
-                      void handleLifecycle(m.id, 'archive');
+                      void handleLifecycle(m.id, 'clear_and_archive');
                     }}
                   >
                     <Trash2 className="h-4 w-4" />
+                    清空并停用
                   </Button>
                 </div>
               </div>
