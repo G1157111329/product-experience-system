@@ -31,6 +31,9 @@ export function hasMeaningfulComparisonCell(value: unknown): boolean {
   return (
     nonBlank(cell.effect_summary) ||
     nonBlank(cell.conclusion) ||
+    nonBlank(cell.manual_score) ||
+    nonBlank(cell.ai_score) ||
+    nonBlank(cell.conclusion_tag) ||
     nonBlank(cell.process_notes) ||
     nonBlankList(cell.problem_points) ||
     meaningfulParam(cell.params)
@@ -40,14 +43,23 @@ export function hasMeaningfulComparisonCell(value: unknown): boolean {
 function meaningfulV2Metric(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false;
   const metric = value as UnknownRecord;
-  if (metric.state !== 'valid') return false;
+  const state = metric.state ?? metric.valueState;
+  const resultStatus = metric.resultStatus ?? metric.result_status;
+  if (resultStatus === 'pending') return false;
+  if (state !== 'valid' && state !== 'filled') return false;
   return (
     nonBlank(metric.value) ||
     nonBlank(metric.durationMs) ||
     nonBlank(metric.text) ||
     nonBlank(metric.display) ||
     nonBlank(metric.valueText) ||
-    nonBlank(metric.valueNumber)
+    nonBlank(metric.valueNumber) ||
+    nonBlank(metric.numericValue) ||
+    nonBlank(metric.textValue) ||
+    nonBlank(metric.booleanValue) ||
+    nonBlank(metric.enumValue) ||
+    nonBlank(metric.dateTimeValue) ||
+    state === 'filled'
   );
 }
 
@@ -65,6 +77,21 @@ function meaningfulV2Row(row: unknown): boolean {
     nonBlank(process?.note) ||
     (typeof issues?.count === 'number' && issues.count > 0)
   ) return true;
+
+  const metrics = record.metrics;
+  if (metrics && typeof metrics === 'object' && !Array.isArray(metrics)) {
+    if (Object.values(metrics as UnknownRecord).some(meaningfulV2Metric)) return true;
+  }
+
+  const evidence = record.evidence;
+  if (evidence && typeof evidence === 'object' && !Array.isArray(evidence)) {
+    const evidenceRecord = evidence as UnknownRecord;
+    if (
+      (typeof evidenceRecord.primaryCount === 'number' && evidenceRecord.primaryCount > 0) ||
+      nonBlankList(evidenceRecord.previewIds) ||
+      (Array.isArray(evidenceRecord.media) && evidenceRecord.media.length > 0)
+    ) return true;
+  }
 
   const values = record.values;
   if (values && typeof values === 'object' && !Array.isArray(values)) {
@@ -113,6 +140,13 @@ function meaningfulV3Cell(value: unknown): boolean {
   );
 }
 
+function meaningfulV3ReportRow(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const cells = (value as UnknownRecord).cells;
+  return !!cells && typeof cells === 'object' && !Array.isArray(cells)
+    && Object.values(cells as UnknownRecord).some(nonBlank);
+}
+
 /** Detects substantive values, media, narratives, or issue points in V3. */
 export function hasMeaningfulV3Projection(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false;
@@ -121,6 +155,8 @@ export function hasMeaningfulV3Projection(value: unknown): boolean {
   if (cells && typeof cells === 'object' && !Array.isArray(cells)) {
     if (Object.values(cells as UnknownRecord).some(meaningfulV3Cell)) return true;
   }
+
+  if (Array.isArray(projection.rows) && projection.rows.some(meaningfulV3ReportRow)) return true;
 
   const cellMedia = projection.cellMedia;
   if (cellMedia && typeof cellMedia === 'object' && !Array.isArray(cellMedia)) {
