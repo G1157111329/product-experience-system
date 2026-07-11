@@ -16,28 +16,26 @@ test('顶部任务栏呈现上下文状态和两个主操作', async ({ page }) 
   await expect(page.getByRole('button', { name: '生成总结', exact: true })).toHaveCount(1);
   await expect(page.getByRole('button', { name: '生成报告', exact: true })).toHaveCount(1);
 
-  for (const label of ['五感体验', '单一食谱功能', '数据矩阵', '对比矩阵', '报告信息', '问题管理']) {
+  for (const label of ['五感体验', '单一食谱功能', '数据矩阵', '对比矩阵', '报告信息']) {
     await expect(context.getByText(label, { exact: true })).toBeVisible();
   }
+  await expect(context.getByText('问题管理', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('录入目录', { exact: true })).toHaveCount(0);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
 });
 
-test('素材证据位于主工作区底部而非录入目录', async ({ page }) => {
+test('素材证据是唯一底部素材区并使用紧凑添加入口', async ({ page }) => {
   await page.goto('/tasks/golden-task-single');
-  await page.getByRole('button', { name: '功能效果', exact: true }).click();
-
-  const directory = page.getByRole('complementary').filter({
-    has: page.getByRole('heading', { name: '录入目录', exact: true }),
-  });
-  await expect(directory).toBeVisible();
-  await expect(directory.getByRole('heading', { name: '素材证据', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: /单一食谱功能/ }).click();
 
   const evidenceRegion = page.getByRole('region', { name: '任务级素材证据' });
   await expect(evidenceRegion).toBeVisible();
   await expect(evidenceRegion.locator('[data-slot="scroll-area-viewport"]')).toBeVisible();
-  await expect(evidenceRegion.getByRole('button', { name: '相册图片', exact: true })).toBeVisible();
+  await expect(evidenceRegion.getByRole('button', { name: /添加素材/ })).toBeVisible();
+  await expect(evidenceRegion.getByText('可直接粘贴剪贴板图片', { exact: true })).toBeVisible();
+  await expect(page.getByText('问题输出', { exact: true })).toHaveCount(0);
 
   const materialButtons = evidenceRegion.locator('[data-slot="scroll-area-viewport"] button');
   if ((await materialButtons.count()) > 0) {
@@ -67,7 +65,7 @@ test('食谱常态显示食材标签而不是常驻大表单', async ({ page }) 
     recipeId = payload.data.id;
 
     await page.goto('/tasks/golden-task-single');
-    await page.getByRole('button', { name: '功能效果', exact: true }).click();
+    await page.getByRole('button', { name: /单一食谱功能/ }).click();
     await page.getByText(recipeName, { exact: true }).click();
 
     await expect(page.getByRole('region', { name: '食材参数' })).toHaveCount(0);
@@ -80,10 +78,91 @@ test('食谱常态显示食材标签而不是常驻大表单', async ({ page }) 
 
 test('新建食谱时完整录入结构化食材', async ({ page }) => {
   await page.goto('/tasks/golden-task-single');
-  await page.getByRole('button', { name: '功能效果', exact: true }).click();
+  await page.getByRole('button', { name: /单一食谱功能/ }).click();
   await page.getByRole('button', { name: '新增', exact: true }).click();
 
   await expect(page.getByRole('textbox', { name: '新食材 1 名称' })).toBeVisible();
   await expect(page.getByRole('textbox', { name: '新食材 1 克重' })).toBeVisible();
   await expect(page.getByRole('textbox', { name: '新食材 1 单位' })).toBeVisible();
+});
+
+test('食谱问题点失焦后自动进入问题管理，无需二次确认', async ({ page }) => {
+  const recipeName = `自动问题同步-${Date.now()}`;
+  const issueTitle = `口感偏粗-${Date.now()}`;
+  let recipeId = '';
+  let issueId = '';
+  try {
+    const recipeResponse = await page.request.post('/api/recipes', {
+      data: { task_id: 'golden-task-single', name: recipeName, recipe_type: '功能', ingredients: '' },
+    });
+    const recipePayload = await recipeResponse.json();
+    expect(recipePayload.code, recipePayload.message).toBe(0);
+    recipeId = recipePayload.data.id as string;
+
+    await page.goto('/tasks/golden-task-single');
+    await page.getByRole('button', { name: /单一食谱功能/ }).click();
+    await page.getByText(recipeName, { exact: true }).click();
+    await page.getByRole('button', { name: '新增问题点', exact: true }).click();
+    const problemInput = page.getByPlaceholder('描述问题点...').last();
+    await problemInput.fill(issueTitle);
+    await problemInput.blur();
+
+    await expect.poll(async () => {
+      const response = await page.request.get(`/api/issues?recipe_id=${encodeURIComponent(recipeId)}&limit=20`);
+      const payload = await response.json();
+      const issue = payload.data?.list?.find((item: { title: string }) => item.title === issueTitle);
+      issueId = issue?.id || '';
+      return Boolean(issue);
+    }).toBe(true);
+    await expect(page.getByText('问题输出', { exact: true })).toHaveCount(0);
+  } finally {
+    if (issueId) await page.request.delete(`/api/issues/${issueId}`);
+    if (recipeId) await page.request.delete(`/api/recipes/${recipeId}`);
+  }
+});
+
+test('素材区支持粘贴图片并从原图预览进入完整编辑器', async ({ page }) => {
+  const fileName = `e2e-paste-${Date.now()}.png`;
+  let materialId = '';
+  let uploadedFileName = '';
+  try {
+    await page.goto('/tasks/golden-task-single');
+    await page.getByRole('button', { name: /单一食谱功能/ }).click();
+    await expect(page.getByTestId('task-evidence-upload')).toBeVisible();
+    const beforeResponse = await page.request.get('/api/materials?task_id=golden-task-single');
+    const beforePayload = await beforeResponse.json();
+    const existingIds = new Set<string>((beforePayload.data || []).map((item: { id: string }) => item.id));
+
+    await page.getByTestId('task-evidence-upload').evaluate((element, name) => {
+      const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='), (char) => char.charCodeAt(0));
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([bytes], name, { type: 'image/png' }));
+      const event = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', { value: transfer });
+      element.dispatchEvent(event);
+    }, fileName);
+
+    await expect.poll(async () => {
+      const response = await page.request.get('/api/materials?task_id=golden-task-single');
+      const payload = await response.json();
+      const material = payload.data?.find((item: { id: string; material_type: string }) => !existingIds.has(item.id) && item.material_type === 'image');
+      materialId = material?.id || '';
+      uploadedFileName = material?.file_name || '';
+      return Boolean(material);
+    }).toBe(true);
+
+    const materialButton = page.getByText(uploadedFileName, { exact: true }).locator('xpath=ancestor::button');
+    await expect(materialButton).toBeVisible();
+    await materialButton.dblclick();
+    await page.getByRole('button', { name: '编辑图片' }).click();
+    const editor = page.getByRole('dialog', { name: '编辑图片' });
+    await expect(editor).toBeVisible();
+    await expect(editor.getByRole('button', { name: '裁剪' })).toBeVisible();
+    await expect(editor.getByRole('button', { name: '画笔' })).toBeVisible();
+    await expect(editor.getByRole('button', { name: '水平翻转' })).toBeVisible();
+    await expect(editor.getByRole('button', { name: '垂直翻转' })).toBeVisible();
+    await expect(editor.getByRole('button', { name: '撤销编辑' })).toBeVisible();
+  } finally {
+    if (materialId) await page.request.delete(`/api/materials?id=${materialId}`);
+  }
 });

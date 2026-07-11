@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-export type TaskAuthoringSection = 'senses' | 'functions' | 'matrix' | 'comparison' | 'info' | 'issues';
+export type TaskAuthoringSection = 'senses' | 'functions' | 'matrix' | 'comparison' | 'info';
 
 type TaskStatusCard = {
   label: string;
@@ -60,7 +60,6 @@ export function TaskAuthoringHeader({
     { label: '数据矩阵', value: hasMatrixInstance ? '已创建' : '未创建', section: 'matrix', available: hasMatrixInstance },
     { label: '对比矩阵', value: hasComparisonInstance ? '已创建' : '未创建', section: 'comparison', available: hasComparisonInstance },
     { label: '报告信息', value: hasAiSummary ? '已有总结' : '待生成', section: 'info' },
-    { label: '问题管理', value: `${issueCount} 个问题`, section: 'issues' },
   ];
 
   return (
@@ -93,7 +92,7 @@ export function TaskAuthoringHeader({
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+      <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
         {cards.map((card) => (
           <button
             key={card.label}

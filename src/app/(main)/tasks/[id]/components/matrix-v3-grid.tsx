@@ -40,7 +40,6 @@ import type {
 import { cellKey, styleKey } from '@/lib/matrix/v3-types';
 import { MatrixFormulaEditor } from './matrix-formula-editor';
 import { MatrixV3MediaCell } from './matrix-v3-media-cell';
-import { MatrixMaterialStagingRail } from './matrix-material-staging-rail';
 import {
   MatrixSummarySuggestionsDialog,
   type SummarySuggestion,
@@ -56,8 +55,6 @@ interface MatrixV3GridProps {
   onChanged: () => void;
   /** When false, formula editor is hidden (feature flag). Default true for Wave 3. */
   formulaEnabled?: boolean;
-  /** Wave 4 staging rail. */
-  stagingEnabled?: boolean;
   /** Wave 5 Hermes matrix summary. */
   hermesEnabled?: boolean;
   /** P1 cell/column-header style toolbar. Default true. */
@@ -153,7 +150,6 @@ export function MatrixV3Grid({
   projection,
   onChanged,
   formulaEnabled = true,
-  stagingEnabled = true,
   hermesEnabled = true,
   cellStyleEnabled = true,
 }: MatrixV3GridProps) {
@@ -545,7 +541,7 @@ export function MatrixV3Grid({
         )}
       </div>
 
-      <div className={cn('gap-3', stagingEnabled ? 'lg:grid lg:grid-cols-[1fr_200px]' : '')}>
+      <div>
         <div className="space-y-3 min-w-0">
       {/* Mobile card layout (PRD §7.15) */}
       <MatrixV3Mobile
@@ -756,16 +752,7 @@ export function MatrixV3Grid({
       </div>
         </div>
 
-        {stagingEnabled && (
-          <MatrixMaterialStagingRail taskId={taskId} className="hidden lg:flex sticky top-2 self-start" />
-        )}
       </div>
-
-      {stagingEnabled && (
-        <div className="lg:hidden">
-          <MatrixMaterialStagingRail taskId={taskId} />
-        </div>
-      )}
 
       {pickMode && formulaColumn && (
         <div className="sticky bottom-0 z-30 rounded-md border border-primary/40 bg-primary/5 px-3 py-2 text-sm flex items-center justify-between gap-2">
@@ -1085,20 +1072,60 @@ function MatrixV3Cell({
   // Default: text / long_text → inline editable via cells PUT (creates row if missing).
   return (
     <div className="px-1 py-0.5">
-      <InlineEditable.Text
+      <InlineCellText
+        matrixId={matrixId}
+        leafRowId={leafRowId}
+        columnId={column.id}
         value={cell?.valueText ?? ''}
-        placeholder="…"
-        onSave={async (v) => {
-          await putMatrixCellValue({
-            matrixId,
-            leafRowId,
-            columnId: column.id,
-            valueText: v,
-          });
-          onChanged();
-        }}
-        inputClassName="h-7 text-xs"
+        onChanged={onChanged}
       />
+    </div>
+  );
+}
+
+function InlineCellText({
+  matrixId,
+  leafRowId,
+  columnId,
+  value,
+  onChanged,
+}: {
+  matrixId: string;
+  leafRowId: string;
+  columnId: string;
+  value: string;
+  onChanged: () => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setDraft(value), [value]);
+
+  const save = async () => {
+    if (draft === value) return;
+    setSaving(true);
+    try {
+      await putMatrixCellValue({ matrixId, leafRowId, columnId, valueText: draft });
+      onChanged();
+    } catch {
+      toast.error('保存失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-1">
+      <Input
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => void save()}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.nativeEvent.isComposing) event.currentTarget.blur();
+        }}
+        className="h-7 text-xs"
+        aria-label="矩阵单元格"
+      />
+      {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
     </div>
   );
 }
@@ -1179,20 +1206,31 @@ function MatrixV3IssueCell({
   onChanged: () => void;
 }) {
   const [converting, setConverting] = useState(false);
+  const [draft, setDraft] = useState(issuePoint?.issueText ?? '');
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setDraft(issuePoint?.issueText ?? ''), [issuePoint?.issueText]);
 
-  const saveText = async (v: string) => {
-    if (issuePoint?.id) {
-      await patchInlineValue('matrix_issue_point', issuePoint.id, 'issue_text', v);
-    } else if (v.trim()) {
-      const res = await fetch(`/api/v1/matrices/${matrixId}/issue-points`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ leafRowId, columnId, issueText: v }),
-      });
-      const json = await res.json();
-      if (json.code !== 0) throw new Error(json.message || '保存问题点失败');
+  const saveText = async () => {
+    if (draft === (issuePoint?.issueText ?? '')) return;
+    setSaving(true);
+    try {
+      if (issuePoint?.id) {
+        await patchInlineValue('matrix_issue_point', issuePoint.id, 'issue_text', draft);
+      } else if (draft.trim()) {
+        const res = await fetch(`/api/v1/matrices/${matrixId}/issue-points`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ leafRowId, columnId, issueText: draft }),
+        });
+        const json = await res.json();
+        if (json.code !== 0) throw new Error(json.message || '保存问题点失败');
+      }
+      onChanged();
+    } catch {
+      toast.error('保存问题点失败');
+    } finally {
+      setSaving(false);
     }
-    onChanged();
   };
 
   const convertToIssue = async () => {
@@ -1218,12 +1256,18 @@ function MatrixV3IssueCell({
 
   return (
     <div className="px-1 py-0.5 min-h-[28px] space-y-1">
-      <InlineEditable.Text
-        value={issuePoint?.issueText ?? ''}
+      <Input
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
         placeholder="问题点…"
-        onSave={saveText}
-        inputClassName="h-7 text-xs"
+        onBlur={() => void saveText()}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.nativeEvent.isComposing) event.currentTarget.blur();
+        }}
+        className="h-7 text-xs"
+        aria-label="矩阵问题点"
       />
+      {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
       {issuePoint?.id && !issuePoint.linkedIssueId && (
         <Button
           type="button"

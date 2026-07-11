@@ -34,13 +34,13 @@ import {
   initializeEffectProblemPoints,
   updateEffectProblemPoints,
 } from '@/lib/effect-problem-points';
+import { buildRecipeIssuePayload } from '@/lib/recipe-issue-output';
 import { AgentPresetPanel } from './components/agent-preset-panel';
 import { AgentAssistPanel } from './components/agent-assist-panel';
 import { MaterialEvidenceRail } from './components/material-evidence-rail';
 import { ReportAuthoringShell } from './components/report-authoring-shell';
 import { SensesInputWorkspace } from './components/senses-input-workspace';
 import { FunctionsInputWorkspace } from './components/functions-input-workspace';
-import { RecipeIssueOutputPanel } from './components/recipe-issue-output-panel';
 import { ComparisonWorkspace } from './components/comparison-workspace';
 import { MatrixTab } from './components/matrix-tab';
 import { TaskAuthoringHeader, type TaskAuthoringSection } from './components/task-authoring-header';
@@ -427,13 +427,7 @@ export default function TaskDetailPage() {
         onBack={() => router.back()}
         onGenerateSummary={aiSummary ? openAiSummaryDialog : handleGenerateAiSummary}
         onGenerateReport={handleRequestGenerateReport}
-        onOpenSection={(section: TaskAuthoringSection) => {
-          if (section === 'issues') {
-            router.push(`/issues?task_id=${encodeURIComponent(id)}`);
-            return;
-          }
-          setActiveTab(section);
-        }}
+        onOpenSection={(section: TaskAuthoringSection) => setActiveTab(section)}
         transferAction={isAdmin ? (
           <Button variant="outline" size="sm" className="w-full min-w-0 sm:w-auto" onClick={handleOpenTransfer}>
             <ArrowRightLeft className="mr-1.5 h-4 w-4" /> 转移
@@ -476,7 +470,7 @@ export default function TaskDetailPage() {
           <MatrixTab taskId={id} taskName={task.task_name} />
         )}
         {activeTab === 'senses' && <SensesTab taskId={id} records={task.records || []} taskProductCategory={task.product_category} taskProduct={task.product} onRefresh={fetchTask} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onBindingTargetChange={setEvidenceBindingTarget} />}
-        {activeTab === 'functions' && <FunctionsTab taskId={id} productModel={task.product_model} initialRecipes={reportRecipes} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onRecipesChange={setReportRecipes} onBindingTargetChange={setEvidenceBindingTarget} />}
+        {activeTab === 'functions' && <FunctionsTab taskId={id} initialRecipes={reportRecipes} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onRecipesChange={setReportRecipes} onBindingTargetChange={setEvidenceBindingTarget} />}
       </ReportAuthoringShell>
 
       {/* Transfer Dialog */}
@@ -2198,14 +2192,12 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
 /* ─── Tab: 功能效果 ─── */
 function FunctionsTab({
   taskId,
-  productModel,
   initialRecipes,
   onStatusUpdate,
   onRecipesChange,
   onBindingTargetChange,
 }: {
   taskId: string;
-  productModel?: string | null;
   initialRecipes?: Recipe[];
   onStatusUpdate: () => void;
   onRecipesChange?: (recipes: Recipe[]) => void;
@@ -2624,6 +2616,21 @@ function FunctionsTab({
     });
   }, []);
 
+  const syncRecipeIssues = useCallback(async (recipe: Recipe, points: ProblemPoint[]) => {
+    const validPoints = points.filter((point) => point.text.trim());
+    if (validPoints.length === 0) return;
+    const results = await Promise.all(validPoints.map(async (problem) => {
+      const response = await fetch('/api/issues', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildRecipeIssuePayload({ taskId, recipe, problem })),
+      });
+      const result = await response.json().catch(() => ({}));
+      return response.ok && result.code === 0;
+    }));
+    if (results.some((result) => !result)) toast.error('效果评价已保存，但部分问题点同步失败');
+  }, [taskId]);
+
   const persistEffectDraft = useCallback(async (
     recipe: Recipe,
     pps: ProblemPoint[],
@@ -2686,6 +2693,7 @@ function FunctionsTab({
     const pps = effectProblemPoints[recipe.id] ?? recipe.effect_problem_points ?? [];
     const selectedMaterials = effectMaterialIds[recipe.id] ?? (recipe.effect_materials || []).map((material) => material.id);
     const saved = await queueEffectSave(recipe, pps, selectedMaterials, version, true);
+    if (saved) await syncRecipeIssues(recipe, pps);
     if (saved && effectDraftVersionRef.current[recipe.id] === version) {
       setDirtyEffectRecipeIds((current) => {
         const next = new Set(current);
@@ -2952,6 +2960,7 @@ function FunctionsTab({
                         placeholder="描述问题点..."
                         value={pp.text}
                         onChange={(e) => handleUpdateProblemPoint(recipe.id, ppIdx, e.target.value)}
+                        onBlur={() => void handleSaveEffect(recipe)}
                         className="text-xs"
                       />
                       <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
@@ -2987,13 +2996,6 @@ function FunctionsTab({
                   </Button>
                 </div>
               </div>
-              <RecipeIssueOutputPanel
-                taskId={taskId}
-                productModel={productModel}
-                recipe={recipe}
-                problemPoints={pps}
-                ensureDraftSaved={() => handleSaveEffect(recipe)}
-              />
             </div>
           );
         }}

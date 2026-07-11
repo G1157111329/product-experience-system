@@ -2,13 +2,20 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Camera, Check, Film, Image as ImageIcon, Link2, Package, Play, RefreshCw, Trash2, Upload, Video, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent } from 'react';
+import { Camera, Check, ChevronDown, Film, Image as ImageIcon, Link2, Package, Play, RefreshCw, Trash2, Upload, Video, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { useImagePreview } from '@/components/image-preview';
+import { ImageEditorDialog, type SaveMode } from '@/components/image-editor-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { getMediaSrc, isPendingMediaUrl, pendingMediaDataUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import type { EvidenceBindingTarget, Material, MaterialEvidenceFilter } from '../types';
@@ -60,12 +67,13 @@ function getMaterialDisplayUrl(material: Material, signedUrl?: string) {
   return pendingMediaDataUrl;
 }
 
-export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange, embedded = false, compact = false }: MaterialEvidenceRailProps) {
+export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange, embedded = false }: MaterialEvidenceRailProps) {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [filter, setFilter] = useState<MaterialEvidenceFilter>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [editingImage, setEditingImage] = useState<{ id: string; url: string; name: string } | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const cameraImageRef = useRef<HTMLInputElement>(null);
@@ -101,7 +109,7 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
     setSelectedIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
   };
 
-  const handleUpload = async (files: File[] | FileList | null) => {
+  const handleUpload = useCallback(async (files: File[] | FileList | null) => {
     if (!files) return;
     const fileList = Array.from(files);
     if (fileList.length === 0) return;
@@ -134,6 +142,47 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
       }
 
       await fetchMaterials();
+    } finally {
+      setUploading(false);
+    }
+  }, [fetchMaterials, taskId]);
+
+  const handlePaste = (event: ReactClipboardEvent<HTMLElement>) => {
+    const clipboard = event.clipboardData;
+    const filesFromItems = Array.from(clipboard.items || [])
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file));
+    const files = filesFromItems.length > 0
+      ? filesFromItems
+      : Array.from(clipboard.files || []).filter((file) => file.type.startsWith('image/'));
+    if (files.length === 0) return;
+    event.preventDefault();
+    void handleUpload(files);
+  };
+
+  const handleEditImageSave = async (editedFile: File, mode: SaveMode) => {
+    if (!editingImage) return;
+    const formData = new FormData();
+    formData.append('file', editedFile);
+    const overwrite = mode === 'overwrite';
+    if (!overwrite) {
+      formData.append('task_id', taskId);
+      formData.append('copy_source_file_name', editingImage.name);
+    }
+    setUploading(true);
+    try {
+      const res = await fetch(overwrite ? `/api/materials/${editingImage.id}/replace` : '/api/materials/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.code !== 0) throw new Error(data.message || '保存失败');
+      toast.success(overwrite ? '图片已保存，原关联保持不变' : '编辑副本已保存');
+      await fetchMaterials();
+      setEditingImage(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '保存编辑图片失败');
     } finally {
       setUploading(false);
     }
@@ -179,8 +228,15 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
   };
 
   return (
-    <section aria-label="任务级素材证据" className={cn(embedded ? 'space-y-3' : 'rounded-lg border bg-card p-3 shadow-sm')}>
+    <section aria-label="任务级素材证据" data-testid="task-evidence-upload" tabIndex={0} onPaste={handlePaste} className={cn('focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', embedded ? 'space-y-3' : 'rounded-lg border bg-card p-3 shadow-sm')}>
       <PreviewComponent />
+      <ImageEditorDialog
+        open={editingImage !== null}
+        onOpenChange={(nextOpen) => { if (!nextOpen) setEditingImage(null); }}
+        imageUrl={editingImage?.url || ''}
+        fileName={editingImage?.name || 'image'}
+        onSave={handleEditImageSave}
+      />
       {/* 嵌入窄侧栏时始终保持纵向：标题在上，按钮在下，避免按钮块覆盖“素材证据”标题 */}
       <div className="flex flex-col gap-3">
         <div className="min-w-0 flex-1">
@@ -191,41 +247,23 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
           </div>
         </div>
 
-        {compact ? (
-          <div className="grid grid-cols-2 gap-2 lg:flex lg:flex-row lg:gap-1 lg:shrink-0">
-            <Button variant="outline" size="sm" onClick={() => cameraImageRef.current?.click()} disabled={uploading} className="whitespace-nowrap lg:h-7 lg:w-7 lg:px-0 lg:justify-center">
-              <Camera className="mr-1.5 h-4 w-4 lg:mr-0 lg:h-3.5 lg:w-3.5" />
-              <span className="lg:hidden">拍照</span>
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => cameraVideoRef.current?.click()} disabled={uploading} className="whitespace-nowrap lg:h-7 lg:w-7 lg:px-0 lg:justify-center">
-              <Video className="mr-1.5 h-4 w-4 lg:mr-0 lg:h-3.5 lg:w-3.5" />
-              <span className="lg:hidden">录像</span>
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => imageInputRef.current?.click()} disabled={uploading} className="whitespace-nowrap lg:h-7 lg:w-7 lg:px-0 lg:justify-center">
-              <ImageIcon className="mr-1.5 h-4 w-4 lg:mr-0 lg:h-3.5 lg:w-3.5" />
-              <span className="lg:hidden">相册</span>
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => videoInputRef.current?.click()} disabled={uploading} className="whitespace-nowrap lg:h-7 lg:w-7 lg:px-0 lg:justify-center">
-              <Film className="mr-1.5 h-4 w-4 lg:mr-0 lg:h-3.5 lg:w-3.5" />
-              <span className="lg:hidden">视频</span>
-            </Button>
-          </div>
-        ) : (
-          <div className="grid min-w-0 grid-cols-2 gap-2">
-            <Button variant="outline" size="sm" onClick={() => cameraImageRef.current?.click()} disabled={uploading} className="min-w-0 justify-center whitespace-nowrap px-2">
-              <Camera className="mr-1 h-4 w-4 shrink-0" />拍照
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => cameraVideoRef.current?.click()} disabled={uploading} className="min-w-0 justify-center whitespace-nowrap px-2">
-              <Video className="mr-1 h-4 w-4 shrink-0" />录像
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => imageInputRef.current?.click()} disabled={uploading} className="min-w-0 justify-center whitespace-nowrap px-2">
-              <ImageIcon className="mr-1 h-4 w-4 shrink-0" />相册图片
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => videoInputRef.current?.click()} disabled={uploading} className="min-w-0 justify-center whitespace-nowrap px-2">
-              <Film className="mr-1 h-4 w-4 shrink-0" />相册视频
-            </Button>
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" disabled={uploading} className="whitespace-nowrap">
+                <Upload className="mr-1.5 h-4 w-4" />{uploading ? '上传中…' : '添加素材'}
+                <ChevronDown className="ml-1.5 h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => cameraImageRef.current?.click()}><Camera className="h-4 w-4" />拍照</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => cameraVideoRef.current?.click()}><Video className="h-4 w-4" />录像</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => imageInputRef.current?.click()}><ImageIcon className="h-4 w-4" />选择图片</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => videoInputRef.current?.click()}><Film className="h-4 w-4" />选择视频</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <span className="text-xs text-muted-foreground">可直接粘贴剪贴板图片</span>
+        </div>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -272,7 +310,12 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
                     event.dataTransfer.effectAllowed = 'copy';
                   }}
                   onClick={() => toggleSelected(material.id)}
-                  onDoubleClick={() => { if (previewUrl) open(previewUrl); }}
+                  onDoubleClick={() => {
+                    if (!previewUrl) return;
+                    open(previewUrl, material.material_type === 'image' ? {
+                      onEdit: (resolvedUrl) => setEditingImage({ id: material.id, url: resolvedUrl, name: material.file_name }),
+                    } : undefined);
+                  }}
                   className={cn(
                     'group relative h-24 w-32 shrink-0 overflow-hidden rounded-lg border text-left transition',
                     selected ? 'border-primary ring-2 ring-primary/30' : 'border-border hover:border-primary/60'
@@ -313,7 +356,7 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
             <Button variant="ghost" size="sm" onClick={() => setSelectedIds([])} className="whitespace-nowrap">
               <X className="mr-1.5 h-4 w-4" />取消
             </Button>
-            <Button variant="destructive" size="sm" onClick={handleDeleteSelected} className="whitespace-nowrap">
+            <Button variant="ghost" size="sm" onClick={handleDeleteSelected} className="whitespace-nowrap text-muted-foreground hover:text-destructive">
               <Trash2 className="mr-1.5 h-4 w-4" />删除素材
             </Button>
             <Button size="sm" onClick={handleBindSelected} disabled={!bindingTarget} className="whitespace-nowrap">

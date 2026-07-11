@@ -12,12 +12,13 @@
  */
 import { NextRequest } from 'next/server';
 import { getDb } from '@/storage/database/pg-db';
-import { eq, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull } from 'drizzle-orm';
 import { matrixColumnDefinitions } from '@/storage/database/shared/schema';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessMatrix, requireUser, isAuthResponse } from '@/lib/server/auth';
 import { ok, fail } from '@/lib/server/api-v1/response';
 import { resolveTraceId } from '@/lib/server/api-v1/trace';
+import { planMatrixColumnOrder } from '@/lib/matrix/column-order';
 
 export const dynamic = 'force-dynamic';
 
@@ -69,27 +70,26 @@ export async function POST(
   try {
     const db = await getDb();
 
-    // Compute display_order if not provided.
-    let displayOrder = typeof body.displayOrder === 'number' ? body.displayOrder : undefined;
-    if (displayOrder === undefined) {
-      const maxOrderResult = await db
-        .select({ maxOrder: sql<number>`COALESCE(MAX(${matrixColumnDefinitions.displayOrder}), 0) + 10` })
+    const column = await db.transaction(async (tx) => {
+      const existing = await tx
+        .select({
+          id: matrixColumnDefinitions.id,
+          columnZone: matrixColumnDefinitions.columnZone,
+          displayOrder: matrixColumnDefinitions.displayOrder,
+        })
         .from(matrixColumnDefinitions)
-        .where(eq(matrixColumnDefinitions.matrixId, matrixId))
-        .execute();
-      displayOrder = maxOrderResult[0]?.maxOrder ?? 10;
-    }
+        .where(and(eq(matrixColumnDefinitions.matrixId, matrixId), isNull(matrixColumnDefinitions.archivedAt)))
+        .orderBy(asc(matrixColumnDefinitions.displayOrder));
 
-    const [column] = await db
-      .insert(matrixColumnDefinitions)
-      .values({
+      const temporaryOrder = (existing.length + 1) * 1000;
+      const [created] = await tx.insert(matrixColumnDefinitions).values({
         matrixId,
         columnZone,
         zoneRole: (body.zoneRole as string) ?? 'A',
         columnLabel: columnLabel.trim(),
         dataType,
         unitText: (body.unitText as string) ?? null,
-        displayOrder,
+        displayOrder: temporaryOrder,
         desktopWidthPx: typeof body.desktopWidthPx === 'number' ? body.desktopWidthPx : 140,
         isPinned: false,
         isRequired: body.isRequired === true,
@@ -98,9 +98,17 @@ export async function POST(
         resultFormat: (body.resultFormat as string) ?? null,
         decimalPlaces: typeof body.decimalPlaces === 'number' ? body.decimalPlaces : 2,
         createdBy: user.id,
-      })
-      .returning()
-      .execute();
+      }).returning();
+      if (!created) throw new Error('创建列失败');
+
+      const orderPlan = planMatrixColumnOrder(existing, created.id, columnZone);
+      for (const item of orderPlan) {
+        await tx.update(matrixColumnDefinitions)
+          .set({ displayOrder: item.displayOrder, updatedAt: new Date().toISOString() })
+          .where(eq(matrixColumnDefinitions.id, item.id));
+      }
+      return { ...created, displayOrder: orderPlan.find((item) => item.id === created.id)?.displayOrder ?? temporaryOrder };
+    });
 
     return ok(column, traceId, 'created');
   } catch (err) {

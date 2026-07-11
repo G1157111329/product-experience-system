@@ -516,16 +516,16 @@ export function ImageEditorDialog({
               </Button>
             ))}
             <div className="w-px h-6 bg-border mx-1" />
-            <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => handleRotate(-90)}>
+            <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => handleRotate(-90)} aria-label="向左旋转" title="向左旋转">
               <RotateCcw className="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => handleRotate(90)}>
+            <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => handleRotate(90)} aria-label="向右旋转" title="向右旋转">
               <RotateCw className="h-4 w-4" />
             </Button>
-            <Button variant={flipX ? 'secondary' : 'ghost'} size="sm" className="h-8 px-2" onClick={() => setFlipX((value) => !value)}>
+            <Button variant={flipX ? 'secondary' : 'ghost'} size="sm" className="h-8 px-2" onClick={() => setFlipX((value) => !value)} aria-label="水平翻转" title="水平翻转">
               <FlipHorizontal className="h-4 w-4" />
             </Button>
-            <Button variant={flipY ? 'secondary' : 'ghost'} size="sm" className="h-8 px-2" onClick={() => setFlipY((value) => !value)}>
+            <Button variant={flipY ? 'secondary' : 'ghost'} size="sm" className="h-8 px-2" onClick={() => setFlipY((value) => !value)} aria-label="垂直翻转" title="垂直翻转">
               <FlipVertical className="h-4 w-4" />
             </Button>
             <div className="w-px h-6 bg-border mx-1" />
@@ -547,7 +547,7 @@ export function ImageEditorDialog({
               <ZoomIn className="h-4 w-4" />
             </Button>
             <div className="w-px h-6 bg-border mx-1" />
-            <Button variant="ghost" size="sm" className="h-8 px-2" onClick={handleUndo} disabled={actions.length === 0}>
+            <Button variant="ghost" size="sm" className="h-8 px-2" onClick={handleUndo} disabled={actions.length === 0} aria-label="撤销编辑" title="撤销编辑">
               <Undo2 className="h-4 w-4" />
             </Button>
           </div>

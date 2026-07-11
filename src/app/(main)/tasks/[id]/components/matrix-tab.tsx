@@ -85,7 +85,6 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
   const [excelLike, setExcelLike] = useState(true);
   const [formulaEnabled, setFormulaEnabled] = useState(true);
   const [cellStyleEnabled, setCellStyleEnabled] = useState(true);
-  const [stagingEnabled, setStagingEnabled] = useState(true);
   const [hermesEnabled, setHermesEnabled] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [selectedMatrixId, setSelectedMatrixId] = useState<string | null>(null);
@@ -136,8 +135,6 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
       setFormulaEnabled(typeof flagFormula === 'boolean' ? flagFormula : true);
       const flagCellStyle = data.flags?.dynamicMatrixCellStyleEnabled;
       setCellStyleEnabled(typeof flagCellStyle === 'boolean' ? flagCellStyle : true);
-      const flagStaging = data.flags?.materialStagingEnabled;
-      setStagingEnabled(typeof flagStaging === 'boolean' ? flagStaging : true);
       const flagHermes = data.flags?.hermesAgentGatewayEnabled;
       setHermesEnabled(typeof flagHermes === 'boolean' ? flagHermes : true);
       return data;
@@ -225,15 +222,15 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
               </Badge>
               {matrix.status !== 'archived' && (
                 <Button
-                  variant="outline"
-                  size="sm"
-                  className="ml-auto gap-1.5 text-destructive"
+                  variant="ghost"
+                  size="icon"
+                  className="ml-auto h-8 w-8 text-muted-foreground hover:text-destructive"
                   title="清空并停用矩阵"
                   aria-label="清空并停用矩阵"
                   onClick={() => void handleLifecycle(matrix.id, 'clear_and_archive')}
                 >
                   <Trash2 className="h-4 w-4" />
-                  清空并停用
+                  <span className="sr-only">清空并停用</span>
                 </Button>
               )}
             </>
@@ -246,7 +243,6 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
             taskId={taskId}
             formulaEnabled={formulaEnabled}
             cellStyleEnabled={cellStyleEnabled}
-            stagingEnabled={stagingEnabled}
             hermesEnabled={hermesEnabled}
             onBack={() => setSelectedMatrixId(null)}
           />
@@ -459,7 +455,6 @@ function MatrixV3Shell({
   taskId,
   formulaEnabled = true,
   cellStyleEnabled = true,
-  stagingEnabled = true,
   hermesEnabled = true,
   onBack,
 }: {
@@ -467,7 +462,6 @@ function MatrixV3Shell({
   taskId: string;
   formulaEnabled?: boolean;
   cellStyleEnabled?: boolean;
-  stagingEnabled?: boolean;
   hermesEnabled?: boolean;
   onBack: () => void;
 }) {
@@ -476,8 +470,8 @@ function MatrixV3Shell({
   const [error, setError] = useState<string | null>(null);
   const [bootstrapping, setBootstrapping] = useState(false);
 
-  const fetchProjection = useCallback(async () => {
-    setLoading(true);
+  const fetchProjection = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoading(true);
     setError(null);
     try {
       const res = await fetch(`/api/v1/matrices/${matrixId}/v3-projection`, { cache: 'no-store' });
@@ -490,7 +484,7 @@ function MatrixV3Shell({
     } catch {
       setError('网络错误');
     } finally {
-      setLoading(false);
+      if (!options?.silent) setLoading(false);
     }
   }, [matrixId]);
 
@@ -581,9 +575,8 @@ function MatrixV3Shell({
       projection={projection}
       formulaEnabled={formulaEnabled}
       cellStyleEnabled={cellStyleEnabled}
-      stagingEnabled={stagingEnabled}
       hermesEnabled={hermesEnabled}
-      onChanged={() => { void fetchProjection(); }}
+      onChanged={() => { void fetchProjection({ silent: true }); }}
     />
   );
 }

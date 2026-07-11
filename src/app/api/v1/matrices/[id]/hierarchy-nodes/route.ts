@@ -14,7 +14,7 @@
  */
 import { NextRequest } from 'next/server';
 import { getDb } from '@/storage/database/pg-db';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
   materialLinks,
   matrixCellValues,
@@ -130,6 +130,27 @@ export async function POST(
         : [];
       if (!parentRows[0]?.parentId) throw new Error('三级细项必须隶属于有效的二级细项');
       level1NodeId = parentRows[0].parentId;
+
+      // The first level-3 item replaces the level-2 placeholder row instead of
+      // creating a second row and leaving the original row as a non-editable dash.
+      const [placeholderRow] = await db
+        .select()
+        .from(matrixLeafRows)
+        .where(and(
+          eq(matrixLeafRows.matrixId, matrixId),
+          eq(matrixLeafRows.level2NodeId, level2NodeId!),
+          isNull(matrixLeafRows.level3NodeId),
+          eq(matrixLeafRows.status, 'active'),
+        ))
+        .limit(1);
+      if (placeholderRow) {
+        const [updatedRow] = await db.update(matrixLeafRows)
+          .set({ level3NodeId: node.id })
+          .where(eq(matrixLeafRows.id, placeholderRow.id))
+          .returning();
+        created.leafRow = updatedRow;
+        return ok(created, traceId, 'created');
+      }
     }
 
     // Compute next visible_row_index.
