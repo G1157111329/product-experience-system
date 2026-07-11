@@ -6,7 +6,9 @@
  * Default view_mode = excel_like_dynamic_matrix (PRD §13.2).
  */
 import { NextRequest } from 'next/server';
+import { sql } from 'drizzle-orm';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { getDb } from '@/storage/database/pg-db';
 import { canAccessTask, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
 import { bootstrapV3MatrixView } from '@/lib/matrix/bootstrap-v3';
@@ -15,6 +17,24 @@ import { ok, fail } from '@/lib/server/api-v1/response';
 import { resolveTraceId } from '@/lib/server/api-v1/trace';
 
 export const dynamic = 'force-dynamic';
+
+const inFlightCreates = new Map<string, Promise<void>>();
+
+function matrixResponseData(matrix: Record<string, unknown>, created: boolean, viewDefinitionId: string | null) {
+  const currentViewDefinitionId = viewDefinitionId
+    ?? (typeof matrix.current_view_definition_id === 'string' ? matrix.current_view_definition_id : null);
+  return {
+    id: matrix.id,
+    taskId: matrix.task_id,
+    name: matrix.name,
+    description: matrix.description,
+    status: matrix.status,
+    viewMode: currentViewDefinitionId ? 'excel_like_dynamic_matrix' : 'v2_designer',
+    currentViewDefinitionId,
+    createdAt: matrix.created_at,
+    created,
+  };
+}
 
 export async function POST(
   req: NextRequest,
@@ -50,7 +70,43 @@ export async function POST(
   const viewMode = body.view_mode === 'v2_designer' ? 'v2_designer' : 'excel_like_dynamic_matrix';
   const useV3 = viewMode === 'excel_like_dynamic_matrix' && flags.dynamicMatrixExcelLikeViewEnabled;
 
-  const { data, error } = await client
+  const findExisting = async () => client
+    .from('task_matrices')
+    .select('*')
+    .eq('task_id', taskId)
+    .neq('status', 'archived')
+    .order('created_at', { ascending: false })
+    .limit(1);
+  const existingResponse = async (matrix: Record<string, unknown>) => {
+    let viewDefinitionId = typeof matrix.current_view_definition_id === 'string'
+      ? matrix.current_view_definition_id
+      : null;
+    if (!viewDefinitionId) {
+      const db = await getDb();
+      const result = await db.execute(sql`
+        SELECT current_view_definition_id
+        FROM task_matrices
+        WHERE id = ${String(matrix.id)}
+        LIMIT 1
+      `);
+      viewDefinitionId = String((result.rows[0] as Record<string, unknown> | undefined)?.current_view_definition_id || '') || null;
+    }
+    return ok(matrixResponseData(matrix, false, viewDefinitionId), traceId, 'existing');
+  };
+
+  const pending = inFlightCreates.get(taskId);
+  if (pending) await pending;
+
+  let releaseCreate!: () => void;
+  const createLock = new Promise<void>((resolve) => { releaseCreate = resolve; });
+  inFlightCreates.set(taskId, createLock);
+
+  try {
+    const existing = await findExisting();
+    if (existing.error) return fail(traceId, { message: existing.error.message, status: 500 });
+    if (existing.data?.[0]) return existingResponse(existing.data[0]);
+
+    const { data, error } = await client
     .from('task_matrices')
     .insert({
       task_id: taskId,
@@ -103,8 +159,13 @@ export async function POST(
       viewMode: useV3 ? 'excel_like_dynamic_matrix' : 'v2_designer',
       currentViewDefinitionId: viewDefinitionId,
       createdAt: data.created_at,
+      created: true,
     },
     traceId,
     'created',
   );
+  } finally {
+    releaseCreate();
+    if (inFlightCreates.get(taskId) === createLock) inFlightCreates.delete(taskId);
+  }
 }

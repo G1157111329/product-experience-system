@@ -133,6 +133,62 @@ test('new data matrix has direct editable default hierarchy and no level-three c
   await page.request.post(`/api/v1/matrices/${matrixId}/lifecycle`, { data: { action: 'archive', reason: 'e2e_cleanup' } });
 });
 
+test('first matrix entry auto-creates one default matrix and reuses it after tab switching', async ({ page }) => {
+  const marker = `E2E auto matrix ${Date.now()}`;
+  const taskResponse = await page.request.post('/api/tasks', {
+    data: {
+      task_name: marker,
+      product_category: '通用标准',
+      product: 'E2E',
+      product_model: marker,
+      task_mode: 'single',
+    },
+  });
+  const taskPayload = await taskResponse.json();
+  expect(taskPayload.code, taskPayload.message).toBe(0);
+  const taskId = taskPayload.data.id as string;
+  let matrixId = '';
+
+  try {
+    await page.goto(`/tasks/${taskId}?tab=matrix`);
+    await expect(page.getByRole('button', { name: '新建数据矩阵', exact: true })).toHaveCount(0);
+    await expect(page.getByText('当前任务尚未建立数据矩阵', { exact: true })).toHaveCount(0);
+    await expect(page.locator('input[value="默认大类"]')).toBeVisible();
+
+    const firstState = await page.request.get(`/api/v1/tasks/${taskId}/matrix-tab-state`);
+    const firstPayload = await firstState.json();
+    expect(firstPayload.code, firstPayload.message).toBe(0);
+    expect(firstPayload.data.state).toBe('ready');
+    expect(firstPayload.data.matrices.filter((matrix: { status: string }) => matrix.status !== 'archived')).toHaveLength(1);
+    matrixId = firstPayload.data.matrices.find((matrix: { status: string }) => matrix.status !== 'archived').id as string;
+
+    await page.goto(`/tasks/${taskId}?tab=info`);
+    await expect(page.getByRole('heading', { name: marker, exact: true })).toBeVisible();
+    await page.goto(`/tasks/${taskId}?tab=matrix`);
+    await expect(page.locator('input[value="默认大类"]')).toBeVisible();
+
+    const secondState = await page.request.get(`/api/v1/tasks/${taskId}/matrix-tab-state`);
+    const secondPayload = await secondState.json();
+    expect(secondPayload.data.matrices.filter((matrix: { status: string }) => matrix.status !== 'archived')).toHaveLength(1);
+    expect(secondPayload.data.matrices[0].id).toBe(matrixId);
+
+    const duplicatePosts = await Promise.all([
+      page.request.post(`/api/v1/tasks/${taskId}/matrices`, { data: { name: `${marker} - 数据矩阵1`, view_mode: 'excel_like_dynamic_matrix' } }),
+      page.request.post(`/api/v1/tasks/${taskId}/matrices`, { data: { name: `${marker} - 数据矩阵1`, view_mode: 'excel_like_dynamic_matrix' } }),
+    ]);
+    for (const response of duplicatePosts) {
+      expect(response.ok(), `${response.status()} ${await response.text()}`).toBeTruthy();
+    }
+    const duplicatePayloads = await Promise.all(duplicatePosts.map((response) => response.json()));
+    expect(duplicatePayloads.map((payload) => payload.data.created).sort()).toEqual([false, false]);
+  } finally {
+    if (matrixId) {
+      await page.request.post(`/api/v1/matrices/${matrixId}/lifecycle`, { data: { action: 'archive', reason: 'e2e_cleanup' } });
+    }
+    await page.request.delete(`/api/tasks/${taskId}`);
+  }
+});
+
 test('comparison categories default collapsed and names autosave without check buttons', async ({ page }) => {
   const initResponse = await page.request.get('/api/tasks/golden-task-comparison/comparison/init');
   const initPayload = await initResponse.json();

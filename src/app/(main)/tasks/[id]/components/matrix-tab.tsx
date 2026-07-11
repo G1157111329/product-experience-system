@@ -9,9 +9,9 @@
  *   - Otherwise falls back to V2 designer / desktop grid
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Plus, Table2, Edit3, AlertCircle, CheckCircle2, Clock, Archive, Loader2, Lock,
+  Table2, Edit3, AlertCircle, CheckCircle2, Clock, Archive, Loader2, Lock,
   Trash2, RotateCcw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -90,6 +90,9 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [selectedMatrixId, setSelectedMatrixId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const autoCreateStartedRef = useRef(false);
+  const activeMatrixCount = matrices.filter((matrix) => matrix.status !== 'archived').length;
 
   const handleLifecycle = async (matrixId: string, action: 'archive' | 'restore') => {
     const prompt = action === 'archive'
@@ -152,9 +155,10 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
     });
   }, [fetchTabState]);
 
-  const handleCreate = async () => {
+  const handleCreate = useCallback(async () => {
     const name = `${taskName} - 数据矩阵${matrices.length + 1}`;
     setCreating(true);
+    setCreateError(null);
     try {
       const endpoint = excelLike
         ? `/api/v1/tasks/${taskId}/matrices`
@@ -176,13 +180,28 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
         await fetchTabState();
       } else {
         toast.error(json.message || '创建失败');
+        setCreateError(json.message || '创建失败，请重试');
+        autoCreateStartedRef.current = false;
       }
     } catch {
       toast.error('创建失败，请重试');
+      setCreateError('创建失败，请重试');
+      autoCreateStartedRef.current = false;
     } finally {
       setCreating(false);
     }
-  };
+  }, [excelLike, fetchTabState, matrices.length, taskId, taskName]);
+
+  useEffect(() => {
+    if (
+      canCreate
+      && (tabState === 'empty' || activeMatrixCount === 0)
+      && !autoCreateStartedRef.current
+    ) {
+      autoCreateStartedRef.current = true;
+      void handleCreate();
+    }
+  }, [activeMatrixCount, canCreate, handleCreate, tabState]);
 
   // ---- Selected matrix detail ----
   if (selectedMatrixId) {
@@ -287,23 +306,23 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
     );
   }
 
-  if (tabState === 'empty' || matrices.length === 0) {
+  if (tabState === 'empty' || activeMatrixCount === 0) {
     return (
       <Card>
-        <CardContent className="py-12 text-center">
-          <Table2 className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-          <h3 className="text-lg font-semibold mb-2">当前任务尚未建立数据矩阵</h3>
-          <p className="text-muted-foreground mb-6 max-w-md mx-auto text-sm">
-            {excelLike
-              ? '创建后即可自定义一级/二级/三级行头与对比维度列，像 Excel 一样直接录入测量数据、评价与问题点。'
-              : '当本次体验需要记录多对象、多场景、多批次或多指标数据时，可创建一份由本次任务自行设计的动态数据矩阵。'}
-          </p>
-          {!canCreate ? (
-            <p className="text-sm text-muted-foreground">功能暂未开放创建，请联系管理员开启。</p>
-          ) : (
-            <Button onClick={() => void handleCreate()} disabled={creating}>
-              {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-              新建数据矩阵
+        <CardContent className="py-5 flex items-center gap-3 text-sm text-muted-foreground">
+          {creating ? <Loader2 className="h-4 w-4 animate-spin shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
+          <span>{creating ? '正在初始化数据矩阵…' : createError || '正在准备数据矩阵…'}</span>
+          {!creating && createError && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto shrink-0"
+              onClick={() => {
+                autoCreateStartedRef.current = true;
+                void handleCreate();
+              }}
+            >
+              重试
             </Button>
           )}
         </CardContent>
@@ -321,12 +340,6 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
             {excelLike ? 'Excel 型动态矩阵 · 用户自定义层级与列' : '自定义设计矩阵'}
           </p>
         </div>
-        {canCreate && (
-            <Button onClick={() => void handleCreate()} disabled={creating} variant="outline" size="sm">
-              {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-              新建
-            </Button>
-        )}
       </div>
 
       <div className="grid gap-3">
