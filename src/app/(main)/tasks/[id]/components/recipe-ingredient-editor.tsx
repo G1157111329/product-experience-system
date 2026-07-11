@@ -27,6 +27,19 @@ export function shouldShowIngredientEditor(recipeType: string) {
   return recipeType === '食谱';
 }
 
+export function formatIngredientTag(item: IngredientDraftItem) {
+  const amount = item.quantity === undefined || item.quantity === '' ? '' : String(item.quantity);
+  return [item.name.trim(), `${amount}${(item.unit || '').trim()}`.trim()].filter(Boolean).join(' ');
+}
+
+export function ingredientTagSummary(items: IngredientDraftItem[], limit = 3) {
+  const labels = items.map(formatIngredientTag).filter(Boolean);
+  return {
+    visible: labels.slice(0, limit),
+    hiddenCount: Math.max(0, labels.length - limit),
+  };
+}
+
 export function RecipeIngredientEditor({
   items,
   legacyText,
