@@ -1,4 +1,4 @@
-import { eq, inArray, or } from 'drizzle-orm';
+import { and, eq, inArray, or } from 'drizzle-orm';
 import { getDb } from '@/storage/database/pg-db';
 import {
   comparisonAiResults,
@@ -6,18 +6,27 @@ import {
   comparisonItemNodes,
   comparisonMatrixCells,
   comparisonObjects,
+  materialLinks,
+  matrixCalculationRuns,
+  metricThresholdRules,
   materials,
 } from '@/storage/database/shared/schema';
+
+export const COMPARISON_ASSEMBLY_TARGET_TYPE = 'comparison_assembly';
 
 export function comparisonAssemblyCleanupPlan() {
   return {
     unbindMaterialFields: ['comparisonCellId', 'comparisonAssemblyId'] as const,
     deleteTables: [
+      'metricThresholdRules',
+      'matrixCalculationRuns',
+      'materialLinks',
       'comparisonAiResults',
       'comparisonMatrixCells',
       'comparisonItemNodes',
       'comparisonObjects',
     ] as const,
+    materialLinkTargetType: COMPARISON_ASSEMBLY_TARGET_TYPE,
     archiveAssembly: true as const,
   };
 }
@@ -56,6 +65,12 @@ export async function clearAndArchiveComparisonAssembly(
         ? or(eq(materials.comparisonAssemblyId, assemblyId), inArray(materials.comparisonCellId, cellIds))
         : eq(materials.comparisonAssemblyId, assemblyId))
       .execute();
+    await tx.delete(materialLinks).where(and(
+      eq(materialLinks.targetType, COMPARISON_ASSEMBLY_TARGET_TYPE),
+      eq(materialLinks.targetId, assemblyId),
+    )).execute();
+    await tx.delete(metricThresholdRules).where(eq(metricThresholdRules.assemblyId, assemblyId)).execute();
+    await tx.delete(matrixCalculationRuns).where(eq(matrixCalculationRuns.matrixInstanceId, assemblyId)).execute();
     await tx.delete(comparisonAiResults).where(eq(comparisonAiResults.assemblyId, assemblyId)).execute();
     await tx.delete(comparisonMatrixCells).where(eq(comparisonMatrixCells.assemblyId, assemblyId)).execute();
     await tx.delete(comparisonItemNodes).where(eq(comparisonItemNodes.assemblyId, assemblyId)).execute();

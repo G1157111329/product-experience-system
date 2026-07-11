@@ -5,11 +5,15 @@ import { assertAssemblyCanBuildSnapshot } from './comparison-assembly';
 assert.deepEqual(comparisonAssemblyCleanupPlan(), {
   unbindMaterialFields: ['comparisonCellId', 'comparisonAssemblyId'],
   deleteTables: [
+    'metricThresholdRules',
+    'matrixCalculationRuns',
+    'materialLinks',
     'comparisonAiResults',
     'comparisonMatrixCells',
     'comparisonItemNodes',
     'comparisonObjects',
   ],
+  materialLinkTargetType: 'comparison_assembly',
   archiveAssembly: true,
 });
 
