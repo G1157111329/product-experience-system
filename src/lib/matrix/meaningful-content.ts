@@ -58,8 +58,7 @@ function meaningfulV2Metric(value: unknown): boolean {
     nonBlank(metric.textValue) ||
     nonBlank(metric.booleanValue) ||
     nonBlank(metric.enumValue) ||
-    nonBlank(metric.dateTimeValue) ||
-    state === 'filled'
+    nonBlank(metric.dateTimeValue)
   );
 }
 

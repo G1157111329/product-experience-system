@@ -73,6 +73,14 @@ assert.equal(hasMeaningfulV2Projection(v2({ groups: [{ rows: [{ metrics: {}, slo
 assert.equal(hasMeaningfulV2Projection(v2({ groups: [{ rows: [{ metrics: {}, slots: { result: { status: 'pending' }, process: {}, issues: { count: 0 } }, evidence: { primaryCount: 0, previewIds: [], media: [{ id: 'material-1' }] } }] }] })), true);
 assert.equal(hasMeaningfulV2Projection(v2({ groups: [{ rows: [v2Row({ values: { metric: { valueState: 'filled', numericValue: 12000 } } })] }] })), true);
 assert.equal(hasMeaningfulV2Projection(v2({ groups: [{ rows: [v2Row({ values: { metric: { valueState: 'missing', numericValue: 12000 } } })] }] })), false);
+assert.equal(hasMeaningfulV2Projection(v2({ groups: [{ rows: [v2Row({ values: { metric: { valueState: 'filled' } } })] }] })), false);
+assert.equal(hasMeaningfulV2Projection(v2({ groups: [{ rows: [v2Row({ values: { metric: { valueState: 'filled', textValue: '   ' } } })] }] })), false);
+assert.equal(hasMeaningfulV2Projection(v2({ groups: [{ rows: [v2Row({ values: { metric: { valueState: 'filled', numericValue: 0 } } })] }] })), true);
+assert.equal(hasMeaningfulV2Projection(v2({ groups: [{ rows: [v2Row({ values: { metric: { valueState: 'filled', booleanValue: false } } })] }] })), true);
+assert.equal(hasMeaningfulV2Projection(v2({ groups: [{ rows: [v2Row({ values: { metric: { valueState: 'filled', durationMs: 0 } } })] }] })), true);
+assert.equal(hasMeaningfulV2Projection(v2({ groups: [{ rows: [v2Row({ values: { metric: { valueState: 'filled', textValue: '备注' } } })] }] })), true);
+assert.equal(hasMeaningfulV2Projection(v2({ groups: [{ rows: [v2Row({ values: { metric: { valueState: 'filled', enumValue: 'pass' } } })] }] })), true);
+assert.equal(hasMeaningfulV2Projection(v2({ groups: [{ rows: [v2Row({ values: { metric: { valueState: 'filled', dateTimeValue: '2026-07-11T00:00:00Z' } } })] }] })), true);
 assert.equal(hasMeaningfulV2Projection(v2({ groups: [{ rows: [v2Row({ slots: { result: { summary: '结论' }, process: {}, issues: { count: 0 } } })] }] })), true);
 assert.equal(hasMeaningfulV2Projection(v2({ groups: [{ rows: [v2Row({ slots: { result: {}, process: { note: '过程记录' }, issues: { count: 0 } } })] }] })), true);
 assert.equal(hasMeaningfulV2Projection(v2({ summary: { totalIssues: 1 } })), true);
