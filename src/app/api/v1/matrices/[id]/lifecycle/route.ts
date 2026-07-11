@@ -3,6 +3,7 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessMatrix, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
 import { matrixLifecyclePatch, type MatrixLifecycleAction } from '@/lib/matrix/matrix-lifecycle';
+import { hasV3ViewDefinition } from '@/lib/matrix/bootstrap-v3';
 import { ok, fail } from '@/lib/server/api-v1/response';
 import { resolveTraceId } from '@/lib/server/api-v1/trace';
 
@@ -31,10 +32,12 @@ export async function POST(
 
   const { data: matrix, error: readError } = await client
     .from('task_matrices')
-    .select('id,task_id,status,current_view_definition_id,current_design_version_id')
+    .select('id,task_id,status,current_design_version_id')
     .eq('id', id)
     .maybeSingle();
   if (readError || !matrix) return fail(traceId, { message: '矩阵不存在', status: 404 });
+
+  const hasV3View = await hasV3ViewDefinition(id);
 
   if (body.action === 'restore' && matrix.status !== 'archived') {
     return ok(matrix, traceId, '矩阵当前未删除');
@@ -44,7 +47,7 @@ export async function POST(
   }
 
   const now = new Date().toISOString();
-  const restoreStatus = matrix.current_view_definition_id || matrix.current_design_version_id
+  const restoreStatus = hasV3View || matrix.current_design_version_id
     ? 'active'
     : 'designing';
   const patch = matrixLifecyclePatch(

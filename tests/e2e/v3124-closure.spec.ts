@@ -181,6 +181,22 @@ test('first matrix entry auto-creates one default matrix and reuses it after tab
     }
     const duplicatePayloads = await Promise.all(duplicatePosts.map((response) => response.json()));
     expect(duplicatePayloads.map((payload) => payload.data.created).sort()).toEqual([false, false]);
+
+    const archived = await page.request.post(`/api/v1/matrices/${matrixId}/lifecycle`, {
+      data: { action: 'archive', reason: 'e2e_recreate' },
+    });
+    const archivedPayload = await archived.json();
+    expect(archivedPayload.code, archivedPayload.message).toBe(0);
+
+    await page.goto(`/tasks/${taskId}?tab=info`);
+    await page.goto(`/tasks/${taskId}?tab=matrix`);
+    await expect(page.locator('input[value="默认大类"]')).toBeVisible();
+    const recreatedState = await page.request.get(`/api/v1/tasks/${taskId}/matrix-tab-state`);
+    const recreatedPayload = await recreatedState.json();
+    const activeMatrices = recreatedPayload.data.matrices.filter((matrix: { status: string }) => matrix.status !== 'archived');
+    expect(activeMatrices).toHaveLength(1);
+    expect(activeMatrices[0].id).not.toBe(matrixId);
+    matrixId = activeMatrices[0].id as string;
   } finally {
     if (matrixId) {
       await page.request.post(`/api/v1/matrices/${matrixId}/lifecycle`, { data: { action: 'archive', reason: 'e2e_cleanup' } });

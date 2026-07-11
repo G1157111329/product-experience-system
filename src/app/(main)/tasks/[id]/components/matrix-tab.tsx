@@ -149,8 +149,9 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
 
   useEffect(() => {
     void fetchTabState().then((data) => {
-      if (data?.state === 'ready' && data.matrices?.length === 1) {
-        setSelectedMatrixId((current) => current ?? data.matrices[0].id);
+      const activeMatrices = data?.matrices?.filter((matrix) => matrix.status !== 'archived') ?? [];
+      if (data?.state === 'ready' && activeMatrices.length === 1) {
+        setSelectedMatrixId((current) => current ?? activeMatrices[0].id);
       }
     });
   }, [fetchTabState]);
