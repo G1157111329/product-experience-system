@@ -37,8 +37,6 @@ export async function POST(
     .maybeSingle();
   if (readError || !matrix) return fail(traceId, { message: '矩阵不存在', status: 404 });
 
-  const hasV3View = await hasV3ViewDefinition(id);
-
   if (body.action === 'restore' && matrix.status !== 'archived') {
     return ok(matrix, traceId, '矩阵当前未删除');
   }
@@ -47,7 +45,8 @@ export async function POST(
   }
 
   const now = new Date().toISOString();
-  const restoreStatus = hasV3View || matrix.current_design_version_id
+  const restoreStatus = body.action === 'restore'
+    && ((await hasV3ViewDefinition(id)) || matrix.current_design_version_id)
     ? 'active'
     : 'designing';
   const patch = matrixLifecyclePatch(

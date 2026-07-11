@@ -182,14 +182,14 @@ test('first matrix entry auto-creates one default matrix and reuses it after tab
     const duplicatePayloads = await Promise.all(duplicatePosts.map((response) => response.json()));
     expect(duplicatePayloads.map((payload) => payload.data.created).sort()).toEqual([false, false]);
 
-    const archived = await page.request.post(`/api/v1/matrices/${matrixId}/lifecycle`, {
-      data: { action: 'archive', reason: 'e2e_recreate' },
-    });
-    const archivedPayload = await archived.json();
-    expect(archivedPayload.code, archivedPayload.message).toBe(0);
-
-    await page.goto(`/tasks/${taskId}?tab=info`);
-    await page.goto(`/tasks/${taskId}?tab=matrix`);
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.getByRole('button', { name: '删除矩阵', exact: true }).click();
+    await expect.poll(async () => {
+      const response = await page.request.get(`/api/v1/tasks/${taskId}/matrix-tab-state`);
+      const payload = await response.json();
+      const activeMatrices = payload.data.matrices.filter((matrix: { status: string }) => matrix.status !== 'archived');
+      return activeMatrices.length === 1 && activeMatrices[0].id !== matrixId ? activeMatrices[0].id : '';
+    }, { timeout: 10_000 }).not.toBe('');
     await expect(page.locator('input[value="默认大类"]')).toBeVisible();
     const recreatedState = await page.request.get(`/api/v1/tasks/${taskId}/matrix-tab-state`);
     const recreatedPayload = await recreatedState.json();
@@ -197,6 +197,55 @@ test('first matrix entry auto-creates one default matrix and reuses it after tab
     expect(activeMatrices).toHaveLength(1);
     expect(activeMatrices[0].id).not.toBe(matrixId);
     matrixId = activeMatrices[0].id as string;
+  } finally {
+    if (matrixId) {
+      await page.request.post(`/api/v1/matrices/${matrixId}/lifecycle`, { data: { action: 'archive', reason: 'e2e_cleanup' } });
+    }
+    await page.request.delete(`/api/tasks/${taskId}`);
+  }
+});
+
+test('concurrent first matrix creation is idempotent without opening the matrix tab', async ({ page }) => {
+  const marker = `E2E concurrent matrix ${Date.now()}`;
+  const taskResponse = await page.request.post('/api/tasks', {
+    data: {
+      task_name: marker,
+      product_category: '通用标准',
+      product: 'E2E',
+      product_model: marker,
+      task_mode: 'single',
+    },
+  });
+  const taskPayload = await taskResponse.json();
+  expect(taskPayload.code, taskPayload.message).toBe(0);
+  const taskId = taskPayload.data.id as string;
+  let matrixId = '';
+
+  try {
+    const responses = await Promise.all([
+      page.request.post(`/api/v1/tasks/${taskId}/matrices`, {
+        data: { name: `${marker} - 数据矩阵1`, view_mode: 'excel_like_dynamic_matrix' },
+      }),
+      page.request.post(`/api/v1/tasks/${taskId}/matrices`, {
+        data: { name: `${marker} - 数据矩阵1`, view_mode: 'excel_like_dynamic_matrix' },
+      }),
+      page.request.post(`/api/v1/tasks/${taskId}/matrices`, {
+        data: { name: `${marker} - 数据矩阵1`, view_mode: 'excel_like_dynamic_matrix' },
+      }),
+    ]);
+    for (const response of responses) {
+      expect(response.ok(), `${response.status()} ${await response.text()}`).toBeTruthy();
+    }
+    const payloads = await Promise.all(responses.map((response) => response.json()));
+    expect(payloads.every((payload) => payload.code === 0)).toBeTruthy();
+    expect(new Set(payloads.map((payload) => payload.data.id)).size).toBe(1);
+    expect(payloads.map((payload) => payload.data.created).sort()).toEqual([false, false, true]);
+    matrixId = payloads[0].data.id as string;
+
+    const stateResponse = await page.request.get(`/api/v1/tasks/${taskId}/matrix-tab-state`);
+    const statePayload = await stateResponse.json();
+    expect(statePayload.code, statePayload.message).toBe(0);
+    expect(statePayload.data.matrices.filter((matrix: { status: string }) => matrix.status !== 'archived')).toHaveLength(1);
   } finally {
     if (matrixId) {
       await page.request.post(`/api/v1/matrices/${matrixId}/lifecycle`, { data: { action: 'archive', reason: 'e2e_cleanup' } });

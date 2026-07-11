@@ -110,6 +110,7 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
         toast.error(json.message || '操作失败');
         return;
       }
+      if (action === 'archive') autoCreateStartedRef.current = false;
       if (selectedMatrixId === matrixId) setSelectedMatrixId(null);
       await fetchTabState();
       toast.success(action === 'archive' ? '矩阵已移入回收区' : '矩阵已恢复');
