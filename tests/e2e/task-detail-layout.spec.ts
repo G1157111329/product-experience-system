@@ -34,3 +34,13 @@ test('食谱常态显示食材标签而不是常驻大表单', async ({ page }) 
     if (recipeId) await page.request.delete(`/api/recipes/${recipeId}`);
   }
 });
+
+test('新建食谱时完整录入结构化食材', async ({ page }) => {
+  await page.goto('/tasks/golden-task-single');
+  await page.getByRole('button', { name: '功能效果', exact: true }).click();
+  await page.getByRole('button', { name: '新增', exact: true }).click();
+
+  await expect(page.getByRole('textbox', { name: '新食材 1 名称' })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: '新食材 1 克重' })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: '新食材 1 单位' })).toBeVisible();
+});

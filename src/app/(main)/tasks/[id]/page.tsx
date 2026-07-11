@@ -43,6 +43,7 @@ import { FunctionsInputWorkspace } from './components/functions-input-workspace'
 import { RecipeIssueOutputPanel } from './components/recipe-issue-output-panel';
 import { ComparisonWorkspace } from './components/comparison-workspace';
 import { MatrixTab } from './components/matrix-tab';
+import { toIngredientPayload, type IngredientDraftItem } from './components/recipe-ingredient-editor';
 import type { EvidenceBindingTarget } from './types';
 
 /* ─── Types ─── */
@@ -2229,8 +2230,13 @@ function FunctionsTab({
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [editingStep, setEditingStep] = useState<RecipeStep | null>(null);
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
-  const [newRecipe, setNewRecipe] = useState({ name: '', ingredients: '', recipe_type: '食谱' });
-  const [editRecipeForm, setEditRecipeForm] = useState({ name: '', ingredients: '', recipe_type: '食谱' });
+  const [newRecipe, setNewRecipe] = useState({
+    name: '',
+    ingredients: '',
+    recipe_type: '食谱',
+    ingredient_items: [{ name: '', quantity: '', unit: '', note: '' }] as IngredientDraftItem[],
+  });
+  const [editRecipeForm, setEditRecipeForm] = useState({ name: '', recipe_type: '食谱' });
   const [newStep, setNewStep] = useState({ operation: '', step_material_ids: [] as string[], problem_points: [{ text: '', material_ids: [] as string[] }] });
   const [stepMaterialIds, setStepMaterialIds] = useState<string[]>([]);
   const [, setStepMaterials] = useState<Material[]>([]);
@@ -2325,12 +2331,23 @@ function FunctionsTab({
     try {
       const res = await fetch('/api/recipes', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_id: taskId, ...newRecipe }),
+        body: JSON.stringify({
+          task_id: taskId,
+          name: newRecipe.name,
+          ingredients: newRecipe.ingredients,
+          recipe_type: newRecipe.recipe_type,
+          ingredient_items: toIngredientPayload(newRecipe.ingredient_items),
+        }),
       });
       const data = await res.json();
       if (data.code === 0) {
         setAddDialogOpen(false);
-        setNewRecipe({ name: '', ingredients: '', recipe_type: '食谱' });
+        setNewRecipe({
+          name: '',
+          ingredients: '',
+          recipe_type: '食谱',
+          ingredient_items: [{ name: '', quantity: '', unit: '', note: '' }],
+        });
         setRecipeSearch('');
         setRecipeSearchResults([]);
         fetchRecipes();
@@ -2345,7 +2362,7 @@ function FunctionsTab({
   // ── Edit recipe (Feature 3) ──
   const handleEditRecipe = (recipe: Recipe) => {
     setEditingRecipe(recipe);
-    setEditRecipeForm({ name: recipe.name, ingredients: recipe.ingredients || '', recipe_type: recipe.recipe_type || '食谱' });
+    setEditRecipeForm({ name: recipe.name, recipe_type: recipe.recipe_type || '食谱' });
     setEditRecipeDialogOpen(true);
   };
 
@@ -2355,7 +2372,13 @@ function FunctionsTab({
     try {
       const res = await fetch(`/api/recipes/${editingRecipe.id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editRecipeForm),
+        body: JSON.stringify({
+          name: editRecipeForm.name,
+          recipe_type: editRecipeForm.recipe_type,
+          ingredients: editingRecipe.ingredients,
+          ingredient_items: editingRecipe.ingredient_items || [],
+          problem_count: editingRecipe.problem_count,
+        }),
       });
       const data = await res.json();
       if (data.code === 0) {
@@ -2396,7 +2419,12 @@ function FunctionsTab({
           }
         }
         setAddDialogOpen(false);
-        setNewRecipe({ name: '', ingredients: '', recipe_type: '食谱' });
+        setNewRecipe({
+          name: '',
+          ingredients: '',
+          recipe_type: '食谱',
+          ingredient_items: [{ name: '', quantity: '', unit: '', note: '' }],
+        });
         setRecipeSearch('');
         setRecipeSearchResults([]);
         fetchRecipes();
@@ -2979,7 +3007,19 @@ function FunctionsTab({
       />
 
       {/* Add recipe dialog */}
-      <Dialog open={addDialogOpen} onOpenChange={(open) => { setAddDialogOpen(open); if (!open) { setRecipeSearch(''); setRecipeSearchResults([]); } }}>
+      <Dialog open={addDialogOpen} onOpenChange={(open) => {
+        setAddDialogOpen(open);
+        if (!open) {
+          setRecipeSearch('');
+          setRecipeSearchResults([]);
+          setNewRecipe({
+            name: '',
+            ingredients: '',
+            recipe_type: '食谱',
+            ingredient_items: [{ name: '', quantity: '', unit: '', note: '' }],
+          });
+        }
+      }}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>新增食谱/功能</DialogTitle></DialogHeader>
           <div className="space-y-3 mt-2">
@@ -3029,11 +3069,91 @@ function FunctionsTab({
               <Input placeholder={newRecipe.recipe_type === '食谱' ? '如：豆浆食谱' : '如：搅拌功能'}
                 value={newRecipe.name} onChange={(e) => setNewRecipe({ ...newRecipe, name: e.target.value })} />
             </div>
-            <div className="space-y-1.5">
-              <Label>食材/参数</Label>
-              <Textarea placeholder={newRecipe.recipe_type === '食谱' ? '填写食材' : '填写功能参数'}
-                value={newRecipe.ingredients} onChange={(e) => setNewRecipe({ ...newRecipe, ingredients: e.target.value })} rows={2} />
-            </div>
+            {newRecipe.recipe_type === '食谱' ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <Label>食材</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setNewRecipe({
+                      ...newRecipe,
+                      ingredient_items: [...newRecipe.ingredient_items, { name: '', quantity: '', unit: '', note: '' }],
+                    })}
+                  >
+                    <Plus className="mr-1 h-3.5 w-3.5" />添加食材
+                  </Button>
+                </div>
+                {newRecipe.ingredient_items.map((item, index) => (
+                  <div key={index} className="grid grid-cols-[minmax(0,1.5fr)_90px_80px_minmax(0,1fr)_36px] gap-2 max-md:grid-cols-[minmax(0,1fr)_80px_72px_36px]">
+                    <Input
+                      aria-label={`新食材 ${index + 1} 名称`}
+                      placeholder="名称"
+                      value={item.name}
+                      onChange={(event) => setNewRecipe({
+                        ...newRecipe,
+                        ingredient_items: newRecipe.ingredient_items.map((ingredient, itemIndex) => itemIndex === index ? { ...ingredient, name: event.target.value } : ingredient),
+                      })}
+                    />
+                    <Input
+                      aria-label={`新食材 ${index + 1} 克重`}
+                      inputMode="decimal"
+                      placeholder="克重"
+                      value={item.quantity ?? ''}
+                      onChange={(event) => setNewRecipe({
+                        ...newRecipe,
+                        ingredient_items: newRecipe.ingredient_items.map((ingredient, itemIndex) => itemIndex === index ? { ...ingredient, quantity: event.target.value } : ingredient),
+                      })}
+                    />
+                    <Input
+                      aria-label={`新食材 ${index + 1} 单位`}
+                      placeholder="单位"
+                      value={item.unit ?? ''}
+                      onChange={(event) => setNewRecipe({
+                        ...newRecipe,
+                        ingredient_items: newRecipe.ingredient_items.map((ingredient, itemIndex) => itemIndex === index ? { ...ingredient, unit: event.target.value } : ingredient),
+                      })}
+                    />
+                    <Input
+                      aria-label={`新食材 ${index + 1} 备注`}
+                      placeholder="备注"
+                      value={item.note ?? ''}
+                      onChange={(event) => setNewRecipe({
+                        ...newRecipe,
+                        ingredient_items: newRecipe.ingredient_items.map((ingredient, itemIndex) => itemIndex === index ? { ...ingredient, note: event.target.value } : ingredient),
+                      })}
+                      className="max-md:col-span-3"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`删除新食材 ${index + 1}`}
+                      onClick={() => {
+                        const remaining = newRecipe.ingredient_items.filter((_, itemIndex) => itemIndex !== index);
+                        setNewRecipe({
+                          ...newRecipe,
+                          ingredient_items: remaining.length > 0 ? remaining : [{ name: '', quantity: '', unit: '', note: '' }],
+                        });
+                      }}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label>功能参数</Label>
+                <Textarea
+                  placeholder="填写功能参数"
+                  value={newRecipe.ingredients}
+                  onChange={(event) => setNewRecipe({ ...newRecipe, ingredients: event.target.value })}
+                  rows={2}
+                />
+              </div>
+            )}
             <Button onClick={handleAddRecipe} className="w-full" disabled={!newRecipe.name || savingRecipe}>{savingRecipe ? '保存中...' : '保存'}</Button>
           </div>
         </DialogContent>
@@ -3188,10 +3308,6 @@ function FunctionsTab({
             <div className="space-y-1.5">
               <Label>{editRecipeForm.recipe_type === '食谱' ? '食谱名称' : '功能名称'} *</Label>
               <Input value={editRecipeForm.name} onChange={(e) => setEditRecipeForm({ ...editRecipeForm, name: e.target.value })} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>食材/参数</Label>
-              <Textarea value={editRecipeForm.ingredients} onChange={(e) => setEditRecipeForm({ ...editRecipeForm, ingredients: e.target.value })} rows={2} />
             </div>
             <Button onClick={handleSaveEditRecipe} className="w-full" disabled={!editRecipeForm.name || savingRecipe}>{savingRecipe ? '保存中...' : '保存修改'}</Button>
           </div>
