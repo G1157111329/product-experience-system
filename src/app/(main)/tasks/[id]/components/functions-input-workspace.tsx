@@ -9,7 +9,8 @@ import type { EvidenceBindingTarget, Recipe, RecipeStep } from '../types';
 import { toast } from 'sonner';
 import { getRecipeStatistics } from '@/lib/recipe-statistics';
 import type { IngredientItem } from '@/lib/task-context-contract';
-import { RecipeIngredientEditor, shouldShowIngredientEditor } from './recipe-ingredient-editor';
+import { shouldShowIngredientEditor } from './recipe-ingredient-editor';
+import { RecipeIngredientSummary } from './recipe-ingredient-summary';
 
 type FunctionsInputWorkspaceProps = {
   recipes: Recipe[];
@@ -184,6 +185,13 @@ export function FunctionsInputWorkspace({
                 <ChefHat className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{recipe.name}</div>
+                  {shouldShowIngredientEditor(recipe.recipe_type) && (
+                    <RecipeIngredientSummary
+                      items={recipe.ingredient_items || []}
+                      legacyText={recipe.ingredients}
+                      onSave={(items) => onSaveIngredients(recipe, items)}
+                    />
+                  )}
                   <div className="mt-1 grid grid-cols-2 gap-1">
                     <Badge variant="outline" className="justify-center text-[10px]">{getRecipeStatistics(recipe).stepCount} 步</Badge>
                     <Badge variant={recipe.effect_description ? 'secondary' : 'outline'} className="text-[10px]">
@@ -229,14 +237,6 @@ export function FunctionsInputWorkspace({
                   <Pencil className="mr-1.5 h-3.5 w-3.5" />编辑
                 </Button>
               </div>
-              {shouldShowIngredientEditor(selectedRecipe.recipe_type) && (
-                <RecipeIngredientEditor
-                  key={selectedRecipe.id}
-                  items={selectedRecipe.ingredient_items || []}
-                  legacyText={selectedRecipe.ingredients}
-                  onSave={(items) => onSaveIngredients(selectedRecipe, items)}
-                />
-              )}
             </div>
 
             <div className="rounded-lg border bg-card p-3 shadow-sm">
