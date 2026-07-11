@@ -4,7 +4,7 @@ import { canAccessMatrix, isAuthResponse, requireUser } from '@/lib/server/auth'
 import { writeSecurityAudit } from '@/lib/server/security-audit';
 import { matrixLifecyclePatch, type MatrixLifecycleAction } from '@/lib/matrix/matrix-lifecycle';
 import { hasV3ViewDefinition } from '@/lib/matrix/bootstrap-v3';
-import { clearTaskMatrixContent } from '@/lib/server/matrix-deactivation';
+import { clearAndArchiveTaskMatrix } from '@/lib/server/matrix-deactivation';
 import { ok, fail } from '@/lib/server/api-v1/response';
 import { resolveTraceId } from '@/lib/server/api-v1/trace';
 
@@ -46,11 +46,21 @@ export async function POST(
   }
 
   if (body.action === 'clear_and_archive') {
-    // Content cleanup uses the direct Drizzle transaction, while lifecycle
-    // status remains on this compat Supabase path: a deliberate two-phase
-    // boundary, with failures returned rather than silently swallowed.
     try {
-      await clearTaskMatrixContent(id);
+      const updated = await clearAndArchiveTaskMatrix(id, body.reason?.trim() || 'user_clear');
+      if (!updated) return fail(traceId, { message: '矩阵不存在', status: 404 });
+      if (matrix.status === 'archived') return ok(updated, traceId, '矩阵已在回收区');
+
+      await writeSecurityAudit(client, {
+        request,
+        actor: user,
+        action: 'task_matrix.cleared_and_archived',
+        outcome: 'success',
+        targetType: 'task_matrix',
+        targetId: id,
+        metadata: { taskId: matrix.task_id, previousStatus: matrix.status, nextStatus: updated.status },
+      });
+      return ok(updated, traceId, '矩阵内容已清空并移入回收区');
     } catch (error) {
       return fail(traceId, { message: error instanceof Error ? error.message : '矩阵内容清理失败', status: 500 });
     }
@@ -64,7 +74,7 @@ export async function POST(
   const patch = matrixLifecyclePatch(
     body.action,
     now,
-    body.reason?.trim() || (body.action === 'clear_and_archive' ? 'user_clear' : 'user_delete'),
+    body.reason?.trim() || 'user_delete',
     restoreStatus,
   );
   const { data: updated, error } = await client
@@ -78,9 +88,7 @@ export async function POST(
   await writeSecurityAudit(client, {
     request,
     actor: user,
-    action: body.action === 'clear_and_archive'
-      ? 'task_matrix.cleared_and_archived'
-      : body.action === 'archive' ? 'task_matrix.archived' : 'task_matrix.restored',
+    action: body.action === 'archive' ? 'task_matrix.archived' : 'task_matrix.restored',
     outcome: 'success',
     targetType: 'task_matrix',
     targetId: id,
@@ -90,8 +98,6 @@ export async function POST(
   return ok(
     updated,
     traceId,
-    body.action === 'clear_and_archive'
-      ? '矩阵内容已清空并移入回收区'
-      : body.action === 'archive' ? '矩阵已移入回收区' : '矩阵已恢复',
+    body.action === 'archive' ? '矩阵已移入回收区' : '矩阵已恢复',
   );
 }

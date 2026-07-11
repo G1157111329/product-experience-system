@@ -65,7 +65,18 @@ export async function POST(request: NextRequest) {
   }
   if (!(await canAccessAssembly(client, user, assemblyId))) return forbidden();
 
-  const snapshot = await buildComparisonReportSnapshot(client, assemblyId, { snapshotStatus: 'draft' }) as SnapshotData;
+  let snapshot: SnapshotData;
+  try {
+    snapshot = await buildComparisonReportSnapshot(client, assemblyId, { snapshotStatus: 'draft' }) as SnapshotData;
+  } catch (error) {
+    if (error instanceof Error && error.name === 'ArchivedAssemblyError') {
+      return NextResponse.json({ code: 1, message: error.message }, { status: 409 });
+    }
+    if (error instanceof Error && error.message.startsWith('Assembly not found:')) {
+      return NextResponse.json({ code: 1, message: '对比矩阵不存在' }, { status: 404 });
+    }
+    throw error;
+  }
   if (!snapshot.primary_task_id) {
     return NextResponse.json({ code: 1, message: '该对比组装缺少可用于创建草稿报告的来源任务' }, { status: 400 });
   }

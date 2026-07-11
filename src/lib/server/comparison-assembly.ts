@@ -73,6 +73,14 @@ type SnapshotClient = {
   };
 };
 
+export function assertAssemblyCanBuildSnapshot(assembly: Row): void {
+  if (assembly.status === 'archived') {
+    const error = new Error('对比矩阵已停用，无法生成报告快照');
+    error.name = 'ArchivedAssemblyError';
+    throw error;
+  }
+}
+
 function asRows(value: unknown): Row[] {
   return Array.isArray(value) ? (value as Row[]) : [];
 }
@@ -148,6 +156,7 @@ export async function buildComparisonReportSnapshot(
   if (!assembly) {
     throw new Error(`Assembly not found: ${assemblyId}`);
   }
+  assertAssemblyCanBuildSnapshot(assembly);
 
   const [
     objectsResult,

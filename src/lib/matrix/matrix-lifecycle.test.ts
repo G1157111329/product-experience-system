@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { matrixLifecyclePatch } from './matrix-lifecycle';
+import { isClearAndArchiveNoop } from '@/lib/server/matrix-deactivation';
 
 const now = '2026-07-10T12:00:00.000Z';
 
@@ -25,5 +26,8 @@ assert.deepEqual(matrixLifecyclePatch('restore', now), {
 });
 
 assert.equal(matrixLifecyclePatch('restore', now, undefined, 'designing').status, 'designing');
+
+assert.equal(isClearAndArchiveNoop('archived'), true);
+assert.equal(isClearAndArchiveNoop('active'), false);
 
 console.log('matrix lifecycle tests passed');

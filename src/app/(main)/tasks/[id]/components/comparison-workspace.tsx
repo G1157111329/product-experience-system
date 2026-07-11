@@ -276,10 +276,10 @@ export function ComparisonWorkspace({
 
     setBusy(true);
     try {
-      const res = await fetch(`/api/comparison-assemblies/${assembly.id}`, {
-        method: assembly.status === 'draft' ? 'DELETE' : 'PUT',
-        headers: assembly.status === 'draft' ? undefined : { 'Content-Type': 'application/json' },
-        body: assembly.status === 'draft' ? undefined : JSON.stringify({ status: 'archived' }),
+      const res = await fetch(`/api/comparison-assemblies/${assembly.id}/deactivate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'user_clear' }),
       });
       const data = await res.json() as ApiResponse<unknown>;
       if (data.code !== 0) {
