@@ -179,7 +179,7 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
   };
 
   return (
-    <section className={cn(embedded ? 'space-y-3' : 'rounded-lg border bg-card p-3 shadow-sm')}>
+    <section aria-label="任务级素材证据" className={cn(embedded ? 'space-y-3' : 'rounded-lg border bg-card p-3 shadow-sm')}>
       <PreviewComponent />
       {/* 嵌入窄侧栏时始终保持纵向：标题在上，按钮在下，避免按钮块覆盖“素材证据”标题 */}
       <div className="flex flex-col gap-3">

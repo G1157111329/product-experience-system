@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { cloneElement, isValidElement, useMemo, useState, type ComponentType, type ReactNode } from 'react';
+import { useState, type ComponentType, type ReactNode } from 'react';
 import {
   Eye,
   FileText,
@@ -52,11 +52,6 @@ export function ReportAuthoringShell({
     }
     return [baseNavItems[0], matrixNavItem, ...baseNavItems.slice(1)];
   })();
-
-  const compactRail = useMemo(() => {
-    if (!materialRail || !isValidElement(materialRail)) return materialRail;
-    return cloneElement(materialRail, { compact: true } as { compact?: boolean });
-  }, [materialRail]);
 
   return (
     <div
@@ -124,30 +119,15 @@ export function ReportAuthoringShell({
           ))}
         </nav>
 
-        {!navCollapsed && materialRail && (
-          <div className="mt-3 border-t pt-3">
-            {materialRail}
-          </div>
-        )}
       </aside>
 
       <div className="min-w-0 space-y-4">
-        {/* Mobile material rail */}
-        {materialRail && (
-          <div className="lg:hidden">
-            <div className="rounded-lg border bg-card p-2 shadow-sm">
-              {compactRail}
-            </div>
-          </div>
-        )}
-        {navCollapsed && materialRail && (
-          <div className="sticky top-0 z-30 bg-background/95 pb-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-            <div className="rounded-lg border bg-card p-3 shadow-sm">
-              {compactRail}
-            </div>
-          </div>
-        )}
         {children}
+        {materialRail && (
+          <div className="rounded-lg border bg-card p-3 shadow-sm" data-testid="task-evidence-bottom">
+            {materialRail}
+          </div>
+        )}
         {/* Spacing for bottom nav + floating agent on mobile */}
         <div className="h-20 lg:hidden" />
       </div>

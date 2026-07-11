@@ -5,6 +5,30 @@ test.beforeEach(async ({ page }) => {
   await loginForE2E(page, 'dockeradmin', 'DockerLocal2026');
 });
 
+test('素材证据位于主工作区底部而非录入目录', async ({ page }) => {
+  await page.goto('/tasks/golden-task-single');
+  await page.getByRole('button', { name: '功能效果', exact: true }).click();
+
+  const directory = page.getByRole('complementary').filter({
+    has: page.getByRole('heading', { name: '录入目录', exact: true }),
+  });
+  await expect(directory).toBeVisible();
+  await expect(directory.getByRole('heading', { name: '素材证据', exact: true })).toHaveCount(0);
+
+  const evidenceRegion = page.getByRole('region', { name: '任务级素材证据' });
+  await expect(evidenceRegion).toBeVisible();
+  await expect(evidenceRegion.locator('[data-slot="scroll-area-viewport"]')).toBeVisible();
+  await expect(evidenceRegion.getByRole('button', { name: '相册图片', exact: true })).toBeVisible();
+
+  const materialButtons = evidenceRegion.locator('[data-slot="scroll-area-viewport"] button');
+  if ((await materialButtons.count()) > 0) {
+    await expect(materialButtons.first()).toBeEnabled();
+  }
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
+});
+
 test('食谱常态显示食材标签而不是常驻大表单', async ({ page }) => {
   const recipeName = `紧凑食材-${Date.now()}`;
   let recipeId = '';
