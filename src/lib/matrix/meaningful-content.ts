@@ -143,7 +143,7 @@ function meaningfulV3ReportRow(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false;
   const cells = (value as UnknownRecord).cells;
   return !!cells && typeof cells === 'object' && !Array.isArray(cells)
-    && Object.values(cells as UnknownRecord).some(nonBlank);
+    && Object.values(cells as UnknownRecord).some((cell) => nonBlank(cell) || meaningfulV3Cell(cell));
 }
 
 /** Detects substantive values, media, narratives, or issue points in V3. */

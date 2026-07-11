@@ -1,6 +1,7 @@
 import { comparisonCellFields } from '@/lib/report-comparison-fields';
 import { selectEffectEvaluationText } from '@/lib/report-content-rules';
 import { issueMaterialRows, recipeIssueMaterialRows } from '@/lib/report-issue-media';
+import { hasMeaningfulV2Projection, hasMeaningfulV3Projection } from '@/lib/matrix/meaningful-content';
 
 type Row = Record<string, unknown>;
 
@@ -741,7 +742,7 @@ function pickMatrixProjectionSource(content: Row, snapshotJson: Row): Row | null
 
 function dataMatrixProjectionOf(content: Row, snapshotJson: Row): ReportDetailDataMatrixProjection | null {
   const source = pickMatrixProjectionSource(content, snapshotJson);
-  if (!source || !Array.isArray(source.groups)) return null;
+  if (!source || !Array.isArray(source.groups) || !hasMeaningfulV2Projection(source)) return null;
   // Defensive: ensure schema block exists so the section is renderable.
   if (!isRecord(source.schema)) return null;
   return source as ReportDetailDataMatrixProjection;
@@ -751,7 +752,7 @@ function dataMatrixV3ProjectionOf(content: Row, snapshotJson: Row): ReportDetail
   const source = pickMatrixProjectionSource(content, snapshotJson);
   if (!source) return null;
   if (source.projectionVersion === 'v3' || source.matrixProjectionVersion === 'v3') {
-    return source as ReportDetailDataMatrixV3Projection;
+    return hasMeaningfulV3Projection(source) ? source as ReportDetailDataMatrixV3Projection : null;
   }
   // Shape heuristic: excel-like columns+rows without V2 groups.
   if (
@@ -760,7 +761,7 @@ function dataMatrixV3ProjectionOf(content: Row, snapshotJson: Row): ReportDetail
     Array.isArray(source.rows) &&
     !Array.isArray(source.groups)
   ) {
-    return source as ReportDetailDataMatrixV3Projection;
+    return hasMeaningfulV3Projection(source) ? source as ReportDetailDataMatrixV3Projection : null;
   }
   return null;
 }

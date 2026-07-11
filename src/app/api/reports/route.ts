@@ -18,6 +18,11 @@ import { getMatrixReadProjection } from '@/lib/matrix/projection-v2';
 import { adaptTaskMatrixProjectionForReport } from '@/lib/matrix/report-projection-adapter';
 import { getV3MatrixProjection } from '@/lib/matrix/projection-v3';
 import {
+  hasMeaningfulComparisonCell,
+  hasMeaningfulV2Projection,
+  hasMeaningfulV3Projection,
+} from '@/lib/matrix/meaningful-content';
+import {
   freezeV3MatrixForReport,
   isFrozenV3MatrixProjection,
   type ReportV3MatrixProjection,
@@ -214,20 +219,6 @@ function mergeMaterialsById(
     if (material) merged.set(id, material);
   }
   return Array.from(merged.values());
-}
-
-function hasMeaningfulComparisonCell(cell: Record<string, unknown>) {
-  const textFields = ['effect_summary', 'manual_score', 'ai_score', 'conclusion_tag'];
-  if (textFields.some((field) => String(cell[field] || '').trim())) return true;
-
-  const objectFields = ['params', 'metric_values', 'media_display_config'];
-  if (objectFields.some((field) => {
-    const value = cell[field];
-    return value && typeof value === 'object' && Object.keys(value as Record<string, unknown>).length > 0;
-  })) return true;
-
-  const listFields = ['process_notes', 'problem_points'];
-  return listFields.some((field) => Array.isArray(cell[field]) && (cell[field] as unknown[]).length > 0);
 }
 
 const COMPARISON_MATRIX_NODE_TYPES = ['item', 'condition', 'process_node', 'metric', 'issue_group'];
@@ -686,7 +677,11 @@ export async function POST(request: NextRequest) {
   // ── 数据矩阵投影：若任务关联 data_matrix 组装，读取投影并写入 content（Sub-task A）──
   // 失败不应阻断报告生成，统一降级为 null。V3（有 view definition）写入冻结形状。
   const dataMatrix = await loadDataMatrixProjection(client, body.task_id);
-  const dataMatrixProjection: ReportDataMatrixProjection | null = dataMatrix?.projection ?? null;
+  const dataMatrixProjection: ReportDataMatrixProjection | null = dataMatrix && (
+    dataMatrix.kind === 'v3'
+      ? hasMeaningfulV3Projection(dataMatrix.projection)
+      : hasMeaningfulV2Projection(dataMatrix.projection)
+  ) ? dataMatrix.projection : null;
 
   const reportContent = {
     task: completedTaskSnapshot,
@@ -694,7 +689,7 @@ export async function POST(request: NextRequest) {
     records: recordsWithMaterials || [],
     recipes: recipesWithCount || [],
     materials: materials || [],
-    data_matrix_projection: dataMatrixProjection,
+    ...(dataMatrixProjection ? { data_matrix_projection: dataMatrixProjection } : {}),
     generatedAt: new Date().toISOString(),
   };
   const finalReportContent = preserveReviewOverrides(

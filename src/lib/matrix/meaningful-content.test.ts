@@ -91,6 +91,7 @@ assert.equal(hasMeaningfulV3Projection(v3({ summary: { filledCells: 0 } })), fal
 assert.equal(hasMeaningfulV3Projection(v3({ cells: { 'row-1:col-1': { id: 'cell-1', valueState: 'filled', valueText: '85℃' } } })), true);
 assert.equal(hasMeaningfulV3Projection(v3({ rows: [{ id: 'row-1', cells: { 'col-1': '' } }] })), false);
 assert.equal(hasMeaningfulV3Projection(v3({ rows: [{ id: 'row-1', cells: { 'col-1': '85℃' } }] })), true);
+assert.equal(hasMeaningfulV3Projection(v3({ rows: [{ id: 'row-1', cells: { 'col-1': { valueState: 'filled', valueText: '85℃' } } }] })), true);
 assert.equal(hasMeaningfulV3Projection(v3({ cellMedia: { 'row-1:col-1': [{ materialId: 'material-1' }] } })), true);
 assert.equal(hasMeaningfulV3Projection(v3({ narratives: [{ id: 'n-1', blockType: 'summary', content: '总体表现稳定' }] })), true);
 assert.equal(hasMeaningfulV3Projection(v3({ issuePoints: [{ id: 'issue-1', issueText: '温度偏高' }] })), true);

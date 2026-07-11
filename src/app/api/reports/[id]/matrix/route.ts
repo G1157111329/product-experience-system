@@ -2,50 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canReadReport, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { loadLatestReportSnapshot } from '@/lib/server/report-snapshots';
-import { buildMatrixReadProjection, type MatrixReadProjection } from '@/lib/matrix/projection';
-import { getMatrixReadProjection } from '@/lib/matrix/projection-v2';
-import { adaptTaskMatrixProjectionForReport } from '@/lib/matrix/report-projection-adapter';
+import { type MatrixReadProjection } from '@/lib/matrix/projection';
+import { hasMeaningfulComparisonCell, hasMeaningfulV2Projection, hasMeaningfulV3Projection } from '@/lib/matrix/meaningful-content';
 import {
   isFrozenV3MatrixProjection,
   type ReportV3MatrixProjection,
 } from '@/lib/matrix/report-projection-v3-adapter';
 
 type Row = Record<string, unknown>;
-
-function isComparisonSnapshot(snapshotJson: Row | undefined): boolean {
-  if (!snapshotJson) return false;
-  return Boolean(
-    snapshotJson.objects ||
-    snapshotJson.comparison_objects ||
-    (Array.isArray(snapshotJson.matrix_cells) && snapshotJson.matrix_cells.length > 0) ||
-    (Array.isArray(snapshotJson.rows) && snapshotJson.rows.length > 0),
-  );
-}
-
-/**
- * Find a data_matrix assembly linked to a task via source_task_ids + matrix_role.
- * Returns null if none exists (or on query failure, since this is a best-effort branch).
- */
-async function findDataMatrixAssemblyId(client: ReturnType<typeof getSupabaseClient>, taskId: string): Promise<string | null> {
-  const { data: assemblies } = await client
-    .from('comparison_assemblies')
-    .select('id, source_task_ids')
-    .eq('matrix_role', 'data_matrix');
-  const rows = (assemblies || []) as Array<{ id: string; source_task_ids: unknown }>;
-  const match = rows.find((assembly) => Array.isArray(assembly.source_task_ids) && assembly.source_task_ids.includes(taskId));
-  return match?.id || null;
-}
-
-async function findTaskMatrixId(client: ReturnType<typeof getSupabaseClient>, taskId: string): Promise<string | null> {
-  const { data: matrices } = await client
-    .from('task_matrices')
-    .select('id,status,updated_at')
-    .eq('task_id', taskId)
-    .neq('status', 'archived')
-    .order('updated_at', { ascending: false })
-    .limit(1);
-  return matrices?.[0]?.id ? String(matrices[0].id) : null;
-}
 
 function pickFrozenProjection(
   snapshotJson: Row | undefined,
@@ -59,13 +23,11 @@ function pickFrozenProjection(
 /**
  * Resolve a data-matrix projection for a report (Sub-task D).
  * Prefers the frozen snapshot (`snapshot_json.matrix_projection`, §11.3 no-drift);
- * falls back to content, then building a fresh V2 projection from the linked assembly.
+ * falls back to content. It never reads the current task matrix or assembly.
  */
 async function resolveDataMatrixProjection(
-  client: ReturnType<typeof getSupabaseClient>,
   snapshotJson: Row | undefined,
   content: Row | null,
-  taskId: string,
 ): Promise<
   | { kind: 'v3'; projection: ReportV3MatrixProjection }
   | { kind: 'v2'; projection: MatrixReadProjection }
@@ -78,21 +40,7 @@ async function resolveDataMatrixProjection(
   if (frozen && Array.isArray((frozen as MatrixReadProjection).groups)) {
     return { kind: 'v2', projection: frozen as MatrixReadProjection };
   }
-  if (!taskId) return null;
-  try {
-    const taskMatrixId = await findTaskMatrixId(client, taskId);
-    if (taskMatrixId) {
-      const taskMatrixProjection = await getMatrixReadProjection(taskMatrixId);
-      if (taskMatrixProjection) {
-        return { kind: 'v2', projection: adaptTaskMatrixProjectionForReport(taskMatrixProjection) };
-      }
-    }
-    const assemblyId = await findDataMatrixAssemblyId(client, taskId);
-    if (!assemblyId) return null;
-    return { kind: 'v2', projection: await buildMatrixReadProjection(client, assemblyId) };
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 function isRecordLike(value: unknown): value is Row {
@@ -125,13 +73,17 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     snapshotLoadError = err instanceof Error ? err.message : String(err);
   }
 
-  if (isComparisonSnapshot(snapshotJson)) {
+  if (isComparisonReport && snapshotJson && Array.isArray(snapshotJson.objects) && Array.isArray(snapshotJson.item_nodes)) {
+    const cells = (snapshotJson.cells ?? snapshotJson.matrix_cells ?? []) as unknown[];
+    const hasCellMedia = cells.some((cell) => isRecordLike(cell) && ['inline_media', 'appendix_media', 'media'].some((key) => Array.isArray(cell[key]) && (cell[key] as unknown[]).length > 0));
+    const hasMeaningfulMatrix = snapshotJson.objects.length > 0 && snapshotJson.item_nodes.length > 0
+      && cells.some((cell) => hasMeaningfulComparisonCell(cell) || hasCellMedia);
     return NextResponse.json({
       code: 0,
       message: 'success',
       data: {
         matrixType: 'multi_matrix',
-        matrix: snapshotJson ?? {},
+        matrix: hasMeaningfulMatrix ? snapshotJson : { objects: [], item_nodes: [], cells: [] },
       },
     });
   }
@@ -139,13 +91,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // ── 数据矩阵分支（Task 12 / Wave 6）──
   // 优先返回冻结快照中的投影；否则从组装即时构建。仅当任务确实关联 data_matrix
   // 组装、且快照/内容中存在投影时触发；既有对比/单报告不受影响。
-  const taskId = report.task_id ? String(report.task_id) : '';
   const frozenCandidate = pickFrozenProjection(snapshotJson, content);
-  const hasFrozenV3 = isFrozenV3MatrixProjection(frozenCandidate);
-  const hasFrozenV2 = isRecordLike(frozenCandidate) && Array.isArray((frozenCandidate as Row).groups);
-  const hasContentDataMatrix = isRecordLike(content?.data_matrix_projection);
-  if (hasFrozenV3 || hasFrozenV2 || hasContentDataMatrix || (taskId && ((await findTaskMatrixId(client, taskId)) || (await findDataMatrixAssemblyId(client, taskId))))) {
-    const resolved = await resolveDataMatrixProjection(client, snapshotJson, content, taskId);
+  const hasFrozenV3 = isFrozenV3MatrixProjection(frozenCandidate) && hasMeaningfulV3Projection(frozenCandidate);
+  const hasFrozenV2 = isRecordLike(frozenCandidate) && Array.isArray((frozenCandidate as Row).groups) && hasMeaningfulV2Projection(frozenCandidate);
+  if (hasFrozenV3 || hasFrozenV2) {
+    const resolved = await resolveDataMatrixProjection(snapshotJson, content);
     if (resolved?.kind === 'v3') {
       return NextResponse.json({
         code: 0,

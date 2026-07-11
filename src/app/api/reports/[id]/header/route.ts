@@ -2,9 +2,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canReadReport, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { loadLatestReportSnapshot } from '@/lib/server/report-snapshots';
+import {
+  hasMeaningfulComparisonCell,
+  hasMeaningfulV2Projection,
+  hasMeaningfulV3Projection,
+} from '@/lib/matrix/meaningful-content';
 
 function isRecordLike(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasSnapshotCellMedia(cell: unknown): boolean {
+  if (!isRecordLike(cell)) return false;
+  return ['inline_media', 'appendix_media', 'media'].some((key) => {
+    const value = cell[key];
+    return Array.isArray(value) && value.length > 0;
+  });
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -69,17 +82,25 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       const snapshot = await loadLatestReportSnapshot(client, id);
       const snapshotJson = snapshot?.snapshot_json as Record<string, unknown> | undefined;
       const objects = (snapshotJson?.objects ?? []) as unknown[];
+      const nodes = (snapshotJson?.item_nodes ?? []) as unknown[];
       const cells = (snapshotJson?.cells ?? snapshotJson?.matrix_cells ?? []) as unknown[];
-      hasMatrix = objects.length > 0 && cells.length > 0;
+      hasMatrix = objects.length > 0 && nodes.length > 0 && cells.some((cell) => (
+        hasMeaningfulComparisonCell(cell) || hasSnapshotCellMedia(cell)
+      ));
     } catch {
       hasMatrix = false;
     }
   } else {
-    const dataMatrixProjection = content?.data_matrix_projection;
-    hasMatrix =
-      isRecordLike(dataMatrixProjection) &&
-      Array.isArray(dataMatrixProjection.groups) &&
-      dataMatrixProjection.groups.length > 0;
+    const snapshot = await loadLatestReportSnapshot(client, id).catch(() => null);
+    const snapshotJson = snapshot?.snapshot_json as Record<string, unknown> | undefined;
+    const dataMatrixProjection = isRecordLike(snapshotJson?.matrix_projection)
+      ? snapshotJson.matrix_projection
+      : content?.data_matrix_projection;
+    hasMatrix = isRecordLike(dataMatrixProjection) && (
+      dataMatrixProjection.projectionVersion === 'v3' || dataMatrixProjection.matrixProjectionVersion === 'v3'
+        ? hasMeaningfulV3Projection(dataMatrixProjection)
+        : hasMeaningfulV2Projection(dataMatrixProjection)
+    );
   }
   if (hasMatrix) availableTabs.push('matrix');
 
