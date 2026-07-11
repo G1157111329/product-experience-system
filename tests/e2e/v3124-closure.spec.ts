@@ -258,6 +258,174 @@ test('concurrent first matrix creation is idempotent without opening the matrix 
   }
 });
 
+test('disposable V3 matrix visibility freezes value across report generations and archive', async ({ page }) => {
+  const marker = `E2E report visibility V3 ${Date.now()}`;
+  const taskResponse = await page.request.post('/api/tasks', {
+    data: {
+      task_name: marker,
+      product_category: '通用标准',
+      product: 'E2E',
+      product_model: marker,
+      task_mode: 'single',
+    },
+  });
+  const taskPayload = await taskResponse.json();
+  expect(taskPayload.code, taskPayload.message).toBe(0);
+  const taskId = taskPayload.data.id as string;
+  let matrixId = '';
+  const reportIds: string[] = [];
+
+  const generateReport = async () => {
+    const response = await page.request.post('/api/reports', { data: { task_id: taskId } });
+    const payload = await response.json();
+    expect(payload.code, payload.message).toBe(0);
+    const reportId = payload.data.id as string;
+    reportIds.push(reportId);
+    return reportId;
+  };
+
+  try {
+    const matrixResponse = await page.request.post(`/api/v1/tasks/${taskId}/matrices`, {
+      data: { name: `${marker} - V3`, view_mode: 'excel_like_dynamic_matrix' },
+    });
+    const matrixPayload = await matrixResponse.json();
+    expect(matrixPayload.code, matrixPayload.message).toBe(0);
+    matrixId = matrixPayload.data.id as string;
+
+    const emptyProjectionResponse = await page.request.get(`/api/v1/matrices/${matrixId}/v3-projection`);
+    const emptyProjectionPayload = await emptyProjectionResponse.json();
+    expect(emptyProjectionPayload.code, emptyProjectionPayload.message).toBe(0);
+    const emptyProjection = emptyProjectionPayload.data as {
+      rows: Array<{ id: string }>;
+      columns: Array<{ id: string; columnZone: string; dataType: string }>;
+    };
+    const leafRowId = emptyProjection.rows.find((row) => row.id)?.id;
+    const column = emptyProjection.columns.find((candidate) => candidate.columnZone === 'evaluation')
+      ?? emptyProjection.columns.find((candidate) => candidate.dataType === 'long_text');
+    expect(leafRowId).toBeTruthy();
+    expect(column?.id).toBeTruthy();
+
+    const reportV1 = await generateReport();
+    const headerV1Response = await page.request.get(`/api/reports/${reportV1}/header`);
+    const headerV1Payload = await headerV1Response.json();
+    expect(headerV1Payload.code, headerV1Payload.message).toBe(0);
+    expect(headerV1Payload.data.availableTabs).not.toContain('matrix');
+
+    const cellResponse = await page.request.put(
+      `/api/v1/matrices/${matrixId}/cells/${leafRowId}/${column!.id}`,
+      { data: { valueText: '85℃', displayText: '85℃' } },
+    );
+    const cellPayload = await cellResponse.json();
+    expect(cellPayload.code, cellPayload.message).toBe(0);
+    expect(cellPayload.data.valueState).toBe('filled');
+
+    const reportV2 = await generateReport();
+    const headerV2Response = await page.request.get(`/api/reports/${reportV2}/header`);
+    const headerV2Payload = await headerV2Response.json();
+    expect(headerV2Payload.data.availableTabs).toContain('matrix');
+    const matrixV2Response = await page.request.get(`/api/reports/${reportV2}/matrix`);
+    const matrixV2Payload = await matrixV2Response.json();
+    expect(matrixV2Payload.code, matrixV2Payload.message).toBe(0);
+    expect(JSON.stringify(matrixV2Payload.data.dataMatrixV3)).toContain('85℃');
+
+    const archiveResponse = await page.request.post(`/api/v1/matrices/${matrixId}/lifecycle`, {
+      data: { action: 'clear_and_archive', reason: 'e2e_report_visibility' },
+    });
+    const archivePayload = await archiveResponse.json();
+    expect(archivePayload.code, archivePayload.message).toBe(0);
+    expect(archivePayload.data.status).toBe('archived');
+
+    const reportV3 = await generateReport();
+    const headerV3Response = await page.request.get(`/api/reports/${reportV3}/header`);
+    const headerV3Payload = await headerV3Response.json();
+    expect(headerV3Payload.data.availableTabs).not.toContain('matrix');
+
+    const oldHeaderResponse = await page.request.get(`/api/reports/${reportV2}/header`);
+    const oldHeaderPayload = await oldHeaderResponse.json();
+    expect(oldHeaderPayload.data.availableTabs).toContain('matrix');
+    const oldMatrixResponse = await page.request.get(`/api/reports/${reportV2}/matrix`);
+    const oldMatrixPayload = await oldMatrixResponse.json();
+    expect(JSON.stringify(oldMatrixPayload.data.dataMatrixV3)).toContain('85℃');
+  } finally {
+    if (matrixId) await page.request.post(`/api/v1/matrices/${matrixId}/lifecycle`, { data: { action: 'archive', reason: 'e2e_cleanup' } });
+    for (const reportId of reportIds) await page.request.delete(`/api/reports/${reportId}`);
+    await page.request.delete(`/api/tasks/${taskId}`);
+  }
+});
+
+test('disposable comparison assembly hides report matrix after UI object deletion and deactivation', async ({ page }) => {
+  const marker = `E2E comparison visibility ${Date.now()}`;
+  const taskResponse = await page.request.post('/api/tasks', {
+    data: {
+      task_name: marker,
+      product_category: '通用标准',
+      product: 'E2E',
+      product_model: marker,
+      task_mode: 'comparison',
+    },
+  });
+  const taskPayload = await taskResponse.json();
+  expect(taskPayload.code, taskPayload.message).toBe(0);
+  const taskId = taskPayload.data.id as string;
+  const assemblyId = taskPayload.data.comparison_assembly_id as string;
+  let reportId = '';
+
+  try {
+    const sectionResponse = await page.request.post('/api/comparison-item-nodes', {
+      data: { assembly_id: assemblyId, node_type: 'section', node_label: `${marker} 大类` },
+    });
+    const sectionPayload = await sectionResponse.json();
+    expect(sectionPayload.code, sectionPayload.message).toBe(0);
+    const sectionId = sectionPayload.data.id as string;
+    const itemResponse = await page.request.post('/api/comparison-item-nodes', {
+      data: { assembly_id: assemblyId, parent_id: sectionId, node_type: 'item', node_label: `${marker} 细项` },
+    });
+    const itemPayload = await itemResponse.json();
+    expect(itemPayload.code, itemPayload.message).toBe(0);
+
+    for (const objectName of ['对象 A', '对象 B']) {
+      const objectResponse = await page.request.post('/api/comparison-objects', {
+        data: { assembly_id: assemblyId, task_id: taskId, object_name: objectName, object_type: 'product_model' },
+      });
+      const objectPayload = await objectResponse.json();
+      expect(objectPayload.code, objectPayload.message).toBe(0);
+    }
+
+    await page.goto(`/tasks/${taskId}?tab=comparison`);
+    const deleteObjectB = page.getByRole('button', { name: '删除对象 对象 B', exact: true });
+    await expect(deleteObjectB).toBeVisible();
+    await deleteObjectB.click();
+    await expect.poll(async () => {
+      const response = await page.request.get(`/api/comparison-matrix?assembly_id=${assemblyId}`);
+      const payload = await response.json();
+      return payload.data.objects.map((object: { object_name: string }) => object.object_name);
+    }).toEqual(['对象 A']);
+
+    const deactivateResponse = await page.request.post(`/api/comparison-assemblies/${assemblyId}/deactivate`, {
+      data: { reason: 'e2e_report_visibility' },
+    });
+    const deactivatePayload = await deactivateResponse.json();
+    expect(deactivatePayload.code, deactivatePayload.message).toBe(0);
+    expect(deactivatePayload.data.status).toBe('archived');
+
+    const reportResponse = await page.request.post('/api/reports', { data: { task_id: taskId } });
+    const reportPayload = await reportResponse.json();
+    expect(reportPayload.code, reportPayload.message).toBe(0);
+    reportId = reportPayload.data.id as string;
+    const headerResponse = await page.request.get(`/api/reports/${reportId}/header`);
+    const headerPayload = await headerResponse.json();
+    expect(headerPayload.data.availableTabs).not.toContain('matrix');
+
+    const snapshotResponse = await page.request.post('/api/report-snapshots', {
+      data: { assembly_id: assemblyId, report_type: 'comparison_report' },
+    });
+    expect(snapshotResponse.status()).toBe(409);
+  } finally {
+    if (reportId) await page.request.delete(`/api/reports/${reportId}`);
+    await page.request.delete(`/api/tasks/${taskId}`);
+  }
+});
+
 test('comparison categories default collapsed and names autosave without check buttons', async ({ page }) => {
   const initResponse = await page.request.get('/api/tasks/golden-task-comparison/comparison/init');
   const initPayload = await initResponse.json();

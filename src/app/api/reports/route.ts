@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { getDb } from '@/storage/database/pg-db';
 import { canAccessTask, isAuthResponse, requireUser } from '@/lib/server/auth';
@@ -61,15 +61,19 @@ async function loadTaskMatrixForReport(
   client: ReturnType<typeof getSupabaseClient>,
   taskId: string,
 ): Promise<LoadedDataMatrix | null> {
-  const { data: matrices } = await client
-    .from('task_matrices')
-    .select('id,status,updated_at,current_view_definition_id')
-    .eq('task_id', taskId)
-    .neq('status', 'archived')
-    .order('updated_at', { ascending: false })
-    .limit(1);
-
-  const row = matrices?.[0] as
+  // current_view_definition_id was added outside the generated Supabase
+  // schema. Read it through the same native PostgreSQL path used by V3
+  // projection APIs so report generation cannot silently fall back to V2.
+  const db = await getDb();
+  const matrixRows = await db.execute(sql`
+    SELECT id, current_view_definition_id
+    FROM task_matrices
+    WHERE task_id = ${taskId}
+      AND status <> 'archived'
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `);
+  const row = matrixRows.rows[0] as
     | { id?: string; current_view_definition_id?: string | null }
     | undefined;
   const matrixId = row?.id ? String(row.id) : '';
