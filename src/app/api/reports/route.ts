@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, eq, ne, sql } from 'drizzle-orm';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { getDb } from '@/storage/database/pg-db';
 import { canAccessTask, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { createApiTimer } from '@/lib/server/api-performance';
 import {
   experienceTasks,
-  issues as issuesTable,
   recipeLibrary,
   recipeLibrarySteps,
   reportSnapshots,
@@ -384,7 +383,6 @@ export async function POST(request: NextRequest) {
     .order('created_at', { ascending: false })
     .limit(20);
   const previousReport = previousReports?.[0];
-  const previousReportIds = (previousReports || []).map((report: { id: string }) => report.id).filter(Boolean);
   const nextVersion = Math.max(0, ...(previousReports || []).map((report: { version?: number | null }) => Number(report.version || 0))) + 1;
 
   // 自动生成报告 - 从任务和记录中填充内容
@@ -435,9 +433,6 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
 
-    if (previousReportIds.length > 0) {
-      await client.from('issues').delete().eq('task_id', body.task_id).in('source_report_id', previousReportIds);
-    }
     await client
       .from('reports')
       .update({ status: 'archived', updated_at: new Date().toISOString() })
@@ -449,126 +444,9 @@ export async function POST(request: NextRequest) {
       .update({ status: '\u5df2\u5b8c\u6210', updated_at: new Date().toISOString() })
       .eq('id', body.task_id);
 
-    // ── 对比矩阵问题点纳入问题管理 ──
-    // 从 snapshot.cells 提取问题点，复用 recipe_problem 类型，按 conclusionTag 推导等级
-    const snapshotCells = (snapshot.cells || []) as Array<Record<string, unknown>>;
-    const snapshotNodes = (snapshot.item_nodes || []) as Array<Record<string, unknown>>;
-    const snapshotObjects = (snapshot.objects || []) as Array<Record<string, unknown>>;
-    const assemblyId = comparisonSource.assemblyId;
-    const createdKeys = new Set<string>();
-    const matrixIssueRows: Array<typeof issuesTable.$inferInsert> = [];
-
-    const nodeLabel = (nodeId: string) => {
-      const node = snapshotNodes.find((n) => String(n.id ?? '') === nodeId);
-      return String(node?.node_label ?? node?.name ?? '');
-    };
-    const objectName = (objId: string) => {
-      const obj = snapshotObjects.find((o) => String(o.id ?? '') === objId);
-      return String(obj?.object_name ?? obj?.name ?? '');
-    };
-    // 按 conclusionTag 推导等级：risk→二类，retest/average→三类，其余不创建
-    const levelFromTag = (tag: string): string | null => {
-      if (tag === 'risk' || tag === 'failed') return '二类';
-      if (tag === 'retest' || tag === 'average') return '三类';
-      return null;
-    };
-
-    for (const cell of snapshotCells) {
-      const cellId = String(cell.id ?? '');
-      const itemNodeId = String(cell.item_node_id ?? cell.itemNodeId ?? '');
-      const objectId = String(cell.object_id ?? cell.objectId ?? '');
-      const conclusionTag = String(cell.conclusion_tag ?? '');
-      const effectSummary = String(cell.effect_summary ?? '');
-      const problemPoints = cell.problem_points;
-
-      // 收集问题文本：problem_points 数组优先，否则用 conclusion_tag=risk 时的 effect_summary
-      const problemTexts: string[] = [];
-      if (Array.isArray(problemPoints)) {
-        for (const pp of problemPoints) {
-          const text = typeof pp === 'string' ? pp : String((pp as Record<string, unknown>)?.text ?? '');
-          if (text.trim()) problemTexts.push(text.trim());
-        }
-      }
-      // 无显式 problem_points 但标签为 risk/retest，用 effect_summary 作为问题描述
-      if (problemTexts.length === 0 && (conclusionTag === 'risk' || conclusionTag === 'retest') && effectSummary.trim()) {
-        problemTexts.push(effectSummary.trim());
-      }
-
-      const level = levelFromTag(conclusionTag);
-      // 有显式 problem_points 的单元格即使标签非 risk 也创建（文本类问题），等级取 level 或默认三类
-      const finalLevel = problemTexts.length > 0 ? (level || '三类') : level;
-      if (!finalLevel || problemTexts.length === 0) continue;
-
-      const nodeText = nodeLabel(itemNodeId);
-      const objText = objectName(objectId);
-      for (const ppText of problemTexts) {
-        const issueTitle = `[对比]${objText} - ${nodeText}：${ppText}`.substring(0, 200);
-        const issueKey = `recipe_problem::${issueTitle}`;
-        if (createdKeys.has(issueKey)) continue;
-
-        matrixIssueRows.push({
-          taskId: body.task_id,
-          title: issueTitle,
-          productModel: (task as Record<string, unknown>)?.product_model as string || null,
-          level: finalLevel,
-          source: `${reportTitle} - 对比矩阵问题`.substring(0, 50),
-          sourceReportId: report.id,
-          sourceType: 'recipe_problem',
-          description: `对象：${objText}\n项目：${nodeText}\n问题：${ppText}`,
-          status: 'open',
-          sourceAssemblyId: assemblyId,
-          sourceCellId: cellId || null,
-          sourceItemNodeId: itemNodeId || null,
-          sourceObjectId: objectId || null,
-        });
-        createdKeys.add(issueKey);
-      }
-    }
-
-    if (matrixIssueRows.length > 0) {
-      try {
-        const matrixDb = getDb();
-        await matrixDb.insert(issuesTable).values(matrixIssueRows).onConflictDoNothing();
-      } catch {
-        // 矩阵问题点创建失败不应阻断报告生成；UNIQUE 约束冲突已被 onConflictDoNothing 吞掉
-      }
-    }
-
-    // ── 五感体验不合格项也纳入问题管理（对比报告此前会遗漏 record_fail）──
-    const { data: comparisonRecords } = await client.from('check_records').select('*').eq('task_id', body.task_id);
-    const sensoryIssueRows: Array<typeof issuesTable.$inferInsert> = [];
-    for (const record of (comparisonRecords || []) as Array<Record<string, unknown>>) {
-      if (record.evaluation_result !== '不合格') continue;
-      const issueTitle = String(record.check_item || '不合格检查项').substring(0, 200);
-      const issueKey = `record_fail::${issueTitle}`;
-      if (createdKeys.has(issueKey)) continue;
-      sensoryIssueRows.push({
-        taskId: body.task_id,
-        title: issueTitle,
-        productModel: (task as Record<string, unknown>)?.product_model as string || null,
-        level: '二类',
-        source: `${reportTitle} - 不合格检查项`.substring(0, 50),
-        sourceReportId: report.id,
-        sourceType: 'record_fail',
-        description: [record.check_requirement, record.check_standard, record.problem_description].filter(Boolean).join('\n'),
-        status: 'open',
-        recordId: String(record.id || '') || null,
-      });
-      createdKeys.add(issueKey);
-    }
-    if (sensoryIssueRows.length > 0) {
-      try {
-        const sensoryDb = getDb();
-        await sensoryDb.insert(issuesTable).values(sensoryIssueRows).onConflictDoNothing();
-      } catch {
-        // 同样不阻断报告生成
-      }
-    }
-
-    const totalNewIssues = matrixIssueRows.length + sensoryIssueRows.length;
     return NextResponse.json({
       code: 0,
-      message: totalNewIssues > 0 ? `对比矩阵报告生成成功，已创建 ${totalNewIssues} 个问题点` : '对比矩阵报告生成成功',
+      message: '对比矩阵报告生成成功',
       data: { ...report, snapshot_id: savedSnapshot.id },
     });
   }
@@ -692,7 +570,16 @@ export async function POST(request: NextRequest) {
     { preserve: body.preserve_review_overrides !== false },
   );
 
-  let frozenSnapshotJson: Record<string, unknown> | null = null;
+  // The snapshot carries the complete original report facts.  Live issue/retest data is
+  // deliberately not copied here and is overlaid by FrozenReportViewModel at read time.
+  let frozenSnapshotJson: Record<string, unknown> = {
+    report_type: 'single_report',
+    snapshot_status: 'published',
+    generated_at: new Date().toISOString(),
+    primary_task_id: body.task_id,
+    source_task_ids: [body.task_id],
+    report_content: finalReportContent,
+  };
   if (dataMatrixProjection) {
     try {
       let frozenProjection: ReportDataMatrixProjection = dataMatrixProjection;
@@ -715,11 +602,7 @@ export async function POST(request: NextRequest) {
       }
 
       frozenSnapshotJson = {
-        report_type: 'single_report',
-        snapshot_status: 'published',
-        generated_at: new Date().toISOString(),
-        primary_task_id: body.task_id,
-        source_task_ids: [body.task_id],
+        ...frozenSnapshotJson,
         matrix_projection: frozenProjection,
       };
     } catch (snapshotError) {
@@ -746,7 +629,7 @@ export async function POST(request: NextRequest) {
       throw new Error('报告创建失败');
     }
 
-    if (frozenSnapshotJson) {
+    {
       const [snapshot] = await tx.insert(reportSnapshots).values({
         reportId: report.id,
         reportType: 'single_report',
@@ -768,147 +651,11 @@ export async function POST(request: NextRequest) {
         ne(reportsTable.id, report.id),
       ));
 
-    if (previousReportIds.length > 0) {
-      await tx.delete(issuesTable)
-        .where(and(
-          eq(issuesTable.taskId, body.task_id),
-          inArray(issuesTable.sourceReportId, previousReportIds),
-        ));
-    }
-
     await tx.update(experienceTasks)
       .set({ status: '\u5df2\u5b8c\u6210', updatedAt: new Date().toISOString() })
       .where(eq(experienceTasks.id, body.task_id));
 
-    const reportTitle = report.title || '报告';
-    const records = (recordsWithMaterials || []) as Record<string, unknown>[];
     const recs = (recipesWithCount || []) as Record<string, unknown>[];
-    const createdKeys = new Set<string>();
-    const sourceText = (value: string) => value.substring(0, 50);
-    const issueRows: Array<typeof issuesTable.$inferInsert> = [];
-
-    for (const record of records) {
-      if (record.evaluation_result !== '不合格') continue;
-
-      const issueTitle = String(record.check_item || '不合格检查项').substring(0, 200);
-      const issueKey = `record_fail::${issueTitle}`;
-      if (createdKeys.has(issueKey)) continue;
-
-      issueRows.push({
-        taskId: body.task_id,
-        title: issueTitle,
-        productModel: (task as Record<string, unknown>)?.product_model as string || null,
-        level: '二类',
-        source: sourceText(`${reportTitle} - 不合格检查项`),
-          sourceReportId: report.id,
-          sourceType: 'record_fail',
-          description: [record.check_requirement, record.check_standard, record.problem_description].filter(Boolean).join('\n'),
-          status: 'open',
-          recordId: String(record.id || '') || null,
-        });
-      createdKeys.add(issueKey);
-    }
-
-    for (const recipe of recs) {
-      for (const step of ((recipe.recipe_steps || []) as Array<Record<string, unknown>>)) {
-        const problemPoints: Array<{ text: string }> = [];
-        const pp = step.problem_points;
-        if (Array.isArray(pp) && pp.length > 0) {
-          (pp as Array<{ text: string }>).forEach((p) => {
-            if (p.text && p.text.trim()) problemPoints.push({ text: p.text });
-          });
-        } else if (step.problem_point && String(step.problem_point).trim()) {
-          problemPoints.push({ text: String(step.problem_point) });
-        }
-
-        for (const ppItem of problemPoints) {
-          const issueTitle = ppItem.text.substring(0, 200);
-          const issueKey = `recipe_problem::${issueTitle}`;
-          if (createdKeys.has(issueKey)) continue;
-
-          issueRows.push({
-            taskId: body.task_id,
-            title: issueTitle,
-            productModel: (task as Record<string, unknown>)?.product_model as string || null,
-            level: '二类',
-            source: sourceText(`${reportTitle} - 食谱功能问题(${(recipe as Record<string, unknown>).name || ''})`),
-            sourceReportId: report.id,
-            sourceType: 'recipe_problem',
-            description: `步骤${step.step_number}: ${step.operation || ''}`,
-            status: 'open',
-          });
-          createdKeys.add(issueKey);
-        }
-      }
-
-      if (recipe.effect_problem_point && String(recipe.effect_problem_point).trim()) {
-        const effectPPStr = String(recipe.effect_problem_point).trim();
-        let effectPPs: string[] = [];
-        try {
-          const parsed = JSON.parse(effectPPStr);
-          if (Array.isArray(parsed)) {
-            effectPPs = parsed
-              .filter((p: unknown) => typeof p === 'object' && p !== null && typeof (p as Record<string, unknown>).text === 'string')
-              .map((p: { text: string }) => p.text.trim())
-              .filter((t: string) => t);
-          } else {
-            effectPPs = [effectPPStr];
-          }
-        } catch {
-          effectPPs = [effectPPStr];
-        }
-
-        for (const ppText of effectPPs) {
-          const issueTitle = ppText.substring(0, 200);
-          const issueKey = `recipe_problem::${issueTitle}`;
-          if (createdKeys.has(issueKey)) continue;
-
-          issueRows.push({
-            taskId: body.task_id,
-            title: issueTitle,
-            productModel: (task as Record<string, unknown>)?.product_model as string || null,
-            level: '二类',
-            source: sourceText(`${reportTitle} - 食谱效果问题(${(recipe as Record<string, unknown>).name || ''})`),
-            sourceReportId: report.id,
-            sourceType: 'recipe_problem',
-            description: '效果/出品效果评价问题',
-            status: 'open',
-          });
-          createdKeys.add(issueKey);
-        }
-      }
-    }
-
-    if (dataMatrixProjection && isFrozenV3MatrixProjection(dataMatrixProjection)) {
-      for (const point of dataMatrixProjection.issuePoints || []) {
-        const issueTitle = String(point.issueText || '').trim().substring(0, 200);
-        if (!issueTitle) continue;
-        const issueKey = `matrix_problem::${issueTitle}`;
-        if (createdKeys.has(issueKey)) continue;
-        const row = dataMatrixProjection.rows.find((item) => item.id === point.leafRowId);
-        const hierarchy = row
-          ? [row.level1Label, row.level2Label, row.level3Label].filter(Boolean).join(' / ')
-          : '';
-        issueRows.push({
-          taskId: body.task_id,
-          title: issueTitle,
-          productModel: (task as Record<string, unknown>)?.product_model as string || null,
-          level: '二类',
-          source: sourceText(`${reportTitle} - 数据矩阵问题`),
-          sourceReportId: report.id,
-          sourceType: 'matrix_problem',
-          description: hierarchy ? `矩阵位置：${hierarchy}` : null,
-          status: 'open',
-          sourceCellId: point.id,
-        });
-        createdKeys.add(issueKey);
-      }
-    }
-
-    if (issueRows.length > 0) {
-      await tx.insert(issuesTable).values(issueRows).onConflictDoNothing();
-    }
-
     const taskInfo = task as Record<string, unknown>;
     const taskProductCategory = taskInfo?.product_category as string || null;
     const taskProduct = taskInfo?.product as string || null;

@@ -8,6 +8,7 @@ import type { ReportDetailMediaItem, ReportDetailModel, ReportDetailSection, Rep
 import { ReportDataMatrixReadView } from '@/components/reports/report-data-matrix-read-view';
 import { ReportMediaGrid, type ReportMediaItem, type ReportMediaRole } from '@/components/reports/report-media-grid';
 import type { PrintMedia, PrintReportViewModel } from '@/lib/server/report-print-renderer';
+import { evaluationStatusLabel } from '@/lib/evaluation-status';
 
 function blockItemClass(status: string | undefined) {
   if (status === 'risk') return 'border-red-200 bg-red-50 text-red-800';
@@ -706,47 +707,6 @@ function PrintMediaThumbs({ media }: { media?: ReportDetailMediaItem[] }) {
   );
 }
 
-function paperRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
-function paperText(value: unknown, fallback = '') {
-  const result = value === null || value === undefined ? '' : String(value).trim();
-  return result || fallback;
-}
-
-function paperMediaFromUnknown(value: unknown): PrintMedia[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item, index) => {
-    const source = paperRecord(item);
-    const url = paperText(source.url || source.file_url || source.fileUrl || source.file_path || source.filePath);
-    if (!url) return [];
-    return [{
-      id: paperText(source.id || source.material_id || source.materialId, `${url}:${index}`),
-      name: paperText(source.name || source.file_name || source.fileName, '素材'),
-      type: paperText(source.type || source.material_type || source.materialType, 'image'),
-      url,
-      ...(paperText(source.posterUrl || source.poster_url || source.thumbnailUrl || source.thumbnail_url)
-        ? { posterUrl: paperText(source.posterUrl || source.poster_url || source.thumbnailUrl || source.thumbnail_url) }
-        : {}),
-    }];
-  });
-}
-
-function paperProblemTexts(value: unknown): string[] {
-  let source = value;
-  if (typeof source === 'string') {
-    const raw = source;
-    try { source = JSON.parse(raw); } catch { return raw.trim() ? [raw.trim()] : []; }
-  }
-  if (!Array.isArray(source)) return [];
-  return source.flatMap((item) => {
-    if (typeof item === 'string') return item.trim() ? [item.trim()] : [];
-    const result = paperText(paperRecord(item).text || paperRecord(item).issueText);
-    return result ? [result] : [];
-  });
-}
-
 function PaperMedia({ items }: { items: PrintMedia[] }) {
   if (items.length === 0) return null;
   return (
@@ -822,12 +782,28 @@ export function ReportPrintDocument({ model }: { model: PrintReportViewModel }) 
       <style>{`@page { size: ${model.page.paper} ${model.page.orientation}; margin: 12mm; } @media print { [data-testid="report-print-document"] { break-after: page; } [data-testid="report-print-document"]:last-child { break-after: auto; } }`}</style>
       <header style={paperRowStyle}><h1 style={{ margin: '0 0 4px', fontSize: '22px' }}>{model.header.title}</h1>{model.header.productModel && <p>{model.header.productModel}</p>}</header>
       <section><h2 style={{ fontSize: '16px', color: '#0f766e' }}>总结</h2><p style={{ whiteSpace: 'pre-wrap' }}>{model.summary.text || '暂无总结'}</p></section>
-      {model.issues.length > 0 && <section><h2 style={{ fontSize: '16px', color: '#0f766e' }}>问题</h2>{model.issues.map((issue) => (
-        <article key={issue.id} style={paperRowStyle}><h3>{issue.title}</h3><p>{issue.details}</p>{issue.liveOverlay.status && <p>当前状态：{issue.liveOverlay.status}</p>}<p>整改：{issue.liveOverlay.rectification || issue.liveOverlay.status || '待处理'}</p>{issue.evidence.length > 0 && <p><b>附录素材：</b></p>}<PaperMedia items={issue.evidence} />{issue.liveOverlay.evidence.length > 0 && <p><b>问题补充素材：</b></p>}<PaperMedia items={issue.liveOverlay.evidence} />{issue.liveOverlay.reEvaluations.map((item, index) => { const evaluation = paperRecord(item); return <div key={paperText(evaluation.id, String(index))}><b>复评：</b>{paperText(evaluation.description || evaluation.result || evaluation.conclusion, '已完成复评')}<PaperMedia items={paperMediaFromUnknown(evaluation.materials)} /></div>; })}</article>
-      ))}</section>}
+      {model.issues.length > 0 && <section><h2 style={{ fontSize: '16px', color: '#0f766e' }}>问题</h2>{model.issues.map((issue) => {
+        const recipe = issue.recipe;
+        const latest = issue.liveOverlay.retest.latest;
+        const parameters = recipe?.parameters
+          ? typeof recipe.parameters === 'string' ? recipe.parameters : Object.entries(recipe.parameters).map(([key, value]) => `${key}：${String(value)}`).join('；')
+          : '';
+        return <article key={issue.id} style={paperRowStyle}><h3>{issue.title}</h3>
+          {recipe ? <>
+            <p><b>食谱名称：</b>{recipe.name}</p>
+            {recipe.formula && <p><b>食谱配方：</b>{recipe.formula}</p>}
+            {parameters && <p><b>食谱参数：</b>{parameters}</p>}
+            {recipe.steps.length > 0 && <details><summary>食谱步骤：{recipe.steps.length}步</summary>{recipe.steps.map((step, index) => <div key={step.id}><b>步骤 {step.stepNumber ?? index + 1}</b> {step.operation}<PaperMedia items={step.evidence} /></div>)}</details>}
+            <p><b>食谱效果评价：</b>{recipe.evaluation}（{evaluationStatusLabel(recipe.evaluationStatus)}）</p><PaperMedia items={recipe.evidence} />
+          </> : <><p>{issue.details}</p><PaperMedia items={issue.evidence} /></>}
+          {issue.liveOverlay.status && <p>当前状态：{({ open: '待整改', rectifying: '整改中', verified_closed: '整改完成', waived: '不整改' }[issue.liveOverlay.status] ?? issue.liveOverlay.status)}</p>}
+          {issue.liveOverlay.status === 'verified_closed' && (issue.liveOverlay.rectification || issue.liveOverlay.evidence.length > 0) && <><p><b>整改效果评价：</b>{issue.liveOverlay.rectification}</p><p><b>整改素材：</b></p><PaperMedia items={issue.liveOverlay.evidence} /></>}
+          {latest && <div><b>整改复测：</b>{evaluationStatusLabel(latest.result)} {latest.description}<PaperMedia items={latest.evidence} />{issue.liveOverlay.retest.count >= 2 && <p>整改复测记录数：{issue.liveOverlay.retest.count}</p>}</div>}
+        </article>;
+      })}</section>}
       {model.matrix && <PaperMatrix matrix={model.matrix} />}
       {model.functionEffects.length > 0 && <section><h2 style={{ fontSize: '16px', color: '#0f766e' }}>功能效果</h2>{model.functionEffects.map((effect) => (
-        <article key={effect.id} style={paperRowStyle}><h3>{effect.name}</h3><p>{effect.evaluation}</p>{effect.score && <p>评分：{effect.score}</p>}{paperProblemTexts(effect.problemPoints).length > 0 && <ul style={{ color: '#991b1b' }}>{paperProblemTexts(effect.problemPoints).map((item) => <li key={item}>{item}</li>)}</ul>}<PaperMedia items={effect.evidence} />{effect.steps.map((item, index) => { const step = paperRecord(item); return <div key={paperText(step.id, String(index))}><b>步骤 {paperText(step.step_number, String(index + 1))}</b> {paperText(step.operation || step.description)}<PaperMedia items={paperMediaFromUnknown(step.materials)} /></div>; })}</article>
+        <article key={effect.recipeId} style={paperRowStyle}><h3>{effect.name}</h3><p>整体判断：{evaluationStatusLabel(effect.evaluationStatus)}</p><p>{effect.evaluation}</p><PaperMedia items={effect.evidence} />{effect.steps.map((step, index) => <div key={step.id}><b>步骤 {step.stepNumber ?? index + 1}</b> {step.operation}<PaperMedia items={step.evidence} /></div>)}</article>
       ))}</section>}
     </article>
   );

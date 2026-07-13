@@ -1,5 +1,6 @@
 import { dataMatrixReadLayout, type ReportDataMatrixReadCard, type ReportDataMatrixReadNarrative } from '@/lib/report-data-matrix-layout';
-import type { FrozenMedia, FrozenReportViewModel } from '@/lib/report-frozen-view';
+import { evaluationStatusLabel } from '@/lib/evaluation-status';
+import type { FrozenMedia, FrozenRecipeContext, FrozenReportViewModel } from '@/lib/report-frozen-view';
 
 type Row = Record<string, unknown>;
 
@@ -126,6 +127,12 @@ function cloneMedia(items: FrozenMedia[]): PrintMedia[] {
 }
 
 function cloneFrozenModelParts(model: FrozenReportViewModel) {
+  const cloneRecipe = (recipe: FrozenRecipeContext): FrozenRecipeContext => ({
+    ...recipe,
+    parameters: typeof recipe.parameters === 'object' && recipe.parameters !== null ? { ...recipe.parameters } : recipe.parameters,
+    evidence: cloneMedia(recipe.evidence),
+    steps: recipe.steps.map((step) => ({ ...step, evidence: cloneMedia(step.evidence) })),
+  });
   return {
     header: { ...model.header },
     summary: { ...model.summary, aiSummary: model.summary.aiSummary ? { ...model.summary.aiSummary } : null },
@@ -135,20 +142,16 @@ function cloneFrozenModelParts(model: FrozenReportViewModel) {
       liveOverlay: {
         ...issue.liveOverlay,
         evidence: cloneMedia(issue.liveOverlay.evidence),
-        reEvaluations: issue.liveOverlay.reEvaluations.map((item) => {
-          const source = record(item);
-          return { ...source, materials: mediaFromUnknown(source.materials) };
-        }),
+        retest: {
+          ...issue.liveOverlay.retest,
+          latest: issue.liveOverlay.retest.latest
+            ? { ...issue.liveOverlay.retest.latest, evidence: cloneMedia(issue.liveOverlay.retest.latest.evidence) }
+            : null,
+        },
       },
+      ...(issue.recipe ? { recipe: cloneRecipe(issue.recipe) } : {}),
     })),
-    functionEffects: model.functionEffects.map((effect) => ({
-      ...effect,
-      evidence: cloneMedia(effect.evidence),
-      steps: effect.steps.map((step) => {
-        const source = record(step);
-        return { ...source, materials: mediaFromUnknown(source.materials) };
-      }),
-    })),
+    functionEffects: model.functionEffects.map(cloneRecipe),
   };
 }
 
@@ -267,11 +270,11 @@ export function printReportMedia(model: PrintReportViewModel): PrintMedia[] {
   const issueMedia = model.issues.flatMap((issue) => [
     ...issue.evidence,
     ...issue.liveOverlay.evidence,
-    ...issue.liveOverlay.reEvaluations.flatMap((item) => mediaFromUnknown(record(item).materials)),
+    ...(issue.liveOverlay.retest.latest?.evidence ?? []),
   ]);
   const functionMedia = model.functionEffects.flatMap((effect) => [
     ...effect.evidence,
-    ...effect.steps.flatMap((step) => mediaFromUnknown(record(step).materials)),
+    ...effect.steps.flatMap((step) => step.evidence),
   ]);
   const matrixMedia = !model.matrix ? [] : model.matrix.kind === 'comparison'
     ? model.matrix.rows.flatMap((row) => Object.values(row.cells).flatMap((cell) => cell.media))
@@ -286,20 +289,6 @@ function escapeHtml(value: unknown) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
-}
-
-function problemTexts(value: unknown): string[] {
-  let source = value;
-  if (typeof source === 'string') {
-    const raw = source;
-    try { source = JSON.parse(raw); } catch { return raw.trim() ? [raw.trim()] : []; }
-  }
-  if (!Array.isArray(source)) return [];
-  return source.flatMap((item) => {
-    if (typeof item === 'string') return item.trim() ? [item.trim()] : [];
-    const result = text(record(item).text || record(item).issueText);
-    return result ? [result] : [];
-  });
 }
 
 function renderMedia(items: PrintMedia[]) {
@@ -347,23 +336,35 @@ function renderComparison(matrix: Extract<PrintMatrix, { kind: 'comparison' }>) 
 function renderIssues(model: PrintReportViewModel) {
   if (model.issues.length === 0) return '';
   return `<section><h2>问题</h2>${model.issues.map((issue) => {
-    const evaluations = issue.liveOverlay.reEvaluations.map((item) => {
-      const evaluation = record(item);
-      return `<div class="reevaluation"><b>复评：</b>${escapeHtml(text(evaluation.description || evaluation.result || evaluation.conclusion, '已完成复评'))}${renderMedia(mediaFromUnknown(evaluation.materials))}</div>`;
-    }).join('');
-    return `<article class="paper-row"><h3>${escapeHtml(issue.title)}</h3><p>${escapeHtml(issue.details)}</p>${issue.liveOverlay.status ? `<p>当前状态：${escapeHtml(issue.liveOverlay.status)}</p>` : ''}<p>整改：${escapeHtml(issue.liveOverlay.rectification || issue.liveOverlay.status || '待处理')}</p>${issue.evidence.length ? '<p><b>附录素材：</b></p>' : ''}${renderMedia(issue.evidence)}${issue.liveOverlay.evidence.length ? '<p><b>问题补充素材：</b></p>' : ''}${renderMedia(issue.liveOverlay.evidence)}${evaluations}</article>`;
+    const recipe = issue.recipe;
+    const parameters = recipe?.parameters
+      ? typeof recipe.parameters === 'string' ? recipe.parameters : Object.entries(recipe.parameters).map(([key, value]) => `${key}：${String(value)}`).join('；')
+      : '';
+    const steps = recipe?.steps.length
+      ? `<details><summary>食谱步骤：${recipe.steps.length}步</summary>${recipe.steps.map((step, index) => `<div class="paper-step"><b>步骤 ${escapeHtml(step.stepNumber ?? index + 1)}</b> ${escapeHtml(step.operation)}${renderMedia(step.evidence)}</div>`).join('')}</details>`
+      : '';
+    const latest = issue.liveOverlay.retest.latest;
+    const retest = latest
+      ? `<div class="reevaluation"><b>整改复测：</b>${escapeHtml(evaluationStatusLabel(latest.result))}${latest.description ? ` ${escapeHtml(latest.description)}` : ''}${latest.createdAt || latest.createdBy ? `<p class="meta">${escapeHtml([latest.createdAt, latest.createdBy].filter(Boolean).join(' · '))}</p>` : ''}${renderMedia(latest.evidence)}${issue.liveOverlay.retest.count >= 2 ? `<p>整改复测记录数：${issue.liveOverlay.retest.count}</p>` : ''}</div>`
+      : '';
+    const rectification = issue.liveOverlay.status === 'verified_closed' && (issue.liveOverlay.rectification || issue.liveOverlay.evidence.length)
+      ? `<div><p><b>整改效果评价：</b>${escapeHtml(issue.liveOverlay.rectification)}</p><p><b>整改素材：</b></p>${renderMedia(issue.liveOverlay.evidence)}</div>`
+      : '';
+    const original = recipe
+      ? `<p><b>食谱名称：</b>${escapeHtml(recipe.name)}</p>${recipe.formula ? `<p><b>食谱配方：</b>${escapeHtml(recipe.formula)}</p>` : ''}${parameters ? `<p><b>食谱参数：</b>${escapeHtml(parameters)}</p>` : ''}${steps}<p><b>食谱效果评价：</b>${escapeHtml(recipe.evaluation)}（${escapeHtml(evaluationStatusLabel(recipe.evaluationStatus))}）</p><p><b>原始效果素材：</b></p>${renderMedia(recipe.evidence)}`
+      : `<p>${escapeHtml(issue.details)}</p>${issue.evidence.length ? '<p><b>附录素材：</b></p>' : ''}${renderMedia(issue.evidence)}`;
+    const status = issue.liveOverlay.status ? `<p>当前状态：${escapeHtml(({ open: '待整改', rectifying: '整改中', verified_closed: '整改完成', waived: '不整改' }[issue.liveOverlay.status] ?? issue.liveOverlay.status))}</p>` : '';
+    return `<article class="paper-row"><h3>${escapeHtml(issue.title)}</h3>${original}${status}${rectification}${retest}</article>`;
   }).join('')}</section>`;
 }
 
 function renderFunctions(model: PrintReportViewModel) {
   if (model.functionEffects.length === 0) return '';
   return `<section><h2>功能效果</h2>${model.functionEffects.map((effect) => {
-    const problems = problemTexts(effect.problemPoints);
-    const steps = effect.steps.map((item, index) => {
-      const step = record(item);
-      return `<div class="paper-step"><b>步骤 ${escapeHtml(step.step_number ?? index + 1)}</b> ${escapeHtml(text(step.operation || step.description))}${renderMedia(mediaFromUnknown(step.materials))}</div>`;
+    const steps = effect.steps.map((step, index) => {
+      return `<div class="paper-step"><b>步骤 ${escapeHtml(step.stepNumber ?? index + 1)}</b> ${escapeHtml(step.operation)}${renderMedia(step.evidence)}</div>`;
     }).join('');
-    return `<article class="paper-row"><h3>${escapeHtml(effect.name)}</h3><p>${escapeHtml(effect.evaluation)}</p>${effect.score ? `<p>评分：${escapeHtml(effect.score)}</p>` : ''}${problems.length ? `<ul class="issues">${problems.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>` : ''}${renderMedia(effect.evidence)}${steps}</article>`;
+    return `<article class="paper-row"><h3>${escapeHtml(effect.name)}</h3><p>整体判断：${escapeHtml(evaluationStatusLabel(effect.evaluationStatus))}</p><p>${escapeHtml(effect.evaluation)}</p>${renderMedia(effect.evidence)}${steps}</article>`;
   }).join('')}</section>`;
 }
 

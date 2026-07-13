@@ -3,377 +3,159 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { buildFrozenReportViewModel } from './report-frozen-view';
 
-const fixture = () => ({
+const frozenRecipe = {
+  id: 'recipe-frozen',
+  name: '冷萃咖啡',
+  recipe_type: '食谱',
+  ingredients: '咖啡粉 20g；水 300ml',
+  parameters: { 水温: '5℃', 时间: '12小时' },
+  effect_status: 'unqualified',
+  effect_description: '口感偏酸，萃取不稳定。',
+  effect_materials: [{ id: 'original-effect', file_url: '/uploads/original-effect.jpg' }],
+  recipe_steps: [{
+    id: 'step-1',
+    step_number: 1,
+    operation: '冷藏萃取 12 小时',
+    problem_point: '旧步骤问题点不得显示',
+    materials: [{ id: 'step-proof', file_url: '/uploads/step-proof.jpg' }],
+  }],
+};
+
+const model = buildFrozenReportViewModel({
   report: {
-    id: 'report-1',
-    title: 'Frozen report',
+    id: 'report-frozen-recipe',
+    title: '实时标题不得覆盖冻结内容',
     report_type: 'single_report',
-    status: 'published',
     content: {
-      ai_summary: { summary: 'Frozen summary' },
-      records: [{
-        id: 'record-1',
-        check_item: 'Frozen issue title',
-        problem_description: 'Frozen issue detail',
-        evaluation_result: '不合格',
-        materials: [{ id: 'material-1', file_url: '/uploads/frozen.png' }],
-      }],
-      recipes: [{ id: 'recipe-1', name: 'Juice', effect_description: 'Stable result' }],
+      recipes: [{ ...frozenRecipe, name: '实时改名', effect_description: '实时描述不得覆盖' }],
     },
   },
   snapshot: {
     snapshot_json: {
-      matrix_projection: {
-        projectionVersion: 'v3',
-        matrixId: 'matrix-1',
-        columns: [{ id: 'column-1', label: 'Temperature' }],
-        rows: [{ id: 'row-1', cells: { 'column-1': '85℃' } }],
+      report_content: {
+        ai_summary: { summary: '冻结总结' },
+        recipes: [frozenRecipe],
       },
     },
   },
-  snapshotResolution: 'anchored' as const,
+  snapshotResolution: 'anchored',
   issues: [{
-    id: 'issue-1',
-    record_id: 'record-1',
-    title: 'Mutated live title',
-    description: 'Mutated live detail',
+    id: 'issue-frozen-recipe',
+    recipe_id: 'recipe-frozen',
+    title: '实时问题标题不得覆盖',
     status: 'verified_closed',
-    improve_plan: 'Live rectification',
-  }, {
-    id: 'issue-post-freeze',
-    title: 'Created after report freeze',
-    status: 'pending',
-  }],
-  issueEvidence: {
-    'issue-1': [{ id: 'material-2', name: 'Aggregated', type: 'image', url: '/uploads/aggregated.png' }],
-  },
-});
-
-const internal = buildFrozenReportViewModel(fixture(), { audience: 'internal' });
-const shared = buildFrozenReportViewModel(fixture(), { audience: 'share' });
-
-assert.deepEqual(shared.tabs, internal.tabs);
-assert.deepEqual(shared.header, internal.header);
-assert.deepEqual(shared.summary, internal.summary);
-assert.deepEqual(shared.issues, internal.issues);
-assert.deepEqual(shared.functionEffects, internal.functionEffects);
-assert.deepEqual(shared.matrix, internal.matrix);
-assert.equal(shared.capabilities.canManageIssues, false);
-assert.equal(shared.capabilities.canShare, false);
-assert.equal(internal.capabilities.canManageIssues, true);
-assert.equal(internal.capabilities.canShare, true);
-assert.equal(internal.matrix?.kind, 'data_v3');
-assert.deepEqual(internal.tabs, ['summary', 'issues', 'data_matrix', 'function_effect']);
-assert.equal(internal.issues[0]?.title, 'Frozen issue title');
-assert.equal(internal.issues[0]?.details, 'Frozen issue detail');
-assert.deepEqual(internal.issues.map((item) => item.id), ['issue-1']);
-assert.deepEqual(internal.issues[0]?.evidence.map((item) => item.id), ['material-1']);
-assert.deepEqual(internal.issues[0]?.liveOverlay, {
-  status: 'verified_closed',
-  rectification: 'Live rectification',
-  reEvaluations: [],
-  evidence: [{ id: 'material-2', name: 'Aggregated', type: 'image', url: '/uploads/aggregated.png' }],
-});
-
-const comparison = buildFrozenReportViewModel({
-  report: { id: 'report-2', title: 'Comparison', report_type: 'comparison_report', content: null },
-  snapshot: {
-    snapshot_json: {
-      objects: [{ id: 'object-1' }],
-      item_nodes: [{ id: 'item-1' }],
-      cells: [{ id: 'cell-1', effect_summary: 'Frozen comparison result' }],
-    },
-  },
-  snapshotResolution: 'anchored',
-  issues: [],
-}, { audience: 'share' });
-assert.equal(comparison.matrix?.kind, 'comparison');
-assert.deepEqual(comparison.tabs, ['summary', 'issues', 'comparison_matrix']);
-
-const dataV2 = buildFrozenReportViewModel({
-  report: { id: 'report-v2', report_type: 'single_report', content: {} },
-  snapshot: {
-    snapshot_json: {
-      matrix_projection: {
-        groups: [{ rows: [{
-          metrics: { temperature: { state: 'valid', value: 85 } },
-          slots: { result: { status: 'pending' }, process: {}, issues: { count: 0 } },
-          evidence: { primaryCount: 0, previewIds: [], media: [] },
-        }] }],
+    improve_plan: '已调整冷萃时间',
+    _reEvaluations: [
+      {
+        id: 'retest-old', result: 'pending', description: '旧复测',
+        created_at: '2026-07-10T00:00:00.000Z', created_by: 'u-old',
+        materials: [{ id: 'old-proof', file_url: '/uploads/old-proof.jpg' }],
       },
-    },
-  },
-  snapshotResolution: 'anchored',
-}, { audience: 'internal' });
-assert.equal(dataV2.matrix?.kind, 'data_v2');
-
-const empty = buildFrozenReportViewModel({
-  report: { id: 'report-empty', report_type: 'single_report', content: {} },
-  snapshot: { snapshot_json: {} },
-  snapshotResolution: 'anchored',
-}, { audience: 'internal' });
-assert.equal(empty.matrix, null);
-
-const legacy = buildFrozenReportViewModel({
-  report: { id: 'legacy-report', report_type: 'single_report', content: {} },
-  snapshot: { snapshot_json: {} },
-  snapshotResolution: 'legacy_latest',
-  issues: [{ id: 'legacy-issue', title: 'Legacy-only issue' }],
-}, { audience: 'internal' });
-assert.deepEqual(legacy.issues.map((item) => item.id), ['legacy-issue']);
-
-const legacyDuplicateEvidence = buildFrozenReportViewModel({
-  report: { id: 'legacy-duplicate', report_type: 'single_report', content: {} },
-  snapshot: null,
-  snapshotResolution: 'legacy_latest',
-  issues: [{
-    id: 'legacy-duplicate-issue',
-    title: 'Legacy duplicate',
-    materials: [{ id: 'same', file_name: 'same.jpg', material_type: 'image', file_url: '/uploads/same.jpg' }],
-  }],
-  issueEvidence: {
-    'legacy-duplicate-issue': [{ id: 'same', name: 'same.jpg', type: 'image', url: '/uploads/same.jpg' }],
-  },
-}, { audience: 'internal' });
-assert.deepEqual(legacyDuplicateEvidence.issues[0]?.evidence.map((item) => item.id), ['same']);
-assert.deepEqual(legacyDuplicateEvidence.issues[0]?.liveOverlay.evidence, []);
-
-const legacyPartialOverlap = buildFrozenReportViewModel({
-  report: { id: 'legacy-partial', report_type: 'single_report', content: {} },
-  snapshot: null,
-  snapshotResolution: 'legacy_latest',
-  issues: [{
-    id: 'legacy-partial-issue',
-    title: 'Legacy partial overlap',
-    materials: [{ id: 'base-a', file_name: 'A.jpg', material_type: 'image', file_url: '/uploads/a.jpg' }],
-    _reEvaluations: [{
-      materials: [{ id: 'reeval-c', file_name: 'C.jpg', material_type: 'image', file_url: '/uploads/c.jpg' }],
-    }],
-  }],
-  issueEvidence: {
-    'legacy-partial-issue': [
-      { id: 'base-a', name: 'A-copy.jpg', type: 'image', url: '/uploads/overlay-a.jpg' },
-      { id: 'overlay-b', name: 'A.jpg', type: 'image', url: '/uploads/b.jpg' },
-      { id: 'overlay-c', name: 'C-copy.jpg', type: 'image', url: '/uploads/c.jpg' },
+      {
+        id: 'retest-latest', result: 'qualified', description: '最新复测合格',
+        created_at: '2026-07-11T00:00:00.000Z', created_by: 'u-new',
+        materials: [{ id: 'latest-proof', file_url: '/uploads/latest-proof.jpg' }],
+      },
     ],
-  },
-}, { audience: 'internal' });
-assert.deepEqual(legacyPartialOverlap.issues[0]?.evidence.map((item) => item.id), ['base-a']);
-assert.deepEqual(legacyPartialOverlap.issues[0]?.liveOverlay.evidence.map((item) => item.id), ['overlay-b']);
-
-const anchoredDuplicateBehavior = buildFrozenReportViewModel({
-  report: {
-    id: 'anchored-duplicate',
-    report_type: 'single_report',
-    content: {
-      records: [{
-        id: 'anchored-record',
-        check_item: 'Anchored duplicate',
-        evaluation_result: 'fail',
-        materials: [{ id: 'anchored-same', file_name: 'same.jpg', material_type: 'image', file_url: '/uploads/same.jpg' }],
-      }],
-    },
-  },
-  snapshot: { snapshot_json: {} },
-  snapshotResolution: 'anchored',
-  issues: [{ id: 'anchored-issue', record_id: 'anchored-record', title: 'Live title' }],
+  }],
   issueEvidence: {
-    'anchored-issue': [{ id: 'anchored-same', name: 'same.jpg', type: 'image', url: '/uploads/same.jpg' }],
+    'issue-frozen-recipe': [{ id: 'rectification-proof', name: '整改素材', type: 'image', url: '/uploads/rectification.jpg' }],
   },
 }, { audience: 'internal' });
-assert.deepEqual(anchoredDuplicateBehavior.issues[0]?.evidence.map((item) => item.id), ['anchored-same']);
-assert.deepEqual(anchoredDuplicateBehavior.issues[0]?.liveOverlay.evidence.map((item) => item.id), ['anchored-same']);
 
-const frozenProblems = buildFrozenReportViewModel({
+assert.equal(model.summary.text, '冻结总结');
+assert.equal(model.functionEffects[0]?.name, '冷萃咖啡');
+assert.equal(model.functionEffects[0]?.evaluation, '口感偏酸，萃取不稳定。');
+assert.equal(model.functionEffects[0]?.evaluationStatus, 'unqualified');
+const effectShape = model.functionEffects[0] as unknown as Record<string, unknown>;
+assert.equal(effectShape.score, undefined);
+assert.equal(effectShape.problemPoints, undefined);
+assert.deepEqual(model.functionEffects[0]?.steps.map((step) => ({
+  number: step.stepNumber,
+  operation: step.operation,
+  evidence: step.evidence.map((item) => item.id),
+})), [{ number: 1, operation: '冷藏萃取 12 小时', evidence: ['step-proof'] }]);
+
+assert.deepEqual(model.issues.map((issue) => issue.id), ['issue-frozen-recipe']);
+const issue = model.issues[0]!;
+assert.equal(issue.title, '冷萃咖啡食谱效果不合格');
+assert.equal(issue.recipe?.name, '冷萃咖啡');
+assert.equal(issue.recipe?.formula, '咖啡粉 20g；水 300ml');
+assert.deepEqual(issue.recipe?.parameters, { 水温: '5℃', 时间: '12小时' });
+assert.equal(issue.recipe?.evaluationStatus, 'unqualified');
+assert.deepEqual(issue.recipe?.steps.map((step) => step.stepNumber), [1]);
+assert.deepEqual(issue.evidence.map((item) => item.id), ['original-effect']);
+assert.equal(issue.liveOverlay.status, 'verified_closed');
+assert.equal(issue.liveOverlay.rectification, '已调整冷萃时间');
+assert.equal(issue.liveOverlay.retest.count, 2);
+assert.equal(issue.liveOverlay.retest.latest?.id, 'retest-latest');
+assert.equal(issue.liveOverlay.retest.latest?.result, 'qualified');
+assert.equal(issue.liveOverlay.retest.latest?.description, '最新复测合格');
+assert.deepEqual(issue.liveOverlay.retest.latest?.evidence.map((item) => item.id), ['latest-proof']);
+assert.equal('reEvaluations' in issue.liveOverlay, false);
+
+const pending = buildFrozenReportViewModel({
   report: {
-    id: 'report-problems',
-    report_type: 'single_report',
-    content: {
-      recipes: [{
-        id: 'recipe-problem',
-        name: 'Frozen recipe',
-        effect_problem_point: JSON.stringify([{
-          text: 'Frozen effect problem',
-          material_ids: ['effect-material'],
-        }]),
-        effect_materials: [{
-          id: 'effect-material',
-          file_url: '/uploads/frozen-effect.png',
-        }],
-        recipe_steps: [{
-          id: 'step-problem',
-          step_number: 1,
-          operation: 'Frozen step operation',
-          problem_points: [{ text: 'Frozen step problem', material_ids: ['step-material'] }],
-          materials: [{ id: 'step-material', file_url: '/uploads/frozen-step.png' }],
-        }],
-      }],
-    },
+    id: 'report-pending', report_type: 'single_report', content: {},
   },
   snapshot: {
     snapshot_json: {
-      matrix_projection: {
-        matrixProjectionVersion: 'v3',
-        matrixId: 'matrix-problems',
-        columns: [{ id: 'column-issue', label: 'Issue' }],
-        rows: [{ id: 'leaf-problem', cells: { 'column-issue': 'fail' } }],
-        issuePoints: [{
-          id: 'matrix-point',
-          leafRowId: 'leaf-problem',
-          columnId: 'column-issue',
-          issueText: 'Frozen V3 matrix problem',
-          status: 'open',
-          materialIds: ['matrix-material'],
-        }],
-        cellMedia: {
-          'leaf-problem:column-issue': [{
-            materialId: 'matrix-material',
-            materialType: 'image',
-            fileName: 'matrix.png',
-            fileUrl: '/uploads/frozen-matrix.png',
-          }],
-        },
+      report_content: {
+        recipes: [{ id: 'recipe-pending', name: '待定功能', recipe_type: '功能', effect_status: 'pending', effect_description: '等待结论' }],
       },
     },
   },
   snapshotResolution: 'anchored',
-  issues: [
-    { id: 'live-effect', title: 'Frozen effect problem', source_type: 'recipe_problem', status: 'verified' },
-    { id: 'live-step', title: 'Frozen step problem', source_type: 'recipe_problem', status: 'rectifying' },
-    { id: 'live-matrix', source_cell_id: 'matrix-point', source_type: 'matrix_problem', title: 'Mutated matrix title', status: 'pending' },
-  ],
-}, { audience: 'internal' });
+}, { audience: 'share' });
+assert.equal(pending.issues.length, 1, '待定整体判断必须进入冻结问题 Tab');
+assert.equal(pending.issues[0]?.title, '待定功能效果待定');
+assert.equal(pending.issues[0]?.recipe?.steps.length, 0);
 
-assert.deepEqual(
-  frozenProblems.issues.map((issue) => ({
-    id: issue.id,
-    title: issue.title,
-    evidence: issue.evidence.map((item) => item.id),
-    status: issue.liveOverlay.status,
-  })),
-  [
-    { id: 'live-effect', title: 'Frozen effect problem', evidence: ['effect-material'], status: 'verified' },
-    { id: 'live-step', title: 'Frozen step problem', evidence: ['step-material'], status: 'rectifying' },
-    { id: 'live-matrix', title: 'Frozen V3 matrix problem', evidence: ['matrix-material'], status: 'pending' },
-  ],
-);
-
-const shareRouteSource = readFileSync(
-  resolve(process.cwd(), 'src/app/api/reports/share/route.ts'),
-  'utf8',
-);
-assert.doesNotMatch(shareRouteSource, /loadReEvaluationsMap/);
-assert.doesNotMatch(shareRouteSource, /\.from\('issue_re_evaluations'\)/);
-assert.doesNotMatch(shareRouteSource, /\.from\('issues'\)/);
-
-const duplicateRecordTitles = buildFrozenReportViewModel({
-  report: {
-    id: 'report-duplicate-records',
-    report_type: 'single_report',
-    content: {
-      records: [
-        { id: 'record-a', check_item: 'Same title', problem_description: 'Detail A', evaluation_result: '不合格' },
-        { id: 'record-b', check_item: 'Same title', problem_description: 'Detail B', evaluation_result: '不合格' },
-      ],
-    },
-  },
-  snapshot: null,
-  snapshotResolution: 'none',
-}, { audience: 'internal' });
-assert.deepEqual(
-  duplicateRecordTitles.issues.map((issue) => [issue.id, issue.title, issue.details]),
-  [
-    ['record-a', 'Same title', 'Detail A'],
-    ['record-b', 'Same title', 'Detail B'],
-  ],
-);
-
-const longProblem = '长'.repeat(205);
-const stableRecipeIssues = buildFrozenReportViewModel({
-  report: {
-    id: 'report-stable-recipes',
-    report_type: 'single_report',
-    content: {
-      recipes: [{
-        id: 'recipe-stable',
-        name: 'Stable recipe',
-        effect_description: 'Frozen effect details',
-        effect_problem_point: JSON.stringify([
-          { text: longProblem, material_ids: ['long-effect-media'] },
-          { text: 'Same recipe problem', material_ids: ['same-effect-media'] },
-        ]),
-        effect_materials: [
-          { id: 'long-effect-media', file_url: '/uploads/long-effect.png' },
-          { id: 'same-effect-media', file_url: '/uploads/same-effect.png' },
-        ],
-        recipe_steps: [{
-          id: 'step-stable',
-          step_number: 2,
-          operation: 'Frozen step details',
-          problem_points: [{ text: 'Same recipe problem', material_ids: ['same-step-media'] }],
-          materials: [{ id: 'same-step-media', file_url: '/uploads/same-step.png' }],
+const legacyOnly = buildFrozenReportViewModel({
+  report: { id: 'legacy-points', report_type: 'single_report', content: {} },
+  snapshot: {
+    snapshot_json: {
+      report_content: {
+        recipes: [{
+          id: 'legacy-recipe', name: '旧食谱', effect_status: 'qualified',
+          effect_problem_point: '[{"text":"不得生成"}]',
+          recipe_steps: [{ id: 'legacy-step', problem_point: '不得生成步骤问题' }],
         }],
-      }],
+      },
     },
   },
-  snapshot: null,
-  snapshotResolution: 'none',
-  issues: [
-    {
-      id: 'live-long-effect',
-      title: longProblem.substring(0, 200),
-      source_type: 'recipe_problem',
-      source: '报告 - 食谱效果问题(Stable recipe)',
-      status: 'verified',
-    },
-    {
-      id: 'live-same-effect',
-      title: 'Same recipe problem',
-      source_type: 'recipe_problem',
-      source: '报告 - 食谱效果问题(Stable recipe)',
-      status: 'effect-status',
-    },
-    {
-      id: 'live-same-step',
-      title: 'Same recipe problem',
-      source_type: 'recipe_problem',
-      source: '报告 - 食谱功能问题(Stable recipe)',
-      status: 'step-status',
-    },
-  ],
+  snapshotResolution: 'anchored',
 }, { audience: 'internal' });
+assert.equal(legacyOnly.issues.length, 0, '旧效果/步骤问题点不得再生成冻结问题');
 
-assert.deepEqual(
-  stableRecipeIssues.issues.map((issue) => ({
-    id: issue.id,
-    title: issue.title,
-    details: issue.details,
-    evidence: issue.evidence.map((item) => item.id),
-    status: issue.liveOverlay.status,
-  })),
-  [
-    {
-      id: 'live-long-effect',
-      title: longProblem,
-      details: 'Frozen effect details',
-      evidence: ['long-effect-media'],
-      status: 'verified',
-    },
-    {
-      id: 'live-same-effect',
-      title: 'Same recipe problem',
-      details: 'Frozen effect details',
-      evidence: ['same-effect-media'],
-      status: 'effect-status',
-    },
-    {
-      id: 'live-same-step',
-      title: 'Same recipe problem',
-      details: '2: Frozen step details',
-      evidence: ['same-step-media'],
-      status: 'step-status',
-    },
-  ],
-);
+const anchoredWithoutContent = buildFrozenReportViewModel({
+  report: {
+    id: 'anchored-without-content', report_type: 'single_report',
+    content: { recipes: [{ id: 'live-only', name: '实时食谱', effect_status: 'unqualified' }] },
+  },
+  snapshot: { snapshot_json: { matrix_projection: {} } },
+  snapshotResolution: 'anchored',
+}, { audience: 'internal' });
+assert.equal(anchoredWithoutContent.functionEffects.length, 0, '带 snapshot_id 的旧快照不得静默读取实时食谱');
+assert.equal(anchoredWithoutContent.issues.length, 0, '带 snapshot_id 的旧快照不得由实时食谱生成问题');
 
-console.log('report frozen view model tests passed');
+const qualifiedAtFreeze = buildFrozenReportViewModel({
+  report: { id: 'qualified-at-freeze', report_type: 'single_report', content: {} },
+  snapshot: { snapshot_json: { report_content: { recipes: [{ id: 'recipe-qualified', name: '冻结时合格', effect_status: 'qualified' }] } } },
+  snapshotResolution: 'anchored',
+  issues: [{ id: 'live-old-issue', recipe_id: 'recipe-qualified', source_type: 'recipe_problem', status: 'rectifying' }],
+}, { audience: 'internal' });
+assert.equal(qualifiedAtFreeze.issues.length, 0, '冻结时合格的食谱不得因之后同 recipe 的旧 issue 回流到报告');
+
+const readerSource = readFileSync(resolve(process.cwd(), 'src/components/reports/frozen-report-reader.tsx'), 'utf8');
+const printSource = readFileSync(resolve(process.cwd(), 'src/lib/server/report-print-renderer.ts'), 'utf8');
+const reportRouteSource = readFileSync(resolve(process.cwd(), 'src/app/api/reports/route.ts'), 'utf8');
+assert.match(readerSource, /issue\.recipe/);
+assert.match(readerSource, /liveOverlay\.retest/);
+assert.doesNotMatch(readerSource, /problemPoints\(/);
+assert.doesNotMatch(readerSource, /AI评分|评分：/);
+assert.doesNotMatch(printSource, /problemTexts\(effect\.problemPoints\)/);
+assert.doesNotMatch(printSource, /effect\.score/);
+assert.match(reportRouteSource, /report_content:\s*finalReportContent/);
+
+console.log('frozen recipe issue projection contract tests passed');

@@ -17,10 +17,12 @@ assert.doesNotMatch(printSource, /role=['"]tab/);
 
 const paperRendererSource = readFileSync(resolve(process.cwd(), 'src/components/reports/report-section-block-renderer.tsx'), 'utf8');
 assert.match(paperRendererSource, /cell\.notes/);
+assert.match(paperRendererSource, /cell\.problems/, '矩阵单元格问题能力必须保留');
 assert.match(paperRendererSource, /row\.issueSummary/);
-assert.match(paperRendererSource, /paperProblemTexts\(effect\.problemPoints\)/);
+assert.doesNotMatch(paperRendererSource, /paperProblemTexts\(effect\.problemPoints\)/);
+assert.doesNotMatch(paperRendererSource, /effect\.problemPoints/);
+assert.doesNotMatch(paperRendererSource, /effect\.score/);
 assert.match(paperRendererSource, /item\.posterUrl/);
-assert.match(paperRendererSource, /source\.posterUrl/);
 assert.match(paperRendererSource, /data-testid="paper-video-poster"/);
 assert.match(paperRendererSource, /<img[\s\S]+?data-video-poster/);
 assert.doesNotMatch(paperRendererSource, /<video\b/);

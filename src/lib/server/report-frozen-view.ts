@@ -1,5 +1,4 @@
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { issueMaterialRows, recipeIssueMaterialRows } from '@/lib/report-issue-media';
 import {
   buildFrozenReportViewModel,
   type FrozenMedia,
@@ -22,12 +21,6 @@ async function selectRows(
 
 function text(value: unknown) {
   return value === null || value === undefined ? '' : String(value).trim();
-}
-
-function rows(value: unknown): Row[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is Row => typeof item === 'object' && item !== null && !Array.isArray(item))
-    : [];
 }
 
 function toFrozenMedia(materials: Row[]): FrozenMedia[] {
@@ -65,33 +58,44 @@ async function attachReEvaluations(client: Client, issues: Row[]) {
     const key = text(material.re_evaluation_id);
     materialsByReEvaluation.set(key, [...(materialsByReEvaluation.get(key) ?? []), material]);
   }
+  const creatorIds = [...new Set(reEvaluations.map((item) => text(item.created_by)).filter(Boolean))];
+  const creatorNames = creatorIds.length
+    ? await selectRows(
+      client.from('platform_users').select('id, name, account').in('id', creatorIds) as unknown as PromiseLike<{ data: Row[] | null; error?: { message?: string } | null }>,
+      'Failed to load re-evaluation creators',
+    )
+    : [];
+  const creatorNameById = new Map(creatorNames.map((creator) => [text(creator.id), firstCreatorName(creator)]));
   const byIssue = new Map<string, Row[]>();
   for (const item of reEvaluations) {
     const key = text(item.issue_id);
     byIssue.set(key, [...(byIssue.get(key) ?? []), {
       ...item,
+      created_by_name: creatorNameById.get(text(item.created_by)) || null,
       materials: materialsByReEvaluation.get(text(item.id)) ?? [],
     }]);
   }
   return issues.map((issue) => ({ ...issue, _reEvaluations: byIssue.get(text(issue.id)) ?? [] }));
 }
 
-function issueEvidence(report: Row, issues: Row[], materials: Row[]) {
-  const content = typeof report.content === 'object' && report.content !== null
-    ? report.content as Row
-    : {};
-  const recipes = rows(content.recipes);
-  const frozenMaterials = rows(content.materials);
-  const allMaterials = [...frozenMaterials, ...materials];
+function firstCreatorName(creator: Row) {
+  return text(creator.name) || text(creator.account);
+}
+
+/**
+ * Mutable overlay media is deliberately narrower than original issue evidence:
+ * only material rows attached to this live issue qualify, and retest material is
+ * supplied by attachReEvaluations as a separate typed record.
+ */
+export function buildLiveIssueOverlayEvidence(issues: Row[], materials: Row[]) {
   return Object.fromEntries(issues.map((issue) => {
-    const reEvaluationMaterials = rows(issue._reEvaluations).flatMap((item) => rows(item.materials));
-    const aggregated = [
-      ...rows(issue.materials),
-      ...issueMaterialRows(issue, allMaterials),
-      ...recipeIssueMaterialRows(issue, recipes, allMaterials),
-      ...reEvaluationMaterials,
-    ];
-    return [text(issue.id), toFrozenMedia(aggregated)];
+    const issueId = text(issue.id);
+    const ownedRectificationMedia = materials.filter((material) => (
+      issueId !== ''
+      && text(material.issue_id) === issueId
+      && text(material.re_evaluation_id) === ''
+    ));
+    return [issueId, toFrozenMedia(ownedRectificationMedia)];
   }));
 }
 
@@ -139,7 +143,7 @@ export async function buildFrozenReportResponse(
     snapshot,
     snapshotResolution: snapshotResult.resolution,
     issues,
-    issueEvidence: issueEvidence(report, issues, materials),
+    issueEvidence: buildLiveIssueOverlayEvidence(issues, materials),
   }, options);
   return { model, detailModel, snapshot, issues };
 }

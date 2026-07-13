@@ -80,7 +80,7 @@ test('anonymous reader presigns raw object keys without requesting them as page-
           header: { id: 'raw-report', title: 'Raw media report', reportType: 'single_report', status: 'published', productModel: null },
           tabs: ['summary', 'issues'],
           summary: { text: 'Raw summary', aiSummary: null },
-          issues: [{ id: 'raw-issue', title: 'Raw issue', details: '', level: '', sourceType: '', evidence: [{ id: 'raw-material', name: 'raw.jpg', type: 'image', url: 'garage/private/raw.jpg' }], liveOverlay: { status: '', rectification: '', reEvaluations: [], evidence: [] } }],
+          issues: [{ id: 'raw-issue', title: 'Raw issue', details: '', level: '', sourceType: '', evidence: [{ id: 'raw-material', name: 'raw.jpg', type: 'image', url: 'garage/private/raw.jpg' }], liveOverlay: { status: '', rectification: '', retest: { count: 0, latest: null }, evidence: [] } }],
           matrix: null,
           functionEffects: [],
           capabilities: { canManageIssues: false, canShare: false, canExport: true },
@@ -123,7 +123,7 @@ test('anonymous reader preserves a successful local-public presign result', asyn
           snapshotResolution: 'anchored',
           header: { id: 'local-report', title: 'Local media report', reportType: 'single_report', status: 'published', productModel: null },
           tabs: ['summary', 'issues'], summary: { text: 'Summary', aiSummary: null },
-          issues: [{ id: 'local-issue', title: 'Local issue', details: '', level: '', sourceType: '', evidence: [{ id: 'local-material', name: 'local.jpg', type: 'image', url: 'garage/private/local.jpg' }], liveOverlay: { status: '', rectification: '', reEvaluations: [], evidence: [] } }],
+          issues: [{ id: 'local-issue', title: 'Local issue', details: '', level: '', sourceType: '', evidence: [{ id: 'local-material', name: 'local.jpg', type: 'image', url: 'garage/private/local.jpg' }], liveOverlay: { status: '', rectification: '', retest: { count: 0, latest: null }, evidence: [] } }],
           matrix: null, functionEffects: [], capabilities: { canManageIssues: false, canShare: false, canExport: true },
         }, siblingReports: [], siblingFrozenViewModels: {},
       },
@@ -164,7 +164,7 @@ for (const failure of [{ name: 'empty result', status: 200 }, { name: 'server er
             snapshotResolution: 'anchored',
             header: { id: 'failed-report', title: 'Failed media report', reportType: 'single_report', status: 'published', productModel: null },
             tabs: ['summary', 'issues'], summary: { text: 'Summary', aiSummary: null },
-            issues: [{ id: 'failed-issue', title: 'Failed issue', details: '', level: '', sourceType: '', evidence: [{ id: 'failed-material', name: 'failed.jpg', type: 'image', url: 'garage/private/failed.jpg' }], liveOverlay: { status: '', rectification: '', reEvaluations: [], evidence: [] } }],
+            issues: [{ id: 'failed-issue', title: 'Failed issue', details: '', level: '', sourceType: '', evidence: [{ id: 'failed-material', name: 'failed.jpg', type: 'image', url: 'garage/private/failed.jpg' }], liveOverlay: { status: '', rectification: '', retest: { count: 0, latest: null }, evidence: [] } }],
             matrix: null, functionEffects: [], capabilities: { canManageIssues: false, canShare: false, canExport: true },
           }, siblingReports: [], siblingFrozenViewModels: {},
         },
@@ -303,21 +303,26 @@ const semanticMediaModel = {
     sourceType: 'record_fail',
     evidence: semanticMedia('original', 5),
     liveOverlay: {
-      status: '整改中',
+      status: 'verified_closed',
       rectification: 'Rectification in progress',
       evidence: semanticMedia('rectification', 5),
-      reEvaluations: [{ id: 'reevaluation', description: 'Re-evaluated', materials: semanticMedia('reevaluation', 5) }],
+      retest: {
+        count: 2,
+        latest: { id: 'reevaluation', result: 'qualified', description: 'Re-evaluated', createdAt: '2026-07-13T00:00:00.000Z', createdBy: 'Engineer', evidence: semanticMedia('reevaluation', 5) },
+      },
     },
   }],
   matrix: null,
   functionEffects: [{
-    id: 'semantic-effect',
+    recipeId: 'semantic-effect',
+    subjectName: 'Semantic function effect食谱',
     name: 'Semantic function effect',
+    formula: '',
+    parameters: null,
+    evaluationStatus: 'qualified',
     evaluation: 'Stable result',
-    score: 8,
-    problemPoints: [],
     evidence: semanticMedia('effect', 7, true),
-    steps: [{ id: 'semantic-step', step_number: 1, operation: 'Run process', materials: semanticMedia('process', 5) }],
+    steps: [{ id: 'semantic-step', stepNumber: 1, operation: 'Run process', evidence: semanticMedia('process', 5) }],
   }],
   capabilities: { canManageIssues: false, canShare: false, canExport: true },
 };
@@ -345,10 +350,11 @@ async function assertSemanticMedia(page: import('@playwright/test').Page) {
   await expect(evidence.getByTestId('report-media-more')).toHaveText('+1');
 
   await reader.getByRole('tab').nth(1).click();
+  await reader.getByText('Semantic issue', { exact: true }).click();
   const appendix = reader.getByTestId('report-media-grid-appendix');
   await expect(appendix).toHaveCount(3);
   await expect(reader.getByText('原始问题素材')).toBeVisible();
-  await expect(reader.getByText('问题补充素材')).toBeVisible();
+  await expect(reader.getByText('整改素材')).toBeVisible();
   await expect(reader.getByText('复评素材')).toBeVisible();
   await expect(appendix.first().getByTestId('report-media-item')).toHaveCount(4);
   await expect(appendix.first().getByTestId('report-media-more')).toHaveText('+1');
@@ -380,6 +386,50 @@ test('semantic media roles size detail and share grids consistently without mobi
   }
 });
 
+test('frozen recipe issue reader keeps snapshot facts and renders four states with 0/1/2+ retests', async ({ page }) => {
+  const states = [
+    { status: 'open', label: '待整改', count: 0 },
+    { status: 'rectifying', label: '整改中', count: 1 },
+    { status: 'verified_closed', label: '整改完成', count: 2 },
+    { status: 'waived', label: '不整改', count: 3 },
+  ] as const;
+  await page.route('**/api/reports/share?token=retest-*', async (route) => {
+    const token = new URL(route.request().url()).searchParams.get('token') || '';
+    const state = states.find((item) => token.endsWith(item.status)) ?? states[0];
+    const latest = state.count === 0 ? null : {
+      id: `latest-${state.status}`,
+      result: state.status === 'verified_closed' ? 'qualified' : state.status === 'rectifying' ? 'unqualified' : 'pending',
+      description: '最新复测记录', createdAt: '2026-07-13T00:00:00.000Z', createdBy: '体验工程师', evidence: [],
+    };
+    await route.fulfill({ json: { code: 0, data: {
+      frozenViewModel: {
+        snapshotResolution: 'anchored',
+        header: { id: `retest-${state.status}`, title: '复测冻结报告', reportType: 'single_report', status: 'published', productModel: null },
+        tabs: ['summary', 'issues'], summary: { text: '冻结总结', aiSummary: null }, matrix: null, functionEffects: [],
+        issues: [{
+          id: `issue-${state.status}`, title: '冻结食谱效果不合格', details: '', level: '二类', sourceType: 'recipe_problem', evidence: [],
+          recipe: { recipeId: 'recipe-frozen', name: '冻结食谱', subjectName: '冻结食谱', formula: '冻结配方', parameters: { 温度: '80℃' }, evaluationStatus: 'unqualified', evaluation: '冻结原始评价', evidence: [], steps: [] },
+          liveOverlay: { status: state.status, rectification: '实时整改评价', evidence: [], retest: { count: state.count, latest } },
+        }],
+        capabilities: { canManageIssues: false, canShare: false, canExport: true },
+      }, siblingReports: [], siblingFrozenViewModels: {},
+    } } });
+  });
+  for (const state of states) {
+    await page.goto(`/reports/share/retest-${state.status}`);
+    const reader = page.getByTestId('frozen-report-reader');
+    await reader.getByRole('tab', { name: '问题' }).click();
+    await reader.getByText('冻结食谱效果不合格', { exact: true }).click();
+    await expect(reader.getByText(state.label, { exact: true })).toBeVisible();
+    await expect(reader.getByText('冻结配方')).toBeVisible();
+    await expect(reader.getByText('冻结原始评价')).toBeVisible();
+    if (state.count === 0) await expect(reader.getByText('整改复测')).toHaveCount(0);
+    else await expect(reader.getByText('最新复测记录')).toBeVisible();
+    if (state.count >= 2) await expect(reader.getByText(`整改复测记录数：${state.count}`)).toBeVisible();
+    else await expect(reader.getByText(/整改复测记录数：/)).toHaveCount(0);
+  }
+});
+
 test('a semantic grid presigns all raw primary media in one batch', async ({ page }) => {
   const paths = Array.from({ length: 6 }, (_, index) => `garage/private/batch-${index + 1}.jpg`);
   const model = {
@@ -389,7 +439,7 @@ test('a semantic grid presigns all raw primary media in one batch', async ({ pag
     issues: [],
     functionEffects: [{
       ...semanticMediaModel.functionEffects[0],
-      id: 'batch-effect',
+      recipeId: 'batch-effect',
       evidence: paths.map((url, index) => ({ id: `batch-${index + 1}`, name: `batch-${index + 1}.jpg`, type: 'image', url })),
       steps: [],
     }],

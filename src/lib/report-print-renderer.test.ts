@@ -21,12 +21,15 @@ function frozenModel(matrix: FrozenReportViewModel['matrix']): FrozenReportViewM
       evidence: [{ id: 'issue-image', name: 'issue.jpg', type: 'image', url: pixel }],
       liveOverlay: {
         status: 'rectifying', rectification: 'Replace seal', evidence: [],
-        reEvaluations: [{ id: 'reeval-1', description: 'Retest passed', materials: [{ id: 'reeval-image', name: 'reeval.jpg', type: 'image', url: pixel }] }],
+        retest: {
+          count: 1,
+          latest: { id: 'reeval-1', result: 'qualified', description: 'Retest passed', createdAt: null, createdBy: null, evidence: [{ id: 'reeval-image', name: 'reeval.jpg', type: 'image', url: pixel }] },
+        },
       },
     }],
     matrix,
     functionEffects: [{
-      id: 'effect-1', name: 'Juice effect', evaluation: 'Clear and stable', score: '8', problemPoints: [{ text: 'Foam remains' }],
+      recipeId: 'effect-1', subjectName: 'Juice effect食谱', name: 'Juice effect', formula: '', parameters: null, evaluationStatus: 'qualified', evaluation: 'Clear and stable',
       evidence: [{ id: 'effect-video', name: 'effect.mp4', type: 'video', url: '/api/materials/file/videos/effect.mp4' }],
       steps: [],
     }],
@@ -74,7 +77,7 @@ for (const [model, expected] of [
   assert.equal(projected.matrix?.kind, model.matrix?.kind);
   const html = renderPrintReportHtml(projected, new Date('2026-07-13T00:00:00.000Z'));
   for (const expectedText of expected) assert.equal(html.includes(expectedText), true, `missing ${expectedText}`);
-  for (const expectedText of ['Frozen summary', 'Frozen issue', 'Retest passed', 'reeval.jpg', 'Juice effect', 'Foam remains', 'VIDEO', 'effect.mp4']) {
+  for (const expectedText of ['Frozen summary', 'Frozen issue', 'Retest passed', 'reeval.jpg', 'Juice effect', '合格', 'VIDEO', 'effect.mp4']) {
     assert.equal(html.includes(expectedText), true, `missing ${expectedText}`);
   }
   assert.doesNotMatch(html, /role=["']tab/);
@@ -113,7 +116,7 @@ assert.equal(comparisonPrint.matrix?.kind === 'comparison' ? comparisonPrint.mat
 assert.equal(comparisonPrint.matrix?.kind === 'comparison' ? comparisonPrint.matrix.rows[0]?.cells.a.value : '', '72.1%');
 assert.equal(comparisonPrint.matrix?.kind === 'comparison' ? (comparisonPrint.matrix.rows[0]?.cells.a as { score?: string }).score : '', '8');
 const comparisonHtml = renderPrintReportHtml(comparisonPrint);
-for (const expectedText of ['Comparison Matrix', 'Effect / Juice quality', '72.1%', '评分：8', 'Fast cycle', 'Foam', 'comparison.mp4', '/api/materials/poster/videos/comparison.mp4']) {
+for (const expectedText of ['Comparison Matrix', 'Effect / Juice quality', '72.1%', '评分：</b>8', 'Fast cycle', 'Foam', 'comparison.mp4', '/api/materials/poster/videos/comparison.mp4']) {
   assert.equal(comparisonHtml.includes(expectedText), true, `missing comparison ${expectedText}`);
 }
 assert.match(comparisonHtml, /<img[^>]+data-video-poster/);
