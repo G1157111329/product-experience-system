@@ -3,6 +3,8 @@ import { canAccessAssembly, canAccessReport, canReadReport, forbidden, isAuthRes
 import { buildComparisonReportSnapshot } from '@/lib/server/comparison-assembly';
 import { hasPermission, Permission } from '@/lib/server/rbac';
 import {
+  IdempotencyConflictError,
+  IdempotencySupersededError,
   persistExistingReportSnapshotAtomic,
   serializeReportSnapshotDto,
 } from '@/lib/server/report-snapshot-persistence';
@@ -121,10 +123,12 @@ export async function POST(request: NextRequest) {
         data: persisted,
       });
     } catch (snapshotError) {
+      const status = snapshotError instanceof IdempotencyConflictError
+        || snapshotError instanceof IdempotencySupersededError ? 409 : 500;
       return NextResponse.json({
         code: 1,
         message: snapshotError instanceof Error ? snapshotError.message : '创建报告快照失败',
-      }, { status: 500 });
+      }, { status });
     }
   } else {
     const { data: report, error } = await client

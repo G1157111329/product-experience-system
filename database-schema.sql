@@ -877,6 +877,7 @@ CREATE TABLE IF NOT EXISTS report_snapshots (
   report_type VARCHAR(40) NOT NULL,
   version INTEGER NOT NULL,
   idempotency_key VARCHAR(100),
+  idempotency_fingerprint VARCHAR(64),
   snapshot_json JSONB NOT NULL,
   layout_profile VARCHAR(80) NOT NULL,
   created_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
@@ -885,6 +886,17 @@ CREATE TABLE IF NOT EXISTS report_snapshots (
   CONSTRAINT report_snapshots_report_idempotency_key UNIQUE(report_id, idempotency_key)
 );
 CREATE INDEX IF NOT EXISTS report_snapshots_report_id_idx ON report_snapshots(report_id);
+ALTER TABLE report_snapshots ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(100);
+ALTER TABLE report_snapshots ADD COLUMN IF NOT EXISTS idempotency_fingerprint VARCHAR(64);
+CREATE UNIQUE INDEX IF NOT EXISTS report_snapshots_report_idempotency_key
+  ON report_snapshots(report_id, idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+DROP FUNCTION IF EXISTS public.persist_existing_report_snapshot_atomic(
+  VARCHAR, VARCHAR, JSONB, VARCHAR, VARCHAR, BOOLEAN, VARCHAR
+);
+DROP FUNCTION IF EXISTS public.persist_existing_report_snapshot_atomic(
+  VARCHAR, VARCHAR, JSONB, VARCHAR, VARCHAR, BOOLEAN, VARCHAR, VARCHAR
+);
 
 CREATE OR REPLACE FUNCTION public.persist_existing_report_snapshot_atomic(
   p_report_id VARCHAR,
@@ -894,7 +906,8 @@ CREATE OR REPLACE FUNCTION public.persist_existing_report_snapshot_atomic(
   p_actor_id VARCHAR,
   p_allow_all BOOLEAN DEFAULT FALSE,
   p_assembly_id VARCHAR DEFAULT NULL,
-  p_idempotency_key VARCHAR DEFAULT NULL
+  p_idempotency_key VARCHAR DEFAULT NULL,
+  p_idempotency_fingerprint VARCHAR DEFAULT NULL
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -912,6 +925,9 @@ BEGIN
   END IF;
   IF p_idempotency_key IS NULL OR btrim(p_idempotency_key) = '' THEN
     RAISE EXCEPTION 'idempotency key is required' USING ERRCODE = '22023';
+  END IF;
+  IF p_idempotency_fingerprint IS NULL OR btrim(p_idempotency_fingerprint) = '' THEN
+    RAISE EXCEPTION 'idempotency fingerprint is required' USING ERRCODE = '22023';
   END IF;
 
   PERFORM pg_advisory_xact_lock(hashtextextended(p_report_id, 0));
@@ -944,6 +960,12 @@ BEGIN
   WHERE report_id = p_report_id
     AND idempotency_key = p_idempotency_key;
   IF FOUND THEN
+    IF v_snapshot.idempotency_fingerprint IS DISTINCT FROM p_idempotency_fingerprint THEN
+      RAISE EXCEPTION 'IDEMPOTENCY_CONFLICT: payload mismatch' USING ERRCODE = 'P0001';
+    END IF;
+    IF v_report.snapshot_id IS DISTINCT FROM v_snapshot.id THEN
+      RAISE EXCEPTION 'IDEMPOTENCY_SUPERSEDED: newer snapshot exists' USING ERRCODE = 'P0001';
+    END IF;
     RETURN jsonb_build_object(
       'report', to_jsonb(v_report),
       'snapshot', to_jsonb(v_snapshot)
@@ -956,10 +978,10 @@ BEGIN
   WHERE report_id = p_report_id;
 
   INSERT INTO report_snapshots (
-    report_id, report_type, version, idempotency_key, snapshot_json,
+    report_id, report_type, version, idempotency_key, idempotency_fingerprint, snapshot_json,
     layout_profile, created_by
   ) VALUES (
-    p_report_id, p_report_type, v_version, p_idempotency_key, p_snapshot_json,
+    p_report_id, p_report_type, v_version, p_idempotency_key, p_idempotency_fingerprint, p_snapshot_json,
     p_layout_profile, p_actor_id
   )
   RETURNING * INTO v_snapshot;
@@ -985,14 +1007,14 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION public.persist_existing_report_snapshot_atomic(
-  VARCHAR, VARCHAR, JSONB, VARCHAR, VARCHAR, BOOLEAN, VARCHAR, VARCHAR
+  VARCHAR, VARCHAR, JSONB, VARCHAR, VARCHAR, BOOLEAN, VARCHAR, VARCHAR, VARCHAR
 ) FROM PUBLIC;
 
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
     GRANT EXECUTE ON FUNCTION public.persist_existing_report_snapshot_atomic(
-      VARCHAR, VARCHAR, JSONB, VARCHAR, VARCHAR, BOOLEAN, VARCHAR, VARCHAR
+      VARCHAR, VARCHAR, JSONB, VARCHAR, VARCHAR, BOOLEAN, VARCHAR, VARCHAR, VARCHAR
     ) TO service_role;
   END IF;
 END;

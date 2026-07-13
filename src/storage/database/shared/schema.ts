@@ -1107,6 +1107,7 @@ export const reportSnapshots = pgTable("report_snapshots", {
 	reportType: varchar("report_type", { length: 40 }).notNull(),
 	version: integer().notNull(),
 	idempotencyKey: varchar("idempotency_key", { length: 100 }),
+	idempotencyFingerprint: varchar("idempotency_fingerprint", { length: 64 }),
 	snapshotJson: jsonb("snapshot_json").notNull(),
 	layoutProfile: varchar("layout_profile", { length: 80 }).notNull(),
 	createdBy: varchar("created_by", { length: 36 }),

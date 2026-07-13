@@ -62,6 +62,7 @@ assert.ok(
 const directRoute = source('src/app/api/report-snapshots/route.ts');
 assert.match(directRoute, /persistAnchoredReportSnapshot/);
 assert.match(directRoute, /persistExistingReportSnapshotAtomic/);
+assert.match(directRoute, /IdempotencyConflictError[\s\S]*409/);
 assert.doesNotMatch(directRoute, /storage\/database\/pg-db/);
 assert.match(directRoute, /loadAnchoredReportSnapshot/);
 assert.doesNotMatch(

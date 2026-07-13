@@ -2,6 +2,20 @@ import { createHash } from 'node:crypto';
 
 type Row = Record<string, unknown>;
 
+export class IdempotencyConflictError extends Error {
+  constructor(message = 'Snapshot idempotency key is bound to a different payload') {
+    super(message);
+    this.name = 'IdempotencyConflictError';
+  }
+}
+
+export class IdempotencySupersededError extends Error {
+  constructor(message = 'Snapshot idempotency replay was superseded by a newer snapshot') {
+    super(message);
+    this.name = 'IdempotencySupersededError';
+  }
+}
+
 export type ExistingReportSnapshotInput = {
   reportId: string;
   reportType: string;
@@ -17,9 +31,14 @@ export type ExistingReportSnapshotInput = {
 
 type PersistenceMode = 'self-hosted-postgres' | 'supabase-service-role';
 
+type PersistedInput = ExistingReportSnapshotInput & {
+  idempotencyKey: string;
+  idempotencyFingerprint: string;
+};
+
 type PersistenceDeps = {
   mode?: PersistenceMode;
-  selfHostedPersist?: (input: ExistingReportSnapshotInput & { idempotencyKey: string }) => Promise<{ report: Row; snapshot: Row }>;
+  selfHostedPersist?: (input: PersistedInput) => Promise<{ report: Row; snapshot: Row }>;
 };
 
 const VOLATILE_FINGERPRINT_KEYS = new Set(['generated_at', 'created_at', 'updated_at', 'frozen_at']);
@@ -35,18 +54,22 @@ function canonicalize(value: unknown): unknown {
   );
 }
 
+export function buildSnapshotOperationFingerprint(input: ExistingReportSnapshotInput) {
+  const payload = JSON.stringify(canonicalize({
+    reportId: input.reportId,
+    reportType: input.reportType,
+    snapshotJson: input.snapshotJson,
+    layoutProfile: input.layoutProfile,
+    reportUpdate: input.reportUpdate,
+  }));
+  return createHash('sha256').update(payload).digest('hex');
+}
+
 export function buildSnapshotOperationKey(input: ExistingReportSnapshotInput) {
   const explicit = String(input.requestKey || '').trim();
-  const payload = explicit
-    ? `request:${explicit}`
-    : JSON.stringify(canonicalize({
-      reportId: input.reportId,
-      reportType: input.reportType,
-      snapshotJson: input.snapshotJson,
-      layoutProfile: input.layoutProfile,
-      reportUpdate: input.reportUpdate,
-    }));
-  return `${explicit ? 'request' : 'content'}:${createHash('sha256').update(payload).digest('hex')}`;
+  return explicit
+    ? `request:${createHash('sha256').update(`request:${explicit}`).digest('hex')}`
+    : `content:${buildSnapshotOperationFingerprint(input)}`;
 }
 
 function value(row: Row, snake: string, camel: string) {
@@ -61,6 +84,7 @@ export function serializeReportSnapshotDto(row: Row) {
     report_type: value(row, 'report_type', 'reportType'),
     version: value(row, 'version', 'version'),
     idempotency_key: value(row, 'idempotency_key', 'idempotencyKey'),
+    idempotency_fingerprint: value(row, 'idempotency_fingerprint', 'idempotencyFingerprint'),
     snapshot_schema_version: value(row, 'snapshot_schema_version', 'snapshotSchemaVersion'),
     snapshot_json: value(row, 'snapshot_json', 'snapshotJson'),
     layout_profile: value(row, 'layout_profile', 'layoutProfile'),
@@ -89,7 +113,7 @@ function resolveMode(): PersistenceMode {
   return 'self-hosted-postgres';
 }
 
-async function persistSelfHosted(input: ExistingReportSnapshotInput & { idempotencyKey: string }) {
+async function persistSelfHosted(input: PersistedInput) {
   const [{ getDb }, schema, drizzle] = await Promise.all([
     import('@/storage/database/pg-db'),
     import('@/storage/database/shared/schema'),
@@ -101,6 +125,8 @@ async function persistSelfHosted(input: ExistingReportSnapshotInput & { idempote
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${input.reportId}, 0))`);
     const lockedReport = await tx.execute(sql`SELECT id FROM reports WHERE id = ${input.reportId} FOR UPDATE`);
     if (lockedReport.rows.length === 0) throw new Error(`report not found: ${input.reportId}`);
+    const [report] = await tx.select().from(reports).where(eq(reports.id, input.reportId)).limit(1);
+    if (!report) throw new Error(`report not found: ${input.reportId}`);
     const [existing] = await tx
       .select()
       .from(reportSnapshots)
@@ -110,8 +136,10 @@ async function persistSelfHosted(input: ExistingReportSnapshotInput & { idempote
       ))
       .limit(1);
     if (existing) {
-      const [report] = await tx.select().from(reports).where(eq(reports.id, input.reportId)).limit(1);
-      if (!report) throw new Error(`report not found: ${input.reportId}`);
+      if (existing.idempotencyFingerprint !== input.idempotencyFingerprint) {
+        throw new IdempotencyConflictError();
+      }
+      if (report.snapshotId !== existing.id) throw new IdempotencySupersededError();
       return { report: report as Row, snapshot: existing as Row };
     }
     const [latest] = await tx
@@ -128,17 +156,18 @@ async function persistSelfHosted(input: ExistingReportSnapshotInput & { idempote
       layoutProfile: input.layoutProfile,
       createdBy: input.actorId,
       idempotencyKey: input.idempotencyKey,
+      idempotencyFingerprint: input.idempotencyFingerprint,
     }).returning();
     if (!snapshot) throw new Error('创建报告快照失败');
-    const [report] = await tx.update(reports).set({
+    const [updatedReport] = await tx.update(reports).set({
       snapshotId: snapshot.id,
       reportType: input.reportType,
       assemblyId: input.reportUpdate.assembly_id,
       layoutProfile: input.layoutProfile,
       updatedAt: new Date().toISOString(),
     }).where(eq(reports.id, input.reportId)).returning();
-    if (!report) throw new Error('Report snapshot anchor update returned no report');
-    return { report: report as Row, snapshot: snapshot as Row };
+    if (!updatedReport) throw new Error('Report snapshot anchor update returned no report');
+    return { report: updatedReport as Row, snapshot: snapshot as Row };
   });
 }
 
@@ -148,7 +177,11 @@ export async function persistExistingReportSnapshotAtomic(
   deps: PersistenceDeps = {},
 ) {
   const mode = deps.mode ?? resolveMode();
-  const persistedInput = { ...input, idempotencyKey: buildSnapshotOperationKey(input) };
+  const persistedInput: PersistedInput = {
+    ...input,
+    idempotencyKey: buildSnapshotOperationKey(input),
+    idempotencyFingerprint: buildSnapshotOperationFingerprint(input),
+  };
   let persisted: { report: Row; snapshot: Row };
   if (mode === 'supabase-service-role') {
     if (typeof client.rpc !== 'function') throw new Error('Supabase client does not support atomic snapshot RPC');
@@ -161,8 +194,14 @@ export async function persistExistingReportSnapshotAtomic(
       p_allow_all: persistedInput.allowAll,
       p_assembly_id: persistedInput.reportUpdate.assembly_id ?? null,
       p_idempotency_key: persistedInput.idempotencyKey,
+      p_idempotency_fingerprint: persistedInput.idempotencyFingerprint,
     });
-    if (error) throw new Error(error.message || 'Atomic report snapshot RPC failed');
+    if (error) {
+      const message = error.message || 'Atomic report snapshot RPC failed';
+      if (message.includes('IDEMPOTENCY_CONFLICT')) throw new IdempotencyConflictError(message);
+      if (message.includes('IDEMPOTENCY_SUPERSEDED')) throw new IdempotencySupersededError(message);
+      throw new Error(message);
+    }
     if (!data || typeof data !== 'object') throw new Error('Atomic report snapshot RPC returned no data');
     persisted = data as { report: Row; snapshot: Row };
   } else {
