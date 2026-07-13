@@ -159,6 +159,21 @@ const wideComparison = frozenModel({
 const widePrint = buildPrintReportViewModel(wideComparison);
 assert.deepEqual(widePrint.page, { paper: 'A3', orientation: 'landscape' });
 assert.equal(pdfProfileForPrintModel(widePrint).id, 'comparison_a3_landscape');
+const anchoredComparison = frozenModel({
+  kind: 'comparison',
+  snapshot: {
+    layout_profile: 'comparison_image_matrix_a3_landscape',
+    matrix_name: 'Anchored comparison',
+    objects: [{ id: 'only-object', object_name: 'Only object' }],
+    item_nodes: [{ id: 'anchored-metric', node_type: 'metric', node_label: 'M' }],
+    cells: [],
+  },
+});
+assert.deepEqual(
+  buildPrintReportViewModel(anchoredComparison).page,
+  { paper: 'A3', orientation: 'landscape' },
+  'an explicit frozen comparison layout remains authoritative for browser and server PDF output',
+);
 const v2Html = renderPrintReportHtml(buildPrintReportViewModel(v2));
 assert.equal(v2Html.includes('问题 2 个'), true);
 assert.equal(v2Html.includes('II'), true);

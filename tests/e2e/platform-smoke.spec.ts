@@ -164,7 +164,7 @@ test('report detail, print, and share keep the frozen report contract', async ({
   await expect(page.getByTestId('print-report-ready')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'GT-02 三台 7L 和面机图片矩阵报告', exact: true })).toBeVisible();
   await expect(page.getByText('中式面团效果', { exact: true }).first()).toBeVisible();
-  await expect(page.getByText('边缘粘附明显', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('问题点：边缘粘附明显', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('golden-cell-a-noodle.png', { exact: true })).toBeVisible();
   await expect(page.getByTestId('print-comparison-matrix')).toBeVisible();
   await expect(page.getByTestId('print-legacy-content')).toHaveCount(0);

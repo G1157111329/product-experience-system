@@ -1,6 +1,16 @@
 import { test, expect } from '@playwright/test';
 import { loginForE2E } from './auth-session';
 
+async function openIssueDetails(page: import('@playwright/test').Page, issueId: string) {
+  const issue = page.locator(`details[data-content-id="issue:${issueId}"]`);
+  await expect(issue).toBeVisible();
+  if (!await issue.evaluate((element: HTMLDetailsElement) => element.open)) {
+    await issue.locator('summary').click();
+  }
+  await expect(issue).toHaveAttribute('open', '');
+  return issue;
+}
+
 test('detail and anonymous share expose equivalent frozen reader content', async ({ browser }) => {
   const authenticated = await browser.newPage();
   await loginForE2E(authenticated, 'dockeradmin', 'DockerLocal2026');
@@ -100,6 +110,7 @@ test('anonymous reader presigns raw object keys without requesting them as page-
 
   await page.goto('/reports/share/raw-media');
   await page.getByRole('tab', { name: '问题' }).click();
+  await openIssueDetails(page, 'raw-issue');
   await expect.poll(() => presignBody).not.toBeNull();
   expect(presignBody).toMatchObject({ paths: ['garage/private/raw.jpg'], share_token: 'raw-media' });
   expect(rawRequests).toEqual([]);
@@ -112,6 +123,7 @@ test('anonymous reader presigns raw object keys without requesting them as page-
 
 test('anonymous reader preserves a successful local-public presign result', async ({ page }) => {
   const localPublicRequests: string[] = [];
+  let presignBody: Record<string, unknown> | null = null;
   page.on('request', (request) => {
     if (request.url().includes('/uploads/garage/private/local.jpg')) localPublicRequests.push(request.url());
   });
@@ -130,24 +142,28 @@ test('anonymous reader preserves a successful local-public presign result', asyn
     } });
   });
   await page.route('**/api/materials/presign', async (route) => {
+    presignBody = route.request().postDataJSON();
     await route.fulfill({ json: { code: 0, data: { 'garage/private/local.jpg': '/uploads/garage/private/local.jpg' } } });
   });
   await page.route('**/uploads/garage/private/local.jpg', async (route) => {
     await route.fulfill({ contentType: 'image/gif', body: Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64') });
   });
   await page.route('**/api/materials/thumb/garage/private/local.jpg', async (route) => {
-    await route.fulfill({ status: 404 });
+    await route.fulfill({ contentType: 'image/gif', body: Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64') });
   });
 
   await page.goto('/reports/share/local-media');
   await page.getByRole('tab', { name: '问题' }).click();
+  await openIssueDetails(page, 'local-issue');
+  await expect.poll(() => presignBody).not.toBeNull();
+  expect(presignBody).toMatchObject({ paths: ['garage/private/local.jpg'], share_token: 'local-media' });
   await expect(page.getByText('素材不可用')).toHaveCount(0);
   const localThumbnail = page.getByTestId('report-media-item');
   await expect(localThumbnail).toHaveCount(1);
-  await expect(localThumbnail.locator('img')).toHaveAttribute('src', '/uploads/garage/private/local.jpg');
-  await expect.poll(() => localPublicRequests.length).toBeGreaterThan(0);
+  await expect(localThumbnail.locator('img')).toHaveAttribute('src', '/api/materials/thumb/garage/private/local.jpg');
   await localThumbnail.click();
   await expect(page.getByRole('dialog')).toBeVisible();
+  await expect.poll(() => localPublicRequests.length).toBeGreaterThan(0);
 });
 
 for (const failure of [{ name: 'empty result', status: 200 }, { name: 'server error', status: 500 }]) {
@@ -177,6 +193,7 @@ for (const failure of [{ name: 'empty result', status: 200 }, { name: 'server er
 
     await page.goto('/reports/share/failed-media');
     await page.getByRole('tab', { name: '问题' }).click();
+    await openIssueDetails(page, 'failed-issue');
     const unavailableLabel = page.getByText('素材不可用');
     await expect(unavailableLabel).toBeVisible();
     const unavailableThumbnail = unavailableLabel.locator('..');
@@ -355,7 +372,9 @@ async function assertSemanticMedia(page: import('@playwright/test').Page) {
   await expect(appendix).toHaveCount(3);
   await expect(reader.getByText('原始问题素材')).toBeVisible();
   await expect(reader.getByText('整改素材')).toBeVisible();
-  await expect(reader.getByText('复评素材')).toBeVisible();
+  await expect(reader.getByText('整改复测', { exact: true })).toBeVisible();
+  await expect(reader.getByText('复测素材')).toBeVisible();
+  await expect(reader.getByText('整改复测记录数：2')).toBeVisible();
   await expect(appendix.first().getByTestId('report-media-item')).toHaveCount(4);
   await expect(appendix.first().getByTestId('report-media-more')).toHaveText('+1');
 
@@ -419,12 +438,15 @@ test('frozen recipe issue reader keeps snapshot facts and renders four states wi
     await page.goto(`/reports/share/retest-${state.status}`);
     const reader = page.getByTestId('frozen-report-reader');
     await reader.getByRole('tab', { name: '问题' }).click();
-    await reader.getByText('冻结食谱效果不合格', { exact: true }).click();
+    await openIssueDetails(page, `issue-${state.status}`);
     await expect(reader.getByText(state.label, { exact: true })).toBeVisible();
     await expect(reader.getByText('冻结配方')).toBeVisible();
     await expect(reader.getByText('冻结原始评价')).toBeVisible();
     if (state.count === 0) await expect(reader.getByText('整改复测')).toHaveCount(0);
-    else await expect(reader.getByText('最新复测记录')).toBeVisible();
+    else {
+      await expect(reader.getByText('整改复测', { exact: true })).toBeVisible();
+      await expect(reader.getByText('最新复测记录', { exact: true })).toBeVisible();
+    }
     if (state.count >= 2) await expect(reader.getByText(`整改复测记录数：${state.count}`)).toBeVisible();
     else await expect(reader.getByText(/整改复测记录数：/)).toHaveCount(0);
   }

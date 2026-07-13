@@ -18,6 +18,8 @@ export type PrintMatrix =
   | {
     kind: 'comparison';
     title: string;
+    /** Explicitly frozen comparison layout, if the snapshot supplied one. */
+    layoutProfile: string;
     columns: Array<{ id: string; label: string }>;
     rows: Array<{ id: string; path: string[]; cells: Record<string, PrintComparisonCell> }>;
   }
@@ -172,6 +174,7 @@ function comparisonMatrix(snapshotValue: unknown): PrintMatrix {
   }));
   return {
     kind: 'comparison',
+    layoutProfile: text(snapshot.layout_profile),
     title: text(snapshot.matrix_name || assembly.name, '对比矩阵'),
     columns,
     rows: nodes.map((node, rowIndex) => {
@@ -235,6 +238,9 @@ function projectMatrix(matrix: FrozenReportViewModel['matrix']): PrintMatrix | n
 
 export function printPageForMatrix(matrix: PrintMatrix | null): PrintReportViewModel['page'] {
   if (!matrix || matrix.kind !== 'comparison') return { paper: 'A4', orientation: 'portrait' };
+  // Snapshot layout is authoritative for historical reports. The adaptive
+  // fallback below is only for snapshots without an explicit layout anchor.
+  if (/a3[_-]landscape/i.test(matrix.layoutProfile)) return { paper: 'A3', orientation: 'landscape' };
   const estimatedWidth = 18 + matrix.columns.reduce((total, column) => {
     const contentLength = Math.max(column.label.length, ...matrix.rows.map((row) => row.cells[column.id]?.value.length || 0));
     return total + Math.min(34, Math.max(16, contentLength * 1.6));
