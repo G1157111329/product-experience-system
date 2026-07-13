@@ -97,6 +97,10 @@ test('anonymous reader presigns raw object keys without requesting them as page-
   await expect.poll(() => presignBody).not.toBeNull();
   expect(presignBody).toMatchObject({ paths: ['garage/private/raw.jpg'], share_token: 'raw-media' });
   expect(rawRequests).toEqual([]);
+  const remoteThumbnail = page.locator('[role="button"]').filter({ has: page.locator('img[src^="data:image/gif"]') });
+  await expect(remoteThumbnail).toHaveCount(1);
+  await remoteThumbnail.click();
+  await expect(page.getByRole('dialog')).toBeVisible();
 });
 
 test('anonymous reader preserves a successful local-public presign result', async ({ page }) => {
@@ -128,8 +132,11 @@ test('anonymous reader preserves a successful local-public presign result', asyn
   await page.goto('/reports/share/local-media');
   await page.getByRole('tab', { name: '问题' }).click();
   await expect(page.getByText('素材不可用')).toHaveCount(0);
-  await expect(page.locator('[role="button"]').filter({ has: page.locator('img[src="/uploads/garage/private/local.jpg"]') })).toHaveCount(1);
+  const localThumbnail = page.locator('[role="button"]').filter({ has: page.locator('img[src="/uploads/garage/private/local.jpg"]') });
+  await expect(localThumbnail).toHaveCount(1);
   await expect.poll(() => localPublicRequests.length).toBeGreaterThan(0);
+  await localThumbnail.click();
+  await expect(page.getByRole('dialog')).toBeVisible();
 });
 
 for (const failure of [{ name: 'empty result', status: 200 }, { name: 'server error', status: 500 }]) {
@@ -159,8 +166,13 @@ for (const failure of [{ name: 'empty result', status: 200 }, { name: 'server er
 
     await page.goto('/reports/share/failed-media');
     await page.getByRole('tab', { name: '问题' }).click();
-    await expect(page.getByText('素材不可用')).toBeVisible();
-    await expect(page.getByLabel('素材不可用')).toHaveCount(0);
+    const unavailableLabel = page.getByText('素材不可用');
+    await expect(unavailableLabel).toBeVisible();
+    const unavailableThumbnail = unavailableLabel.locator('..');
+    await expect(unavailableThumbnail).not.toHaveAttribute('role', 'button');
+    await expect(unavailableThumbnail).not.toHaveAttribute('tabindex', '0');
+    await unavailableThumbnail.click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
     expect(rawRequests).toEqual([]);
   });
 }

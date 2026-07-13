@@ -1,6 +1,6 @@
 'use client';
 
-import type { KeyboardEvent } from 'react';
+import { useMemo, type KeyboardEvent } from 'react';
 import { useImagePreview } from '@/components/image-preview';
 import {
   isAllowedMediaSource,
@@ -185,8 +185,12 @@ export function MediaGallery({
   const preview = PreviewComponent ?? <internal.PreviewComponent />;
 
   // Batch resolve presigned URLs for all materials
+  const presignMaterials = useMemo(
+    () => materials.map((m) => ({ id: m.id, file_url: m.file_url, file_path: m.file_path })),
+    [materials],
+  );
   const presignedMap = usePresignedUrls(
-    materials.map((m) => ({ id: m.id, file_url: m.file_url, file_path: m.file_path })),
+    presignMaterials,
     { unavailableUrl: unavailableMediaDataUrl },
   );
 
