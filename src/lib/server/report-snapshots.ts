@@ -24,6 +24,43 @@ export async function loadLatestReportSnapshot(client: ClientLike, reportId: str
   return Array.isArray(data) ? data[0] || null : null;
 }
 
+export async function loadNextReportSnapshotVersion(
+  client: ClientLike,
+  reportId: string,
+  options: { deleteReportOnFailure?: boolean } = {},
+) {
+  try {
+    const query = client
+      .from('report_snapshots')
+      .select('version')
+      .eq('report_id', reportId)
+      .order('version', { ascending: false }) as unknown as {
+        limit: (count: number) => Promise<{
+          data: Record<string, unknown>[] | null;
+          error?: { message?: string } | null;
+        }>;
+      };
+    const { data, error } = await query.limit(1);
+    if (error) throw new Error(error.message || 'Failed to resolve report snapshot version');
+    return Number(data?.[0]?.version || 0) + 1;
+  } catch (error) {
+    if (options.deleteReportOnFailure) {
+      try {
+        const cleanupResult = await (client
+          .from('reports')
+          .delete()
+          .eq('id', reportId) as PromiseLike<{ error?: { message?: string } | null }>);
+        if (cleanupResult?.error) throw new Error(cleanupResult.error.message || 'cleanup delete failed');
+      } catch (cleanupError) {
+        const primaryMessage = error instanceof Error ? error.message : String(error);
+        const cleanupMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+        throw new Error(`${primaryMessage}; cleanup failed: ${cleanupMessage}`);
+      }
+    }
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+}
+
 export async function loadAnchoredReportSnapshot(
   client: ClientLike,
   report: ReportSnapshotAnchor,

@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { canAccessAssembly, canAccessReport, canReadReport, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { buildComparisonReportSnapshot } from '@/lib/server/comparison-assembly';
-import { persistAnchoredReportSnapshot } from '@/lib/server/report-snapshots';
+import {
+  loadNextReportSnapshotVersion,
+  persistAnchoredReportSnapshot,
+} from '@/lib/server/report-snapshots';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 type SnapshotData = {
@@ -12,17 +15,6 @@ type SnapshotData = {
   source_report_ids: string[];
   assembly?: { id?: string; name?: string } & Record<string, unknown>;
 };
-
-async function nextSnapshotVersion(client: ReturnType<typeof getSupabaseClient>, reportId: string) {
-  const { data } = await client
-    .from('report_snapshots')
-    .select('version')
-    .eq('report_id', reportId)
-    .order('version', { ascending: false })
-    .limit(1);
-  const latest = Array.isArray(data) ? data[0] as { version?: number | null } | undefined : undefined;
-  return Number(latest?.version || 0) + 1;
-}
 
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
@@ -115,8 +107,10 @@ export async function POST(request: NextRequest) {
     createdNewReport = true;
   }
 
-  const version = await nextSnapshotVersion(client, reportId);
   try {
+    const version = await loadNextReportSnapshotVersion(client, reportId, {
+      deleteReportOnFailure: createdNewReport,
+    });
     const { report, snapshot: savedSnapshot } = await persistAnchoredReportSnapshot(client, reportId, {
       report_id: reportId,
       report_type: 'comparison_report',

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   loadAnchoredReportSnapshot,
+  loadNextReportSnapshotVersion,
   persistAnchoredReportSnapshot,
 } from './report-snapshots';
 
@@ -327,6 +328,48 @@ async function run() {
       persistAnchoredReportSnapshot(client as never, 'report-1', { report_id: 'report-1' }),
       /snapshot insert failed.*cleanup failed: cleanup delete failed/,
     );
+  }
+
+  for (const versionResult of [
+    async () => ({ data: null, error: { message: 'version query failed' } }),
+    async () => { throw new Error('version query rejected'); },
+  ]) {
+    const deletedReportIds: string[] = [];
+    const client = {
+      from(table: string) {
+        if (table === 'report_snapshots') {
+          return {
+            select() {
+              return {
+                eq() {
+                  return {
+                    order() {
+                      return { limit: versionResult };
+                    },
+                  };
+                },
+              };
+            },
+          };
+        }
+        return {
+          delete() {
+            return {
+              async eq(_field: string, value: unknown) {
+                deletedReportIds.push(String(value));
+                return { error: null };
+              },
+            };
+          },
+        };
+      },
+    };
+
+    await assert.rejects(
+      loadNextReportSnapshotVersion(client as never, 'new-report', { deleteReportOnFailure: true }),
+      /version query (failed|rejected)/,
+    );
+    assert.deepEqual(deletedReportIds, ['new-report']);
   }
 
   console.log('report snapshot anchoring contract tests passed');
