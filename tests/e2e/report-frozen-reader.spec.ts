@@ -98,3 +98,36 @@ test('anonymous reader presigns raw object keys without requesting them as page-
   expect(presignBody).toMatchObject({ paths: ['garage/private/raw.jpg'], share_token: 'raw-media' });
   expect(rawRequests).toEqual([]);
 });
+
+for (const failure of [{ name: 'empty result', status: 200 }, { name: 'server error', status: 500 }]) {
+  test(`failed media presign settles as unavailable for ${failure.name}`, async ({ page }) => {
+    const rawRequests: string[] = [];
+    page.on('request', (request) => {
+      if (request.url().includes('garage/private/failed.jpg')) rawRequests.push(request.url());
+    });
+    await page.route('**/api/reports/share?token=failed-media', async (route) => {
+      await route.fulfill({ json: {
+        code: 0,
+        data: {
+          frozenViewModel: {
+            snapshotResolution: 'anchored',
+            header: { id: 'failed-report', title: 'Failed media report', reportType: 'single_report', status: 'published', productModel: null },
+            tabs: ['summary', 'issues'], summary: { text: 'Summary', aiSummary: null },
+            issues: [{ id: 'failed-issue', title: 'Failed issue', details: '', level: '', sourceType: '', evidence: [{ id: 'failed-material', name: 'failed.jpg', type: 'image', url: 'garage/private/failed.jpg' }], liveOverlay: { status: '', rectification: '', reEvaluations: [], evidence: [] } }],
+            matrix: null, functionEffects: [], capabilities: { canManageIssues: false, canShare: false, canExport: true },
+          }, siblingReports: [], siblingFrozenViewModels: {},
+        },
+      } });
+    });
+    await page.route('**/api/materials/presign', async (route) => {
+      if (failure.status === 500) await route.fulfill({ status: 500, json: { code: 1 } });
+      else await route.fulfill({ json: { code: 0, data: {} } });
+    });
+
+    await page.goto('/reports/share/failed-media');
+    await page.getByRole('tab', { name: '问题' }).click();
+    await expect(page.getByText('素材不可用')).toBeVisible();
+    await expect(page.getByLabel('素材不可用')).toHaveCount(0);
+    expect(rawRequests).toEqual([]);
+  });
+}

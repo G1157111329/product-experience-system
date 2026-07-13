@@ -24,7 +24,7 @@ interface MediaGalleryProps {
   PreviewComponent?: React.ReactNode;
 }
 
-const missingMediaDataUrl =
+export const missingMediaDataUrl =
   `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="180" viewBox="0 0 240 180"><rect width="240" height="180" rx="10" fill="#f7f2e9"/><path d="M72 66h86a10 10 0 0 1 10 10v52a10 10 0 0 1-10 10H72a10 10 0 0 1-10-10V76a10 10 0 0 1 10-10Z" fill="none" stroke="#d8c7ad" stroke-width="4"/><path d="m76 122 28-28 22 22 13-13 29 29" fill="none" stroke="#d8c7ad" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="145" cy="85" r="8" fill="#d8c7ad"/><text x="120" y="154" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#8a735c">素材文件缺失</text></svg>',
   )}`;
@@ -45,7 +45,7 @@ export function resolveGalleryMediaUrl(material: Material, resolvedUrl?: string)
   if (isPendingMediaUrl(resolvedUrl)) return resolvedUrl;
   const rawStorageKey = Boolean(storageKey && !isAllowedMediaSource(storageKey));
   const unsafeFallback = rawStorageKey ? toPublicMediaUrl(storageKey) : null;
-  if (unsafeFallback && resolvedUrl === unsafeFallback) return pendingMediaDataUrl;
+  if (unsafeFallback && resolvedUrl === unsafeFallback) return missingMediaDataUrl;
   return resolvedUrl;
 }
 
@@ -55,12 +55,14 @@ function MediaThumbnail({
   onClick,
   size = 'md',
   responsive,
+  unavailable,
 }: {
   url: string;
   type: 'image' | 'video';
   onClick?: () => void;
   size?: 'sm' | 'md' | 'lg' | 'xs';
   responsive?: boolean;
+  unavailable?: boolean;
 }) {
   const sizeClass =
     size === 'xs'
@@ -104,7 +106,11 @@ function MediaThumbnail({
       onKeyDown={handleKeyDown}
       onKeyUp={handleKeyUp}
     >
-      {type === 'video' && !isImagePlaceholder && !isPendingVideo ? (
+      {unavailable ? (
+        <div className="flex h-full w-full items-center justify-center bg-muted px-2 text-center text-[10px] text-muted-foreground">
+          素材不可用
+        </div>
+      ) : type === 'video' && !isImagePlaceholder && !isPendingVideo ? (
         <>
           <video
             src={url}
@@ -201,14 +207,16 @@ export function MediaGallery({
           const resolvedUrl = resolveGalleryMediaUrl(mat, presignedMap.get(mat.id));
           const previewUrl = isPendingMediaUrl(resolvedUrl) ? (mat.file_path || mat.file_url || resolvedUrl) : resolvedUrl;
           const pending = isPendingMediaUrl(resolvedUrl);
+          const unavailable = resolvedUrl === missingMediaDataUrl;
           return (
             <MediaThumbnail
               key={mat.id}
               url={resolvedUrl}
               type={mat.material_type === 'video' ? 'video' : 'image'}
-              onClick={pending ? undefined : () => open(previewUrl)}
+              onClick={pending || unavailable ? undefined : () => open(previewUrl)}
               size={size}
               responsive={responsive}
+              unavailable={unavailable}
             />
           );
         })}
