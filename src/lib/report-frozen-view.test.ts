@@ -204,4 +204,114 @@ assert.doesNotMatch(shareRouteSource, /loadReEvaluationsMap/);
 assert.doesNotMatch(shareRouteSource, /\.from\('issue_re_evaluations'\)/);
 assert.doesNotMatch(shareRouteSource, /\.from\('issues'\)/);
 
+const duplicateRecordTitles = buildFrozenReportViewModel({
+  report: {
+    id: 'report-duplicate-records',
+    report_type: 'single_report',
+    content: {
+      records: [
+        { id: 'record-a', check_item: 'Same title', problem_description: 'Detail A', evaluation_result: '不合格' },
+        { id: 'record-b', check_item: 'Same title', problem_description: 'Detail B', evaluation_result: '不合格' },
+      ],
+    },
+  },
+  snapshot: null,
+  snapshotResolution: 'none',
+}, { audience: 'internal' });
+assert.deepEqual(
+  duplicateRecordTitles.issues.map((issue) => [issue.id, issue.title, issue.details]),
+  [
+    ['record-a', 'Same title', 'Detail A'],
+    ['record-b', 'Same title', 'Detail B'],
+  ],
+);
+
+const longProblem = '长'.repeat(205);
+const stableRecipeIssues = buildFrozenReportViewModel({
+  report: {
+    id: 'report-stable-recipes',
+    report_type: 'single_report',
+    content: {
+      recipes: [{
+        id: 'recipe-stable',
+        name: 'Stable recipe',
+        effect_description: 'Frozen effect details',
+        effect_problem_point: JSON.stringify([
+          { text: longProblem, material_ids: ['long-effect-media'] },
+          { text: 'Same recipe problem', material_ids: ['same-effect-media'] },
+        ]),
+        effect_materials: [
+          { id: 'long-effect-media', file_url: '/uploads/long-effect.png' },
+          { id: 'same-effect-media', file_url: '/uploads/same-effect.png' },
+        ],
+        recipe_steps: [{
+          id: 'step-stable',
+          step_number: 2,
+          operation: 'Frozen step details',
+          problem_points: [{ text: 'Same recipe problem', material_ids: ['same-step-media'] }],
+          materials: [{ id: 'same-step-media', file_url: '/uploads/same-step.png' }],
+        }],
+      }],
+    },
+  },
+  snapshot: null,
+  snapshotResolution: 'none',
+  issues: [
+    {
+      id: 'live-long-effect',
+      title: longProblem.substring(0, 200),
+      source_type: 'recipe_problem',
+      source: '报告 - 食谱效果问题(Stable recipe)',
+      status: 'verified',
+    },
+    {
+      id: 'live-same-effect',
+      title: 'Same recipe problem',
+      source_type: 'recipe_problem',
+      source: '报告 - 食谱效果问题(Stable recipe)',
+      status: 'effect-status',
+    },
+    {
+      id: 'live-same-step',
+      title: 'Same recipe problem',
+      source_type: 'recipe_problem',
+      source: '报告 - 食谱功能问题(Stable recipe)',
+      status: 'step-status',
+    },
+  ],
+}, { audience: 'internal' });
+
+assert.deepEqual(
+  stableRecipeIssues.issues.map((issue) => ({
+    id: issue.id,
+    title: issue.title,
+    details: issue.details,
+    evidence: issue.evidence.map((item) => item.id),
+    status: issue.liveOverlay.status,
+  })),
+  [
+    {
+      id: 'live-long-effect',
+      title: longProblem,
+      details: 'Frozen effect details',
+      evidence: ['long-effect-media'],
+      status: 'verified',
+    },
+    {
+      id: 'live-same-effect',
+      title: 'Same recipe problem',
+      details: 'Frozen effect details',
+      evidence: ['same-effect-media'],
+      status: 'effect-status',
+    },
+    {
+      id: 'live-same-step',
+      title: 'Same recipe problem',
+      details: '2: Frozen step details',
+      evidence: ['same-step-media'],
+      status: 'step-status',
+    },
+  ],
+);
+
 console.log('report frozen view model tests passed');

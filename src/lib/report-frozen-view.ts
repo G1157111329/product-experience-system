@@ -142,15 +142,31 @@ function materialsByIds(materials: Row[], ids: string[]) {
   return materials.filter((item) => wanted.has(first(item.id, item.materialId)));
 }
 
+function generatedIssueTitle(value: unknown) {
+  return text(value).substring(0, 200);
+}
+
 function frozenIssueFacts(content: Row, snapshotJson: Row): Row[] {
   const facts: Row[] = [
-    ...rows(content.issues),
-    ...rows(content.records).filter(failedRecord),
+    ...rows(content.issues).map((issue, index) => ({
+      ...issue,
+      _frozenKey: `issue:${first(issue.id, index)}`,
+      _sourceKind: 'explicit_issue',
+    })),
+    ...rows(content.records).filter(failedRecord).map((record, index) => ({
+      ...record,
+      _frozenKey: `record:${first(record.id, index)}`,
+      _sourceKind: 'record',
+    })),
   ];
   for (const recipe of rows(content.recipes)) {
     const effectMaterials = rows(recipe.effect_materials);
     problemPoints(recipe.effect_problem_point).forEach((point, index) => facts.push({
       id: `recipe-effect:${first(recipe.id, recipe.name)}:${index}`,
+      _frozenKey: `recipe:${first(recipe.id, recipe.name)}:effect:${index}`,
+      _sourceKind: 'recipe_effect',
+      _recipeId: text(recipe.id),
+      _recipeName: text(recipe.name),
       title: point.text,
       description: first(recipe.effect_description, '效果/出品效果评价问题'),
       source_type: 'recipe_problem',
@@ -162,6 +178,11 @@ function frozenIssueFacts(content: Row, snapshotJson: Row): Row[] {
         : problemPoints(step.problem_point);
       stepPoints.forEach((point, index) => facts.push({
         id: `recipe-step:${first(step.id, recipe.id)}:${index}`,
+        _frozenKey: `recipe:${first(recipe.id, recipe.name)}:step:${first(step.id, index)}:problem:${index}`,
+        _sourceKind: 'recipe_step',
+        _recipeId: text(recipe.id),
+        _recipeName: text(recipe.name),
+        _recipeStepId: text(step.id),
         title: point.text,
         description: [first(step.step_number), first(step.operation)].filter(Boolean).join(': '),
         source_type: 'recipe_problem',
@@ -184,6 +205,8 @@ function frozenIssueFacts(content: Row, snapshotJson: Row): Row[] {
     const materialIds = Array.isArray(point.materialIds) ? point.materialIds.map(text).filter(Boolean) : [];
     facts.push({
       id: pointId || `matrix-issue:${leafRowId}:${columnId}`,
+      _frozenKey: `v3-issue:${pointId || `${leafRowId}:${columnId}`}`,
+      _sourceKind: 'v3_issue_point',
       title: point.issueText,
       description: point.issueText,
       source_type: 'matrix_problem',
@@ -192,13 +215,68 @@ function frozenIssueFacts(content: Row, snapshotJson: Row): Row[] {
     });
   }
 
+  for (const cell of rows(snapshotJson.cells ?? snapshotJson.matrix_cells)) {
+    const cellId = text(cell.id);
+    const points = problemPoints(cell.problem_points);
+    points.forEach((point, index) => facts.push({
+      id: `comparison-cell:${cellId}:problem:${index}`,
+      _frozenKey: `comparison-cell:${cellId}:problem:${index}`,
+      _sourceKind: 'comparison_cell',
+      _comparisonCellId: cellId,
+      title: point.text,
+      description: first(cell.effect_summary, point.text),
+      source_type: 'recipe_problem',
+      materials: [
+        ...rows(cell.inline_media),
+        ...rows(cell.appendix_media),
+        ...rows(cell.media),
+      ],
+    }));
+  }
+
   const seen = new Set<string>();
   return facts.filter((fact) => {
-    const key = `${first(fact.source_type, fact.standard_category)}:${first(fact.title, fact.check_item, fact.id)}`;
+    const key = first(fact._frozenKey, fact.id);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+}
+
+function recipeSourceKind(live: Row): 'recipe_effect' | 'recipe_step' | null {
+  const source = text(live.source);
+  if (source.includes('食谱效果问题') || source.includes('效果问题')) return 'recipe_effect';
+  if (source.includes('食谱功能问题') || source.includes('功能问题')) return 'recipe_step';
+  return null;
+}
+
+function findFrozenFactForLive(facts: Row[], live: Row) {
+  const stable = facts.find((item) => (
+    text(item.id) === text(live.id)
+    || (text(item.id) && text(item.id) === text(live.source_cell_id))
+    || (
+      text(item._comparisonCellId)
+      && text(item._comparisonCellId) === text(live.source_cell_id)
+      && generatedIssueTitle(item.title) === generatedIssueTitle(live.title)
+    )
+    || (text(item.source_issue_point_id) && text(item.source_issue_point_id) === text(live.source_issue_point_id))
+    || (text(item._recipeStepId) && text(item._recipeStepId) === text(live.recipe_step_id))
+  ));
+  if (stable) return stable;
+
+  const title = generatedIssueTitle(live.title);
+  const sourceType = text(live.source_type);
+  const discriminator = recipeSourceKind(live);
+  const candidates = facts.filter((item) => {
+    if (generatedIssueTitle(first(item.title, item.check_item)) !== title) return false;
+    if (first(item.source_type, item.standard_category) !== sourceType) return false;
+    if (discriminator && text(item._sourceKind) !== discriminator) return false;
+    if (text(live.recipe_step_id) && text(item._recipeStepId) !== text(live.recipe_step_id)) return false;
+    if (text(live.recipe_id) && text(item._recipeId) !== text(live.recipe_id)) return false;
+    const recipeName = text(item._recipeName);
+    return !recipeName || !text(live.source) || text(live.source).includes(recipeName);
+  });
+  return candidates.length === 1 ? candidates[0] : undefined;
 }
 
 function liveOverlay(issue: Row | undefined, evidence: FrozenMedia[] = []): FrozenIssueLiveOverlay {
@@ -234,23 +312,16 @@ function buildIssues(
   issueEvidence: Record<string, FrozenMedia[]>,
   snapshotResolution: BuildFrozenReportViewInput['snapshotResolution'],
 ): FrozenIssue[] {
-  const records = rows(content.records);
   const frozenFacts = frozenIssueFacts(content, snapshotJson);
   const cells = rows(snapshotJson.cells ?? snapshotJson.matrix_cells);
   const consumed = new Set<Row>();
   const result: FrozenIssue[] = [];
 
   for (const live of liveIssues) {
-    const record = records.find((item) => text(item.id) === text(live.record_id));
-    const explicit = frozenFacts.find((item) => (
-      text(item.id) === text(live.id)
-      || (text(item.id) && text(item.id) === text(live.source_cell_id))
-      || (text(item.source_issue_point_id) && text(item.source_issue_point_id) === text(live.source_issue_point_id))
-      || (
-        first(item.title, item.check_item) === text(live.title)
-        && first(item.source_type, item.standard_category) === text(live.source_type)
-      )
+    const record = frozenFacts.find((item) => (
+      text(item._sourceKind) === 'record' && text(item.id) === text(live.record_id)
     ));
+    const explicit = findFrozenFactForLive(frozenFacts, live);
     const cell = cells.find((item) => text(item.id) === text(live.source_cell_id));
     const base = explicit ?? record ?? cell;
     if (!base && snapshotResolution !== 'legacy_latest') continue;
