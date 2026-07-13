@@ -517,6 +517,44 @@ export async function canAccessIssueReEvaluation(client: ClientLike, user: AuthU
   return canAccessIssue(client, user, String(reEvaluation.issue_id));
 }
 
+const ISSUE_RETEST_MUTATION_PERMISSIONS = [
+  Permission.ISSUE_CREATE,
+  Permission.ISSUE_RECTIFY,
+  Permission.ISSUE_VERIFY,
+];
+
+/** Mutation access is intentionally narrower than issue read/access scope. */
+export async function canMutateIssueRetest(client: ClientLike, user: AuthUser, issueId: string) {
+  if (user.role === 'admin') return true;
+  if (!hasAnyPermission(user.role, ISSUE_RETEST_MUTATION_PERMISSIONS)) return false;
+
+  const { data: issue } = await client
+    .from('issues')
+    .select('id, task_id, responsible_person')
+    .eq('id', issueId)
+    .maybeSingle();
+  if (!issue?.task_id) return false;
+
+  if (
+    hasPermission(user.role, Permission.ISSUE_VIEW_ALL)
+    && hasPermission(user.role, Permission.ISSUE_VERIFY)
+  ) return true;
+
+  if (user.role === 'rectification_owner') return isIssueOwner(client, user, issueId);
+  return isTaskOwner(client, user, String(issue.task_id));
+}
+
+export async function canMutateIssueReEvaluation(client: ClientLike, user: AuthUser, reEvaluationId: string) {
+  if (user.role === 'admin') return true;
+  const { data: reEvaluation } = await client
+    .from('issue_re_evaluations')
+    .select('id, issue_id')
+    .eq('id', reEvaluationId)
+    .maybeSingle();
+  if (!reEvaluation?.issue_id) return false;
+  return canMutateIssueRetest(client, user, String(reEvaluation.issue_id));
+}
+
 // V2.3 对比组装权限：基于 created_by + source_task_ids + source_report_ids 推导
 // - 管理员始终可访问
 // - 创建者可访问

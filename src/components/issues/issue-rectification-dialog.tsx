@@ -1,16 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Pencil, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { MaterialPicker, type Material } from '@/components/material-picker';
-import { PresignedImage } from '@/components/presigned-media';
+import { IssueRetestPanel } from '@/components/issues/issue-retest-panel';
 import { useDictLabels } from '@/hooks/useDictionary';
 import { cn } from '@/lib/utils';
 import {
@@ -36,22 +33,6 @@ export type IssueForRectification = {
   verification_note: string | null;
   product_model: string | null;
   [key: string]: unknown;
-};
-
-type ReEvaluation = {
-  id: string;
-  issue_id: string;
-  description: string | null;
-  ai_result: { score: number; summary: string } | null;
-  created_at: string;
-  created_by: string | null;
-  materials?: Array<{
-    id: string;
-    material_type: string;
-    file_url: string;
-    file_path: string | null;
-    file_name: string;
-  }>;
 };
 
 type Verification = {
@@ -97,17 +78,6 @@ const LEVEL_COLORS: Record<string, string> = {
 export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }: IssueRectificationDialogProps) {
   const levelList = useDictLabels('issue_severity_dict');
   const [current, setCurrent] = useState<IssueForRectification | null>(issue);
-  const [reEvaluations, setReEvaluations] = useState<ReEvaluation[]>([]);
-  const [newReEvalDescription, setNewReEvalDescription] = useState('');
-  const [newReEvalMaterialIds, setNewReEvalMaterialIds] = useState<string[]>([]);
-  const [newReEvalMaterials, setNewReEvalMaterials] = useState<Material[]>([]);
-  const [savingReEval, setSavingReEval] = useState(false);
-  const [evaluating, setEvaluating] = useState<string | null>(null);
-  const [editingReEvalId, setEditingReEvalId] = useState<string | null>(null);
-  const [editingReEvalDesc, setEditingReEvalDesc] = useState('');
-  const [editingReEvalAiScore, setEditingReEvalAiScore] = useState('');
-  const [editingReEvalAiSummary, setEditingReEvalAiSummary] = useState('');
-  const [savingReEvalEdit, setSavingReEvalEdit] = useState(false);
   const [rectificationHistory, setRectificationHistory] = useState<RectificationHistoryItem[]>([]);
 
   useEffect(() => {
@@ -115,24 +85,9 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
       setCurrent(issue);
     } else if (!open) {
       setCurrent(null);
-      setReEvaluations([]);
-      setNewReEvalDescription('');
-      setNewReEvalMaterialIds([]);
-      setNewReEvalMaterials([]);
-      setEditingReEvalId(null);
       setRectificationHistory([]);
     }
   }, [open, issue]);
-
-  const fetchReEvaluations = useCallback(async (issueId: string) => {
-    try {
-      const res = await fetch(`/api/issue-re-evaluations?issue_id=${issueId}`);
-      const data = await res.json();
-      if (data.code === 0) setReEvaluations(data.data || []);
-    } catch {
-      /* noop */
-    }
-  }, []);
 
   const fetchRectificationHistory = useCallback(async (issueId: string) => {
     try {
@@ -147,17 +102,10 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
   useEffect(() => {
     if (open && current?.id) {
       fetchRectificationHistory(current.id);
-      if (current.source_type === 'recipe_problem') {
-        fetchReEvaluations(current.id);
-      }
-      setNewReEvalDescription('');
-      setNewReEvalMaterialIds([]);
-      setNewReEvalMaterials([]);
     } else {
-      setReEvaluations([]);
       setRectificationHistory([]);
     }
-  }, [open, current?.id, current?.source_type, fetchReEvaluations, fetchRectificationHistory]);
+  }, [open, current?.id, fetchRectificationHistory]);
 
   const updateField = async (field: string, value: unknown) => {
     if (!current) return;
@@ -232,102 +180,6 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
     const currentStatus = normalizeIssueStatus(current.status);
     if (currentStatus === 'verified_closed') return;
     await updateIssueFields({ status: 'verified_closed', is_improve: true }, '已标记为整改完成');
-  };
-
-  const handleSaveReEvaluation = async () => {
-    if (!current) return;
-    setSavingReEval(true);
-    try {
-      const res = await fetch('/api/issue-re-evaluations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ issue_id: current.id, description: newReEvalDescription }),
-      });
-      const data = await res.json();
-      if (data.code !== 0) {
-        toast.error(data.message || '保存失败');
-        return;
-      }
-      const reEvalId = data.data.id;
-      for (const matId of newReEvalMaterialIds) {
-        await fetch('/api/materials', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: matId, re_evaluation_id: reEvalId }),
-        });
-      }
-      for (const mat of newReEvalMaterials) {
-        if (!newReEvalMaterialIds.includes(mat.id)) {
-          await fetch('/api/materials', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: mat.id, re_evaluation_id: reEvalId }),
-          });
-        }
-      }
-      toast.success('复评估保存成功');
-      setNewReEvalDescription('');
-      setNewReEvalMaterialIds([]);
-      setNewReEvalMaterials([]);
-      fetchReEvaluations(current.id);
-    } catch {
-      toast.error('保存失败');
-    } finally {
-      setSavingReEval(false);
-    }
-  };
-
-  const handleEvaluate = async (reEvalId: string) => {
-    setEvaluating(reEvalId);
-    try {
-      const res = await fetch(`/api/issue-re-evaluations/${reEvalId}/ai-evaluate`, { method: 'POST' });
-      const data = await res.json();
-      if (data.code !== 0) {
-        toast.error(data.message || '评价失败');
-        return;
-      }
-      toast.success('评价完成');
-      if (current) fetchReEvaluations(current.id);
-    } catch {
-      toast.error('评价失败');
-    } finally {
-      setEvaluating(null);
-    }
-  };
-
-  const handleStartEditReEval = (reEval: ReEvaluation) => {
-    setEditingReEvalId(reEval.id);
-    setEditingReEvalDesc(reEval.description || '');
-    setEditingReEvalAiScore(reEval.ai_result ? String(reEval.ai_result.score) : '');
-    setEditingReEvalAiSummary(reEval.ai_result?.summary || '');
-  };
-
-  const handleSaveReEvalEdit = async (reEvalId: string) => {
-    setSavingReEvalEdit(true);
-    try {
-      const body: Record<string, unknown> = { description: editingReEvalDesc };
-      const score = parseFloat(editingReEvalAiScore);
-      if (!isNaN(score) || editingReEvalAiSummary) {
-        body.ai_result = { score: isNaN(score) ? 0 : score, summary: editingReEvalAiSummary };
-      }
-      const res = await fetch(`/api/issue-re-evaluations/${reEvalId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (data.code !== 0) {
-        toast.error(data.message || '保存失败');
-        return;
-      }
-      toast.success('保存成功');
-      setEditingReEvalId(null);
-      if (current) fetchReEvaluations(current.id);
-    } catch {
-      toast.error('保存失败');
-    } finally {
-      setSavingReEvalEdit(false);
-    }
   };
 
   const currentStatus = normalizeIssueStatus(current?.status || 'open');
@@ -519,172 +371,15 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
               )}
             </div>
 
-            {/* 复测结果记录 — always shown so any issue can record retests */}
-            <div className="border-t pt-3 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">复测结果记录</span>
-                <Badge variant="secondary" className="text-[10px]">{reEvaluations.length} 次</Badge>
-              </div>
-
-              <div className="border rounded-lg p-3 space-y-3 bg-primary/5">
-                <div className="flex items-center gap-2">
-                  <Plus className="h-4 w-4 text-primary" />
-                  <span className="text-sm font-medium">新增复测</span>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs">描述评价</Label>
-                  <Textarea
-                    value={newReEvalDescription}
-                    onChange={(e) => setNewReEvalDescription(e.target.value)}
-                    rows={3}
-                    placeholder="输入复测效果描述..."
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs">选择素材</Label>
-                  <MaterialPicker
-                    taskId={current.task_id}
-                    issueId={undefined}
-                    selectedIds={newReEvalMaterialIds}
-                    initialMaterials={newReEvalMaterials}
-                    onSelectionChange={(ids, mats) => {
-                      setNewReEvalMaterialIds(ids);
-                      setNewReEvalMaterials(mats);
-                    }}
-                    selectedPreviewSize="sm"
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    onClick={handleSaveReEvaluation}
-                    disabled={savingReEval || (!newReEvalDescription && newReEvalMaterialIds.length === 0)}
-                  >
-                    {savingReEval && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
-                    保存复测
-                  </Button>
-                </div>
-              </div>
-
-              {reEvaluations.length > 0 && (
-                <div className="space-y-3">
-                  {reEvaluations.map((reEval, idx) => {
-                    const roundLabel = idx === 0 ? '最新复测' : `第${reEvaluations.length - idx}次复测`;
-                    const isEditing = editingReEvalId === reEval.id;
-                    return (
-                      <div key={reEval.id} className="border rounded-lg p-3 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-medium text-muted-foreground">{roundLabel}</span>
-                          <div className="flex items-center gap-1">
-                            <span className="text-[10px] text-muted-foreground">
-                              {new Date(reEval.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
-                            </span>
-                            {!isEditing && (
-                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => handleStartEditReEval(reEval)}>
-                                <Pencil className="h-3 w-3" />
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                        {isEditing ? (
-                          <>
-                            <Textarea
-                              value={editingReEvalDesc}
-                              onChange={(e) => setEditingReEvalDesc(e.target.value)}
-                              rows={2}
-                              placeholder="输入复测效果描述..."
-                              className="text-sm"
-                            />
-                            <div className="space-y-1.5">
-                              <div className="flex items-center gap-2">
-                                <Input
-                                  type="number"
-                                  step="0.1"
-                                  min="0"
-                                  max="10"
-                                  value={editingReEvalAiScore}
-                                  onChange={(e) => setEditingReEvalAiScore(e.target.value)}
-                                  className="h-7 w-20 text-sm font-bold"
-                                />
-                                <span className="text-xs text-muted-foreground">分</span>
-                              </div>
-                              <Textarea
-                                value={editingReEvalAiSummary}
-                                onChange={(e) => setEditingReEvalAiSummary(e.target.value)}
-                                rows={3}
-                                placeholder="评价总结内容..."
-                                className="text-xs"
-                              />
-                            </div>
-                            <div className="flex gap-2">
-                              <Button size="sm" onClick={() => handleSaveReEvalEdit(reEval.id)} disabled={savingReEvalEdit}>
-                                {savingReEvalEdit && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
-                                保存
-                              </Button>
-                              <Button size="sm" variant="ghost" onClick={() => setEditingReEvalId(null)}>
-                                取消
-                              </Button>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            {reEval.description && (
-                              <div className="text-sm bg-muted/30 p-2 rounded break-all">{reEval.description}</div>
-                            )}
-                            {reEval.materials && reEval.materials.length > 0 && (
-                              <div className="flex gap-2 flex-wrap">
-                                {reEval.materials.map((mat) => (
-                                  <div key={mat.id} className="shrink-0">
-                                    {mat.material_type === 'image' ? (
-                                      <PresignedImage filePath={mat.file_path || mat.file_url} alt={mat.file_name} className="h-16 w-16 object-cover rounded border" />
-                                    ) : (
-                                      <div className="h-16 w-16 rounded border bg-muted/30 flex items-center justify-center">
-                                        <span className="text-[10px] text-muted-foreground">视频</span>
-                                      </div>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                            {reEval.ai_result ? (
-                              <div className="bg-muted/20 rounded-lg p-2 space-y-1">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-sm font-bold text-primary">{reEval.ai_result.score}分</span>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-6 text-xs"
-                                    disabled={evaluating === reEval.id}
-                                    onClick={() => handleEvaluate(reEval.id)}
-                                  >
-                                    {evaluating === reEval.id ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
-                                    重新评价
-                                  </Button>
-                                </div>
-                                {reEval.ai_result.summary && (
-                                  <p className="text-xs text-muted-foreground break-all">{reEval.ai_result.summary}</p>
-                                )}
-                              </div>
-                            ) : (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-7 text-xs"
-                                disabled={evaluating === reEval.id}
-                                onClick={() => handleEvaluate(reEval.id)}
-                              >
-                                {evaluating === reEval.id && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
-                                生成评价
-                              </Button>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            <IssueRetestPanel
+              issueId={current.id}
+              taskId={current.task_id}
+              onIssueUpdated={(updatedIssue) => {
+                const next = { ...current, ...updatedIssue } as IssueForRectification;
+                setCurrent(next);
+                onSaved?.(next);
+              }}
+            />
           </div>
         )}
       </DialogContent>
