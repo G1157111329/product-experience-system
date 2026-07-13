@@ -110,6 +110,9 @@ export async function POST(request: NextRequest) {
         layoutProfile: snapshot.layout_profile,
         actorId: user.id,
         allowAll: user.role === 'admin' || hasPermission(user.role, Permission.REPORT_VIEW_ALL),
+        requestKey: typeof body.idempotency_key === 'string'
+          ? body.idempotency_key
+          : typeof body.request_key === 'string' ? body.request_key : undefined,
         reportUpdate: { assembly_id: assemblyId },
       });
       return NextResponse.json({

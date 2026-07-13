@@ -1106,12 +1106,14 @@ export const reportSnapshots = pgTable("report_snapshots", {
 	reportId: varchar("report_id", { length: 36 }).notNull(),
 	reportType: varchar("report_type", { length: 40 }).notNull(),
 	version: integer().notNull(),
+	idempotencyKey: varchar("idempotency_key", { length: 100 }),
 	snapshotJson: jsonb("snapshot_json").notNull(),
 	layoutProfile: varchar("layout_profile", { length: 80 }).notNull(),
 	createdBy: varchar("created_by", { length: 36 }),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
 	unique("report_snapshots_report_version_key").on(table.reportId, table.version),
+	unique("report_snapshots_report_idempotency_key").on(table.reportId, table.idempotencyKey),
 	index("report_snapshots_report_id_idx").using("btree", table.reportId.asc().nullsLast().op("text_ops")),
 	foreignKey({
 		columns: [table.reportId],

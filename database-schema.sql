@@ -876,11 +876,13 @@ CREATE TABLE IF NOT EXISTS report_snapshots (
   report_id VARCHAR(36) NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
   report_type VARCHAR(40) NOT NULL,
   version INTEGER NOT NULL,
+  idempotency_key VARCHAR(100),
   snapshot_json JSONB NOT NULL,
   layout_profile VARCHAR(80) NOT NULL,
   created_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE(report_id, version)
+  UNIQUE(report_id, version),
+  CONSTRAINT report_snapshots_report_idempotency_key UNIQUE(report_id, idempotency_key)
 );
 CREATE INDEX IF NOT EXISTS report_snapshots_report_id_idx ON report_snapshots(report_id);
 
@@ -891,7 +893,8 @@ CREATE OR REPLACE FUNCTION public.persist_existing_report_snapshot_atomic(
   p_layout_profile VARCHAR,
   p_actor_id VARCHAR,
   p_allow_all BOOLEAN DEFAULT FALSE,
-  p_assembly_id VARCHAR DEFAULT NULL
+  p_assembly_id VARCHAR DEFAULT NULL,
+  p_idempotency_key VARCHAR DEFAULT NULL
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -906,6 +909,9 @@ DECLARE
 BEGIN
   IF p_report_id IS NULL OR btrim(p_report_id) = '' THEN
     RAISE EXCEPTION 'report id is required' USING ERRCODE = '22023';
+  END IF;
+  IF p_idempotency_key IS NULL OR btrim(p_idempotency_key) = '' THEN
+    RAISE EXCEPTION 'idempotency key is required' USING ERRCODE = '22023';
   END IF;
 
   PERFORM pg_advisory_xact_lock(hashtextextended(p_report_id, 0));
@@ -933,16 +939,27 @@ BEGIN
     RAISE EXCEPTION 'report access denied' USING ERRCODE = '42501';
   END IF;
 
+  SELECT * INTO v_snapshot
+  FROM report_snapshots
+  WHERE report_id = p_report_id
+    AND idempotency_key = p_idempotency_key;
+  IF FOUND THEN
+    RETURN jsonb_build_object(
+      'report', to_jsonb(v_report),
+      'snapshot', to_jsonb(v_snapshot)
+    );
+  END IF;
+
   SELECT COALESCE(MAX(version), 0) + 1
   INTO v_version
   FROM report_snapshots
   WHERE report_id = p_report_id;
 
   INSERT INTO report_snapshots (
-    report_id, report_type, version, snapshot_json,
+    report_id, report_type, version, idempotency_key, snapshot_json,
     layout_profile, created_by
   ) VALUES (
-    p_report_id, p_report_type, v_version, p_snapshot_json,
+    p_report_id, p_report_type, v_version, p_idempotency_key, p_snapshot_json,
     p_layout_profile, p_actor_id
   )
   RETURNING * INTO v_snapshot;
@@ -968,14 +985,14 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION public.persist_existing_report_snapshot_atomic(
-  VARCHAR, VARCHAR, JSONB, VARCHAR, VARCHAR, BOOLEAN, VARCHAR
+  VARCHAR, VARCHAR, JSONB, VARCHAR, VARCHAR, BOOLEAN, VARCHAR, VARCHAR
 ) FROM PUBLIC;
 
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
     GRANT EXECUTE ON FUNCTION public.persist_existing_report_snapshot_atomic(
-      VARCHAR, VARCHAR, JSONB, VARCHAR, VARCHAR, BOOLEAN, VARCHAR
+      VARCHAR, VARCHAR, JSONB, VARCHAR, VARCHAR, BOOLEAN, VARCHAR, VARCHAR
     ) TO service_role;
   END IF;
 END;
