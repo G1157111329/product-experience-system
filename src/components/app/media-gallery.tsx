@@ -2,7 +2,14 @@
 
 import type { KeyboardEvent } from 'react';
 import { useImagePreview } from '@/components/image-preview';
-import { isAllowedMediaSource, isPendingMediaUrl, pendingMediaDataUrl, toPublicMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
+import {
+  isAllowedMediaSource,
+  isPendingMediaUrl,
+  isUnavailableMediaUrl,
+  pendingMediaDataUrl,
+  unavailableMediaDataUrl,
+  usePresignedUrls,
+} from '@/lib/use-presigned-url';
 import { cn } from '@/lib/utils';
 
 interface Material {
@@ -24,11 +31,6 @@ interface MediaGalleryProps {
   PreviewComponent?: React.ReactNode;
 }
 
-export const missingMediaDataUrl =
-  `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="180" viewBox="0 0 240 180"><rect width="240" height="180" rx="10" fill="#f7f2e9"/><path d="M72 66h86a10 10 0 0 1 10 10v52a10 10 0 0 1-10 10H72a10 10 0 0 1-10-10V76a10 10 0 0 1 10-10Z" fill="none" stroke="#d8c7ad" stroke-width="4"/><path d="m76 122 28-28 22 22 13-13 29 29" fill="none" stroke="#d8c7ad" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="145" cy="85" r="8" fill="#d8c7ad"/><text x="120" y="154" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#8a735c">素材文件缺失</text></svg>',
-  )}`;
-
 function isDirectMediaUrl(value: string | null | undefined): boolean {
   return Boolean(value && isAllowedMediaSource(value));
 }
@@ -40,12 +42,7 @@ function getInitialMediaUrl(material: Material): string {
 }
 
 export function resolveGalleryMediaUrl(material: Material, resolvedUrl?: string): string {
-  const storageKey = material.file_path || material.file_url;
   if (!resolvedUrl) return getInitialMediaUrl(material);
-  if (isPendingMediaUrl(resolvedUrl)) return resolvedUrl;
-  const rawStorageKey = Boolean(storageKey && !isAllowedMediaSource(storageKey));
-  const unsafeFallback = rawStorageKey ? toPublicMediaUrl(storageKey) : null;
-  if (unsafeFallback && resolvedUrl === unsafeFallback) return missingMediaDataUrl;
   return resolvedUrl;
 }
 
@@ -141,7 +138,7 @@ function MediaThumbnail({
           loading="lazy"
           onError={(event) => {
             const img = event.currentTarget;
-            if (img.src !== missingMediaDataUrl) img.src = missingMediaDataUrl;
+            if (!isUnavailableMediaUrl(img.src)) img.src = unavailableMediaDataUrl;
           }}
         />
       )}
@@ -189,7 +186,8 @@ export function MediaGallery({
 
   // Batch resolve presigned URLs for all materials
   const presignedMap = usePresignedUrls(
-    materials.map((m) => ({ id: m.id, file_url: m.file_url, file_path: m.file_path }))
+    materials.map((m) => ({ id: m.id, file_url: m.file_url, file_path: m.file_path })),
+    { unavailableUrl: unavailableMediaDataUrl },
   );
 
   if (!materials || materials.length === 0) return null;
@@ -207,7 +205,7 @@ export function MediaGallery({
           const resolvedUrl = resolveGalleryMediaUrl(mat, presignedMap.get(mat.id));
           const previewUrl = isPendingMediaUrl(resolvedUrl) ? (mat.file_path || mat.file_url || resolvedUrl) : resolvedUrl;
           const pending = isPendingMediaUrl(resolvedUrl);
-          const unavailable = resolvedUrl === missingMediaDataUrl;
+          const unavailable = isUnavailableMediaUrl(resolvedUrl);
           return (
             <MediaThumbnail
               key={mat.id}

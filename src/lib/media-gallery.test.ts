@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { missingMediaDataUrl, resolveGalleryMediaUrl } from '@/components/app/media-gallery';
-import { pendingMediaDataUrl } from './use-presigned-url';
+import { resolveGalleryMediaUrl } from '@/components/app/media-gallery';
+import { pendingMediaDataUrl, unavailableMediaDataUrl } from './use-presigned-url';
 
 const material = (fileUrl: string, filePath?: string) => ({
   id: fileUrl,
@@ -12,9 +12,9 @@ const material = (fileUrl: string, filePath?: string) => ({
 
 for (const rawKey of ['garage/private/raw.jpg', 'experience-media/reports/raw.jpg']) {
   assert.equal(resolveGalleryMediaUrl(material(rawKey)), pendingMediaDataUrl);
-  assert.equal(resolveGalleryMediaUrl(material(rawKey), `/uploads/${rawKey}`), missingMediaDataUrl);
+  assert.equal(resolveGalleryMediaUrl(material(rawKey), `/uploads/${rawKey}`), `/uploads/${rawKey}`);
 }
-assert.notEqual(missingMediaDataUrl, pendingMediaDataUrl);
+assert.notEqual(unavailableMediaDataUrl, pendingMediaDataUrl);
 
 assert.equal(resolveGalleryMediaUrl(material('/uploads/local.jpg')), '/uploads/local.jpg');
 assert.equal(resolveGalleryMediaUrl(material('https://cdn.example.com/signed.jpg')), 'https://cdn.example.com/signed.jpg');

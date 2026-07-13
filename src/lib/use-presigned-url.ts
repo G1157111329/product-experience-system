@@ -21,6 +21,15 @@ export function isPendingMediaUrl(value: string | null | undefined): boolean {
   return value === pendingMediaDataUrl;
 }
 
+export const unavailableMediaDataUrl =
+  `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="180" viewBox="0 0 240 180"><rect width="240" height="180" rx="10" fill="#f7f2e9"/><path d="M72 66h86a10 10 0 0 1 10 10v52a10 10 0 0 1-10 10H72a10 10 0 0 1-10-10V76a10 10 0 0 1 10-10Z" fill="none" stroke="#d8c7ad" stroke-width="4"/><path d="m76 122 28-28 22 22 13-13 29 29" fill="none" stroke="#d8c7ad" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="145" cy="85" r="8" fill="#d8c7ad"/><text x="120" y="154" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#8a735c">素材文件缺失</text></svg>',
+  )}`;
+
+export function isUnavailableMediaUrl(value: string | null | undefined): boolean {
+  return value === unavailableMediaDataUrl;
+}
+
 function areUrlMapsEqual(a: Map<string, string>, b: Map<string, string>): boolean {
   if (a.size !== b.size) return false;
   for (const [key, value] of a) {
@@ -136,6 +145,9 @@ async function requestPresignedUrls(filePaths: string[]): Promise<Map<string, st
   } catch {
     // 请求失败时静默处理
   }
+  for (const filePath of filePaths) {
+    if (!result.has(filePath)) result.set(filePath, unavailableMediaDataUrl);
+  }
   return result;
 }
 
@@ -177,7 +189,12 @@ function scheduleBatch(filePath: string, resolve: (url: string) => void) {
         const urls = await requestPresignedUrls(toRequest);
         for (const item of items) {
           if (toRequest.includes(item.filePath)) {
-            item.resolve(urls.get(item.filePath) || toPublicMediaUrl(item.filePath) || item.filePath);
+            const resolvedUrl = urls.get(item.filePath);
+            item.resolve(
+              resolvedUrl && !isUnavailableMediaUrl(resolvedUrl)
+                ? resolvedUrl
+                : toPublicMediaUrl(item.filePath) || item.filePath,
+            );
           }
         }
       }
@@ -283,7 +300,8 @@ export function usePresignedUrl(filePath: string | null | undefined): string | n
  * @returns Map<materialId, signedUrl>
  */
 export function usePresignedUrls<T extends { id: string; file_url?: string | null; file_path?: string | null }>(
-  materials: T[]
+  materials: T[],
+  options?: { unavailableUrl?: string },
 ): Map<string, string> {
   const [urlMap, setUrlMap] = useState<Map<string, string>>(new Map());
   const mountedRef = useRef(true);
@@ -291,6 +309,7 @@ export function usePresignedUrls<T extends { id: string; file_url?: string | nul
   const materialSignature = materials
     .map((m) => `${m.id}:${m.file_path ?? ''}:${m.file_url ?? ''}`)
     .join('|');
+  const unavailableUrl = options?.unavailableUrl;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -341,7 +360,12 @@ export function usePresignedUrls<T extends { id: string; file_url?: string | nul
           const filePath = getStorageKey(m);
           if (filePath && toRequest.includes(filePath)) {
             const signedUrl = urls.get(filePath);
-            result.set(m.id, signedUrl || toPublicMediaUrl(filePath) || filePath);
+            result.set(
+              m.id,
+              signedUrl && !isUnavailableMediaUrl(signedUrl)
+                ? signedUrl
+                : unavailableUrl || toPublicMediaUrl(filePath) || filePath,
+            );
           }
         }
         setUrlMap((previous) => (
@@ -353,7 +377,7 @@ export function usePresignedUrls<T extends { id: string; file_url?: string | nul
     return () => {
       mountedRef.current = false;
     };
-  }, [materials, materialSignature]);
+  }, [materials, materialSignature, unavailableUrl]);
 
   return urlMap;
 }
@@ -369,5 +393,6 @@ export async function fetchPresignedUrl(filePath: string): Promise<string> {
   if (cached && cached.expireAt > Date.now()) return cached.url;
 
   const urls = await requestPresignedUrls([filePath]);
-  return urls.get(filePath) || filePath;
+  const resolvedUrl = urls.get(filePath);
+  return resolvedUrl && !isUnavailableMediaUrl(resolvedUrl) ? resolvedUrl : filePath;
 }

@@ -99,6 +99,39 @@ test('anonymous reader presigns raw object keys without requesting them as page-
   expect(rawRequests).toEqual([]);
 });
 
+test('anonymous reader preserves a successful local-public presign result', async ({ page }) => {
+  const localPublicRequests: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/uploads/garage/private/local.jpg')) localPublicRequests.push(request.url());
+  });
+  await page.route('**/api/reports/share?token=local-media', async (route) => {
+    await route.fulfill({ json: {
+      code: 0,
+      data: {
+        frozenViewModel: {
+          snapshotResolution: 'anchored',
+          header: { id: 'local-report', title: 'Local media report', reportType: 'single_report', status: 'published', productModel: null },
+          tabs: ['summary', 'issues'], summary: { text: 'Summary', aiSummary: null },
+          issues: [{ id: 'local-issue', title: 'Local issue', details: '', level: '', sourceType: '', evidence: [{ id: 'local-material', name: 'local.jpg', type: 'image', url: 'garage/private/local.jpg' }], liveOverlay: { status: '', rectification: '', reEvaluations: [], evidence: [] } }],
+          matrix: null, functionEffects: [], capabilities: { canManageIssues: false, canShare: false, canExport: true },
+        }, siblingReports: [], siblingFrozenViewModels: {},
+      },
+    } });
+  });
+  await page.route('**/api/materials/presign', async (route) => {
+    await route.fulfill({ json: { code: 0, data: { 'garage/private/local.jpg': '/uploads/garage/private/local.jpg' } } });
+  });
+  await page.route('**/uploads/garage/private/local.jpg', async (route) => {
+    await route.fulfill({ contentType: 'image/gif', body: Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64') });
+  });
+
+  await page.goto('/reports/share/local-media');
+  await page.getByRole('tab', { name: '问题' }).click();
+  await expect(page.getByText('素材不可用')).toHaveCount(0);
+  await expect(page.locator('[role="button"]').filter({ has: page.locator('img[src="/uploads/garage/private/local.jpg"]') })).toHaveCount(1);
+  await expect.poll(() => localPublicRequests.length).toBeGreaterThan(0);
+});
+
 for (const failure of [{ name: 'empty result', status: 200 }, { name: 'server error', status: 500 }]) {
   test(`failed media presign settles as unavailable for ${failure.name}`, async ({ page }) => {
     const rawRequests: string[] = [];
