@@ -258,7 +258,7 @@ test('data-matrix problem and appendix material reach report detail and print', 
     reportId = reportPayload.data.id as string;
 
     const headerResponse = await page.request.get(`/api/reports/${reportId}/header`);
-    expect((await headerResponse.json()).data.availableTabs).toContain('matrix');
+    expect((await headerResponse.json()).data.availableTabs).toContain('data_matrix');
     const issuesResponse = await page.request.get(`/api/reports/${reportId}/issues`);
     const reportIssues = (await issuesResponse.json()).data as Array<Record<string, unknown>>;
     const reportIssue = reportIssues.find((issue) => issue.title === issueTitle);
@@ -453,7 +453,8 @@ test('disposable V3 matrix visibility freezes value across report generations an
     const headerV1Response = await page.request.get(`/api/reports/${reportV1}/header`);
     const headerV1Payload = await headerV1Response.json();
     expect(headerV1Payload.code, headerV1Payload.message).toBe(0);
-    expect(headerV1Payload.data.availableTabs).not.toContain('matrix');
+    expect(headerV1Payload.data.availableTabs).not.toContain('data_matrix');
+    expect(headerV1Payload.data.availableTabs).not.toContain('comparison_matrix');
 
     const cellResponse = await page.request.put(
       `/api/v1/matrices/${matrixId}/cells/${leafRowId}/${column!.id}`,
@@ -466,7 +467,8 @@ test('disposable V3 matrix visibility freezes value across report generations an
     const reportV2 = await generateReport();
     const headerV2Response = await page.request.get(`/api/reports/${reportV2}/header`);
     const headerV2Payload = await headerV2Response.json();
-    expect(headerV2Payload.data.availableTabs).toContain('matrix');
+    expect(headerV2Payload.data.availableTabs).toContain('data_matrix');
+    expect(headerV2Payload.data.availableTabs).not.toContain('comparison_matrix');
     const matrixV2Response = await page.request.get(`/api/reports/${reportV2}/matrix`);
     const matrixV2Payload = await matrixV2Response.json();
     expect(matrixV2Payload.code, matrixV2Payload.message).toBe(0);
@@ -482,11 +484,13 @@ test('disposable V3 matrix visibility freezes value across report generations an
     const reportV3 = await generateReport();
     const headerV3Response = await page.request.get(`/api/reports/${reportV3}/header`);
     const headerV3Payload = await headerV3Response.json();
-    expect(headerV3Payload.data.availableTabs).not.toContain('matrix');
+    expect(headerV3Payload.data.availableTabs).not.toContain('data_matrix');
+    expect(headerV3Payload.data.availableTabs).not.toContain('comparison_matrix');
 
     const oldHeaderResponse = await page.request.get(`/api/reports/${reportV2}/header`);
     const oldHeaderPayload = await oldHeaderResponse.json();
-    expect(oldHeaderPayload.data.availableTabs).toContain('matrix');
+    expect(oldHeaderPayload.data.availableTabs).toContain('data_matrix');
+    expect(oldHeaderPayload.data.availableTabs).not.toContain('comparison_matrix');
     const oldMatrixResponse = await page.request.get(`/api/reports/${reportV2}/matrix`);
     const oldMatrixPayload = await oldMatrixResponse.json();
     expect(JSON.stringify(oldMatrixPayload.data.dataMatrixV3)).toContain('85℃');
@@ -558,7 +562,8 @@ test('disposable comparison assembly hides report matrix after UI object deletio
     reportId = reportPayload.data.id as string;
     const headerResponse = await page.request.get(`/api/reports/${reportId}/header`);
     const headerPayload = await headerResponse.json();
-    expect(headerPayload.data.availableTabs).not.toContain('matrix');
+    expect(headerPayload.data.availableTabs).not.toContain('data_matrix');
+    expect(headerPayload.data.availableTabs).not.toContain('comparison_matrix');
 
     const snapshotResponse = await page.request.post('/api/report-snapshots', {
       data: { assembly_id: assemblyId, report_type: 'comparison_report' },

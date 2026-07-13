@@ -1,26 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canReadReport, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
-import {
-  loadAnchoredReportSnapshot,
-  loadReportSnapshotWithLegacyErrorFallback,
-} from '@/lib/server/report-snapshots';
-import {
-  hasMeaningfulComparisonCell,
-  hasMeaningfulV2Projection,
-  hasMeaningfulV3Projection,
-} from '@/lib/matrix/meaningful-content';
+import { loadAnchoredReportSnapshot } from '@/lib/server/report-snapshots';
+import { buildReportFrozenTabs } from '@/lib/report-frozen-tabs';
 
 function isRecordLike(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function hasSnapshotCellMedia(cell: unknown): boolean {
-  if (!isRecordLike(cell)) return false;
-  return ['inline_media', 'appendix_media', 'media'].some((key) => {
-    const value = cell[key];
-    return Array.isArray(value) && value.length > 0;
-  });
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -72,44 +57,20 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
   }
 
-  // 动态决定 Tab：summary/issues 始终显示；matrix 仅对比报告且有矩阵快照时；function_effect 仅有食谱时显示。
-  const availableTabs = ['summary', 'issues'];
+  // Tab 仅由冻结内容决定；新合同显式区分数据矩阵和对比矩阵。
   const content = (report.content ?? null) as Record<string, unknown> | null;
   const recipes = (content?.recipes ?? []) as unknown[];
-  const isComparison = report.report_type === 'comparison_report';
-
-  // matrix：普通报告不再用食谱瀑布冒充矩阵，避免无矩阵录入仍显示矩阵 Tab。
-  let hasMatrix = false;
-  if (isComparison) {
-    try {
-      const { snapshot } = await loadAnchoredReportSnapshot(client, report);
-      const snapshotJson = snapshot?.snapshot_json as Record<string, unknown> | undefined;
-      const objects = (snapshotJson?.objects ?? []) as unknown[];
-      const nodes = (snapshotJson?.item_nodes ?? []) as unknown[];
-      const cells = (snapshotJson?.cells ?? snapshotJson?.matrix_cells ?? []) as unknown[];
-      hasMatrix = objects.length > 0 && nodes.length > 0 && cells.some((cell) => (
-        hasMeaningfulComparisonCell(cell) || hasSnapshotCellMedia(cell)
-      ));
-    } catch (snapshotError) {
-      if (report.snapshot_id) throw snapshotError;
-      hasMatrix = false;
-    }
-  } else {
-    const { snapshot } = await loadReportSnapshotWithLegacyErrorFallback(client, report);
-    const snapshotJson = snapshot?.snapshot_json as Record<string, unknown> | undefined;
-    const dataMatrixProjection = isRecordLike(snapshotJson?.matrix_projection)
-      ? snapshotJson.matrix_projection
-      : content?.data_matrix_projection;
-    hasMatrix = isRecordLike(dataMatrixProjection) && (
-      dataMatrixProjection.projectionVersion === 'v3' || dataMatrixProjection.matrixProjectionVersion === 'v3'
-        ? hasMeaningfulV3Projection(dataMatrixProjection)
-        : hasMeaningfulV2Projection(dataMatrixProjection)
-    );
-  }
-  if (hasMatrix) availableTabs.push('matrix');
-
-  // function_effect：有食谱时才显示
-  if (recipes.length > 0) availableTabs.push('function_effect');
+  const { snapshot } = await loadAnchoredReportSnapshot(client, report);
+  const snapshotJson = snapshot?.snapshot_json as Record<string, unknown> | undefined;
+  const dataMatrixProjection = isRecordLike(snapshotJson?.matrix_projection)
+    ? snapshotJson.matrix_projection
+    : content?.data_matrix_projection;
+  const availableTabs = buildReportFrozenTabs({
+    reportType: report.report_type,
+    dataMatrixProjection,
+    comparisonSnapshot: snapshotJson,
+    recipes,
+  });
 
   return NextResponse.json({
     code: 0,

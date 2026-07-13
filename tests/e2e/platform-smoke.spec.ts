@@ -140,6 +140,11 @@ test('report detail, print, and share keep the frozen report contract', async ({
     expect(headerResponse.ok(), `${reportId} header API should return 2xx`).toBeTruthy();
     const headerPayload = await headerResponse.json();
     expect(headerPayload.code, headerPayload.message || `${reportId} header API should succeed`).toBe(0);
+    expect(headerPayload.data.availableTabs).not.toContain('matrix');
+    if (reportId === 'golden-report-comparison') {
+      expect(headerPayload.data.availableTabs).toContain('comparison_matrix');
+      expect(headerPayload.data.availableTabs).not.toContain('data_matrix');
+    }
 
     await page.goto(`/reports/${reportId}`);
     await expect(page.getByTestId('report-frozen-detail')).toBeVisible();
@@ -150,7 +155,7 @@ test('report detail, print, and share keep the frozen report contract', async ({
   }
 
   await page.goto('/reports/golden-report-comparison');
-  await page.getByRole('button', { name: '矩阵', exact: true }).click();
+  await page.getByRole('button', { name: '对比矩阵', exact: true }).click();
   await expect(page.getByTestId('report-frozen-detail')).toBeVisible();
 
   await page.goto('/reports/print?id=golden-report-single&mode=text');

@@ -57,8 +57,14 @@ const TAB_LABELS: Record<string, string> = {
   summary: '总结',
   issues: '问题',
   matrix: '矩阵',
+  data_matrix: '数据矩阵',
+  comparison_matrix: '对比矩阵',
   function_effect: '功能效果',
 };
+
+function isMatrixTab(key: string): boolean {
+  return key === 'matrix' || key === 'data_matrix' || key === 'comparison_matrix';
+}
 
 export default function ReportDetailPage() {
   const params = useParams();
@@ -137,7 +143,7 @@ export default function ReportDetailPage() {
     if (!header) return;
     if (activeTab === 'summary') void fetchSummary();
     if (activeTab === 'issues') void fetchIssues();
-    if (activeTab === 'matrix') void fetchMatrix();
+    if (isMatrixTab(activeTab)) void fetchMatrix();
     if (activeTab === 'function_effect') void fetchFunctionEffect();
   }, [activeTab, header, fetchSummary, fetchIssues, fetchMatrix, fetchFunctionEffect]);
 
@@ -226,7 +232,7 @@ export default function ReportDetailPage() {
             <SkeletonTab />
           )
         )}
-        {activeTab === 'matrix' && (
+        {isMatrixTab(activeTab) && (
           matrix ? (
             <ReportMatrixTab data={matrix as MatrixData} />
           ) : (
