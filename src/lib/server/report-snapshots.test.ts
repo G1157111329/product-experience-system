@@ -373,7 +373,11 @@ async function run() {
     assert.deepEqual(deletedReportIds, ['new-report']);
   }
 
-  {
+  for (const scenario of [
+    { name: 'legacy null', rereadSnapshotId: null, expectSuccess: false, oldSnapshotId: null },
+    { name: 'committed new anchor', rereadSnapshotId: 'snapshot-1', expectSuccess: true, oldSnapshotId: null },
+    { name: 'preserved old anchor', rereadSnapshotId: 'snapshot-old', expectSuccess: false, oldSnapshotId: 'snapshot-old' },
+  ]) {
     const deleted: string[] = [];
     const client = {
       from(table: string) {
@@ -385,8 +389,8 @@ async function run() {
               }),
             }),
             delete: () => ({
-              eq: async () => {
-                deleted.push('snapshot');
+              eq: async (_field: string, value: unknown) => {
+                deleted.push(String(value));
                 return { error: null };
               },
             }),
@@ -396,39 +400,56 @@ async function run() {
           update: () => ({
             eq: () => ({
               select: () => ({
-                single: async () => { throw new Error('anchor response rejected after commit'); },
+                single: async () => {
+                  if (scenario.expectSuccess) throw new Error('anchor update response rejected');
+                  return { data: null, error: { message: 'anchor update returned error' } };
+                },
               }),
             }),
           }),
-          delete: () => ({
-            eq: async () => {
-              deleted.push('report');
-              return { error: null };
-            },
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: { id: 'existing-report', snapshot_id: scenario.rereadSnapshotId },
+                error: null,
+              }),
+            }),
           }),
         };
       },
     };
 
-    await assert.rejects(
-      persistAnchoredReportSnapshot(
-        client as never,
-        'existing-report',
-        { report_id: 'existing-report' },
-        { deleteReportOnFailure: false },
-      ),
-      /anchor response rejected after commit/,
+    const operation = persistAnchoredReportSnapshot(
+      client as never,
+      'existing-report',
+      { report_id: 'existing-report' },
+      { deleteReportOnFailure: false },
     );
-    assert.deepEqual(deleted, []);
-
-    const anchoredClient = createSnapshotClient([
-      { id: 'snapshot-1', report_id: 'existing-report', version: 1 },
-    ]).client;
-    const anchored = await loadAnchoredReportSnapshot(anchoredClient as never, {
-      id: 'existing-report',
-      snapshot_id: 'snapshot-1',
-    });
-    assert.equal(anchored.snapshot?.id, 'snapshot-1');
+    if (scenario.expectSuccess) {
+      const result = await operation;
+      assert.equal(result.report.snapshot_id, 'snapshot-1', scenario.name);
+      assert.deepEqual(deleted, [], scenario.name);
+    } else {
+      await assert.rejects(operation, /anchor update returned error/, scenario.name);
+      assert.deepEqual(deleted, ['snapshot-1'], scenario.name);
+      if (scenario.oldSnapshotId) {
+        const anchoredClient = createSnapshotClient([
+          { id: scenario.oldSnapshotId, report_id: 'existing-report', version: 1 },
+        ]).client;
+        const anchored = await loadAnchoredReportSnapshot(anchoredClient as never, {
+          id: 'existing-report',
+          snapshot_id: scenario.oldSnapshotId,
+        });
+        assert.equal(anchored.snapshot?.id, scenario.oldSnapshotId);
+      } else {
+        const legacyClient = createSnapshotClient([]).client;
+        const legacy = await loadAnchoredReportSnapshot(legacyClient as never, {
+          id: 'existing-report',
+          snapshot_id: null,
+        });
+        assert.equal(legacy.snapshot, null);
+      }
+    }
   }
 
   {

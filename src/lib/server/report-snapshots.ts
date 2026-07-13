@@ -152,6 +152,34 @@ export async function persistAnchoredReportSnapshot(
   } catch (error) {
     const primaryMessage = error instanceof Error ? error.message : String(error);
     if (!deleteReportOnFailure) {
+      if (!snapshot?.id) throw error instanceof Error ? error : new Error(primaryMessage);
+      const reread = await ((client
+        .from('reports')
+        .select('id, snapshot_id')
+        .eq('id', reportId) as unknown as {
+          maybeSingle: () => Promise<{
+            data: Record<string, unknown> | null;
+            error?: { message?: string } | null;
+          }>;
+        }).maybeSingle());
+      if (reread.error || !reread.data) {
+        throw new Error(
+          `${primaryMessage}; snapshot anchor reconciliation failed: ${reread.error?.message || 'report not found'}`,
+        );
+      }
+      if (String(reread.data.snapshot_id || '') === String(snapshot.id)) {
+        return { snapshot, report: reread.data };
+      }
+      try {
+        const cleanupResult = await (client
+          .from('report_snapshots')
+          .delete()
+          .eq('id', snapshot.id) as PromiseLike<{ error?: { message?: string } | null }>);
+        if (cleanupResult?.error) throw new Error(cleanupResult.error.message || 'cleanup delete failed');
+      } catch (cleanupError) {
+        const cleanupMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+        throw new Error(`${primaryMessage}; cleanup failed: ${cleanupMessage}`);
+      }
       throw error instanceof Error ? error : new Error(primaryMessage);
     }
     try {
