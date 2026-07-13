@@ -1,12 +1,12 @@
 'use client';
 
-import { Fragment, useState } from 'react';
+import { Fragment } from 'react';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { isPendingMediaUrl, pendingMediaDataUrl, toPublicMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
+import { pendingMediaDataUrl, toPublicMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import { cn } from '@/lib/utils';
 import type { ReportDetailMediaItem, ReportDetailModel, ReportDetailSection, ReportDetailSectionBlock } from '@/lib/server/report-detail';
 import { ReportDataMatrixReadView } from '@/components/reports/report-data-matrix-read-view';
+import { ReportMediaGrid, type ReportMediaItem, type ReportMediaRole } from '@/components/reports/report-media-grid';
 
 function blockItemClass(status: string | undefined) {
   if (status === 'risk') return 'border-red-200 bg-red-50 text-red-800';
@@ -89,25 +89,6 @@ function usableResolvedMediaUrl(originalUrl: string, resolvedUrl: string | undef
   return toRenderableMediaUrl(originalUrl);
 }
 
-function useResolvedReportMedia(media: ReportDetailMediaItem[] | undefined): ReportDetailMediaItem[] {
-  const mediaItems = media || [];
-  const presignedMap = usePresignedUrls(
-    mediaItems.map((item, index) => ({
-      id: `${item.id || 'media'}:${index}:${item.url}`,
-      file_url: item.url,
-      file_path: item.url,
-    })),
-  );
-
-  return mediaItems.map((item, index) => ({
-    ...item,
-    url: usableResolvedMediaUrl(
-      item.url,
-      presignedMap.get(`${item.id || 'media'}:${index}:${item.url}`),
-    ),
-  }));
-}
-
 function useResolvedReportMediaMap(mediaItems: ReportDetailMediaItem[]): Map<string, ReportDetailMediaItem> {
   const presignedMap = usePresignedUrls(
     mediaItems.map((item, index) => ({
@@ -129,49 +110,21 @@ function useResolvedReportMediaMap(mediaItems: ReportDetailMediaItem[]): Map<str
   ]));
 }
 
-function MediaPreviewDialog({
-  item,
-  context,
-  onOpenChange,
-}: {
-  item: ReportDetailMediaItem | null;
-  context?: string;
-  onOpenChange: (open: boolean) => void;
-}) {
-  return (
-    <Dialog open={Boolean(item)} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl overflow-hidden p-0">
-        <DialogHeader className="border-b px-4 py-3">
-          <DialogTitle className="truncate text-base">{item?.name || '素材预览'}</DialogTitle>
-          {context && <p className="truncate text-xs text-muted-foreground">{context}</p>}
-        </DialogHeader>
-        <div className="bg-muted/30 p-3">
-          {item && isVideoType(item.type) ? (
-            <video src={item.url} className="max-h-[72vh] w-full rounded-md bg-black object-contain" controls autoPlay preload="metadata" />
-          ) : item ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={item.url} alt={item.name} className="mx-auto max-h-[72vh] max-w-full rounded-md object-contain" />
-          ) : null}
-          {item && (
-            <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
-              <span>{mediaTypeLabel(item.type)}</span>
-              {item.role && <span>{mediaRoleLabel(item.role)}</span>}
-              {item.owner && <span>{item.owner}</span>}
-            </div>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
+function reportMediaItems(media: ReportDetailMediaItem[] | undefined): ReportMediaItem[] {
+  return (media || []).flatMap((item, index) => item.url ? [{
+    id: String(item.id || `${item.url}:${index}`),
+    name: item.name || '素材',
+    type: item.type || 'image',
+    url: item.url,
+  }] : []);
 }
 
 function InteractiveMediaStrip({
   media,
-  limit,
   compact = false,
   featured = false,
   context,
-  testId = 'report-inline-media-item',
+  testId,
 }: {
   media?: ReportDetailSectionBlock['media'];
   limit?: number;
@@ -180,54 +133,13 @@ function InteractiveMediaStrip({
   context?: string;
   testId?: string;
 }) {
-  const [selected, setSelected] = useState<ReportDetailMediaItem | null>(null);
-  const resolvedMedia = useResolvedReportMedia(media);
-  if (!resolvedMedia.length) return null;
+  const role: ReportMediaRole = featured ? 'primary' : compact ? 'compact' : 'evidence';
+  const items = reportMediaItems(media);
+  if (!items.length) return null;
   return (
-    <>
-      {/* Golden contract token: data-testid="report-inline-media-item" */}
-      <div data-testid="report-inline-media-strip" className="mt-2 flex flex-wrap gap-2 pb-1">
-      {resolvedMedia.slice(0, limit ?? resolvedMedia.length).map((item, index) => (
-        <button
-          type="button"
-          key={`${item.id}-${item.url}`}
-          data-testid={testId}
-          onClick={() => setSelected(item)}
-          className={cn(
-            'group relative shrink-0 overflow-hidden rounded-md border bg-muted/30 text-left',
-            featured && index === 0 ? 'h-28 w-36' : featured ? 'h-16 w-16' : compact ? 'h-12 w-12' : 'h-16 w-16',
-          )}
-          title={item.name}
-        >
-          {isPendingMediaUrl(item.url) ? (
-            <div className="flex h-full w-full items-center justify-center bg-muted text-[10px] text-muted-foreground">
-              加载中
-            </div>
-          ) : isImageType(item.type) ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={item.url} alt={item.name} className="h-full w-full object-cover transition-transform group-hover:scale-105" />
-          ) : isVideoType(item.type) ? (
-            <video src={item.url} className="h-full w-full object-cover transition-transform group-hover:scale-105" muted preload="metadata" />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center bg-muted text-[10px] font-medium uppercase text-muted-foreground">
-              {mediaTypeLabel(item.type)}
-            </div>
-          )}
-          {!isImageType(item.type) && (
-            <span className="absolute inset-x-1 bottom-1 rounded bg-background/90 px-1 py-0.5 text-center text-[9px] text-foreground">
-              {isVideoType(item.type) ? '播放' : '素材'}
-            </span>
-          )}
-        </button>
-      ))}
-      {typeof limit === 'number' && resolvedMedia.length > limit && (
-        <div className={cn('flex shrink-0 items-center justify-center rounded-md border bg-muted/20 text-[10px] text-muted-foreground', featured ? 'h-16 w-16' : compact ? 'h-12 w-12' : 'h-16 w-16')}>
-          +{resolvedMedia.length - limit}
-        </div>
-      )}
-      </div>
-      <MediaPreviewDialog item={selected} context={context} onOpenChange={(open) => !open && setSelected(null)} />
-    </>
+    <div data-testid="report-inline-media-strip" data-context={context} data-item-testid={testId} className="mt-2 min-w-0 pb-1">
+      <ReportMediaGrid items={items} role={role} />
+    </div>
   );
 }
 
@@ -273,52 +185,7 @@ function isMatrixCellEmpty(cell: NonNullable<NonNullable<ReportDetailSectionBloc
 }
 
 function InteractiveMediaCards({ media }: { media?: ReportDetailSectionBlock['media'] }) {
-  const [selected, setSelected] = useState<ReportDetailMediaItem | null>(null);
-  const resolvedMedia = useResolvedReportMedia(media);
-  if (!resolvedMedia.length) return null;
-  return (
-    <>
-      {resolvedMedia.map((item) => (
-        <button
-          type="button"
-          key={`${item.id}-${item.url}`}
-          data-testid="report-section-media-item"
-          onClick={() => setSelected(item)}
-          className="min-w-0 overflow-hidden rounded-md border bg-muted/20 text-left text-xs transition-colors hover:bg-muted/40"
-        >
-          {isPendingMediaUrl(item.url) ? (
-            <div className="flex h-28 w-full items-center justify-center bg-muted text-xs text-muted-foreground">
-              加载中
-            </div>
-          ) : isImageType(item.type) ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={item.url} alt={item.name} className="h-28 w-full object-cover" />
-          ) : isVideoType(item.type) ? (
-            <div className="relative h-28 w-full bg-muted">
-              <video src={item.url} className="h-full w-full object-cover" muted preload="metadata" />
-              <span className="absolute inset-x-3 bottom-2 rounded bg-background/90 px-2 py-1 text-center text-[10px] text-foreground">播放</span>
-            </div>
-          ) : (
-            <div className="flex h-28 w-full items-center justify-center bg-muted text-xs font-medium uppercase text-muted-foreground">
-              {mediaTypeLabel(item.type)}
-            </div>
-          )}
-          <div className="px-3 py-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className="min-w-0 truncate font-medium">{item.name}</span>
-              <Badge variant="outline" className="shrink-0 text-[10px]">{mediaTypeLabel(item.type)}</Badge>
-            </div>
-            {(item.role || item.owner) && (
-              <p className="mt-1 truncate text-[11px] text-muted-foreground">
-                {[mediaRoleLabel(item.role), item.owner].filter(Boolean).join(' / ')}
-              </p>
-            )}
-          </div>
-        </button>
-      ))}
-      <MediaPreviewDialog item={selected} onOpenChange={(open) => !open && setSelected(null)} />
-    </>
-  );
+  return <ReportMediaGrid items={reportMediaItems(media)} role="evidence" />;
 }
 
 export function hasReadableSectionBlocks(model: ReportDetailModel | null | undefined) {
@@ -534,12 +401,7 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
 
       {block.type === 'media' && (block.media?.length ?? 0) > 0 && (
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          <InteractiveMediaCards media={block.media?.slice(0, 12)} />
-          {(block.media?.length ?? 0) > 12 && (
-            <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-              还有 {(block.media?.length ?? 0) - 12} 个素材
-            </div>
-          )}
+          <InteractiveMediaCards media={block.media} />
         </div>
       )}
 

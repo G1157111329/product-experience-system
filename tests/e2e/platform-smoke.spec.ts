@@ -148,14 +148,14 @@ test('report detail, print, and share keep the frozen report contract', async ({
 
     await page.goto(`/reports/${reportId}`);
     await expect(page.getByTestId('report-frozen-detail')).toBeVisible();
-    await expect(page.getByRole('button', { name: '总结', exact: true })).toBeVisible();
+    await expect(page.getByRole('tab', { name: '总结', exact: true })).toBeVisible();
     await expect(page.getByTestId('report-detail-shell')).toHaveCount(0);
     await expect(page.getByTestId('report-legacy-content')).toHaveCount(0);
     await expectAppLoaded(page);
   }
 
   await page.goto('/reports/golden-report-comparison');
-  await page.getByRole('button', { name: '对比矩阵', exact: true }).click();
+  await page.getByRole('tab', { name: '对比矩阵', exact: true }).click();
   await expect(page.getByTestId('report-frozen-detail')).toBeVisible();
 
   await page.goto('/reports/print?id=golden-report-single&mode=text');

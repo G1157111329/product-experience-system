@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ChevronDown, ChevronRight, Star } from 'lucide-react';
 import { selectEffectEvaluationText } from '@/lib/report-content-rules';
-import { ReportMediaPreview } from './report-media-preview';
+import { ReportMediaGrid, type ReportMediaItem, type ReportMediaRole } from '@/components/reports/report-media-grid';
 
 interface FunctionEffectRecipe {
   id: string;
@@ -111,7 +111,7 @@ function RecipeCard({ recipe }: { recipe: FunctionEffectRecipe }) {
               <p className="whitespace-pre-wrap text-xs text-muted-foreground">{evaluationText}</p>
             )}
             {recipe.effect_materials && recipe.effect_materials.length > 0 && (
-              <EffectMediaGrid materials={recipe.effect_materials} />
+              <SemanticMediaGrid materials={recipe.effect_materials} role="primary" />
             )}
           </div>
         )}
@@ -149,7 +149,7 @@ function RecipeCard({ recipe }: { recipe: FunctionEffectRecipe }) {
                       )}
                       {step.materials && step.materials.length > 0 && (
                         <div className="mt-1">
-                          <StepMediaGrid materials={step.materials} />
+                          <SemanticMediaGrid materials={step.materials} role="evidence" />
                         </div>
                       )}
                     </div>
@@ -167,7 +167,7 @@ function RecipeCard({ recipe }: { recipe: FunctionEffectRecipe }) {
             {effectPps.map((pp, idx) => (
               <div key={idx} className="rounded border border-amber-200/60 bg-amber-50/30 p-2">
                 <p className="text-xs">{pp.text}</p>
-                <EffectMediaGrid materials={materialsForIds(recipe.effect_materials, pp.material_ids)} />
+                <SemanticMediaGrid materials={materialsForIds(recipe.effect_materials, pp.material_ids)} role="primary" />
               </div>
             ))}
           </div>
@@ -177,31 +177,16 @@ function RecipeCard({ recipe }: { recipe: FunctionEffectRecipe }) {
   );
 }
 
-function EffectMediaGrid({ materials }: { materials: Array<Record<string, unknown>> }) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      {materials.map((mat) => (
-        <MediaThumb key={String(mat.id)} material={mat} />
-      ))}
-    </div>
-  );
-}
-
-function StepMediaGrid({ materials }: { materials: Array<Record<string, unknown>> }) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      {materials.map((mat) => (
-        <MediaThumb key={String(mat.id)} material={mat} />
-      ))}
-    </div>
-  );
-}
-
-function MediaThumb({ material }: { material: Record<string, unknown> }) {
-  const filePath = String(material.file_path || material.file_url || '');
-  const name = String(material.file_name || '');
-  const type = String(material.material_type || 'image');
-  return (
-    <ReportMediaPreview filePath={filePath} type={type} name={name} size="sm" />
-  );
+function SemanticMediaGrid({ materials, role }: { materials: Array<Record<string, unknown>>; role: ReportMediaRole }) {
+  const items = materials.flatMap((material, index): ReportMediaItem[] => {
+    const url = String(material.file_path || material.file_url || '');
+    if (!url) return [];
+    return [{
+      id: String(material.id || `${url}:${index}`),
+      url,
+      name: String(material.file_name || '素材'),
+      type: String(material.material_type || 'image'),
+    }];
+  });
+  return <ReportMediaGrid items={items} role={role} />;
 }

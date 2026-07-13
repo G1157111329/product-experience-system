@@ -5,7 +5,7 @@ import type { FrozenMedia, FrozenReportViewModel } from '@/lib/report-frozen-vie
 import type { ReportFrozenTabKey } from '@/lib/report-frozen-tabs';
 import { ReportTabBar } from '@/app/(main)/reports/[id]/components/report-tab-bar';
 import { ReportMatrixTab, type MatrixData } from '@/app/(main)/reports/[id]/components/report-matrix-tab';
-import { MediaGallery } from '@/components/app/media-gallery';
+import { ReportMediaGrid, type ReportMediaRole } from '@/components/reports/report-media-grid';
 
 const TAB_LABELS: Record<ReportFrozenTabKey, string> = {
   summary: '总结',
@@ -57,21 +57,11 @@ export function frozenReaderDomPrefix(reportId: string, instanceId: string) {
   return `report-${safeDomPart(reportId).slice(0, 32)}-${stableHash(reportId)}-${safeDomPart(instanceId)}`;
 }
 
-function MediaList({ items }: { items: FrozenMedia[] }) {
+function MediaList({ items, role, label }: { items: FrozenMedia[]; role: ReportMediaRole; label?: string }) {
   if (items.length === 0) return null;
   return (
     <div data-content-id={`media-group:${items.map((item) => item.id).join(',')}`}>
-      <MediaGallery
-        materials={items.map((item) => ({
-          id: item.id,
-          file_url: item.url,
-          file_name: item.name,
-          material_type: item.type,
-        }))}
-        responsive
-        columns={{ mobile: 2, sm: 3, lg: 4 }}
-        gap="gap-3"
-      />
+      <ReportMediaGrid items={items} role={role} label={label} />
     </div>
   );
 }
@@ -128,14 +118,14 @@ function FrozenPanel({ model, active }: { model: FrozenReportViewModel; active: 
               <h3 className="font-medium">{issue.title}</h3>
               {issue.details && <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{issue.details}</p>}
             </div>
-            <MediaList items={issue.evidence} />
+            <MediaList items={issue.evidence} role="appendix" label="原始问题素材" />
             {(issue.liveOverlay.status || issue.liveOverlay.rectification) && (
               <div className="rounded-md bg-muted/40 p-3 text-sm">
                 {issue.liveOverlay.status && <p>当前状态：{issue.liveOverlay.status}</p>}
                 {issue.liveOverlay.rectification && <p className="mt-1">整改：{issue.liveOverlay.rectification}</p>}
               </div>
             )}
-            <MediaList items={issue.liveOverlay.evidence} />
+            <MediaList items={issue.liveOverlay.evidence} role="appendix" label="整改素材" />
             {issue.liveOverlay.reEvaluations.length > 0 && (
               <div className="space-y-2 border-t pt-3">
                 <h4 className="text-sm font-medium">复评记录</h4>
@@ -147,7 +137,7 @@ function FrozenPanel({ model, active }: { model: FrozenReportViewModel; active: 
                       <p>{valueText(evaluation.description, evaluation.result, evaluation.conclusion) || '已完成复评'}</p>
                       {record(evaluation.ai_result).score !== undefined && <p className="mt-1">AI评分：{String(record(evaluation.ai_result).score)}</p>}
                       {valueText(record(evaluation.ai_result).summary) && <p className="mt-1">AI评语：{valueText(record(evaluation.ai_result).summary)}</p>}
-                      <div className="mt-2"><MediaList items={mediaFromUnknown(evaluation.materials)} /></div>
+                      <div className="mt-2"><MediaList items={mediaFromUnknown(evaluation.materials)} role="appendix" label="复评素材" /></div>
                     </div>
                   );
                 })}
@@ -171,7 +161,7 @@ function FrozenPanel({ model, active }: { model: FrozenReportViewModel; active: 
                 {problemTexts(effect.problemPoints).map((point, index) => <li key={`${point}:${index}`}>{point}</li>)}
               </ul>
             )}
-            <MediaList items={effect.evidence} />
+            <MediaList items={effect.evidence} role="primary" label="效果素材" />
             {effect.steps.length > 0 && (
               <ol className="space-y-2 border-t pt-3">
                 {effect.steps.map((item, index) => {
@@ -184,7 +174,7 @@ function FrozenPanel({ model, active }: { model: FrozenReportViewModel; active: 
                         {valueText(step.operation, step.description) && <span className="ml-2 text-muted-foreground">{valueText(step.operation, step.description)}</span>}
                       </div>
                       {problems.length > 0 && <ul className="list-disc pl-5 text-amber-700">{problems.map((point, pointIndex) => <li key={`${point}:${pointIndex}`}>{point}</li>)}</ul>}
-                      <MediaList items={mediaFromUnknown(step.materials)} />
+                      <MediaList items={mediaFromUnknown(step.materials)} role="evidence" label="过程证据" />
                     </li>
                   );
                 })}

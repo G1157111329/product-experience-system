@@ -66,7 +66,10 @@ test('anonymous reader presigns raw object keys without requesting them as page-
   const rawRequests: string[] = [];
   let presignBody: Record<string, unknown> | null = null;
   page.on('request', (request) => {
-    if (request.url().includes('garage/private/raw.jpg')) rawRequests.push(request.url());
+    if (
+      request.url().includes('garage/private/raw.jpg')
+      && !request.url().includes('/api/materials/thumb/')
+    ) rawRequests.push(request.url());
   });
   await page.route('**/api/reports/share?token=raw-media', async (route) => {
     await route.fulfill({ json: {
@@ -97,8 +100,9 @@ test('anonymous reader presigns raw object keys without requesting them as page-
   await expect.poll(() => presignBody).not.toBeNull();
   expect(presignBody).toMatchObject({ paths: ['garage/private/raw.jpg'], share_token: 'raw-media' });
   expect(rawRequests).toEqual([]);
-  const remoteThumbnail = page.locator('[role="button"]').filter({ has: page.locator('img[src^="data:image/gif"]') });
+  const remoteThumbnail = page.getByTestId('report-media-item');
   await expect(remoteThumbnail).toHaveCount(1);
+  await expect(remoteThumbnail.locator('img')).toHaveAttribute('src', '/api/materials/thumb/garage/private/raw.jpg');
   await remoteThumbnail.click();
   await expect(page.getByRole('dialog')).toBeVisible();
 });
@@ -132,11 +136,13 @@ test('anonymous reader preserves a successful local-public presign result', asyn
   await page.goto('/reports/share/local-media');
   await page.getByRole('tab', { name: '问题' }).click();
   await expect(page.getByText('素材不可用')).toHaveCount(0);
-  const localThumbnail = page.locator('[role="button"]').filter({ has: page.locator('img[src="/uploads/garage/private/local.jpg"]') });
+  const localThumbnail = page.getByTestId('report-media-item');
   await expect(localThumbnail).toHaveCount(1);
-  await expect.poll(() => localPublicRequests.length).toBeGreaterThan(0);
+  await expect(localThumbnail.locator('img')).toHaveAttribute('src', '/api/materials/thumb/garage/private/local.jpg');
+  expect(localPublicRequests).toEqual([]);
   await localThumbnail.click();
   await expect(page.getByRole('dialog')).toBeVisible();
+  await expect.poll(() => localPublicRequests.length).toBeGreaterThan(0);
 });
 
 for (const failure of [{ name: 'empty result', status: 200 }, { name: 'server error', status: 500 }]) {
@@ -169,9 +175,9 @@ for (const failure of [{ name: 'empty result', status: 200 }, { name: 'server er
     const unavailableLabel = page.getByText('素材不可用');
     await expect(unavailableLabel).toBeVisible();
     const unavailableThumbnail = unavailableLabel.locator('..');
+    await expect(unavailableThumbnail).toBeDisabled();
     await expect(unavailableThumbnail).not.toHaveAttribute('role', 'button');
     await expect(unavailableThumbnail).not.toHaveAttribute('tabindex', '0');
-    await unavailableThumbnail.click();
     await expect(page.getByRole('dialog')).toHaveCount(0);
     expect(rawRequests).toEqual([]);
   });
@@ -267,3 +273,95 @@ for (const matrixCase of [
     }
   });
 }
+
+const transparentPixel = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+
+function semanticMedia(prefix: string, count: number, includeVideo = false) {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `${prefix}-${index + 1}`,
+    name: `${prefix}-${index + 1}.${includeVideo && index === 1 ? 'mp4' : 'jpg'}`,
+    type: includeVideo && index === 1 ? 'video' : 'image',
+    url: transparentPixel,
+  }));
+}
+
+const semanticMediaModel = {
+  snapshotResolution: 'anchored',
+  header: { id: 'semantic-media', title: 'Semantic media report', reportType: 'single_report', status: 'published', productModel: null },
+  tabs: ['summary', 'issues', 'function_effect'],
+  summary: { text: 'Summary', aiSummary: null },
+  issues: [{
+    id: 'semantic-issue',
+    title: 'Semantic issue',
+    details: 'Three evidence phases stay separate.',
+    level: '二类',
+    sourceType: 'record_fail',
+    evidence: semanticMedia('original', 5),
+    liveOverlay: {
+      status: '整改中',
+      rectification: 'Rectification in progress',
+      evidence: semanticMedia('rectification', 5),
+      reEvaluations: [{ id: 'reevaluation', description: 'Re-evaluated', materials: semanticMedia('reevaluation', 5) }],
+    },
+  }],
+  matrix: null,
+  functionEffects: [{
+    id: 'semantic-effect',
+    name: 'Semantic function effect',
+    evaluation: 'Stable result',
+    score: 8,
+    problemPoints: [],
+    evidence: semanticMedia('effect', 7, true),
+    steps: [{ id: 'semantic-step', step_number: 1, operation: 'Run process', materials: semanticMedia('process', 5) }],
+  }],
+  capabilities: { canManageIssues: false, canShare: false, canExport: true },
+};
+
+async function assertSemanticMedia(page: import('@playwright/test').Page) {
+  const reader = page.getByTestId('frozen-report-reader');
+  await reader.getByRole('tab').nth(2).click();
+
+  const primary = reader.getByTestId('report-media-grid-primary');
+  await expect(primary).toBeVisible();
+  await expect(primary.getByTestId('report-media-item')).toHaveCount(6);
+  await expect(primary.locator('[data-media-type="image"]').first()).toHaveAttribute('data-aspect', '4/3');
+  await expect(primary.locator('[data-media-type="video"]')).toHaveAttribute('data-aspect', '16/9');
+  await expect(primary.getByTestId('report-media-more')).toHaveText('+1');
+  await primary.getByTestId('report-media-more').click();
+  await expect(primary.getByTestId('report-media-item')).toHaveCount(7);
+  await primary.getByTestId('report-media-collapse').click();
+  await expect(primary.getByTestId('report-media-item')).toHaveCount(6);
+
+  const evidence = reader.getByTestId('report-media-grid-evidence');
+  await expect(evidence.getByTestId('report-media-item')).toHaveCount(4);
+  await expect(evidence.getByTestId('report-media-more')).toHaveText('+1');
+
+  await reader.getByRole('tab').nth(1).click();
+  const appendix = reader.getByTestId('report-media-grid-appendix');
+  await expect(appendix).toHaveCount(3);
+  await expect(reader.getByText('原始问题素材')).toBeVisible();
+  await expect(reader.getByText('整改素材')).toBeVisible();
+  await expect(reader.getByText('复评素材')).toBeVisible();
+  await expect(appendix.first().getByTestId('report-media-item')).toHaveCount(4);
+  await expect(appendix.first().getByTestId('report-media-more')).toHaveText('+1');
+
+  expect(await reader.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBeTruthy();
+}
+
+test('semantic media roles size detail and share grids consistently without mobile overflow', async ({ browser }) => {
+  const detail = await browser.newPage({ viewport: { width: 390, height: 900 } });
+  const share = await browser.newPage({ viewport: { width: 390, height: 900 } });
+  await loginForE2E(detail, 'dockeradmin', 'DockerLocal2026');
+  await detail.route('**/api/reports/semantic-media/detail', (route) => route.fulfill({ json: { code: 0, data: { frozenViewModel: semanticMediaModel } } }));
+  await share.route('**/api/reports/share?token=semantic-media', (route) => route.fulfill({ json: { code: 0, data: { frozenViewModel: semanticMediaModel, siblingReports: [], siblingFrozenViewModels: {} } } }));
+
+  try {
+    await detail.goto('/reports/semantic-media');
+    await share.goto('/reports/share/semantic-media');
+    await assertSemanticMedia(detail);
+    await assertSemanticMedia(share);
+  } finally {
+    await detail.close();
+    await share.close();
+  }
+});

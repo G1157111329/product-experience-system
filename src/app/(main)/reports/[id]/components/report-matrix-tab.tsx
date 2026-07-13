@@ -10,7 +10,7 @@ import type { ComparisonSnapshot } from '@/components/reports/comparison-report-
 import { ReportDataMatrixReadView } from '@/components/reports/report-data-matrix-read-view';
 import { ReportV3MatrixView, isReportV3MatrixProjection } from './report-v3-matrix-view';
 import type { ReportV3MatrixProjection } from '@/lib/matrix/report-projection-v3-adapter';
-import { ReportMediaPreview } from './report-media-preview';
+import { ReportMediaGrid, type ReportMediaItem } from '@/components/reports/report-media-grid';
 
 type Row = Record<string, unknown>;
 type MatrixMetricReadValue = {
@@ -358,17 +358,19 @@ function MatrixCell({ cell }: { cell: Row | undefined }) {
         </ul>
       )}
       {allMedia.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {allMedia.map((m) => (
-            <ReportMediaPreview
-              key={String(m.id)}
-              filePath={String(m.file_path || m.file_url || '')}
-              type={String(m.material_type || 'image')}
-              name={String(m.file_name || '')}
-              size="sm"
-            />
-          ))}
-        </div>
+        <ReportMediaGrid
+          role="compact"
+          items={allMedia.flatMap((media, index): ReportMediaItem[] => {
+            const url = String(media.file_path || media.file_url || '');
+            if (!url) return [];
+            return [{
+              id: String(media.id || `${url}:${index}`),
+              url,
+              type: String(media.material_type || 'image'),
+              name: String(media.file_name || '素材'),
+            }];
+          })}
+        />
       )}
     </div>
   );

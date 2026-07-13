@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import { Badge } from '@/components/ui/badge';
-import { MediaGallery } from '@/components/app/media-gallery';
+import { ReportMediaGrid } from '@/components/reports/report-media-grid';
 import {
   dataMatrixReadLayout,
   type ReportDataMatrixReadField,
@@ -23,19 +23,7 @@ function displayValue(field: ReportDataMatrixReadField) {
 
 function MatrixMedia({ items }: { items: ReportDataMatrixReadMedia[] }) {
   if (items.length === 0) return null;
-  return (
-    <MediaGallery
-      materials={items.map((item) => ({
-        id: item.id,
-        file_url: item.url,
-        file_name: item.name,
-        material_type: item.type,
-      }))}
-      responsive
-      columns={{ mobile: 2, sm: 3, lg: 4 }}
-      gap="gap-2"
-    />
-  );
+  return <ReportMediaGrid items={items} role="compact" label="矩阵素材" />;
 }
 
 export function ReportDataMatrixReadView({ projection }: { projection: unknown }) {

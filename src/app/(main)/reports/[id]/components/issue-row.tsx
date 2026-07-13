@@ -7,7 +7,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getIssueStatusPresentation } from '@/lib/server/issue-state-machine';
 import type { IssueForRectification } from '@/components/issues/issue-rectification-dialog';
-import { ReportMediaPreview } from './report-media-preview';
+import { ReportMediaGrid, type ReportMediaItem, type ReportMediaRole } from '@/components/reports/report-media-grid';
 
 type Row = Record<string, unknown>;
 
@@ -85,12 +85,12 @@ function RecipeIssueDetails({
                       {stepPoints.map((point, pointIndex) => (
                         <div key={`${point.text}-${pointIndex}`}>
                           <span className="font-medium">步骤问题点：</span>{point.text}
-                          <MaterialGrid materials={materialsForIds(stepMaterials, point.material_ids)} />
+                          <MaterialGrid materials={materialsForIds(stepMaterials, point.material_ids)} role="evidence" />
                         </div>
                       ))}
                     </div>
                   )}
-                  <MaterialGrid materials={stepMaterials} />
+                  <MaterialGrid materials={stepMaterials} role="evidence" />
                 </div>
               );
             })}
@@ -102,7 +102,7 @@ function RecipeIssueDetails({
           <div className="font-medium text-primary">食谱效果评价</div>
           {Boolean(recipe.effect_description) && <div className="whitespace-pre-wrap text-muted-foreground">{String(recipe.effect_description)}</div>}
           {Boolean(recipe.effect_score) && <div className="text-muted-foreground">评分：{String(recipe.effect_score)}</div>}
-          <MaterialGrid materials={effectMaterials} />
+          <MaterialGrid materials={effectMaterials} role="primary" />
         </div>
       )}
     </div>
@@ -138,21 +138,19 @@ function materialsForIds(materials: Row[] | undefined, ids: string[] | undefined
   return materials.filter((material) => idSet.has(String(material.id || '')));
 }
 
-function MaterialGrid({ materials }: { materials?: Row[] }) {
+function MaterialGrid({ materials, role = 'appendix' }: { materials?: Row[]; role?: ReportMediaRole }) {
   if (!materials?.length) return null;
-  return (
-    <div className="mt-1 flex flex-wrap gap-2">
-      {materials.map((mat) => (
-        <ReportMediaPreview
-          key={String(mat.id || mat.file_path || mat.file_url)}
-          filePath={String(mat.file_path || mat.file_url || '')}
-          type={String(mat.material_type || 'image')}
-          name={String(mat.file_name || '')}
-          size="sm"
-        />
-      ))}
-    </div>
-  );
+  const items = materials.flatMap((material, index): ReportMediaItem[] => {
+    const url = String(material.file_path || material.file_url || '');
+    if (!url) return [];
+    return [{
+      id: String(material.id || `${url}:${index}`),
+      url,
+      name: String(material.file_name || '素材'),
+      type: String(material.material_type || 'image'),
+    }];
+  });
+  return <ReportMediaGrid items={items} role={role} className="mt-1" />;
 }
 
 export function IssueRow({ issue, onStatusClick }: IssueRowProps) {
@@ -235,7 +233,7 @@ export function IssueRow({ issue, onStatusClick }: IssueRowProps) {
           {materials.length > 0 && (
             <div className="space-y-1">
               <div className="font-medium text-foreground">附录素材</div>
-              <MaterialGrid materials={materials} />
+              <MaterialGrid materials={materials} role="appendix" />
             </div>
           )}
 
@@ -263,17 +261,7 @@ export function IssueRow({ issue, onStatusClick }: IssueRowProps) {
                   {Array.isArray(latestReEval.materials) && (latestReEval.materials as Array<Record<string, unknown>>).length > 0 && (
                     <div>
                       <span className="text-muted-foreground">整改素材：</span>
-                      <div className="mt-1 flex flex-wrap gap-2">
-                        {(latestReEval.materials as Array<Record<string, unknown>>).map((m) => (
-                          <ReportMediaPreview
-                            key={String(m.id)}
-                            filePath={String(m.file_path || m.file_url || '')}
-                            type={String(m.material_type || 'image')}
-                            name={String(m.file_name || '')}
-                            size="sm"
-                          />
-                        ))}
-                      </div>
+                      <MaterialGrid materials={latestReEval.materials as Array<Record<string, unknown>>} role="appendix" />
                     </div>
                   )}
                 </>

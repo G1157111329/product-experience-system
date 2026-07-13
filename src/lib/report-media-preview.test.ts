@@ -4,14 +4,33 @@ import { resolve } from 'node:path';
 
 const previewPath = resolve(
   process.cwd(),
-  'src/app/(main)/reports/[id]/components/report-media-preview.tsx',
+  'src/components/reports/report-media-preview.tsx',
 );
 assert.equal(existsSync(previewPath), true, 'shared report media preview component should exist');
 
 const previewSource = readFileSync(previewPath, 'utf8');
-assert.match(previewSource, /MediaThumbnail/);
 assert.match(previewSource, /ImagePreview/);
-assert.match(previewSource, /onClick=\{\(\)\s*=>\s*setPreviewUrl/);
+assert.match(previewSource, /usePresignedUrls/);
+assert.match(previewSource, /report-media-placeholder/);
+assert.match(
+  previewSource,
+  /mediaFailed/,
+  'a final thumbnail load failure must render a stable placeholder',
+);
+assert.match(
+  previewSource,
+  /canPreview\s*=\s*!pending\s*&&\s*!unavailable\s*&&\s*!mediaFailed/,
+  'a final media load failure must not remain interactive',
+);
+assert.match(previewSource, /aspect-\[4\/3\]/);
+assert.match(previewSource, /aspect-video/);
+
+const compatibilitySource = readFileSync(resolve(
+  process.cwd(),
+  'src/app/(main)/reports/[id]/components/report-media-preview.tsx',
+), 'utf8');
+assert.match(compatibilitySource, /export \{ ReportMediaPreview \}/);
+assert.match(compatibilitySource, /@\/components\/reports\/report-media-preview/);
 
 const sharedPreviewSource = readFileSync(resolve(process.cwd(), 'src/components/image-preview.tsx'), 'utf8');
 assert.match(sharedPreviewSource, /<video[\s\S]+?controls/);

@@ -72,7 +72,7 @@ assert.match(readerSource, /liveOverlay\.reEvaluations/);
 assert.match(readerSource, /effect\.steps/);
 assert.match(readerSource, /effect\.problemPoints/);
 assert.match(readerSource, /ReportMatrixTab/);
-assert.match(readerSource, /MediaGallery/);
+assert.match(readerSource, /ReportMediaGrid/);
 assert.doesNotMatch(readerSource, /<img\s+src=\{item\.url\}/);
 assert.match(stickyHeaderSource, /ReportShareDialog/);
 assert.doesNotMatch(stickyHeaderSource, /expires_in/);
