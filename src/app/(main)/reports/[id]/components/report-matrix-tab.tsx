@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { selectEffectEvaluationText } from '@/lib/report-content-rules';
 import type { ComparisonSnapshot } from '@/components/reports/comparison-report-view';
+import { ReportDataMatrixReadView } from '@/components/reports/report-data-matrix-read-view';
 import { ReportV3MatrixView, isReportV3MatrixProjection } from './report-v3-matrix-view';
 import type { ReportV3MatrixProjection } from '@/lib/matrix/report-projection-v3-adapter';
 import { ReportMediaPreview } from './report-media-preview';
@@ -89,82 +90,8 @@ export function ReportMatrixTab({ data }: { data: MatrixData | null }) {
 
 // ── 字段读取助手：snapshot 使用 snake_case 数据库字段 ──
 
-function formatMetricValue(value: MatrixMetricReadValue | undefined): string {
-  if (!value) return '-';
-  if (value.display) return String(value.display);
-  if (value.durationMs != null) return `${Math.round(Number(value.durationMs) / 1000)}s`;
-  if (value.value != null) return String(value.value);
-  if (value.text) return String(value.text);
-  if (value.state && value.state !== 'valid') return String(value.state);
-  return '-';
-}
-
 function DataMatrixView({ projection }: { projection: MatrixReadProjection }) {
-  const dimensions = projection.schema.dimensions;
-  return (
-    <div className="space-y-4 p-4">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <Badge variant="secondary">{projection.schema.name}</Badge>
-        <span className="text-muted-foreground">
-          {projection.viewport.totalGroups} 个分组 / {projection.viewport.totalRows} 行
-        </span>
-      </div>
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full min-w-[760px] text-xs">
-          <thead>
-            <tr className="bg-muted">
-              <th className="border-b border-r p-2 text-left">分组</th>
-              <th className="border-b border-r p-2 text-left">行项目</th>
-              <th className="border-b border-r p-2 text-left">结果</th>
-              <th className="border-b border-r p-2 text-left">过程说明</th>
-              {dimensions.map((dimension) => (
-                <th key={dimension.dimensionKey} className="border-b border-r p-2 text-left">
-                  {dimension.displayName}
-                </th>
-              ))}
-              <th className="border-b border-r p-2 text-left">证据/图片</th>
-            </tr>
-          </thead>
-          <tbody>
-            {projection.groups.flatMap((group) =>
-              group.rows.map((row) => {
-                const media = row.evidence?.media || [];
-                return (
-                  <tr key={row.id}>
-                    <td className="border-b border-r p-2 align-top font-medium">{group.label}</td>
-                    <td className="border-b border-r p-2 align-top">{row.subject.label}</td>
-                    <td className="border-b border-r p-2 align-top">
-                      {row.slots.result.summary || row.slots.result.status || '-'}
-                    </td>
-                    <td className="border-b border-r p-2 align-top">{row.slots.process.note || '-'}</td>
-                    {dimensions.map((dimension) => (
-                      <td key={`${row.id}:${dimension.dimensionKey}`} className="border-b border-r p-2 align-top">
-                        {formatMetricValue(row.metrics[dimension.dimensionKey])}
-                      </td>
-                    ))}
-                    <td className="border-b border-r p-2 align-top">
-                      <div className="mb-1 text-[10px] text-muted-foreground">证据 {row.evidence?.primaryCount ?? media.length} 条</div>
-                      <div className="flex flex-wrap gap-1">
-                        {media.map((item) => (
-                          <ReportMediaPreview
-                            key={`${item.id}-${item.url}`}
-                            filePath={item.url}
-                            type={String(item.type || 'image').includes('video') ? 'video' : 'image'}
-                            name={item.name}
-                            size="sm"
-                          />
-                        ))}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              }),
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
+  return <ReportDataMatrixReadView projection={projection} />;
 }
 
 function nodeName(node: Row): string {

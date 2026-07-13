@@ -6,8 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { isPendingMediaUrl, pendingMediaDataUrl, toPublicMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import { cn } from '@/lib/utils';
 import type { ReportDetailMediaItem, ReportDetailModel, ReportDetailSection, ReportDetailSectionBlock } from '@/lib/server/report-detail';
-import { ReportV3MatrixView } from '@/app/(main)/reports/[id]/components/report-v3-matrix-view';
-import type { ReportV3MatrixProjection } from '@/lib/matrix/report-projection-v3-adapter';
+import { ReportDataMatrixReadView } from '@/components/reports/report-data-matrix-read-view';
 
 function blockItemClass(status: string | undefined) {
   if (status === 'risk') return 'border-red-200 bg-red-50 text-red-800';
@@ -524,58 +523,12 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
       )}
 
       {block.type === 'data_matrix' && block.dataMatrix && block.dataMatrix.groups.length > 0 && (
-        <div className="max-w-full overflow-x-auto">
-          <table data-testid="report-data-matrix-block" className="w-full min-w-[56rem] border-collapse text-xs">
-            <thead>
-              <tr className="border-b bg-muted/30 text-left text-muted-foreground">
-                <th className="sticky left-0 z-10 w-36 bg-muted px-2 py-2 font-medium">分组</th>
-                <th className="w-36 px-2 py-2 font-medium">行项目</th>
-                {(block.dataMatrix.schema.dimensions || []).map((dimension) => (
-                  <th key={dataMatrixDimensionKey(dimension)} className="min-w-32 px-2 py-2 font-medium">
-                    {dataMatrixDimensionLabel(dimension)}
-                  </th>
-                ))}
-                <th className="min-w-28 px-2 py-2 font-medium">结果</th>
-                <th className="min-w-40 px-2 py-2 font-medium">证据/图片</th>
-              </tr>
-            </thead>
-            <tbody>
-              {block.dataMatrix.groups.flatMap((group) =>
-                group.rows.map((row) => {
-                  const evidenceMedia = row.evidence?.media || [];
-                  return (
-                    <tr key={row.id} data-testid="report-data-matrix-row" className="border-b last:border-0">
-                      <td className="sticky left-0 z-10 bg-background px-2 py-2 align-top font-medium text-foreground">
-                        {group.label}
-                      </td>
-                      <td className="px-2 py-2 align-top text-foreground">{row.subject?.label || row.id}</td>
-                      {(block.dataMatrix?.schema.dimensions || []).map((dimension) => {
-                        const key = dataMatrixDimensionKey(dimension);
-                        return (
-                          <td key={`${row.id}:${key}`} className="max-w-56 break-words px-2 py-2 align-top text-muted-foreground">
-                            {dataMatrixMetricDisplay(row.metrics?.[key])}
-                          </td>
-                        );
-                      })}
-                      <td className="max-w-48 break-words px-2 py-2 align-top text-muted-foreground">
-                        {row.slots?.result?.summary || row.slots?.result?.status || '-'}
-                      </td>
-                      <td className="px-2 py-2 align-top">
-                        <div className="text-[11px] text-muted-foreground">证据 {row.evidence?.primaryCount ?? evidenceMedia.length} 条</div>
-                        <InteractiveMediaStrip media={evidenceMedia} compact limit={6} context={`${group.label} / ${row.subject?.label || row.id}`} testId="report-data-matrix-media-item" />
-                      </td>
-                    </tr>
-                  );
-                }),
-              )}
-            </tbody>
-          </table>
-        </div>
+        <ReportDataMatrixReadView projection={block.dataMatrix} />
       )}
 
       {block.type === 'data_matrix_v3' && block.dataMatrixV3 && (
         <div data-testid="report-data-matrix-v3-block">
-          <ReportV3MatrixView projection={block.dataMatrixV3 as unknown as ReportV3MatrixProjection} />
+          <ReportDataMatrixReadView projection={block.dataMatrixV3} />
         </div>
       )}
 
@@ -610,7 +563,7 @@ export function ReportSectionBlockStack({ sections, compact = false }: { section
           </div>
           {section.summary && <p className="text-xs leading-5 text-muted-foreground">{section.summary}</p>}
           <div className="grid gap-2">
-            {section.blocks.map((block) => (
+            {section.blocks.filter((block) => block.id !== 'data_matrix:table').map((block) => (
               <ReportSectionBlockView key={block.id} block={block} compact={compact} />
             ))}
           </div>

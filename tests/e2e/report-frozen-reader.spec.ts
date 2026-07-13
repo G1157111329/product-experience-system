@@ -176,3 +176,94 @@ for (const failure of [{ name: 'empty result', status: 200 }, { name: 'server er
     expect(rawRequests).toEqual([]);
   });
 }
+
+const responsiveV2Projection = {
+  matrixId: 'responsive-v2',
+  schema: {
+    name: '响应式 V2 数据矩阵',
+    dimensions: [
+      { dimensionKey: 'temperature', displayName: '温度', columnGroup: 'observed' },
+      { dimensionKey: 'yield', displayName: '出汁率', columnGroup: 'calculated' },
+    ],
+  },
+  viewport: { totalGroups: 1, totalRows: 1 },
+  groups: [{
+    id: 'responsive-group',
+    label: '苹果组',
+    rows: [{
+      id: 'responsive-row-v2',
+      subject: { label: '样品 A' },
+      metrics: { temperature: { display: '25℃' }, yield: { value: 0 } },
+      slots: { result: { summary: '效果稳定' }, process: { note: '运行无抖动' }, issues: { count: 0, severitySummary: [] } },
+      evidence: { primaryCount: 0, media: [] },
+    }],
+  }],
+};
+
+const responsiveV3Projection = {
+  matrixProjectionVersion: 'v3',
+  matrixId: 'responsive-v3',
+  matrixName: '响应式 V3 数据矩阵',
+  frozenAt: '2026-07-13T00:00:00.000Z',
+  columns: [
+    { id: 'temperature', zone: 'detail_dimension', label: '温度', unitText: '℃', displayOrder: 1 },
+    { id: 'evaluation', zone: 'evaluation', label: '效果评价', displayOrder: 2 },
+  ],
+  rows: [{ id: 'responsive-row-v3', level1Label: '使用效果', level2Label: '出汁表现', level3Label: '苹果', visibleRowIndex: 1, cells: { temperature: '0', evaluation: '清透' } }],
+  cellMedia: {},
+  narratives: [{ blockType: 'summary', content: '整体表现稳定', showInReport: true }],
+  issuePoints: [{ id: 'responsive-issue', leafRowId: 'responsive-row-v3', columnId: 'evaluation', leafRowIndex: 1, issueText: '果渣偏多', status: 'open', materialIds: [] }],
+  summary: { totalRows: 1, totalColumns: 2, filledCells: 2 },
+};
+
+function responsiveMatrixModel(kind: 'data_v2' | 'data_v3') {
+  return {
+    snapshotResolution: 'anchored',
+    header: { id: `responsive-${kind}`, title: `${kind} report`, reportType: 'single_report', status: 'published', productModel: null },
+    tabs: ['summary', 'data_matrix'],
+    summary: { text: 'Summary', aiSummary: null },
+    issues: [],
+    matrix: { kind, projection: kind === 'data_v2' ? responsiveV2Projection : responsiveV3Projection },
+    functionEffects: [],
+    capabilities: { canManageIssues: false, canShare: false, canExport: true },
+  };
+}
+
+async function assertNoScrollMatrixView(page: import('@playwright/test').Page, expectedText: string) {
+  await page.getByRole('tab', { name: '数据矩阵' }).click();
+  const view = page.getByTestId('report-data-matrix-read-view');
+  await expect(view).toBeVisible();
+  await expect(view.getByText(expectedText, { exact: false })).toBeVisible();
+  expect(await view.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBeTruthy();
+  await expect(view.locator('table, input, textarea, [draggable="true"], .overflow-x-auto')).toHaveCount(0);
+}
+
+for (const matrixCase of [
+  { kind: 'data_v2' as const, expected: '苹果组 / 样品 A' },
+  { kind: 'data_v3' as const, expected: '使用效果 / 出汁表现 / 苹果' },
+]) {
+  test(`${matrixCase.kind} detail and share use the responsive no-scroll matrix reader`, async ({ browser }) => {
+    const model = responsiveMatrixModel(matrixCase.kind);
+    const detail = await browser.newPage();
+    const share = await browser.newPage();
+    await loginForE2E(detail, 'dockeradmin', 'DockerLocal2026');
+    await detail.route(`**/api/reports/responsive-${matrixCase.kind}/detail`, (route) => route.fulfill({ json: { code: 0, data: { frozenViewModel: model } } }));
+    await share.route(`**/api/reports/share?token=responsive-${matrixCase.kind}`, (route) => route.fulfill({ json: { code: 0, data: { frozenViewModel: model, siblingReports: [], siblingFrozenViewModels: {} } } }));
+
+    try {
+      for (const width of [390, 768, 1024]) {
+        await detail.setViewportSize({ width, height: 900 });
+        await share.setViewportSize({ width, height: 900 });
+        await detail.goto(`/reports/responsive-${matrixCase.kind}`);
+        await share.goto(`/reports/share/responsive-${matrixCase.kind}`);
+        await assertNoScrollMatrixView(detail, matrixCase.expected);
+        await assertNoScrollMatrixView(share, matrixCase.expected);
+        await expect(detail.getByTestId('report-data-matrix-read-view')).toContainText(matrixCase.kind === 'data_v2' ? '0' : '清透');
+        await expect(share.getByTestId('report-data-matrix-read-view')).toContainText(matrixCase.kind === 'data_v2' ? '0' : '清透');
+      }
+    } finally {
+      await detail.close();
+      await share.close();
+    }
+  });
+}
