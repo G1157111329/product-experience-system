@@ -137,6 +137,7 @@ export async function buildFrozenReportResponse(
   const model = buildFrozenReportViewModel({
     report,
     snapshot,
+    snapshotResolution: snapshotResult.resolution,
     issues,
     issueEvidence: issueEvidence(report, issues, materials),
   }, options);

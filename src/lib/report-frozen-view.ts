@@ -19,6 +19,8 @@ export type FrozenIssueLiveOverlay = {
   status: string;
   rectification: string;
   reEvaluations: unknown[];
+  /** Mutable rectification/re-evaluation media, separate from original frozen evidence. */
+  evidence: FrozenMedia[];
 };
 
 export type FrozenIssue = {
@@ -43,6 +45,7 @@ export type FrozenFunctionEffect = {
 };
 
 export type FrozenReportViewModel = {
+  snapshotResolution: 'anchored' | 'legacy_latest' | 'none';
   header: {
     id: string;
     title: string;
@@ -63,6 +66,7 @@ export type BuildFrozenReportViewInput = {
   snapshot?: Row | null;
   issues?: Row[];
   issueEvidence?: Record<string, FrozenMedia[]>;
+  snapshotResolution: 'anchored' | 'legacy_latest' | 'none';
 };
 
 function isRecord(value: unknown): value is Row {
@@ -107,15 +111,21 @@ function failedRecord(record: Row): boolean {
   return result.includes('fail') || result.includes('unqualified') || result.includes('not_pass') || result.includes('不合');
 }
 
-function liveOverlay(issue: Row | undefined): FrozenIssueLiveOverlay {
+function liveOverlay(issue: Row | undefined, evidence: FrozenMedia[] = []): FrozenIssueLiveOverlay {
   return {
     status: first(issue?.status, issue?.evaluation_result),
     rectification: first(issue?.improve_plan, issue?.rectification, issue?.no_improve_reason),
     reEvaluations: rows(issue?._reEvaluations),
+    evidence,
   };
 }
 
-function frozenIssue(base: Row, live: Row | undefined, evidence: FrozenMedia[]): FrozenIssue {
+function frozenIssue(
+  base: Row,
+  live: Row | undefined,
+  evidence: FrozenMedia[],
+  overlayEvidence: FrozenMedia[] = [],
+): FrozenIssue {
   return {
     id: first(live?.id, base.id),
     title: first(base.title, base.check_item, base.problem_description, base.effect_summary, base.id),
@@ -123,7 +133,7 @@ function frozenIssue(base: Row, live: Row | undefined, evidence: FrozenMedia[]):
     level: first(base.level, base.problem_level, live?.level, live?.problem_level),
     sourceType: first(base.source_type, base.standard_category, live?.source_type),
     evidence,
-    liveOverlay: liveOverlay(live),
+    liveOverlay: liveOverlay(live, overlayEvidence),
   };
 }
 
@@ -132,6 +142,7 @@ function buildIssues(
   snapshotJson: Row,
   liveIssues: Row[],
   issueEvidence: Record<string, FrozenMedia[]>,
+  snapshotResolution: BuildFrozenReportViewInput['snapshotResolution'],
 ): FrozenIssue[] {
   const records = rows(content.records);
   const frozenIssues = rows(content.issues);
@@ -143,12 +154,19 @@ function buildIssues(
     const record = records.find((item) => text(item.id) === text(live.record_id));
     const explicit = frozenIssues.find((item) => text(item.id) === text(live.id));
     const cell = cells.find((item) => text(item.id) === text(live.source_cell_id));
-    const base = explicit ?? record ?? cell ?? live;
-    consumed.add(base);
+    const base = explicit ?? record ?? cell;
+    if (!base && snapshotResolution !== 'legacy_latest') continue;
+    const frozenBase = base ?? live;
+    consumed.add(frozenBase);
     const baseMedia = cell
       ? [...rows(cell.inline_media), ...rows(cell.appendix_media), ...rows(cell.media)]
-      : rows(base.materials);
-    result.push(frozenIssue(base, live, issueEvidence[text(live.id)] ?? media(baseMedia)));
+      : rows(frozenBase.materials);
+    result.push(frozenIssue(
+      frozenBase,
+      live,
+      media(baseMedia),
+      issueEvidence[text(live.id)] ?? [],
+    ));
   }
 
   const orphanFrozen = [
@@ -200,6 +218,7 @@ export function buildFrozenReportViewModel(
   const aiSummary = isRecord(content.ai_summary) ? content.ai_summary : null;
   const internal = options.audience === 'internal';
   return {
+    snapshotResolution: input.snapshotResolution,
     header: {
       id: text(input.report.id),
       title: first(input.report.title, input.report.id),
@@ -209,7 +228,13 @@ export function buildFrozenReportViewModel(
     },
     tabs,
     summary: { text: first(aiSummary?.summary, content.summary, input.report.title), aiSummary },
-    issues: buildIssues(content, snapshotJson, input.issues ?? [], input.issueEvidence ?? {}),
+    issues: buildIssues(
+      content,
+      snapshotJson,
+      input.issues ?? [],
+      input.issueEvidence ?? {},
+      input.snapshotResolution,
+    ),
     matrix: matrixView(reportType, projection, snapshotJson, tabs),
     functionEffects: functionEffects(content),
     capabilities: {
