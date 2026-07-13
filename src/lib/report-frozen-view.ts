@@ -92,15 +92,15 @@ function first(...values: unknown[]): string {
 function media(items: unknown): FrozenMedia[] {
   const seen = new Set<string>();
   return rows(items).flatMap((item) => {
-    const id = first(item.id, item.file_path, item.file_url);
-    const url = first(item.file_url, item.file_path, item.url);
+    const id = first(item.id, item.materialId, item.file_path, item.file_url, item.fileUrl);
+    const url = first(item.file_url, item.fileUrl, item.file_path, item.url);
     const key = id || url;
     if (!key || !url || seen.has(key)) return [];
     seen.add(key);
     return [{
       id: key,
-      name: first(item.file_name, item.name, item.id, 'material'),
-      type: first(item.material_type, item.media_type, 'material'),
+      name: first(item.file_name, item.fileName, item.name, item.id, item.materialId, 'material'),
+      type: first(item.material_type, item.materialType, item.media_type, 'material'),
       url,
     }];
   });
@@ -109,6 +109,96 @@ function media(items: unknown): FrozenMedia[] {
 function failedRecord(record: Row): boolean {
   const result = text(record.evaluation_result).toLowerCase();
   return result.includes('fail') || result.includes('unqualified') || result.includes('not_pass') || result.includes('不合');
+}
+
+function problemPoints(value: unknown): Array<{ text: string; materialIds: string[] }> {
+  let source = value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    try {
+      source = JSON.parse(trimmed);
+    } catch {
+      return [{ text: trimmed, materialIds: [] }];
+    }
+  }
+  if (!Array.isArray(source)) return [];
+  return source.flatMap((item) => {
+    if (typeof item === 'string') return item.trim() ? [{ text: item.trim(), materialIds: [] }] : [];
+    if (!isRecord(item)) return [];
+    const pointText = text(item.text ?? item.issueText);
+    if (!pointText) return [];
+    const rawMaterialIds = item.material_ids ?? item.materialIds;
+    const materialIds = Array.isArray(rawMaterialIds)
+      ? rawMaterialIds.map(text).filter(Boolean)
+      : [];
+    return [{ text: pointText, materialIds }];
+  });
+}
+
+function materialsByIds(materials: Row[], ids: string[]) {
+  if (ids.length === 0) return [];
+  const wanted = new Set(ids);
+  return materials.filter((item) => wanted.has(first(item.id, item.materialId)));
+}
+
+function frozenIssueFacts(content: Row, snapshotJson: Row): Row[] {
+  const facts: Row[] = [
+    ...rows(content.issues),
+    ...rows(content.records).filter(failedRecord),
+  ];
+  for (const recipe of rows(content.recipes)) {
+    const effectMaterials = rows(recipe.effect_materials);
+    problemPoints(recipe.effect_problem_point).forEach((point, index) => facts.push({
+      id: `recipe-effect:${first(recipe.id, recipe.name)}:${index}`,
+      title: point.text,
+      description: first(recipe.effect_description, '效果/出品效果评价问题'),
+      source_type: 'recipe_problem',
+      materials: materialsByIds(effectMaterials, point.materialIds),
+    }));
+    for (const step of rows(recipe.recipe_steps)) {
+      const stepPoints = problemPoints(step.problem_points).length > 0
+        ? problemPoints(step.problem_points)
+        : problemPoints(step.problem_point);
+      stepPoints.forEach((point, index) => facts.push({
+        id: `recipe-step:${first(step.id, recipe.id)}:${index}`,
+        title: point.text,
+        description: [first(step.step_number), first(step.operation)].filter(Boolean).join(': '),
+        source_type: 'recipe_problem',
+        materials: materialsByIds(rows(step.materials), point.materialIds),
+      }));
+    }
+  }
+
+  const projection = isRecord(snapshotJson.matrix_projection) ? snapshotJson.matrix_projection : {};
+  const cellMedia = isRecord(projection.cellMedia) ? projection.cellMedia : {};
+  for (const point of rows(projection.issuePoints)) {
+    const pointId = text(point.id);
+    const leafRowId = text(point.leafRowId);
+    const columnId = text(point.columnId);
+    const pointMaterials = Object.entries(cellMedia).flatMap(([key, items]) => (
+      key === `${leafRowId}:${columnId}` || key.startsWith(`${leafRowId}:`)
+        ? rows(items)
+        : []
+    ));
+    const materialIds = Array.isArray(point.materialIds) ? point.materialIds.map(text).filter(Boolean) : [];
+    facts.push({
+      id: pointId || `matrix-issue:${leafRowId}:${columnId}`,
+      title: point.issueText,
+      description: point.issueText,
+      source_type: 'matrix_problem',
+      source_issue_point_id: pointId,
+      materials: materialsByIds(pointMaterials, materialIds),
+    });
+  }
+
+  const seen = new Set<string>();
+  return facts.filter((fact) => {
+    const key = `${first(fact.source_type, fact.standard_category)}:${first(fact.title, fact.check_item, fact.id)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function liveOverlay(issue: Row | undefined, evidence: FrozenMedia[] = []): FrozenIssueLiveOverlay {
@@ -145,14 +235,22 @@ function buildIssues(
   snapshotResolution: BuildFrozenReportViewInput['snapshotResolution'],
 ): FrozenIssue[] {
   const records = rows(content.records);
-  const frozenIssues = rows(content.issues);
+  const frozenFacts = frozenIssueFacts(content, snapshotJson);
   const cells = rows(snapshotJson.cells ?? snapshotJson.matrix_cells);
   const consumed = new Set<Row>();
   const result: FrozenIssue[] = [];
 
   for (const live of liveIssues) {
     const record = records.find((item) => text(item.id) === text(live.record_id));
-    const explicit = frozenIssues.find((item) => text(item.id) === text(live.id));
+    const explicit = frozenFacts.find((item) => (
+      text(item.id) === text(live.id)
+      || (text(item.id) && text(item.id) === text(live.source_cell_id))
+      || (text(item.source_issue_point_id) && text(item.source_issue_point_id) === text(live.source_issue_point_id))
+      || (
+        first(item.title, item.check_item) === text(live.title)
+        && first(item.source_type, item.standard_category) === text(live.source_type)
+      )
+    ));
     const cell = cells.find((item) => text(item.id) === text(live.source_cell_id));
     const base = explicit ?? record ?? cell;
     if (!base && snapshotResolution !== 'legacy_latest') continue;
@@ -170,8 +268,7 @@ function buildIssues(
   }
 
   const orphanFrozen = [
-    ...frozenIssues,
-    ...records.filter(failedRecord),
+    ...frozenFacts,
   ].filter((item) => !consumed.has(item));
   for (const item of orphanFrozen) result.push(frozenIssue(item, undefined, media(item.materials)));
   return result;

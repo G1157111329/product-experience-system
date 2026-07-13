@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { buildFrozenReportViewModel } from './report-frozen-view';
 
 const fixture = () => ({
@@ -119,5 +121,87 @@ const legacy = buildFrozenReportViewModel({
   issues: [{ id: 'legacy-issue', title: 'Legacy-only issue' }],
 }, { audience: 'internal' });
 assert.deepEqual(legacy.issues.map((item) => item.id), ['legacy-issue']);
+
+const frozenProblems = buildFrozenReportViewModel({
+  report: {
+    id: 'report-problems',
+    report_type: 'single_report',
+    content: {
+      recipes: [{
+        id: 'recipe-problem',
+        name: 'Frozen recipe',
+        effect_problem_point: JSON.stringify([{
+          text: 'Frozen effect problem',
+          material_ids: ['effect-material'],
+        }]),
+        effect_materials: [{
+          id: 'effect-material',
+          file_url: '/uploads/frozen-effect.png',
+        }],
+        recipe_steps: [{
+          id: 'step-problem',
+          step_number: 1,
+          operation: 'Frozen step operation',
+          problem_points: [{ text: 'Frozen step problem', material_ids: ['step-material'] }],
+          materials: [{ id: 'step-material', file_url: '/uploads/frozen-step.png' }],
+        }],
+      }],
+    },
+  },
+  snapshot: {
+    snapshot_json: {
+      matrix_projection: {
+        matrixProjectionVersion: 'v3',
+        matrixId: 'matrix-problems',
+        columns: [{ id: 'column-issue', label: 'Issue' }],
+        rows: [{ id: 'leaf-problem', cells: { 'column-issue': 'fail' } }],
+        issuePoints: [{
+          id: 'matrix-point',
+          leafRowId: 'leaf-problem',
+          columnId: 'column-issue',
+          issueText: 'Frozen V3 matrix problem',
+          status: 'open',
+          materialIds: ['matrix-material'],
+        }],
+        cellMedia: {
+          'leaf-problem:column-issue': [{
+            materialId: 'matrix-material',
+            materialType: 'image',
+            fileName: 'matrix.png',
+            fileUrl: '/uploads/frozen-matrix.png',
+          }],
+        },
+      },
+    },
+  },
+  snapshotResolution: 'anchored',
+  issues: [
+    { id: 'live-effect', title: 'Frozen effect problem', source_type: 'recipe_problem', status: 'verified' },
+    { id: 'live-step', title: 'Frozen step problem', source_type: 'recipe_problem', status: 'rectifying' },
+    { id: 'live-matrix', source_cell_id: 'matrix-point', source_type: 'matrix_problem', title: 'Mutated matrix title', status: 'pending' },
+  ],
+}, { audience: 'internal' });
+
+assert.deepEqual(
+  frozenProblems.issues.map((issue) => ({
+    id: issue.id,
+    title: issue.title,
+    evidence: issue.evidence.map((item) => item.id),
+    status: issue.liveOverlay.status,
+  })),
+  [
+    { id: 'live-effect', title: 'Frozen effect problem', evidence: ['effect-material'], status: 'verified' },
+    { id: 'live-step', title: 'Frozen step problem', evidence: ['step-material'], status: 'rectifying' },
+    { id: 'live-matrix', title: 'Frozen V3 matrix problem', evidence: ['matrix-material'], status: 'pending' },
+  ],
+);
+
+const shareRouteSource = readFileSync(
+  resolve(process.cwd(), 'src/app/api/reports/share/route.ts'),
+  'utf8',
+);
+assert.doesNotMatch(shareRouteSource, /loadReEvaluationsMap/);
+assert.doesNotMatch(shareRouteSource, /\.from\('issue_re_evaluations'\)/);
+assert.doesNotMatch(shareRouteSource, /\.from\('issues'\)/);
 
 console.log('report frozen view model tests passed');
