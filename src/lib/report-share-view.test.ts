@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { orderedFrozenModels, resolveFrozenReportTab } from '@/components/reports/frozen-report-reader';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import {
+  FrozenReportReader,
+  frozenReaderDomPrefix,
+  orderedFrozenModels,
+  resolveFrozenReportTab,
+} from '@/components/reports/frozen-report-reader';
 import type { FrozenReportViewModel } from './report-frozen-view';
 
 assert.equal(resolveFrozenReportTab(['summary', 'issues'], 'issues'), 'issues');
@@ -15,6 +22,33 @@ assert.deepEqual(
     .map((item) => item.header.id),
   ['primary', 's2', 's1'],
 );
+
+const safePrefix = frozenReaderDomPrefix('报告 id/with spaces', ':r1:');
+assert.match(safePrefix, /^[a-z][a-z0-9-]*$/);
+assert.notEqual(safePrefix, frozenReaderDomPrefix('报告 id/with spaces', ':r2:'));
+
+const repeatedModel = {
+  snapshotResolution: 'anchored',
+  header: { id: 'same report/id', title: 'Repeated', reportType: 'single_report', status: 'published', productModel: null },
+  tabs: ['summary', 'issues'],
+  summary: { text: 'Summary', aiSummary: null },
+  issues: [],
+  matrix: null,
+  functionEffects: [],
+  capabilities: { canManageIssues: false, canShare: false, canExport: true },
+} as FrozenReportViewModel;
+const repeatedMarkup = renderToStaticMarkup(createElement('div', null,
+  createElement(FrozenReportReader, { model: repeatedModel }),
+  createElement(FrozenReportReader, { model: repeatedModel }),
+));
+const ids = [...repeatedMarkup.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
+assert.equal(new Set(ids).size, ids.length, 'multiple readers must not emit duplicate DOM ids');
+for (const controls of repeatedMarkup.matchAll(/aria-controls="([^"]+)"/g)) {
+  assert.equal(ids.filter((id) => id === controls[1]).length, 1, `aria-controls must resolve once: ${controls[1]}`);
+}
+for (const labelledBy of repeatedMarkup.matchAll(/aria-labelledby="([^"]+)"/g)) {
+  assert.equal(ids.filter((id) => id === labelledBy[1]).length, 1, `aria-labelledby must resolve once: ${labelledBy[1]}`);
+}
 
 const detailSource = readFileSync(resolve(process.cwd(), 'src/app/(main)/reports/[id]/page.tsx'), 'utf8');
 const shareSource = readFileSync(resolve(process.cwd(), 'src/app/reports/share/[token]/page.tsx'), 'utf8');

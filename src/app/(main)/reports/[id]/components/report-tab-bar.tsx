@@ -1,15 +1,16 @@
 'use client';
 
-import { useRef } from 'react';
+import React, { useRef } from 'react';
 import { cn } from '@/lib/utils';
 
 interface ReportTabBarProps {
+  idPrefix?: string;
   tabs: { key: string; label: string; count?: number }[];
   active: string;
   onChange: (key: string) => void;
 }
 
-export function ReportTabBar({ tabs, active, onChange }: ReportTabBarProps) {
+export function ReportTabBar({ idPrefix = 'report', tabs, active, onChange }: ReportTabBarProps) {
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const moveFocus = (index: number, direction: 1 | -1) => {
@@ -25,11 +26,11 @@ export function ReportTabBar({ tabs, active, onChange }: ReportTabBarProps) {
         <button
           key={tab.key}
           ref={(node) => { tabRefs.current[index] = node; }}
-          id={`report-tab-${tab.key}`}
+          id={`${idPrefix}-tab-${tab.key}`}
           type="button"
           role="tab"
           aria-selected={active === tab.key}
-          aria-controls={`report-panel-${tab.key}`}
+          aria-controls={`${idPrefix}-panel-${tab.key}`}
           tabIndex={active === tab.key ? 0 : -1}
           onClick={() => onChange(tab.key)}
           onKeyDown={(event) => {

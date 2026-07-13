@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useId, useMemo, useState } from 'react';
 import type { FrozenMedia, FrozenReportViewModel } from '@/lib/report-frozen-view';
 import type { ReportFrozenTabKey } from '@/lib/report-frozen-tabs';
 import { ReportTabBar } from '@/app/(main)/reports/[id]/components/report-tab-bar';
@@ -38,6 +38,23 @@ export function orderedFrozenModels(
     seen.add(model.header.id);
     return [model];
   })];
+}
+
+function stableHash(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function safeDomPart(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'report';
+}
+
+export function frozenReaderDomPrefix(reportId: string, instanceId: string) {
+  return `report-${safeDomPart(reportId).slice(0, 32)}-${stableHash(reportId)}-${safeDomPart(instanceId)}`;
 }
 
 function MediaList({ items }: { items: FrozenMedia[] }) {
@@ -185,7 +202,9 @@ function FrozenPanel({ model, active }: { model: FrozenReportViewModel; active: 
   return <div data-content-id={`matrix:${model.header.id}`}><ReportMatrixTab data={matrixData} /></div>;
 }
 
-export function FrozenReportReader({ model }: { model: FrozenReportViewModel }) {
+export function FrozenReportReader({ model, instanceId }: { model: FrozenReportViewModel; instanceId?: string }) {
+  const reactId = useId();
+  const domPrefix = frozenReaderDomPrefix(model.header.id, instanceId ?? reactId);
   const tabSignature = model.tabs.join('|');
   const [active, setActive] = useState<ReportFrozenTabKey>(() => resolveFrozenReportTab(model.tabs, 'summary'));
   useEffect(() => {
@@ -199,13 +218,13 @@ export function FrozenReportReader({ model }: { model: FrozenReportViewModel }) 
 
   return (
     <section data-testid="frozen-report-reader">
-      <ReportTabBar tabs={tabs} active={active} onChange={(key) => setActive(key as ReportFrozenTabKey)} />
+      <ReportTabBar idPrefix={domPrefix} tabs={tabs} active={active} onChange={(key) => setActive(key as ReportFrozenTabKey)} />
       {model.tabs.map((key) => (
         <div
           key={key}
-          id={`report-panel-${key}`}
+          id={`${domPrefix}-panel-${key}`}
           role="tabpanel"
-          aria-labelledby={`report-tab-${key}`}
+          aria-labelledby={`${domPrefix}-tab-${key}`}
           hidden={active !== key}
           className="min-h-[320px] p-4 sm:p-6"
         >
