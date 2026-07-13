@@ -61,6 +61,8 @@ assert.ok(
 
 const directRoute = source('src/app/api/report-snapshots/route.ts');
 assert.match(directRoute, /persistAnchoredReportSnapshot/);
+assert.match(directRoute, /persistExistingReportSnapshotAtomic/);
+assert.doesNotMatch(directRoute, /storage\/database\/pg-db/);
 assert.match(directRoute, /loadAnchoredReportSnapshot/);
 assert.doesNotMatch(
   directRoute.slice(directRoute.indexOf('export async function GET'), directRoute.indexOf('export async function POST')),

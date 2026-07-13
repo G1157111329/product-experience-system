@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { desc, eq } from 'drizzle-orm';
 import { canAccessAssembly, canAccessReport, canReadReport, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { buildComparisonReportSnapshot } from '@/lib/server/comparison-assembly';
+import { hasPermission, Permission } from '@/lib/server/rbac';
+import {
+  persistExistingReportSnapshotAtomic,
+  serializeReportSnapshotDto,
+} from '@/lib/server/report-snapshot-persistence';
 import {
   loadAnchoredReportSnapshot,
   loadNextReportSnapshotVersion,
   persistAnchoredReportSnapshot,
 } from '@/lib/server/report-snapshots';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { getDb } from '@/storage/database/pg-db';
-import { reportSnapshots, reports as reportsTable } from '@/storage/database/shared/schema';
 
 type SnapshotData = {
   report_type: string;
@@ -101,31 +103,14 @@ export async function POST(request: NextRequest) {
   if (reportId) {
     if (!(await canAccessReport(client, user, reportId))) return forbidden();
     try {
-      const persisted = await getDb().transaction(async (tx) => {
-        const [latest] = await tx
-          .select({ version: reportSnapshots.version })
-          .from(reportSnapshots)
-          .where(eq(reportSnapshots.reportId, reportId))
-          .orderBy(desc(reportSnapshots.version))
-          .limit(1);
-        const [savedSnapshot] = await tx.insert(reportSnapshots).values({
-          reportId,
-          reportType: 'comparison_report',
-          version: Number(latest?.version || 0) + 1,
-          snapshotJson: snapshot,
-          layoutProfile: snapshot.layout_profile,
-          createdBy: user.id,
-        }).returning();
-        if (!savedSnapshot) throw new Error('创建报告快照失败');
-        const [report] = await tx.update(reportsTable).set({
-          snapshotId: savedSnapshot.id,
-          reportType: 'comparison_report',
-          assemblyId,
-          layoutProfile: snapshot.layout_profile,
-          updatedAt: new Date().toISOString(),
-        }).where(eq(reportsTable.id, reportId)).returning();
-        if (!report) throw new Error('Report snapshot anchor update returned no report');
-        return { report, snapshot: savedSnapshot };
+      const persisted = await persistExistingReportSnapshotAtomic(client, {
+        reportId,
+        reportType: 'comparison_report',
+        snapshotJson: snapshot,
+        layoutProfile: snapshot.layout_profile,
+        actorId: user.id,
+        allowAll: user.role === 'admin' || hasPermission(user.role, Permission.REPORT_VIEW_ALL),
+        reportUpdate: { assembly_id: assemblyId },
       });
       return NextResponse.json({
         code: 0,
@@ -189,7 +174,7 @@ export async function POST(request: NextRequest) {
       message: 'comparison_report 草稿快照已生成',
       data: {
         report,
-        snapshot: savedSnapshot,
+        snapshot: serializeReportSnapshotDto(savedSnapshot),
       },
     });
   } catch (snapshotError) {

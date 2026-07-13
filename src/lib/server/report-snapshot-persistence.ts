@@ -1,0 +1,123 @@
+type Row = Record<string, unknown>;
+
+export type ExistingReportSnapshotInput = {
+  reportId: string;
+  reportType: string;
+  snapshotJson: Row;
+  layoutProfile: string;
+  actorId: string;
+  allowAll: boolean;
+  reportUpdate: {
+    assembly_id?: string | null;
+  };
+};
+
+type PersistenceMode = 'self-hosted-postgres' | 'supabase-service-role';
+
+type PersistenceDeps = {
+  mode?: PersistenceMode;
+  selfHostedPersist?: (input: ExistingReportSnapshotInput) => Promise<{ report: Row; snapshot: Row }>;
+};
+
+function value(row: Row, snake: string, camel: string) {
+  return row[snake] ?? row[camel] ?? null;
+}
+
+export function serializeReportSnapshotDto(row: Row) {
+  const createdAt = value(row, 'created_at', 'createdAt');
+  return {
+    id: value(row, 'id', 'id'),
+    report_id: value(row, 'report_id', 'reportId'),
+    version: value(row, 'version', 'version'),
+    snapshot_schema_version: value(row, 'snapshot_schema_version', 'snapshotSchemaVersion'),
+    snapshot_json: value(row, 'snapshot_json', 'snapshotJson'),
+    content_hash: value(row, 'content_hash', 'contentHash'),
+    model_meta: value(row, 'model_meta', 'modelMeta'),
+    template_version: value(row, 'template_version', 'templateVersion'),
+    frozen_at: value(row, 'frozen_at', 'frozenAt') ?? createdAt,
+    created_by: value(row, 'created_by', 'createdBy'),
+    created_at: createdAt,
+  };
+}
+
+function snakeCaseRow(row: Row) {
+  return Object.fromEntries(Object.entries(row).map(([key, entryValue]) => [
+    key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
+    entryValue,
+  ]));
+}
+
+function resolveMode(): PersistenceMode {
+  const raw = String(process.env.DATABASE_ACCESS_MODE || '').trim().toLowerCase();
+  if (raw === 'supabase-service-role' || raw === 'supabase') return 'supabase-service-role';
+  if (!raw && String(process.env.NEXT_PUBLIC_SUPABASE_URL || '').startsWith('https://')) {
+    return 'supabase-service-role';
+  }
+  return 'self-hosted-postgres';
+}
+
+async function persistSelfHosted(input: ExistingReportSnapshotInput) {
+  const [{ getDb }, schema, drizzle] = await Promise.all([
+    import('@/storage/database/pg-db'),
+    import('@/storage/database/shared/schema'),
+    import('drizzle-orm'),
+  ]);
+  const { reportSnapshots, reports } = schema;
+  const { desc, eq } = drizzle;
+  return getDb().transaction(async (tx) => {
+    const [latest] = await tx
+      .select({ version: reportSnapshots.version })
+      .from(reportSnapshots)
+      .where(eq(reportSnapshots.reportId, input.reportId))
+      .orderBy(desc(reportSnapshots.version))
+      .limit(1);
+    const [snapshot] = await tx.insert(reportSnapshots).values({
+      reportId: input.reportId,
+      reportType: input.reportType,
+      version: Number(latest?.version || 0) + 1,
+      snapshotJson: input.snapshotJson,
+      layoutProfile: input.layoutProfile,
+      createdBy: input.actorId,
+    }).returning();
+    if (!snapshot) throw new Error('创建报告快照失败');
+    const [report] = await tx.update(reports).set({
+      snapshotId: snapshot.id,
+      reportType: input.reportType,
+      assemblyId: input.reportUpdate.assembly_id,
+      layoutProfile: input.layoutProfile,
+      updatedAt: new Date().toISOString(),
+    }).where(eq(reports.id, input.reportId)).returning();
+    if (!report) throw new Error('Report snapshot anchor update returned no report');
+    return { report: report as Row, snapshot: snapshot as Row };
+  });
+}
+
+export async function persistExistingReportSnapshotAtomic(
+  client: { rpc?: (name: string, args: Row) => Promise<{ data: unknown; error?: { message?: string } | null }> },
+  input: ExistingReportSnapshotInput,
+  deps: PersistenceDeps = {},
+) {
+  const mode = deps.mode ?? resolveMode();
+  let persisted: { report: Row; snapshot: Row };
+  if (mode === 'supabase-service-role') {
+    if (typeof client.rpc !== 'function') throw new Error('Supabase client does not support atomic snapshot RPC');
+    const { data, error } = await client.rpc('persist_existing_report_snapshot_atomic', {
+      p_report_id: input.reportId,
+      p_report_type: input.reportType,
+      p_snapshot_json: input.snapshotJson,
+      p_layout_profile: input.layoutProfile,
+      p_actor_id: input.actorId,
+      p_allow_all: input.allowAll,
+      p_assembly_id: input.reportUpdate.assembly_id ?? null,
+    });
+    if (error) throw new Error(error.message || 'Atomic report snapshot RPC failed');
+    if (!data || typeof data !== 'object') throw new Error('Atomic report snapshot RPC returned no data');
+    persisted = data as { report: Row; snapshot: Row };
+  } else {
+    persisted = await (deps.selfHostedPersist ?? persistSelfHosted)(input);
+  }
+  return {
+    report: snakeCaseRow(persisted.report),
+    snapshot: serializeReportSnapshotDto(persisted.snapshot),
+  };
+}
