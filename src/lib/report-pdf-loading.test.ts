@@ -19,7 +19,7 @@ assert.doesNotMatch(
 );
 assert.match(
   routeSource,
-  /presignReportMediaUrls\(detail,\s*\{\s*absoluteBaseUrl:\s*internalMediaBaseUrl\s*\}\)/,
+  /presignPrintReportMediaUrls\(printModel,\s*\{\s*absoluteBaseUrl:\s*internalMediaBaseUrl\s*\}\)/,
   'server-side PDF media should load through the loopback application origin',
 );
 assert.match(
@@ -27,5 +27,11 @@ assert.match(
   /internalMediaBaseUrl\s*=\s*`http:\/\/127\.0\.0\.1:\$\{process\.env\.PORT\s*\|\|\s*['"]5000['"]\}`/,
   'the loopback media origin should follow the production application port',
 );
+assert.match(routeSource, /buildFrozenReportResponse\(client,\s*report/);
+assert.match(routeSource, /buildPrintReportViewModel\(frozen\.model\)/);
+assert.doesNotMatch(routeSource, /loadAnchoredReportSnapshot/);
+assert.doesNotMatch(routeSource, /attachReEvaluations/);
+assert.doesNotMatch(routeSource, /buildReportDetailModel/);
+assert.match(routeSource, /renderPrintReportHtml\(printModel/);
 
 console.log('report-pdf-loading tests passed');

@@ -2,22 +2,22 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const printSource = readFileSync(
-  resolve(process.cwd(), 'src/app/reports/print/page.tsx'),
-  'utf8',
-);
+const printSource = readFileSync(resolve(process.cwd(), 'src/app/reports/print/page.tsx'), 'utf8');
 
-const inlineMatrixStart = printSource.indexOf('function PrintInlineMatrix');
-const inlineMatrixEnd = printSource.indexOf('function PrintDataMatrixSections');
-assert.ok(inlineMatrixStart >= 0 && inlineMatrixEnd > inlineMatrixStart);
-const inlineMatrixSource = printSource.slice(inlineMatrixStart, inlineMatrixEnd);
+assert.match(printSource, /buildPrintReportViewModel/);
+assert.match(printSource, /frozenViewModel/);
+assert.match(printSource, /ReportPrintDocument/);
+assert.doesNotMatch(printSource, /fetch\(`\/api\/reports\/\$\{rpt\.id\}\/issues`/);
+assert.doesNotMatch(printSource, /fetch\(`\/api\/issue-re-evaluations/);
+assert.doesNotMatch(printSource, /PrintInlineMatrix/);
+assert.doesNotMatch(printSource, /ReportPrintSectionBlocks/);
+assert.doesNotMatch(printSource, /overflowX:\s*['"]auto['"]/);
+assert.doesNotMatch(printSource, /<video\b/);
+assert.doesNotMatch(printSource, /role=['"]tab/);
 
-assert.match(inlineMatrixSource, /cell\.processNotes/);
-assert.match(inlineMatrixSource, /过程记录：/);
-assert.match(inlineMatrixSource, /效果结论：/);
-assert.ok(
-  inlineMatrixSource.indexOf('过程记录：') < inlineMatrixSource.indexOf('效果结论：'),
-  'process notes should render before the independent effect conclusion',
-);
+const paperRendererSource = readFileSync(resolve(process.cwd(), 'src/components/reports/report-section-block-renderer.tsx'), 'utf8');
+assert.match(paperRendererSource, /cell\.notes/);
+assert.match(paperRendererSource, /row\.issueSummary/);
+assert.match(paperRendererSource, /paperProblemTexts\(effect\.problemPoints\)/);
 
 console.log('report-print-matrix tests passed');

@@ -1,116 +1,40 @@
 'use client';
 
-import { Suspense, useEffect, useState, type CSSProperties } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { reportFilenameBase } from '@/lib/report-filename';
 import { Loader2 } from 'lucide-react';
-import { ReportPrintSectionBlocks } from '@/components/reports/report-section-block-renderer';
-import { buildDisplayReportContent, type AiSummaryLike, type ReportContentWithReview, type ReportReviewOverrides } from '@/lib/report-review-overrides';
+import { ReportPrintDocument } from '@/components/reports/report-section-block-renderer';
+import { reportFilenameBase } from '@/lib/report-filename';
+import type { FrozenReportViewModel } from '@/lib/report-frozen-view';
 import { mapWithConcurrency, normalizePrintMode, uniqueUrls, type PrintMode } from '@/lib/print-assets';
-import type { ReportDetailModel } from '@/lib/server/report-detail';
-import {
-  getReportMergeModel,
-  isMergeableReportProjectType,
-  normalizeReportProjectType,
-  sortReportsByCreatedAtAsc,
-} from '@/lib/report-merge';
 import { resolvePresignBatches } from '@/lib/presign-batches';
-import { selectEffectEvaluationText } from '@/lib/report-content-rules';
-import { isAllowedMediaSource, toPublicMediaUrl } from '@/lib/use-presigned-url';
+import {
+  buildPrintReportViewModel,
+  printReportMedia,
+  type PrintReportViewModel,
+} from '@/lib/server/report-print-renderer';
+import { isAllowedMediaSource } from '@/lib/use-presigned-url';
 
-interface Material {
-  id: string; material_type: string; file_name: string; file_url: string; file_size: number; file_path?: string;
-}
-
-interface ProblemPoint { text: string; material_ids?: string[]; }
-interface ReEvaluation { id: string; description: string | null; ai_result: Record<string, unknown> | null; created_at: string; materials?: Material[]; }
-interface RecipeStep {
-  id: string; step_number: number; operation: string; problem_point: string | null;
-  problem_points?: ProblemPoint[];
-  materials?: Material[];
-}
-
-interface Recipe {
-  id: string; name: string; ingredients: string | null; recipe_type: string;
-  problem_count: number; recipe_steps: RecipeStep[];
-  effect_description?: string | null; effect_score?: string | null; effect_problem_point?: string | null;
-  effect_ai_result?: { score: number; summary: string } | null;
-  effect_materials?: Material[];
-}
-
-interface CheckRecord {
-  id: string; sensory_dimension?: string; check_dimension?: string; sub_check_dimension?: string;
-  check_item: string; check_requirement?: string; check_standard?: string;
-  evaluation_result: string; problem_description?: string;
-  materials?: Material[];
-  [key: string]: unknown;
-}
-
-interface IssueItem {
-  id: string; title: string; description: string | null; level: string | null;
-  status: string; source_report_id: string | null; source_type: string | null;
-  category?: string; improve_plan?: string; responsible_person?: string;
-  plan_complete_date?: string; verification_note?: string;
-  [key: string]: unknown;
-}
-
-interface ReportContent {
-  task: Record<string, unknown>;
-  ai_summary?: AiTaskSummary | null;
-  records: CheckRecord[];
-  issues: Array<Record<string, unknown>>;
-  recipes: Recipe[];
-  materials: Material[];
-  generatedAt: string;
-  review_overrides?: ReportReviewOverrides;
-}
-
-interface AiTaskSummary {
-  tag?: string;
-  satisfaction_score?: number;
-  summary?: string;
-  strengths?: string[];
-  risks?: string[];
-  historical_position?: string;
-  suggestions?: string[];
-}
-
-interface ReportData {
-  id: string; title: string; product_model: string | null; status: string; version: number;
-  task_id: string; created_at: string;
-  content: ReportContent | null;
-  report_type?: string | null;
-}
-
-const taskFieldLabels: Record<string, string> = {
-  task_name: '任务名称', product_category: '产品品类', product: '产品', product_model: '产品型号',
-  project_number: '项目单号', project_type: '项目类型', project_phase: '项目阶段',
-  test_date: '测试日期', organizer: '组织人', target_user: '目标用户',
-  test_purpose: '测试目的', test_method: '测试方法', status: '状态',
-  assigned_to: '负责人', created_at: '创建时间', updated_at: '更新时间',
+type SharePayload = {
+  frozenViewModel?: FrozenReportViewModel;
+  siblingReports?: Array<{ id?: string }>;
+  siblingFrozenViewModels?: Record<string, FrozenReportViewModel>;
 };
 
-const hiddenTaskFields = new Set(['id', 'selected_standards', 'created_by']);
-const beijingTimeFields = new Set(['created_at', 'updated_at']);
-
-function formatBeijingTime(dateStr: string | null | undefined): string {
-  if (!dateStr) return '-';
-  try {
-    const d = new Date(dateStr);
-    if (Number.isNaN(d.getTime())) return String(dateStr);
-    const utc = d.getTime() + d.getTimezoneOffset() * 60000;
-    const beijing = new Date(utc + 8 * 60 * 60000);
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${beijing.getFullYear()}-${pad(beijing.getMonth() + 1)}-${pad(beijing.getDate())} ${pad(beijing.getHours())}:${pad(beijing.getMinutes())}:${pad(beijing.getSeconds())}`;
-  } catch {
-    return String(dateStr);
-  }
+function orderedShareModels(payload: SharePayload): FrozenReportViewModel[] {
+  if (!payload.frozenViewModel) return [];
+  const siblings = payload.siblingFrozenViewModels ?? {};
+  const order = payload.siblingReports?.map((item) => String(item.id || '')).filter(Boolean) ?? [];
+  return [
+    payload.frozenViewModel,
+    ...order.flatMap((id) => siblings[id] ? [siblings[id]] : []),
+  ];
 }
 
 async function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result as string);
+    reader.onloadend = () => resolve(String(reader.result));
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
@@ -120,29 +44,26 @@ async function imageUrlToPrintableDataUrl(url: string, mode: PrintMode): Promise
   if (url.startsWith('data:')) return url;
   try {
     const response = await fetch(url);
+    if (!response.ok) return url;
     const blob = await response.blob();
     if (mode === 'high') return blobToDataUrl(blob);
-
     const objectUrl = URL.createObjectURL(blob);
     try {
       const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => resolve(img);
-        img.onerror = reject;
-        img.src = objectUrl;
+        const value = new Image();
+        value.onload = () => resolve(value);
+        value.onerror = reject;
+        value.src = objectUrl;
       });
-      const maxSide = 1200;
-      const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
-      const width = Math.max(1, Math.round(image.naturalWidth * scale));
-      const height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const scale = Math.min(1, 1200 / Math.max(image.naturalWidth, image.naturalHeight));
       const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return blobToDataUrl(blob);
-      ctx.drawImage(image, 0, 0, width, height);
-      const compressed = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.72));
-      return compressed ? blobToDataUrl(compressed) : blobToDataUrl(blob);
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const context = canvas.getContext('2d');
+      if (!context) return blobToDataUrl(blob);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const printable = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.72));
+      return printable ? blobToDataUrl(printable) : blobToDataUrl(blob);
     } finally {
       URL.revokeObjectURL(objectUrl);
     }
@@ -151,770 +72,52 @@ async function imageUrlToPrintableDataUrl(url: string, mode: PrintMode): Promise
   }
 }
 
-async function batchPresignUrls(paths: string[], reportId?: string | null, shareToken?: string | null): Promise<Record<string, string>> {
-  const objectKeys = paths.filter((path) => !isDirectPrintableUrl(path) && !/^https?:\/\//i.test(path));
-  const directUrls = paths.filter(isDirectPrintableUrl);
-  const directMap = Object.fromEntries(directUrls.map((url) => [url, url]));
-  if (!objectKeys.length) return directMap;
-  if (objectKeys.length > 50) {
-    const signedMap = await resolvePresignBatches(objectKeys, (batch) =>
-      batchPresignUrls(batch, reportId, shareToken));
-    return { ...directMap, ...signedMap };
-  }
-  try {
-    const res = await fetch('/api/materials/presign', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths: objectKeys, report_id: reportId || undefined, share_token: shareToken || undefined }),
-    });
-    if (!res.ok) return directMap;
-    const data = await res.json();
-    return data.code === 0 ? { ...directMap, ...data.data } : directMap;
-  } catch {
-    return directMap;
-  }
-}
-
-function isDirectPrintableUrl(value: string): boolean {
-  return isAllowedMediaSource(value);
-}
-
-function isRejectedAbsoluteMediaUrl(value: string): boolean {
-  return /^https?:\/\//i.test(value) && !isDirectPrintableUrl(value);
-}
-
-const pendingPrintableMediaDataUrl =
-  `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96"><rect width="96" height="96" rx="8" fill="#f3f4f6"/><text x="48" y="51" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#6b7280">加载素材</text></svg>',
-  )}`;
-
-function printableMatrixMediaUrl(value: string | null | undefined): string {
-  if (!value) return pendingPrintableMediaDataUrl;
-  return isDirectPrintableUrl(value) ? value : pendingPrintableMediaDataUrl;
-}
-
-function printableMediaUrl(material: { file_url?: string | null; file_path?: string | null }) {
-  return toPublicMediaUrl(material.file_url || material.file_path) || '';
-}
-
-async function presignReportUrls(rpt: ReportData, shareToken?: string | null): Promise<ReportData> {
-  const filePaths: string[] = [];
-  const collectPaths = (obj: unknown) => {
-    if (!obj || typeof obj !== 'object') return;
-    const record = obj as Record<string, unknown>;
-    for (const [key, val] of Object.entries(record)) {
-      if (
-        (key === 'file_url' || key === 'file_path')
-        && typeof val === 'string'
-        && val
-        && !isDirectPrintableUrl(val)
-        && !isRejectedAbsoluteMediaUrl(val)
-      ) {
-        filePaths.push(val);
-      } else if (Array.isArray(val)) {
-        val.forEach(item => collectPaths(item));
-      } else if (typeof val === 'object' && val !== null) {
-        collectPaths(val);
-      }
-    }
-  };
-  collectPaths(rpt);
-  if (filePaths.length === 0) return rpt;
-  if (new Set(filePaths).size > 50) {
-    const urlMap = await batchPresignUrls([...new Set(filePaths)], rpt.id, shareToken);
-    const replacePaths = (obj: unknown): unknown => {
-      if (!obj || typeof obj !== 'object') return obj;
-      if (Array.isArray(obj)) return obj.map(item => replacePaths(item));
-      const record = obj as Record<string, unknown>;
-      const result: Record<string, unknown> = {};
-      for (const [key, val] of Object.entries(record)) {
-        if ((key === 'file_url' || key === 'file_path') && typeof val === 'string' && urlMap[val]) {
-          result[key] = urlMap[val];
-        } else if (typeof val === 'object' && val !== null) {
-          result[key] = replacePaths(val);
-        } else {
-          result[key] = val;
-        }
-      }
-      return result;
-    };
-    return replacePaths(rpt) as ReportData;
-  }
-
-  try {
-    const res = await fetch('/api/materials/presign', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_paths: [...new Set(filePaths)], report_id: rpt.id, share_token: shareToken || undefined }),
-    });
-    const data = await res.json();
-    if (data.code === 0 && data.data) {
-      const urlMap = data.data as Record<string, string>;
-      const replacePaths = (obj: unknown): unknown => {
-        if (!obj || typeof obj !== 'object') return obj;
-        if (Array.isArray(obj)) return obj.map(item => replacePaths(item));
-        const record = obj as Record<string, unknown>;
-        const result: Record<string, unknown> = {};
-        for (const [key, val] of Object.entries(record)) {
-          if ((key === 'file_url' || key === 'file_path') && typeof val === 'string' && urlMap[val]) {
-            result[key] = urlMap[val];
-          } else if (typeof val === 'object' && val !== null) {
-            result[key] = replacePaths(val);
-          } else {
-            result[key] = val;
-          }
-        }
-        return result;
-      };
-      return replacePaths(rpt) as ReportData;
-    }
-  } catch { /* ignore */ }
-
-  return rpt;
-}
-
-async function fetchReportDetailModel(reportId: string): Promise<ReportDetailModel | null> {
-  try {
-    const res = await fetch(`/api/reports/${reportId}/detail`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.code === 0 ? data.data as ReportDetailModel : null;
-  } catch {
-    return null;
-  }
-}
-
-function parseProblemPoints(value?: string | null): ProblemPoint[] {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value);
-    if (Array.isArray(parsed)) {
-      return parsed
-        .map((item) => {
-          if (typeof item === 'string') return { text: item };
-          if (item && typeof item === 'object' && typeof (item as Record<string, unknown>).text === 'string') {
-            const rawIds = (item as Record<string, unknown>).material_ids;
-            return {
-              text: (item as Record<string, string>).text,
-              material_ids: Array.isArray(rawIds) ? rawIds.filter((id): id is string => typeof id === 'string') : undefined,
-            };
-          }
-          return null;
-        })
-        .filter((item): item is ProblemPoint => Boolean(item));
-    }
-    if (typeof parsed === 'string' && parsed.trim()) return [{ text: parsed.trim() }];
-  } catch {
-    // Legacy reports stored a plain text problem point.
-  }
-  return value.trim() ? [{ text: value.trim() }] : [];
-}
-
-function getBoundMaterials(materials: Material[] | undefined, ids: string[] | undefined): Material[] {
-  if (!materials?.length || !ids?.length) return [];
-  const idSet = new Set(ids);
-  return materials.filter((material) => idSet.has(material.id));
-}
-
-function getStepProblemPoints(step: RecipeStep): ProblemPoint[] {
-  if (step.problem_points && step.problem_points.length > 0) {
-    return step.problem_points.filter((point) => point.text && point.text.trim());
-  }
-  return step.problem_point ? [{ text: step.problem_point }] : [];
-}
-
-function getUnboundStepMaterials(materials: Material[] | undefined, problemPoints: ProblemPoint[]): Material[] {
-  if (!materials?.length) return [];
-  const boundIds = new Set(problemPoints.flatMap((point) => point.material_ids || []));
-  return materials.filter((material) => !boundIds.has(material.id));
-}
-
-// ── 内联矩阵渲染（从 detailModel.sections 提取 matrix block，仅渲染一次，全展开）──
-function PrintInlineMatrix({ detailModel }: { detailModel: ReportDetailModel }) {
-  const matrixBlock = detailModel.sections
-    .flatMap((s) => s.blocks || [])
-    .find((b) => b.type === 'matrix' && b.matrix);
-  if (!matrixBlock?.matrix) return null;
-  const matrix = matrixBlock.matrix;
-  const objects = matrix.objects || [];
-  const rows = matrix.rows || [];
-  if (objects.length === 0 || rows.length === 0) return null;
-
-  return (
-    <section style={{ margin: '20px 0', pageBreakInside: 'avoid' }}>
-      <h2 style={{ fontSize: '18px', color: '#0d9488', borderBottom: '2px solid #0d9488', paddingBottom: '4px', marginBottom: '12px' }}>横向对比矩阵</h2>
-      <div style={{ overflowX: 'auto', border: '1px solid #e5e7eb', borderRadius: '8px' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
-          <thead>
-            <tr>
-              <th style={{ border: '1px solid #e5e7eb', background: '#f9fafb', padding: '6px', minWidth: '120px', textAlign: 'left' }}>维度/对象</th>
-              {objects.map((obj) => (
-                <th key={obj.id} style={{ border: '1px solid #e5e7eb', background: '#f9fafb', padding: '6px', textAlign: 'center', minWidth: '100px' }}>
-                  <div style={{ fontWeight: 600 }}>{obj.label}</div>
-                  {obj.subtitle && <div style={{ fontSize: '9px', color: '#6b7280', fontWeight: 400 }}>{obj.subtitle}</div>}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => {
-              // summary 行：跨列显示用户输入的 summaryText
-              if (row.rowKind === 'summary') {
-                return (
-                  <tr key={row.id} style={{ background: '#fffbeb' }}>
-                    <td colSpan={objects.length + 1} style={{ border: '1px solid #e5e7eb', padding: '6px', fontWeight: 600, verticalAlign: 'top' }}>
-                      <span style={{ fontSize: '9px', color: '#6b7280', marginRight: '6px' }}>{row.label}</span>
-                      <span style={{ whiteSpace: 'pre-wrap' }}>{row.summaryText || '—'}</span>
-                    </td>
-                  </tr>
-                );
-              }
-              return (
-              <tr key={row.id}>
-                <td style={{ border: '1px solid #e5e7eb', padding: '6px', fontWeight: 500, verticalAlign: 'top' }}>
-                  {row.group && <div style={{ fontSize: '9px', color: '#6b7280', marginBottom: '2px' }}>{row.group}</div>}
-                  {row.label}
-                </td>
-                {objects.map((obj) => {
-                  const cell = row.cells?.[obj.id];
-                  return (
-                    <td key={obj.id} style={{ border: '1px solid #e5e7eb', padding: '6px', verticalAlign: 'top' }}>
-                      {cell ? (
-                        <div style={{ lineHeight: 1.5 }}>
-                          {cell.processNotes && cell.processNotes.length > 0 && (
-                            <div style={{ color: '#4b5563', whiteSpace: 'pre-wrap' }}>
-                              <span style={{ fontWeight: 600 }}>过程记录：</span>
-                              {cell.processNotes.join('；')}
-                            </div>
-                          )}
-                          {cell.conclusion && (
-                            <div style={{ color: '#111827', whiteSpace: 'pre-wrap' }}>
-                              <span style={{ fontWeight: 600 }}>效果结论：</span>
-                              {cell.conclusion}
-                            </div>
-                          )}
-                          {cell.value && cell.value !== cell.conclusion && <div style={{ color: '#6b7280' }}>{cell.value}</div>}
-                          {cell.score && <div style={{ color: '#6b7280' }}>{cell.score}分</div>}
-                          {cell.problems && cell.problems.length > 0 && (
-                            <ul style={{ margin: '2px 0 0', paddingLeft: '14px', color: '#dc2626' }}>
-                              {cell.problems.filter((p) => p !== cell.value).map((p, i) => <li key={i}>{p}</li>)}
-                            </ul>
-                          )}
-                          {cell.media && cell.media.length > 0 && (
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', marginTop: '4px' }}>
-                              {cell.media.map((m) => (
-                                <div key={m.id} style={{ width: '48px', height: '48px', overflow: 'hidden', borderRadius: '3px', border: '1px solid #e5e7eb' }}>
-                                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img
-                                    src={printableMatrixMediaUrl(m.url)}
-                                    data-media-key={m.url || ''}
-                                    alt=""
-                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                  />
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <span style={{ color: '#d1d5db' }}>—</span>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-// ── 单食谱列表式卡片（全展开，不分割）──
-function PrintDataMatrixSections({ detailModel }: { detailModel: ReportDetailModel }) {
-  const sections = detailModel.sections.filter((section) => section.key === 'data_matrix');
-  if (sections.length === 0) return null;
-  return <ReportPrintSectionBlocks sections={sections} />;
-}
-
-function PrintRecipeCard({ recipe }: { recipe: Record<string, unknown> }) {
-  const name = String(recipe.name || '');
-  const recipeType = String(recipe.recipe_type || '');
-  const ingredients = String(recipe.ingredients || '');
-  const effectEvaluation = selectEffectEvaluationText(recipe);
-  const effectScore = String(recipe.effect_score || '');
-  const effectProblemPoint = String(recipe.effect_problem_point || '');
-  const steps = (recipe.recipe_steps || []) as Array<Record<string, unknown>>;
-  const effectMaterials = (recipe.effect_materials || []) as Array<Record<string, unknown>>;
-
-  // 实时计算步骤问题点（不依赖可能不准的 problem_count 字段）
-  const stepProblemCount = steps.reduce((sum, step) => {
-    const pps = step.problem_points as Array<{ text?: string }> | undefined;
-    if (Array.isArray(pps) && pps.length > 0) return sum + pps.filter((p) => p.text?.trim()).length;
-    return sum + (String(step.problem_point || '').trim() ? 1 : 0);
-  }, 0);
-
-  // 解析效果问题点（JSON 数组或换行文本）
-  let effectProblems: string[] = [];
-  if (effectProblemPoint) {
+async function presignPaths(paths: string[], reportId: string, shareToken: string | null) {
+  const objectKeys = uniqueUrls(paths).filter((path) => !isAllowedMediaSource(path) && !/^https?:\/\//i.test(path));
+  if (objectKeys.length === 0) return {};
+  return resolvePresignBatches(objectKeys, async (batch) => {
     try {
-      const parsed = JSON.parse(effectProblemPoint);
-      if (Array.isArray(parsed)) {
-        effectProblems = parsed.map((p) => typeof p === 'string' ? p : String((p as Record<string, unknown>)?.text || '')).filter(Boolean);
-      } else {
-        effectProblems = [effectProblemPoint];
-      }
+      const response = await fetch('/api/materials/presign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: batch, report_id: reportId, share_token: shareToken || undefined }),
+      });
+      if (!response.ok) return {};
+      const payload = await response.json() as { code?: number; data?: Record<string, string> };
+      return payload.code === 0 && payload.data ? payload.data : {};
     } catch {
-      effectProblems = effectProblemPoint.split('\n').map((s) => s.trim()).filter(Boolean);
+      return {};
     }
+  });
+}
+
+async function preparePrintModel(model: FrozenReportViewModel, mode: PrintMode, shareToken: string | null) {
+  const projected = buildPrintReportViewModel(model);
+  const media = printReportMedia(projected);
+  const sourceUrls = uniqueUrls(media.map((item) => item.url));
+  const signed = await presignPaths(sourceUrls, projected.sourceReportId, shareToken);
+  for (const item of media) item.url = signed[item.url] ?? item.url;
+
+  if (mode !== 'text') {
+    const images = media.filter((item) => !item.type.toLowerCase().includes('video'));
+    const printableUrls = uniqueUrls(images.map((item) => item.url));
+    const converted = await mapWithConcurrency(printableUrls, 4, async (url) => imageUrlToPrintableDataUrl(url, mode));
+    const convertedByUrl = new Map(printableUrls.map((url, index) => [url, converted[index]]));
+    for (const item of images) item.url = convertedByUrl.get(item.url) ?? item.url;
   }
-  const totalProblems = stepProblemCount + effectProblems.length;
-
-  const renderMedia = (mats: Array<Record<string, unknown>>) => {
-    if (!mats.length) return null;
-    return (
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
-        {mats.map((m) => (
-          <div key={String(m.id)} style={{ width: '60px', height: '60px', overflow: 'hidden', borderRadius: '4px', border: '1px solid #e5e7eb', background: '#f9fafb' }}>
-            {String(m.material_type || 'image') === 'image' ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={toPublicMediaUrl(String(m.file_url || m.file_path || '')) || pendingPrintableMediaDataUrl} alt={String(m.file_name || '')} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            ) : (
-              <video src={toPublicMediaUrl(String(m.file_url || m.file_path || '')) || undefined} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
-            )}
-          </div>
-        ))}
-      </div>
-    );
-  };
-
-  return (
-    <div className="print-recipe-card" style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px', marginBottom: '12px', pageBreakInside: 'avoid' }}>
-      {/* 食谱名称 + 小标签 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
-        {recipeType && <span style={{ display: 'inline-block', padding: '1px 6px', background: '#f3f4f6', borderRadius: '3px', fontSize: '10px', color: '#4b5563' }}>{recipeType}</span>}
-        <span style={{ fontWeight: 600, fontSize: '14px' }}>{name}</span>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '4px' }}>
-          <span style={{ display: 'inline-block', padding: '1px 6px', border: '1px solid #e5e7eb', borderRadius: '3px', fontSize: '10px', color: '#6b7280' }}>{steps.length} 步骤</span>
-          {effectScore && <span style={{ display: 'inline-block', padding: '1px 6px', background: '#0d9488', color: '#fff', borderRadius: '3px', fontSize: '10px' }}>{effectScore}分</span>}
-          <span style={{ display: 'inline-block', padding: '1px 6px', border: '1px solid #e5e7eb', borderRadius: '3px', fontSize: '10px', color: totalProblems > 0 ? '#dc2626' : '#6b7280' }}>{totalProblems} 问题</span>
-        </div>
-      </div>
-
-      {/* 食材/参数 */}
-      {ingredients && <div style={{ fontSize: '11px', color: '#6b7280', marginBottom: '6px' }}>食材/参数：{ingredients}</div>}
-
-      {/* 效果评价（含素材） */}
-      {(effectEvaluation || effectScore) && (
-        <div style={{ marginBottom: '8px' }}>
-          <div style={{ fontSize: '11px', fontWeight: 600, color: '#0d9488', marginBottom: '2px' }}>效果评价</div>
-          {effectEvaluation && <div style={{ fontSize: '11px', color: '#374151', whiteSpace: 'pre-wrap' }}>{effectEvaluation}</div>}
-          {renderMedia(effectMaterials)}
-        </div>
-      )}
-
-      {/* 食谱步骤（全展开，不折叠） */}
-      {steps.length > 0 && (
-        <div style={{ marginBottom: '8px' }}>
-          <div style={{ fontSize: '11px', fontWeight: 600, color: '#0d9488', marginBottom: '4px' }}>食谱步骤：{steps.length}步</div>
-          {steps.map((step, idx) => {
-            const stepPps = (step.problem_points as Array<{ text: string }>) || [];
-            const stepPp = step.problem_point ? [{ text: String(step.problem_point) }] : [];
-            const pps = stepPps.length > 0 ? stepPps.filter((p) => p.text?.trim()) : stepPp;
-            const stepMats = (step.materials as Array<Record<string, unknown>>) || [];
-            return (
-              <div key={String(step.id || idx)} style={{ fontSize: '11px', padding: '4px 8px', marginBottom: '4px', background: '#f9fafb', borderRadius: '4px', border: '1px solid #f3f4f6' }}>
-                <div><span style={{ fontWeight: 600 }}>步骤{Number(step.step_number) || idx + 1}：</span>{String(step.operation || '')}</div>
-                {pps.length > 0 && (
-                  <div style={{ color: '#dc2626', marginTop: '2px' }}>
-                    {pps.map((p, i) => <div key={i}>问题点：{p.text}</div>)}
-                  </div>
-                )}
-                {stepMats.length > 0 && renderMedia(stepMats)}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* 问题点（带素材） */}
-      {effectProblems.length > 0 && (
-        <div>
-          <div style={{ fontSize: '11px', fontWeight: 600, color: '#dc2626', marginBottom: '4px' }}>问题点（{effectProblems.length}条）</div>
-          {effectProblems.map((p, i) => (
-            <div key={i} style={{ fontSize: '11px', padding: '4px 8px', marginBottom: '4px', background: '#fef2f2', borderRadius: '4px', border: '1px solid #fecaca' }}>{p}</div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  return projected;
 }
-
-function PrintMediaStrip({ materials, indent = 0 }: { materials?: Material[]; indent?: number }) {
-  if (!materials?.length) return null;
-  const images = materials.filter(m => m.material_type === 'image');
-  const videos = materials.filter(m => m.material_type === 'video');
-  if (images.length === 0 && videos.length === 0) return null;
-
-  const mediaBoxStyle: CSSProperties = {
-    width: '72px',
-    height: '72px',
-    borderRadius: '6px',
-    objectFit: 'cover',
-    border: '1px solid #d1d5db',
-    background: '#f3f4f6',
-  };
-
-  return (
-    <div style={{ display: 'flex', gap: '8px', marginTop: '8px', marginLeft: indent, flexWrap: 'wrap' }}>
-      {images.map(mat => (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img key={mat.id} src={printableMediaUrl(mat)} alt={mat.file_name} style={mediaBoxStyle} crossOrigin="anonymous" />
-      ))}
-      {videos.map(mat => (
-        <div key={mat.id} style={{ ...mediaBoxStyle, overflow: 'hidden', position: 'relative' }}>
-          <video src={printableMediaUrl(mat)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(17,24,39,0.28)' }}>
-            <span style={{ color: 'white', fontSize: '16px' }}>&#9654;</span>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function PrintAiSummary({ summary }: { summary?: AiSummaryLike | null }) {
-  if (!summary || (!summary.summary && !summary.tag && !summary.historical_position)) return null;
-  return (
-    <>
-      <h3 style={{ fontSize: '17px', margin: '18px 0 10px', color: '#0f766e', borderBottom: '2px solid #0d9488', paddingBottom: '6px' }}>总结</h3>
-      <div style={{ padding: '14px', background: '#fff', border: '1px solid #d1d5db', borderRadius: '8px', margin: '8px 0 14px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
-          {summary.tag && <span style={{ fontSize: '12px', fontWeight: 700, color: '#0f766e', background: '#ccfbf1', padding: '3px 9px', borderRadius: '4px' }}>{summary.tag}</span>}
-          {summary.satisfaction_score !== undefined && <span style={{ fontSize: '12px', fontWeight: 600, color: '#0f766e' }}>满意度 {summary.satisfaction_score}/10</span>}
-        </div>
-        {summary.summary && (
-          <div style={{ fontSize: '13px', lineHeight: 1.75, whiteSpace: 'pre-wrap', marginBottom: '12px', color: '#111827' }}>
-            {summary.summary}
-          </div>
-        )}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
-          {(summary.strengths || []).length > 0 && (
-            <div style={{ border: '1px solid #d1fae5', background: '#ecfdf5', borderRadius: '6px', padding: '10px' }}>
-              <div style={{ fontSize: '12px', fontWeight: 700, color: '#047857', marginBottom: '6px' }}>主要优势</div>
-              {(summary.strengths || []).map((item, idx) => (
-                <div key={idx} style={{ fontSize: '12px', lineHeight: 1.6, color: '#1f2937', marginBottom: '4px' }}>• {item}</div>
-              ))}
-            </div>
-          )}
-          {(summary.risks || []).length > 0 && (
-            <div style={{ border: '1px solid #fde68a', background: '#fffbeb', borderRadius: '6px', padding: '10px' }}>
-              <div style={{ fontSize: '12px', fontWeight: 700, color: '#b45309', marginBottom: '6px' }}>主要风险</div>
-              {(summary.risks || []).map((item, idx) => (
-                <div key={idx} style={{ fontSize: '12px', lineHeight: 1.6, color: '#1f2937', marginBottom: '4px' }}>• {item}</div>
-              ))}
-            </div>
-          )}
-        </div>
-        {summary.historical_position && (
-          <div style={{ fontSize: '12px', lineHeight: 1.6, color: '#4b5563', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '8px 10px', marginBottom: '10px' }}>
-            <strong style={{ color: '#111827' }}>历史表现：</strong>{summary.historical_position}
-          </div>
-        )}
-        {(summary.suggestions || []).length > 0 && (
-          <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', padding: '10px' }}>
-            <div style={{ fontSize: '12px', fontWeight: 700, color: '#111827', marginBottom: '6px' }}>后续建议</div>
-            {summary.suggestions!.map((item, idx) => (
-              <div key={idx} style={{ fontSize: '12px', lineHeight: 1.6, color: '#4b5563', marginBottom: '4px' }}>{idx + 1}. {item}</div>
-            ))}
-          </div>
-        )}
-      </div>
-    </>
-  );
-}
-
-function PrintReportSection({ report, liveIssues }: { report: ReportData; liveIssues: IssueItem[] }) {
-  const content = report.content;
-  if (!content) return null;
-  const task = content.task;
-  const records = content.records || [];
-  const recipes = content.recipes || [];
-  const display = buildDisplayReportContent({ title: report.title, content: content as unknown as ReportContentWithReview });
-  const STATUS_BG: Record<string, string> = { '待整改': '#fef3c7', '整改中': '#dbeafe', '已验证': '#d1fae5', '不整改': '#e5e7eb' };
-  const STATUS_FG: Record<string, string> = { '待整改': '#92400e', '整改中': '#1e40af', '已验证': '#065f46', '不整改': '#374151' };
-
-  return (
-    <>
-      {/* Task Info */}
-      {task && (
-        <>
-          <h3 style={{ fontSize: '15px', margin: '16px 0 8px', color: '#0d9488', borderBottom: '1px solid #0d9488', paddingBottom: '4px' }}>任务信息</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', margin: '8px 0' }}>
-            {Object.entries(task)
-              .filter(([k]) => !hiddenTaskFields.has(k))
-              .map(([key, value]) => {
-                const displayValue = beijingTimeFields.has(key)
-                  ? formatBeijingTime(value as string | null | undefined)
-                  : String(value || '-');
-                return (
-                  <div key={key} style={{ fontSize: '12px', padding: '6px', background: '#f9fafb', borderRadius: '4px' }}>
-                    <div style={{ color: '#666', fontSize: '10px', marginBottom: '2px' }}>{taskFieldLabels[key] || key}</div>
-                    <div style={{ wordBreak: 'break-all' }}>{displayValue}</div>
-                  </div>
-                );
-              })}
-          </div>
-        </>
-      )}
-
-      <PrintAiSummary summary={display.ai_summary} />
-      {display.review_note && (
-        <div style={{ padding: '10px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', margin: '8px 0', fontSize: '12px', whiteSpace: 'pre-wrap' }}>
-          <strong>评审备注：</strong>{display.review_note}
-        </div>
-      )}
-
-      {/* Issues with live status */}
-      {liveIssues.length > 0 && (
-        <>
-          <h3 style={{ fontSize: '15px', margin: '16px 0 8px', color: '#0d9488', borderBottom: '1px solid #0d9488', paddingBottom: '4px' }}>问题清单 ({liveIssues.length})</h3>
-          {liveIssues.map((issue, idx) => (
-            <div key={idx} style={{ padding: '8px', background: '#f9fafb', borderRadius: '4px', margin: '4px 0', fontSize: '12px', border: '1px solid #e5e7eb' }}>
-              {/* Row 1: Level + Title + Status */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 500,
-                  background: issue.level === '一类' ? '#fee2e2' : issue.level === '二类' ? '#fef3c7' : '#e0f2fe',
-                  color: issue.level === '一类' ? '#991b1b' : issue.level === '二类' ? '#92400e' : '#0c4a6e'
-                }}>{String(issue.level || '二类')}</span>
-                {issue.source_type === 'recipe_problem' && (
-                  <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', border: '1px solid #d1d5db' }}>食谱/功能</span>
-                )}
-                <span style={{ flex: 1, fontWeight: 500 }}>{String(issue.title || '')}</span>
-                <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 500,
-                  background: STATUS_BG[issue.status] || '#fef3c7', color: STATUS_FG[issue.status] || '#92400e'
-                }}>{issue.status}</span>
-              </div>
-              {/* Row 2: Standard/Category */}
-              {issue.category && (
-                <div style={{ marginTop: '4px', paddingLeft: '4px' }}>
-                  <span style={{ color: '#6b7280', fontSize: '10px' }}>标准: </span>
-                  <span style={{ color: '#6b7280', fontSize: '10px' }}>{String(issue.category)}</span>
-                </div>
-              )}
-              {/* Row 3: Problem description */}
-              {issue.description && (
-                <div style={{ marginTop: '4px', paddingLeft: '4px' }}>
-                  <span style={{ color: '#6b7280', fontSize: '10px' }}>问题来源: </span>
-                  <span style={{ color: '#6b7280', fontSize: '10px' }}>{String(issue.description)}</span>
-                </div>
-              )}
-              {/* Row 4: Rectification plan */}
-              {(issue.improve_plan || issue.responsible_person || issue.plan_complete_date) && (
-                <div style={{ marginTop: '4px', paddingLeft: '4px' }}>
-                  <span style={{ color: '#6b7280', fontSize: '10px' }}>整改方案: </span>
-                  <span style={{ color: '#6b7280', fontSize: '10px' }}>
-                    {issue.improve_plan && String(issue.improve_plan)}
-                    {issue.responsible_person && <span> ({String(issue.responsible_person)})</span>}
-                    {issue.plan_complete_date && <span> 截止: {String(issue.plan_complete_date)}</span>}
-                  </span>
-                </div>
-              )}
-              {/* Row 5: Verification result */}
-              {issue.verification_note && (
-                <div style={{ marginTop: '4px', paddingLeft: '4px' }}>
-                  <span style={{ color: '#6b7280', fontSize: '10px' }}>验证结果: </span>
-                  <span style={{ color: '#6b7280', fontSize: '10px' }}>{String(issue.verification_note)}</span>
-                </div>
-              )}
-              {/* Re-evaluations for recipe_problem issues */}
-              {Array.isArray(issue._reEvaluations) && (issue._reEvaluations as Array<Record<string, unknown>>).length > 0 && (
-                <div style={{ marginTop: '6px', borderTop: '1px dashed #d1d5db', paddingTop: '4px' }}>
-                  {(issue._reEvaluations as Array<Record<string, unknown>>).map((re, reIdx) => {
-                    const reMats = re.materials as Array<Record<string, string>> | undefined;
-                    const aiResult = re.ai_result as { score: number; summary: string } | null | undefined;
-                    return (
-                    <div key={String(re.id)} style={{ background: '#f0fdf4', borderRadius: '3px', padding: '4px 6px', margin: '3px 0', fontSize: '10px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <span style={{ background: '#dcfce7', padding: '0 4px', borderRadius: '2px', fontWeight: 500 }}>第{reIdx + 1}次复测</span>
-                        {aiResult && (
-                          <span style={{ border: '1px solid #d1d5db', padding: '0 4px', borderRadius: '2px' }}>评分: {aiResult.score}</span>
-                        )}
-                        <span style={{ color: '#9ca3af', marginLeft: 'auto' }}>{re.created_at ? new Date(String(re.created_at)).toLocaleDateString('zh-CN') : ''}</span>
-                      </div>
-                      {String(re.description || '') && <div style={{ marginTop: '2px' }}>{String(re.description || '')}</div>}
-                      {aiResult && aiResult.summary && <div style={{ color: '#6b7280', marginTop: '2px' }}>总结: {String(aiResult.summary)}</div>}
-                      {reMats && reMats.length > 0 && (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
-                          {reMats.filter(m => m.material_type === 'image').map((m, mi) => (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img key={mi} src={toPublicMediaUrl(String(m.file_url || m.file_path || '')) || ''} alt={String(m.file_name)} style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '3px', border: '1px solid #e5e7eb' }} />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          ))}
-        </>
-      )}
-
-      {/* Check Records */}
-      <h3 style={{ fontSize: '15px', margin: '16px 0 8px', color: '#0d9488', borderBottom: '1px solid #0d9488', paddingBottom: '4px' }}>检查记录 ({records.length})</h3>
-      {records.length > 0 ? records.map((record) => {
-        const recordMats = record.materials || [];
-        return (
-          <div key={record.id} style={{ padding: '10px', margin: '4px 0', background: '#f9fafb', borderRadius: '6px', border: '1px solid #e5e7eb' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-              <span style={{
-                display: 'inline-block', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 500,
-                background: record.evaluation_result === '合格' ? '#d1fae5' : record.evaluation_result === '不合格' ? '#fee2e2' : '#fef3c7',
-                color: record.evaluation_result === '合格' ? '#065f46' : record.evaluation_result === '不合格' ? '#991b1b' : '#92400e'
-              }}>{record.evaluation_result}</span>
-              <span style={{ fontWeight: 500, fontSize: '13px', flex: 1 }}>{record.check_item}</span>
-              {record.sensory_dimension && <span style={{ fontSize: '10px', color: '#0c4a6e', background: '#e0f2fe', padding: '1px 4px', borderRadius: '2px' }}>{record.sensory_dimension}</span>}
-              {record.check_dimension && <span style={{ fontSize: '10px', color: '#666' }}>{record.check_dimension}</span>}
-            </div>
-            {(record.check_requirement || record.check_standard) && (
-              <div style={{ fontSize: '10px', color: '#888', marginTop: '2px', paddingLeft: '4px' }}>
-                {record.check_requirement && <div>要求: {record.check_requirement}</div>}
-                {record.check_standard && <div>标准: {record.check_standard}</div>}
-              </div>
-            )}
-            {record.problem_description && <div style={{ color: '#666', fontSize: '11px', marginTop: '3px' }}>{record.problem_description}</div>}
-            <PrintMediaStrip materials={recordMats} />
-          </div>
-        );
-      }) : <div style={{ textAlign: 'center', color: '#666', padding: '12px', fontSize: '12px' }}>暂无记录</div>}
-
-      {/* Recipes */}
-      {recipes.length > 0 && (
-        <>
-          <h3 style={{ fontSize: '15px', margin: '16px 0 8px', color: '#0d9488', borderBottom: '1px solid #0d9488', paddingBottom: '4px' }}>食谱/功能列表 ({recipes.length})</h3>
-          {recipes.map(recipe => (
-            <div key={recipe.id} style={{ border: '1px solid #e5e7eb', borderRadius: '6px', padding: '12px', margin: '6px 0' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-                <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 500, background: '#e0f2fe', color: '#0c4a6e' }}>{recipe.recipe_type}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ fontWeight: 600, fontSize: '13px' }}>{recipe.name}</span>
-                  {recipe.ingredients && <div style={{ color: '#888', fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{recipe.ingredients}</div>}
-                </div>
-                <span style={{ color: '#666', fontSize: '11px', marginLeft: 'auto', flexShrink: 0 }}>{recipe.recipe_steps?.length || 0} 步骤 | {(() => { const sp = (recipe.recipe_steps || []).reduce((s, st) => { const pp = st.problem_points; return s + (Array.isArray(pp) && pp.length > 0 ? pp.filter((p) => p.text?.trim()).length : (st.problem_point?.trim() ? 1 : 0)); }, 0); let ep = 0; try { const p = JSON.parse(recipe.effect_problem_point || '[]'); if (Array.isArray(p)) ep = p.filter((x) => x?.text?.trim()).length; } catch { ep = recipe.effect_problem_point?.trim() ? 1 : 0; } return sp + ep; })()} 问题{recipe.effect_score ? ` | ${recipe.effect_score}分` : ''}</span>
-              </div>
-              {recipe.recipe_steps?.map(step => {
-                const stepMats = step.materials || [];
-                const problemPoints = getStepProblemPoints(step);
-                const stepLevelMats = getUnboundStepMaterials(stepMats, problemPoints);
-                return (
-                  <div key={step.id} style={{ padding: '6px', margin: '3px 0', background: '#f9fafb', borderRadius: '3px' }}>
-                    <div>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '18px', height: '18px', borderRadius: '50%', background: '#f3f4f6', color: '#374151', fontSize: '10px', fontWeight: 600, marginRight: '6px' }}>{step.step_number}</span>
-                      <span style={{ fontSize: '12px' }}>{step.operation}</span>
-                    </div>
-                    {(() => {
-                      const pps = problemPoints;
-                      if (pps.length === 0) return null;
-                      return (
-                          <div style={{ marginLeft: '24px' }}>
-                          {pps.map((pp: ProblemPoint, ppIdx: number) => {
-                            const pointMaterials = getBoundMaterials(stepMats, pp.material_ids);
-                            return (
-                            <div key={ppIdx}>
-                            <div style={{ color: '#d97706', fontSize: '11px' }}>
-                              {pps.length > 1 && <span style={{ fontWeight: 600 }}>问题{ppIdx + 1}: </span>}
-                              {pp.text}
-                            </div>
-                            <PrintMediaStrip materials={pointMaterials} />
-                            </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    })()}
-                    <PrintMediaStrip materials={stepLevelMats} indent={24} />
-                  </div>
-                );
-              })}
-              {/* Effect Evaluation */}
-              {(recipe.effect_description || recipe.effect_problem_point || recipe.effect_score || recipe.effect_ai_result || (recipe.effect_materials && recipe.effect_materials.length > 0)) && (
-                <div style={{ marginTop: '8px', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', background: '#fff' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 600, color: '#0d9488' }}>效果/出品效果评价</span>
-                    {recipe.effect_score && (
-                      <span style={{ marginLeft: 'auto', display: 'inline-block', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 600,
-                        background: Number(recipe.effect_score) >= 8 ? '#059669' : Number(recipe.effect_score) >= 6 ? '#2563eb' : Number(recipe.effect_score) >= 4 ? '#d97706' : '#dc2626',
-                        color: 'white' }}>综合 {recipe.effect_score}分/10分</span>
-                    )}
-                  </div>
-                  {selectEffectEvaluationText(recipe) && (
-                    <div style={{ fontSize: '11px', color: '#555', marginLeft: '20px', whiteSpace: 'pre-wrap' }}>
-                      {selectEffectEvaluationText(recipe)}
-                    </div>
-                  )}
-                  {recipe.effect_problem_point && (() => {
-                    let pps: string[] = [];
-                    try {
-                      const parsed = JSON.parse(recipe.effect_problem_point);
-                      if (Array.isArray(parsed)) {
-                        pps = parsed.filter((p: unknown) => typeof p === 'object' && p !== null && typeof (p as Record<string, unknown>).text === 'string').map((p: { text: string }) => p.text);
-                      } else { pps = [recipe.effect_problem_point]; }
-                    } catch { pps = [recipe.effect_problem_point]; }
-                    return pps.map((pp, i) => (
-                      <div key={i} style={{ fontSize: '11px', color: '#d97706', marginLeft: '20px' }}>问题{i > 0 ? i + 1 : ''}: {pp}</div>
-                    ));
-                  })()}
-                  {(() => {
-                    const effectPoints = parseProblemPoints(recipe.effect_problem_point);
-                    const effectMaterials = recipe.effect_materials || [];
-                    const hasBoundMaterials = effectPoints.some((point) => point.material_ids?.length);
-                    if (!hasBoundMaterials) return null;
-                    return effectPoints.map((point, i) => (
-                      <div key={`${point.text}-${i}`} style={{ marginLeft: '20px', marginTop: '6px' }}>
-                        <div style={{ fontSize: '10px', color: '#6b7280' }}>对应素材 {effectPoints.length > 1 ? i + 1 : ''}</div>
-                        <PrintMediaStrip materials={getBoundMaterials(effectMaterials, point.material_ids)} />
-                      </div>
-                    ));
-                  })()}
-                  {recipe.effect_materials && recipe.effect_materials.length > 0 && !parseProblemPoints(recipe.effect_problem_point).some((point) => point.material_ids?.length) && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px', marginLeft: '20px' }}>
-                      {recipe.effect_materials.filter(m => m.material_type === 'image').map(mat => (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img key={mat.id} src={printableMediaUrl(mat)} alt={mat.file_name} style={{ width: '50px', height: '50px', borderRadius: '3px', objectFit: 'cover', border: '1px solid #e5e7eb' }} crossOrigin="anonymous" />
-                      ))}
-                      {recipe.effect_materials.filter(m => m.material_type === 'video').map(mat => (
-                        <div key={mat.id} style={{ width: '50px', height: '50px', borderRadius: '3px', overflow: 'hidden', border: '1px solid #e5e7eb', position: 'relative', background: '#e5e7eb' }}>
-                          <video src={printableMediaUrl(mat)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
-                          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)' }}>
-                            <span style={{ color: 'white', fontSize: '16px' }}>&#9654;</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
-        </>
-      )}
-
-    </>
-  );
-}
-// Kept as the legacy report renderer while the merged print path is active.
-void PrintReportSection;
 
 export default function ReportPrintPage() {
   return (
-    <Suspense fallback={<div className="flex items-center justify-center h-screen"><Loader2 className="h-8 w-8 animate-spin" /></div>}>
+    <Suspense fallback={<LoadingState />}>
       <ReportPrintContent />
     </Suspense>
   );
+}
+
+function LoadingState({ message = '正在准备打印报告…' }: { message?: string }) {
+  return <div className="flex h-screen items-center justify-center text-sm text-muted-foreground"><div className="text-center"><Loader2 className="mx-auto h-8 w-8 animate-spin" /><p className="mt-2">{message}</p></div></div>;
 }
 
 function ReportPrintContent() {
@@ -922,653 +125,58 @@ function ReportPrintContent() {
   const reportId = searchParams.get('id');
   const shareToken = searchParams.get('share_token');
   const printMode = normalizePrintMode(searchParams.get('mode'));
-  const [report, setReport] = useState<ReportData | null>(null);
-  const [siblingReports, setSiblingReports] = useState<ReportData[]>([]);
-  const [detailModelsMap, setDetailModelsMap] = useState<Record<string, ReportDetailModel>>({});
-  const [liveIssuesMap, setLiveIssuesMap] = useState<Record<string, IssueItem[]>>({});
-  const [loading, setLoading] = useState(true);
-  const [imagesLoaded, setImagesLoaded] = useState(false);
-  const [imageProgress, setImageProgress] = useState({ total: 0, done: 0 });
+  const [models, setModels] = useState<PrintReportViewModel[]>([]);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!reportId) return;
-    if (shareToken) {
-      fetch(`/api/reports/share?token=${encodeURIComponent(shareToken)}`).then(r => r.json()).then(async (res) => {
-        if (res.code !== 0 || !res.data?.report) return;
-
-        const currentReport = res.data.report as ReportData;
-        if (currentReport.id !== reportId) return;
-
-        const rpt = await presignReportUrls(currentReport, shareToken);
-        const siblings = await Promise.all(((res.data.siblingReports || []) as ReportData[])
-          .filter((item) => Boolean(item?.content))
-          .map((item) => presignReportUrls(item, shareToken)));
-        setReport(rpt);
-        setSiblingReports(siblings);
-        setDetailModelsMap({
-          ...(res.data.detailModel ? { [rpt.id]: res.data.detailModel as ReportDetailModel } : {}),
-          ...(res.data.siblingDetailModels || {}),
-        });
-        setLiveIssuesMap({
-          [rpt.id]: res.data.liveIssues || [],
-          ...(res.data.siblingIssuesMap || {}),
-        });
-      }).finally(() => setLoading(false));
+    if (!reportId) {
+      setError('缺少报告 ID');
       return;
     }
+    const controller = new AbortController();
+    setModels([]);
+    setError('');
+    const endpoint = shareToken
+      ? `/api/reports/share?token=${encodeURIComponent(shareToken)}`
+      : `/api/reports/${encodeURIComponent(reportId)}/detail`;
+    void fetch(endpoint, { signal: controller.signal })
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok || payload.code !== 0) throw new Error(payload.message || '报告加载失败');
+        const frozenModels = shareToken
+          ? orderedShareModels(payload.data as SharePayload)
+          : payload.data?.frozenViewModel ? [payload.data.frozenViewModel as FrozenReportViewModel] : [];
+        if (frozenModels.length === 0 || frozenModels[0]?.header.id !== reportId) throw new Error('冻结报告不存在或与请求不匹配');
+        return Promise.all(frozenModels.map((model) => preparePrintModel(model, printMode, shareToken)));
+      })
+      .then((prepared) => {
+        if (controller.signal.aborted) return;
+        setModels(prepared);
+        document.title = reportFilenameBase(prepared[0]?.header.title || '报告');
+      })
+      .catch((loadError) => {
+        if (!controller.signal.aborted) setError(loadError instanceof Error ? loadError.message : '报告加载失败');
+      });
+    return () => controller.abort();
+  }, [printMode, reportId, shareToken]);
 
-    fetch(`/api/reports/${reportId}`).then(r => r.json()).then(async (res) => {
-      if (res.code === 0) {
-        const rpt = await presignReportUrls(res.data as ReportData);
-        // 对比报告 content=null，需额外获取 task 数据和 AI 总结补充到 content
-        if (!rpt.content && rpt.task_id) {
-          try {
-            const taskRes = await fetch(`/api/reports/${reportId}/header`);
-            const taskData = await taskRes.json();
-            if (taskData.code === 0 && taskData.data?.aiSummary) {
-              rpt.content = { task: null as unknown, ai_summary: taskData.data.aiSummary, records: [], recipes: [], materials: [] } as unknown as ReportContent;
-            }
-          } catch { /* ignore */ }
-          // 通过 summary API 获取 task 信息
-          try {
-            const sumRes = await fetch(`/api/reports/${reportId}/summary`);
-            const sumData = await sumRes.json();
-            if (sumData.code === 0) {
-              if (!rpt.content) rpt.content = { ai_summary: null, records: [], recipes: [], materials: [] } as unknown as ReportContent;
-              rpt.content.task = sumData.data?.taskInfo || null;
-              if (!rpt.content.ai_summary && sumData.data?.aiSummary) {
-                rpt.content.ai_summary = sumData.data.aiSummary;
-              }
-            }
-          } catch { /* ignore */ }
-        }
-        setReport(rpt);
-        setSiblingReports([]);
-        const detailModel = await fetchReportDetailModel(rpt.id);
-        if (detailModel) setDetailModelsMap(prev => ({ ...prev, [rpt.id]: detailModel }));
-        // Fetch sibling reports for merging
-        const mergeModel = getReportMergeModel(rpt.product_model);
-        if (mergeModel) {
-          const allRes = await fetch('/api/reports?limit=200');
-          const allData = await allRes.json();
-          const allReports: ReportData[] = Array.isArray(allData.data) ? allData.data : (allData.data?.list || []);
-          const projectType = (rpt.content?.task as Record<string, unknown>)?.project_type as string;
-          if (isMergeableReportProjectType(projectType)) {
-            // Deduplicate: for each task_id, only keep the latest report
-            const byTaskId: Record<string, ReportData> = {};
-            for (const r of allReports) {
-              if (getReportMergeModel(r.product_model) !== mergeModel) continue;
-              const rProjectType = normalizeReportProjectType((r as unknown as Record<string, unknown>).project_type as string || (r.content?.task as Record<string, unknown>)?.project_type as string);
-              if (!isMergeableReportProjectType(rProjectType)) continue;
-              const existing = byTaskId[r.task_id];
-              if (!existing || r.created_at > existing.created_at) {
-                byTaskId[r.task_id] = r;
-              }
-            }
-            // Current report's task_id should use current report
-            byTaskId[rpt.task_id] = rpt;
-            const siblingSummaries = sortReportsByCreatedAtAsc(Object.values(byTaskId))
-              .filter((r: ReportData) => r.id !== rpt.id)
-              .filter((r: ReportData) => Boolean(r.id));
-            const siblings = await Promise.all(siblingSummaries.map(async (summary) => {
-              const detailRes = await fetch(`/api/reports/${summary.id}`);
-              const detailData = await detailRes.json();
-              if (detailData.code !== 0) return null;
-              const sibling = await presignReportUrls(detailData.data as ReportData);
-              const siblingDetailModel = await fetchReportDetailModel(sibling.id);
-              if (siblingDetailModel) setDetailModelsMap(prev => ({ ...prev, [sibling.id]: siblingDetailModel }));
-              return sibling;
-            }));
-            setSiblingReports(siblings.filter((item): item is ReportData => Boolean(item?.content)));
-          }
-        }
-        // Fetch live issues
-        const issuesRes = await fetch(`/api/reports/${rpt.id}/issues`);
-        const issuesData = await issuesRes.json();
-        const raw = issuesData.data;
-        const reportIssues: IssueItem[] = Array.isArray(raw) ? raw : (raw?.list || []);
-        // Fetch re-evaluations for recipe_problem issues
-        const recipeIssues = reportIssues.filter((i: IssueItem) => i.source_type === 'recipe_problem');
-        if (recipeIssues.length > 0) {
-          try {
-            const issueIds = recipeIssues.map(i => i.id).join(',');
-            const reRes = await fetch(`/api/issue-re-evaluations?issue_ids=${issueIds}`);
-            const reData = await reRes.json();
-            if (reData.code === 0 && reData.data) {
-              const reEvalMap: Record<string, unknown[]> = {};
-              for (const re of reData.data) {
-                if (!reEvalMap[re.issue_id]) reEvalMap[re.issue_id] = [];
-                reEvalMap[re.issue_id].push(re);
-              }
-              for (const issue of recipeIssues) {
-                (issue as Record<string, unknown>)._reEvaluations = reEvalMap[issue.id] || [];
-              }
-            }
-          } catch { /* ignore */ }
-        }
-        setLiveIssuesMap({ [rpt.id]: reportIssues });
-      }
-    }).finally(() => setLoading(false));
-  }, [reportId, shareToken]);
-
-  // Fetch live issues for sibling reports
   useEffect(() => {
-    if (siblingReports.length === 0) return;
-    Promise.all(siblingReports.map(async (rpt) => {
-      const res = await fetch(`/api/reports/${rpt.id}/issues`);
-      const data = await res.json();
-      const raw = data.data;
-      const allIssues: IssueItem[] = Array.isArray(raw) ? raw : (raw?.list || []);
-      return { reportId: rpt.id, issues: allIssues };
-    })).then(async results => {
-      const map: Record<string, IssueItem[]> = {};
-      results.forEach(result => { map[result.reportId] = result.issues; });
-      // Fetch re-evaluations for recipe_problem issues
-      const allRecipeIssues = Object.values(map).flat().filter((i: IssueItem) => i.source_type === 'recipe_problem');
-      if (allRecipeIssues.length > 0) {
-        try {
-          const issueIds = allRecipeIssues.map(i => i.id).join(',');
-          const reRes = await fetch(`/api/issue-re-evaluations?issue_ids=${issueIds}`);
-          const reData = await reRes.json();
-          if (reData.code === 0 && reData.data) {
-            const reEvalMap: Record<string, unknown[]> = {};
-            for (const re of reData.data) {
-              if (!reEvalMap[re.issue_id]) reEvalMap[re.issue_id] = [];
-              reEvalMap[re.issue_id].push(re);
-            }
-            for (const issue of allRecipeIssues) {
-              (issue as Record<string, unknown>)._reEvaluations = reEvalMap[issue.id] || [];
-            }
-          }
-        } catch { /* ignore */ }
-      }
-      setLiveIssuesMap(prev => ({ ...prev, ...map }));
+    if (models.length === 0) return;
+    let cancelled = false;
+    const firstFrame = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!cancelled) window.print();
+      });
     });
-  }, [siblingReports]);
+    return () => { cancelled = true; cancelAnimationFrame(firstFrame); };
+  }, [models]);
 
-  // Convert images for printing. Fast mode dedupes and compresses; high mode keeps originals.
-  useEffect(() => {
-    if (!report) return;
-    setImagesLoaded(false);
-    setImageProgress({ total: 0, done: 0 });
-
-    if (printMode === 'text') {
-      setImagesLoaded(true);
-      return;
-    }
-
-    const convertImages = async () => {
-      const allReports = [report, ...siblingReports];
-      const allFilePaths: string[] = [];
-      allReports.forEach(rpt => {
-        if (!rpt.content) return;
-        rpt.content.records?.forEach(r => {
-          (r as CheckRecord).materials?.forEach(m => {
-            if (m.material_type === 'image') allFilePaths.push(m.file_path || m.file_url);
-          });
-        });
-        rpt.content.recipes?.forEach(recipe => {
-          recipe.recipe_steps?.forEach(step => {
-            step.materials?.forEach(m => {
-              if (m.material_type === 'image') allFilePaths.push(m.file_path || m.file_url);
-            });
-          });
-          recipe.effect_materials?.forEach(m => {
-            if (m.material_type === 'image') allFilePaths.push(m.file_path || m.file_url);
-          });
-        });
-        rpt.content.materials?.forEach(m => {
-          if (m.material_type === 'image') allFilePaths.push(m.file_path || m.file_url);
-        });
-      });
-
-      // 收集矩阵单元格素材（对比报告的 inline_media）
-      Object.values(detailModelsMap).forEach(dm => {
-        dm.sections?.forEach(s => {
-          s.blocks?.forEach(b => {
-            if (b.type === 'matrix' && b.matrix) {
-              b.matrix.rows?.forEach(row => {
-                Object.values(row.cells || {}).forEach(cell => {
-                  cell.media?.forEach(m => {
-                    if (m.url) allFilePaths.push(m.url);
-                  });
-                });
-              });
-            }
-          });
-        });
-      });
-
-      // Also include re-evaluation materials
-      Object.values(liveIssuesMap).flat().forEach(issue => {
-        const issueMaterials = (issue as Record<string, unknown>).materials as Material[] | undefined;
-        issueMaterials?.forEach(m => {
-          if (m.material_type === 'image') allFilePaths.push(m.file_path || m.file_url);
-        });
-        const reEvals = (issue as Record<string, unknown>)._reEvaluations as ReEvaluation[] | undefined;
-        reEvals?.forEach(reEval => {
-          reEval.materials?.forEach(m => {
-            if (m.material_type === 'image') allFilePaths.push(m.file_path || m.file_url);
-          });
-        });
-      });
-
-      // Presign all file paths to get valid URLs
-      const filePaths = uniqueUrls(allFilePaths);
-      const presignedMap = await batchPresignUrls(filePaths, reportId, shareToken);
-
-      // Step 1: Update DOM img/video src from S3 key to presigned URL
-      for (const [fp, presignedUrl] of Object.entries(presignedMap)) {
-        document.querySelectorAll('img').forEach((img) => {
-          if (img.getAttribute('src') === fp || img.getAttribute('data-media-key') === fp) {
-            (img as HTMLImageElement).src = presignedUrl;
-          }
-        });
-        document.querySelectorAll('video').forEach((vid) => {
-          if (vid.getAttribute('src') === fp || vid.getAttribute('data-media-key') === fp) {
-            (vid as HTMLVideoElement).src = presignedUrl;
-          }
-        });
-      }
-
-      // Step 2: Convert presigned URLs to base64 for print
-      const imageUrls = filePaths.map(fp => presignedMap[fp] || toPublicMediaUrl(fp) || fp);
-      setImageProgress({ total: imageUrls.length, done: 0 });
-
-      await mapWithConcurrency(imageUrls, printMode === 'high' ? 3 : 5, async (url) => {
-        try {
-          const base64 = await imageUrlToPrintableDataUrl(url, printMode);
-          document.querySelectorAll('img').forEach((img) => {
-            if (img.getAttribute('src') === url || (img as HTMLImageElement).src === url) {
-              (img as HTMLImageElement).src = base64;
-            }
-          });
-        } catch { /* ignore */ }
-        setImageProgress((current) => ({ total: current.total, done: current.done + 1 }));
-      });
-      setImagesLoaded(true);
-    };
-    const timer = setTimeout(convertImages, 500);
-    return () => clearTimeout(timer);
-  }, [report, siblingReports, printMode, liveIssuesMap, detailModelsMap, reportId, shareToken]);
-
-  useEffect(() => {
-    if (!report) return;
-    const previousTitle = document.title;
-    document.title = reportFilenameBase(report.title);
-    return () => {
-      document.title = previousTitle;
-    };
-  }, [report]);
-
-  useEffect(() => {
-    if (report && imagesLoaded) {
-      const timer = setTimeout(() => window.print(), 800);
-      return () => clearTimeout(timer);
-    }
-  }, [report, imagesLoaded]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <span className="ml-3 text-muted-foreground">加载报告内容...</span>
-      </div>
-    );
-  }
-
-  const primaryDetailModel = report ? detailModelsMap[report.id] : null;
-
-  if (!report || (!report.content && !primaryDetailModel)) {
-    return <div className="p-8 text-center text-muted-foreground">报告不存在或内容为空</div>;
-  }
-
-  const task = report.content?.task || {};
-  const projectType = task?.project_type as string | undefined;
-  const isMerged = siblingReports.length > 0;
-  const allReports = isMerged ? [report, ...siblingReports] : [report];
-
-  // Total stats
-  const allLiveIssues = allReports.flatMap(r => liveIssuesMap[r.id] || []);
-  const displayReport = report.content
-    ? buildDisplayReportContent({
-      title: report.title,
-      content: report.content as unknown as ReportContentWithReview,
-    })
-    : { title: report.title, ai_summary: null, review_note: null };
-
+  if (error) return <div className="p-10 text-center text-sm text-red-700">{error}</div>;
+  if (models.length === 0) return <LoadingState />;
   return (
-    <>
-      {!imagesLoaded && printMode !== 'text' && (
-        <div className="print-status" style={{ position: 'fixed', top: 16, right: 16, zIndex: 50, padding: '10px 12px', borderRadius: '8px', background: '#0f766e', color: 'white', fontSize: '12px', boxShadow: '0 8px 24px rgba(0,0,0,0.16)' }}>
-          正在处理图片 {imageProgress.done}/{imageProgress.total || '-'} · {printMode === 'high' ? '高清模式' : '快速模式'}
-        </div>
-      )}
-    <div className={`print-container ${printMode === 'text' ? 'print-text-mode' : ''}`} style={{ padding: '40px', maxWidth: '1000px', margin: '0 auto', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif', color: '#1a1a1a', lineHeight: 1.6, fontSize: '14px' }}>
-      {/* Title */}
-      <h1 style={{ fontSize: '24px', marginBottom: '8px', color: '#111827', letterSpacing: '0' }}>
-        {report.product_model || displayReport.title}
-        {isMerged && <span style={{ fontSize: '14px', color: '#666', fontWeight: 400, marginLeft: '8px' }}>(合并 {allReports.length} 份报告)</span>}
-      </h1>
-      <div style={{ color: '#666', fontSize: '12px', marginBottom: '20px' }}>
-        {projectType && <span>项目类型: {projectType} | </span>}
-        版本 V{report.version} | 状态: {report.status} | 生成时间: {formatBeijingTime(report.content?.generatedAt || report.created_at)}
-      </div>
-
-      {/* 产品信息栏（含 report.product_model 兜底 + 单号 + 创建时间） */}
-      <section data-testid="print-product-info" style={{ border: '1px solid #d1d5db', borderRadius: '8px', padding: '14px 16px', margin: '16px 0', background: '#fff' }}>
-        <div style={{ fontSize: '14px', fontWeight: 700, color: '#0d9488', marginBottom: '10px', borderBottom: '1px solid #e5e7eb', paddingBottom: '6px' }}>产品信息</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px 16px', fontSize: '12px' }}>
-          {([
-            { label: '单号', value: task?.project_number },
-            { label: '产品型号', value: task?.product_model || report.product_model },
-            { label: '产品', value: task?.product },
-            { label: '品类', value: task?.product_category },
-            { label: '项目类型', value: task?.project_type },
-            { label: '项目阶段', value: task?.project_phase },
-            { label: '体验人', value: task?.organizer },
-            { label: '体验时间', value: formatBeijingTime(task?.test_date as string | null | undefined) },
-            { label: '创建时间', value: formatBeijingTime(report.created_at) },
-          ] as Array<{ label: string; value: unknown }>)
-            .filter((item) => item.value !== null && item.value !== undefined && String(item.value).trim() !== '')
-            .map((item) => (
-            <div key={item.label}>
-              <span style={{ color: '#6b7280' }}>{item.label}：</span>
-              <span style={{ fontWeight: 600 }}>{String(item.value)}</span>
-            </div>
-          ))}
-        </div>
-        {/* 体验目的独占一行（大量文本，避免撑高网格） */}
-        {task?.test_purpose ? (
-          <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid #f3f4f6', fontSize: '12px' }}>
-            <span style={{ color: '#6b7280' }}>体验目的：</span>
-            <span style={{ fontWeight: 600 }}>{String(task.test_purpose)}</span>
-          </div>
-        ) : null}
-      </section>
-
-      {/* 总结栏（无内容时缩小空间） */}
-      {displayReport.ai_summary ? (
-        <section style={{ margin: '16px 0', border: '1px solid #d1d5db', borderRadius: '8px', padding: '14px 16px' }}>
-          <div style={{ fontSize: '14px', fontWeight: 700, color: '#0d9488', marginBottom: '10px', borderBottom: '1px solid #e5e7eb', paddingBottom: '6px' }}>总结</div>
-          {(() => {
-            const ai = displayReport.ai_summary as Record<string, unknown>;
-            const tag = ai.tag ? String(ai.tag) : '';
-            const summary = ai.summary ? String(ai.summary) : '';
-            const strengths = Array.isArray(ai.strengths) ? (ai.strengths as string[]).filter(Boolean) : [];
-            const risks = Array.isArray(ai.risks) ? (ai.risks as string[]).filter(Boolean) : [];
-            const suggestions = Array.isArray(ai.suggestions) ? (ai.suggestions as string[]).filter(Boolean) : [];
-            return (
-              <div style={{ fontSize: '12px', lineHeight: 1.7 }}>
-                {tag && <div style={{ display: 'inline-block', padding: '2px 8px', background: '#ccfbf1', borderRadius: '4px', fontSize: '11px', marginRight: '6px', marginBottom: '6px' }}>{tag}</div>}
-                {summary && <p style={{ margin: '6px 0', color: '#374151' }}>{summary}</p>}
-                {strengths.length > 0 && (
-                  <div style={{ margin: '6px 0' }}>
-                    <span style={{ color: '#059669', fontWeight: 600 }}>主要优势：</span>
-                    {strengths.map((s, i) => <span key={i} style={{ color: '#374151' }}>{i > 0 ? '；' : ''}{s}</span>)}
-                  </div>
-                )}
-                {risks.length > 0 && (
-                  <div style={{ margin: '6px 0' }}>
-                    <span style={{ color: '#d97706', fontWeight: 600 }}>主要风险：</span>
-                    {risks.map((s, i) => <span key={i} style={{ color: '#374151' }}>{i > 0 ? '；' : ''}{s}</span>)}
-                  </div>
-                )}
-                {suggestions.length > 0 && (
-                  <div style={{ margin: '6px 0' }}>
-                    <span style={{ fontWeight: 600 }}>后续建议：</span>
-                    <ol style={{ margin: '4px 0 0 18px', padding: 0 }}>
-                      {suggestions.map((s, i) => <li key={i} style={{ color: '#374151' }}>{s}</li>)}
-                    </ol>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-        </section>
-      ) : (
-        <div style={{ margin: '12px 0', padding: '6px 12px', border: '1px dashed #e5e7eb', borderRadius: '6px', fontSize: '11px', color: '#999' }}>暂无总结内容</div>
-      )}
-
-      {/* 概览统计（5 项：问题点维度） */}
-      <h2 style={{ fontSize: '18px', margin: '24px 0 12px', color: '#0d9488', borderBottom: '2px solid #0d9488', paddingBottom: '4px' }}>概览统计</h2>
-      {(() => {
-        const sensoryCnt = allLiveIssues.filter((i) => (i as Record<string, unknown>).source_type === 'record_fail').length;
-        const funcCnt = allLiveIssues.filter((i) => (i as Record<string, unknown>).source_type === 'recipe_problem' && !(i as Record<string, unknown>).source_assembly_id).length;
-        const cmpCnt = allLiveIssues.filter((i) => (i as Record<string, unknown>).source_type === 'recipe_problem' && (i as Record<string, unknown>).source_assembly_id).length;
-        const rectified = allLiveIssues.filter((i) => {
-          const st = String((i as Record<string, unknown>).status || '');
-          return st === 'verified_closed' || st === '已验证' || st === '已整改';
-        }).length;
-        const rate = allLiveIssues.length > 0 ? Math.round((rectified / allLiveIssues.length) * 100) : 0;
-        const stats5 = [
-          { label: '问题点总数', value: allLiveIssues.length, color: '#1a1a1a' },
-          { label: '五感体验问题', value: sensoryCnt, color: '#d97706' },
-          { label: '功能效果问题', value: funcCnt, color: '#ea580c' },
-          { label: '对比问题', value: cmpCnt, color: '#7c3aed' },
-          { label: '整改率', value: `${rate}%`, color: '#059669' },
-        ];
-        return (
-          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', margin: '12px 0 20px' }}>
-            {stats5.map((s) => (
-              <div key={s.label} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px', textAlign: 'center', minWidth: '110px', flex: 1 }}>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', color: s.color }}>{s.value}</div>
-                <div style={{ fontSize: '11px', color: '#666', marginTop: '4px' }}>{s.label}</div>
-              </div>
-            ))}
-          </div>
-        );
-      })()}
-
-      {/* 问题点栏（分行展开 + 素材；五感/功能/对比统一格式） */}
-      {allLiveIssues.length > 0 && (
-        <section style={{ margin: '20px 0', pageBreakInside: 'avoid' }}>
-          <h2 style={{ fontSize: '18px', color: '#0d9488', borderBottom: '2px solid #0d9488', paddingBottom: '4px', marginBottom: '12px' }}>问题点</h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {allLiveIssues.map((issue) => {
-              const iss = issue as Record<string, unknown>;
-              const level = String(iss.level || '三类');
-              const levelColor = level === '一类' ? '#dc2626' : level === '二类' ? '#d97706' : '#2563eb';
-              const sourceType = String(iss.source_type || '');
-              const sourceLabel = sourceType === 'matrix_problem' ? '数据矩阵' : sourceType === 'recipe_problem' ? (iss.source_assembly_id ? '对比项' : '食谱/功能') : sourceType === 'record_fail' ? '五感体验' : '其他';
-              const status = String(iss.status || '');
-              const statusMap: Record<string, string> = { open: '待整改', triaged: '待整改', assigned: '整改中', rectifying: '整改中', pending_verification: '待验证', verified_closed: '已整改', waived: '不整改', reopened: '待整改', '待整改': '待整改', '整改中': '整改中', '已验证': '已整改', '已整改': '已整改', '不整改': '不整改' };
-              const statusLabel = statusMap[status] || status || '待整改';
-              // 解析描述分行
-              const descLines = String(iss.description || '').split('\n').filter(Boolean);
-              const descMap: Record<string, string> = {};
-              for (const line of descLines) { const idx = line.indexOf('：'); if (idx > 0) descMap[line.slice(0, idx)] = line.slice(idx + 1); }
-              const mats = (iss.materials as Array<Record<string, unknown>>) || [];
-              const objText = descMap['对象'] || '';
-              const projText = descMap['项目'] || '';
-              const detailText = descMap['细项'] || '';
-              const problemText = descMap['问题'] || String(iss.title || '');
-              return (
-                <div key={String(iss.id)} className="print-issue-row" style={{ border: '1px solid #e5e7eb', borderRadius: '6px', padding: '10px 12px', fontSize: '12px', pageBreakInside: 'avoid' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '6px' }}>
-                    <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 700, color: '#fff', background: levelColor }}>{level}</span>
-                    <span style={{ display: 'inline-block', padding: '1px 6px', border: '1px solid #d1d5db', borderRadius: '3px', fontSize: '10px', color: '#4b5563' }}>{sourceLabel}</span>
-                    <span style={{ flex: 1, minWidth: 0, fontWeight: 500 }}>{String(iss.title || '')}</span>
-                    <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: '3px', fontSize: '10px', background: '#f3f4f6', color: '#374151' }}>{statusLabel}</span>
-                  </div>
-                  {/* 分行展开 */}
-                  {objText && <div style={{ color: '#6b7280' }}>对象：{objText}</div>}
-                  {projText && <div style={{ color: '#6b7280' }}>项目：{projText}</div>}
-                  {detailText && <div style={{ color: '#6b7280' }}>细项：{detailText}</div>}
-                  <div><strong>问题点：</strong>{problemText}</div>
-                  {(() => {
-                    const descStr = iss.description ? String(iss.description) : '';
-                    if (!objText && descStr && descStr !== problemText) {
-                      return <div style={{ color: '#6b7280' }}>{descStr}</div>;
-                    }
-                    return null;
-                  })()}
-                  {/* 素材 */}
-                  {mats.length > 0 && (
-                    <div style={{ marginTop: '4px' }}>
-                      <span style={{ color: '#6b7280' }}>附录素材：</span>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
-                        {mats.map((m) => (
-                          <div key={String(m.id)} style={{ width: '60px', height: '60px', overflow: 'hidden', borderRadius: '4px', border: '1px solid #e5e7eb', background: '#f9fafb' }}>
-                            {String(m.material_type || 'image') === 'image' ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={toPublicMediaUrl(String(m.file_url || m.file_path || '')) || pendingPrintableMediaDataUrl} alt={String(m.file_name || '')} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                            ) : (
-                              <video src={toPublicMediaUrl(String(m.file_url || m.file_path || '')) || undefined} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px solid #e5e7eb' }}>
-                    <strong>整改：</strong>{statusLabel}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* 报告分区（按型号+阶段区隔，重复则加时间）+ 内联矩阵/功能效果（单食谱列表式，全展开） */}
-      {allReports.map((rpt, idx) => {
-        const rptTask = rpt.content?.task as Record<string, unknown> | undefined;
-        const rptPhase = (rptTask?.project_phase as string) || '';
-        const rptModel = (rptTask?.product_model as string) || rpt.product_model || '';
-        const rptDate = rptTask?.test_date ? formatBeijingTime(rptTask.test_date as string).slice(0, 10) : '';
-        // 合并标题：型号+阶段；若与前一份型号+阶段重复则加时间
-        const phaseModel = [rptPhase, rptModel].filter(Boolean).join(' - ') || rpt.title;
-        const prevSameKey = idx > 0 ? (() => {
-          const prev = allReports[idx - 1];
-          const prevTask = prev.content?.task as Record<string, unknown> | undefined;
-          const prevKey = [(prevTask?.project_phase as string) || '', (prevTask?.product_model as string) || prev.product_model || ''].filter(Boolean).join(' - ');
-          return prevKey === [rptPhase, rptModel].filter(Boolean).join(' - ');
-        })() : false;
-        const sectionTitle = prevSameKey && rptDate ? `${phaseModel}（${rptDate}）` : phaseModel;
-        const rptRecipes = ((rpt.content?.recipes || []) as unknown as Array<Record<string, unknown>>);
-        const rptSnapshot = detailModelsMap[rpt.id];
-        return (
-          <div key={rpt.id} className="print-report-card" style={{ pageBreakInside: 'avoid' }}>
-            {/* 合并分割线 + 标题（型号+阶段，重复加时间） */}
-            {idx > 0 && (
-              <div style={{ margin: '32px 0 12px', borderTop: '2px dashed #0d9488', paddingTop: '12px' }}>
-                <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#0d9488' }}>{sectionTitle}</h2>
-              </div>
-            )}
-            {idx === 0 && isMerged && (
-              <h2 style={{ fontSize: '16px', margin: '20px 0 12px', color: '#0d9488', borderBottom: '2px solid #0d9488', paddingBottom: '4px' }}>{sectionTitle}</h2>
-            )}
-
-            {/* 横向对比矩阵（仅对比报告，仅渲染一次，不重复） */}
-            {rpt.report_type === 'comparison_report' && rptSnapshot && (
-              <PrintInlineMatrix detailModel={rptSnapshot} />
-            )}
-
-            {rptSnapshot && (
-              <PrintDataMatrixSections detailModel={rptSnapshot} />
-            )}
-
-            {/* 功能效果（单食谱列表式，全展开） */}
-            {rptRecipes.length > 0 && (
-              <section style={{ margin: '20px 0' }}>
-                <h2 style={{ fontSize: '18px', color: '#0d9488', borderBottom: '2px solid #0d9488', paddingBottom: '4px', marginBottom: '12px' }}>功能效果</h2>
-                {rptRecipes.map((recipe) => (
-                  <PrintRecipeCard key={String(recipe.id)} recipe={recipe} />
-                ))}
-              </section>
-            )}
-          </div>
-        );
-      })}
-
-      {/* Print-specific styles */}
-      <style>{`
-        @media print {
-          body { margin: 0; padding: 0; }
-          .print-status { display: none !important; }
-          .print-container { padding: 20px !important; }
-          .print-text-mode img, .print-text-mode video { display: none !important; }
-          h2, h3 { page-break-after: avoid; }
-          img { page-break-inside: avoid; max-width: 100%; }
-        }
-        .print-text-mode img, .print-text-mode video { display: none !important; }
-        .print-container {
-          background: #fff !important;
-          box-sizing: border-box !important;
-          overflow-wrap: anywhere !important;
-        }
-        .print-container *,
-        .print-container *::before,
-        .print-container *::after {
-          box-sizing: border-box !important;
-        }
-        .print-container h1,
-        .print-container h2,
-        .print-container h3 {
-          color: #111827 !important;
-          border-color: #d1d5db !important;
-          letter-spacing: 0 !important;
-        }
-        .print-container [style*="#f0fdfa"],
-        .print-container [style*="#ccfbf1"] {
-          background: #fff !important;
-          border-color: #d1d5db !important;
-          color: #111827 !important;
-        }
-        .print-container img,
-        .print-container video {
-          width: 72px !important;
-          height: 72px !important;
-          object-fit: cover !important;
-        }
-        .print-container [style*="width: 50px"] {
-          width: 72px !important;
-          height: 72px !important;
-          border-radius: 6px !important;
-        }
-        @media screen and (max-width: 640px) {
-          .print-container {
-            width: 100% !important;
-            max-width: 100% !important;
-            padding: 20px !important;
-            overflow-x: hidden !important;
-          }
-          .print-container > div,
-          .print-container section,
-          .print-container [data-testid="print-section-block-stack"],
-          .print-container [data-testid="print-section-block-group"],
-          .print-container [data-testid="print-section-block"] {
-            width: 100% !important;
-            max-width: 100% !important;
-            min-width: 0 !important;
-          }
-          .print-container [style*="minmax(180px"] {
-            grid-template-columns: 1fr !important;
-          }
-          .print-container table {
-            width: 100% !important;
-            min-width: 100% !important;
-            max-width: 100% !important;
-            table-layout: fixed !important;
-          }
-          .print-container th,
-          .print-container td {
-            word-break: break-word !important;
-            overflow-wrap: anywhere !important;
-          }
-        }
-        @page { size: A4 landscape; margin: 12mm; }
-        /* 打印时确保所有折叠区块展开 */
-        @media print {
-          .print-container details { open: true; }
-          .print-container details > summary { display: none !important; }
-          .print-container details[style*="display: none"],
-          .print-container [data-collapsed="true"] { display: block !important; }
-          tr, td, th, .print-recipe-card, .print-issue-row { page-break-inside: avoid; }
-        }
-      `}</style>
-    </div>
-    </>
+    <main data-testid="print-report-ready" data-print-mode={printMode} className={printMode === 'text' ? 'print-text-mode bg-white p-5' : 'bg-white p-5'}>
+      {models.map((model) => <ReportPrintDocument key={model.sourceReportId} model={model} />)}
+      <style>{`@media print { body { margin: 0; background: #fff; } .print-text-mode img { display: none !important; } }`}</style>
+    </main>
   );
 }

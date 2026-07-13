@@ -1,4 +1,199 @@
-import type { ReportDetailModel, ReportDetailSectionBlock } from './report-detail';
+import { dataMatrixReadLayout, type ReportDataMatrixReadCard, type ReportDataMatrixReadNarrative } from '@/lib/report-data-matrix-layout';
+import type { FrozenMedia, FrozenReportViewModel } from '@/lib/report-frozen-view';
+
+type Row = Record<string, unknown>;
+
+export type PrintMedia = FrozenMedia;
+
+export type PrintComparisonCell = {
+  value: string;
+  notes: string[];
+  problems: string[];
+  media: PrintMedia[];
+};
+
+export type PrintMatrix =
+  | {
+    kind: 'comparison';
+    title: string;
+    columns: Array<{ id: string; label: string }>;
+    rows: Array<{ id: string; path: string[]; cells: Record<string, PrintComparisonCell> }>;
+  }
+  | {
+    kind: 'data_v2' | 'data_v3';
+    title: string;
+    summary?: string;
+    rows: ReportDataMatrixReadCard[];
+    narratives: ReportDataMatrixReadNarrative[];
+  };
+
+export type PrintReportViewModel = {
+  sourceReportId: string;
+  snapshotResolution: FrozenReportViewModel['snapshotResolution'];
+  page: { paper: 'A4' | 'A3'; orientation: 'portrait' | 'landscape' };
+  header: FrozenReportViewModel['header'];
+  summary: FrozenReportViewModel['summary'];
+  issues: FrozenReportViewModel['issues'];
+  functionEffects: FrozenReportViewModel['functionEffects'];
+  matrix: PrintMatrix | null;
+};
+
+function record(value: unknown): Row {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Row : {};
+}
+
+function rows(value: unknown): Row[] {
+  return Array.isArray(value) ? value.map(record).filter((item) => Object.keys(item).length > 0) : [];
+}
+
+function text(value: unknown, fallback = '') {
+  const result = value === null || value === undefined ? '' : String(value).trim();
+  return result || fallback;
+}
+
+function mediaFromUnknown(value: unknown): PrintMedia[] {
+  return rows(value).flatMap((item, index) => {
+    const url = text(item.url || item.file_url || item.fileUrl || item.file_path || item.filePath);
+    if (!url) return [];
+    return [{
+      id: text(item.id || item.material_id || item.materialId, `${url}:${index}`),
+      name: text(item.name || item.file_name || item.fileName, '素材'),
+      type: text(item.type || item.material_type || item.materialType, 'image'),
+      url,
+    }];
+  });
+}
+
+function textList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => typeof item === 'string' ? item.trim() : text(record(item).text || record(item).value)).filter(Boolean)
+    : [];
+}
+
+function cloneMedia(items: FrozenMedia[]): PrintMedia[] {
+  return items.map((item) => ({ ...item }));
+}
+
+function cloneFrozenModelParts(model: FrozenReportViewModel) {
+  return {
+    header: { ...model.header },
+    summary: { ...model.summary, aiSummary: model.summary.aiSummary ? { ...model.summary.aiSummary } : null },
+    issues: model.issues.map((issue) => ({
+      ...issue,
+      evidence: cloneMedia(issue.evidence),
+      liveOverlay: {
+        ...issue.liveOverlay,
+        evidence: cloneMedia(issue.liveOverlay.evidence),
+        reEvaluations: issue.liveOverlay.reEvaluations.map((item) => {
+          const source = record(item);
+          return { ...source, materials: mediaFromUnknown(source.materials) };
+        }),
+      },
+    })),
+    functionEffects: model.functionEffects.map((effect) => ({
+      ...effect,
+      evidence: cloneMedia(effect.evidence),
+      steps: effect.steps.map((step) => {
+        const source = record(step);
+        return { ...source, materials: mediaFromUnknown(source.materials) };
+      }),
+    })),
+  };
+}
+
+function comparisonMatrix(snapshotValue: unknown): PrintMatrix {
+  const snapshot = record(snapshotValue);
+  const assembly = record(snapshot.assembly);
+  const objects = rows(snapshot.objects);
+  const nodes = rows(snapshot.item_nodes).filter((node) => {
+    const nodeType = text(node.node_type, 'item');
+    return ['item', 'condition', 'process_node', 'metric', 'issue_group'].includes(nodeType);
+  });
+  const cells = rows(snapshot.cells);
+  const columns = objects.map((object, index) => ({
+    id: text(object.id, String(index)),
+    label: text(object.object_name || object.label || object.name, `对象 ${index + 1}`),
+  }));
+  return {
+    kind: 'comparison',
+    title: text(snapshot.matrix_name || assembly.name, '对比矩阵'),
+    columns,
+    rows: nodes.map((node, rowIndex) => {
+      const id = text(node.id, String(rowIndex));
+      const cellMap: Record<string, PrintComparisonCell> = {};
+      for (const column of columns) {
+        const cell = cells.find((candidate) => (
+          text(candidate.item_node_id) === id
+          && text(candidate.object_id || candidate.comparison_object_id) === column.id
+        ));
+        cellMap[column.id] = {
+          value: text(cell?.effect_summary || cell?.value || cell?.conclusion || cell?.text, '-'),
+          notes: textList(cell?.process_notes),
+          problems: textList(cell?.problem_points),
+          media: [
+            ...mediaFromUnknown(cell?.inline_media),
+            ...mediaFromUnknown(cell?.appendix_media),
+            ...mediaFromUnknown(cell?.media),
+          ],
+        };
+      }
+      return {
+        id,
+        path: [text(node.parent_label || node.group_label), text(node.node_label || node.label, `项目 ${rowIndex + 1}`)].filter(Boolean),
+        cells: cellMap,
+      };
+    }),
+  };
+}
+
+function projectMatrix(matrix: FrozenReportViewModel['matrix']): PrintMatrix | null {
+  if (!matrix) return null;
+  if (matrix.kind === 'comparison') return comparisonMatrix(matrix.snapshot);
+  const layout = dataMatrixReadLayout(matrix.projection);
+  return {
+    kind: matrix.kind,
+    title: layout.title,
+    summary: layout.summary,
+    rows: layout.cards.map((card) => ({
+      ...card,
+      path: [...card.path],
+      fields: card.fields.map((field) => ({ ...field })),
+      media: card.media.map((item) => ({ ...item })),
+      issues: card.issues.map((item) => ({ ...item })),
+      narratives: card.narratives.map((item) => ({ ...item })),
+      ...(card.issueSummary ? { issueSummary: { count: card.issueSummary.count, levels: [...card.issueSummary.levels] } } : {}),
+    })),
+    narratives: layout.narratives.map((item) => ({ ...item })),
+  };
+}
+
+export function buildPrintReportViewModel(model: FrozenReportViewModel): PrintReportViewModel {
+  const frozen = cloneFrozenModelParts(model);
+  const comparison = model.matrix?.kind === 'comparison';
+  return {
+    sourceReportId: model.header.id,
+    snapshotResolution: model.snapshotResolution,
+    page: { paper: comparison ? 'A3' : 'A4', orientation: comparison ? 'landscape' : 'portrait' },
+    ...frozen,
+    matrix: projectMatrix(model.matrix),
+  };
+}
+
+export function printReportMedia(model: PrintReportViewModel): PrintMedia[] {
+  const issueMedia = model.issues.flatMap((issue) => [
+    ...issue.evidence,
+    ...issue.liveOverlay.evidence,
+    ...issue.liveOverlay.reEvaluations.flatMap((item) => mediaFromUnknown(record(item).materials)),
+  ]);
+  const functionMedia = model.functionEffects.flatMap((effect) => [
+    ...effect.evidence,
+    ...effect.steps.flatMap((step) => mediaFromUnknown(record(step).materials)),
+  ]);
+  const matrixMedia = !model.matrix ? [] : model.matrix.kind === 'comparison'
+    ? model.matrix.rows.flatMap((row) => Object.values(row.cells).flatMap((cell) => cell.media))
+    : model.matrix.rows.flatMap((row) => row.media);
+  return [...issueMedia, ...functionMedia, ...matrixMedia];
+}
 
 function escapeHtml(value: unknown) {
   return String(value ?? '')
@@ -9,199 +204,97 @@ function escapeHtml(value: unknown) {
     .replace(/'/g, '&#39;');
 }
 
-function isBlankMatrixText(value: string | undefined) {
-  const normalized = (value || '').trim();
-  return normalized === '' || normalized === '-' || normalized === '—' || normalized === '暂无' || normalized === '无';
+function problemTexts(value: unknown): string[] {
+  let source = value;
+  if (typeof source === 'string') {
+    const raw = source;
+    try { source = JSON.parse(raw); } catch { return raw.trim() ? [raw.trim()] : []; }
+  }
+  if (!Array.isArray(source)) return [];
+  return source.flatMap((item) => {
+    if (typeof item === 'string') return item.trim() ? [item.trim()] : [];
+    const result = text(record(item).text || record(item).issueText);
+    return result ? [result] : [];
+  });
 }
 
-function isMatrixCellEmpty(cell: NonNullable<NonNullable<ReportDetailSectionBlock['matrix']>['rows'][number]['cells'][string]> | undefined) {
-  if (!cell) return true;
-  return isBlankMatrixText(cell.value)
-    && isBlankMatrixText(cell.conclusion)
-    && (cell.processNotes || []).length === 0
-    && isBlankMatrixText(cell.score)
-    && isBlankMatrixText(cell.anomaly)
-    && isBlankMatrixText(cell.conclusionTag)
-    && cell.problems.length === 0
-    && cell.media.length === 0;
-}
-
-function renderMatrixText(cell: { value: string; conclusion: string; processNotes?: string[] }) {
-  const process = (cell.processNotes || []).length
-    ? `<p><strong>过程记录：</strong>${escapeHtml((cell.processNotes || []).join('；'))}</p>`
-    : '';
-  const conclusion = !isBlankMatrixText(cell.conclusion)
-    ? `<p><strong>效果结论：</strong>${escapeHtml(cell.conclusion)}</p>`
-    : '';
-  const value = cell.value && cell.value !== cell.conclusion
-    ? `<p>${escapeHtml(cell.value)}</p>`
-    : '';
-  return `${process}${conclusion || `<b>${escapeHtml(cell.value)}</b>`}${conclusion ? value : ''}`;
-}
-
-function renderBlock(block: ReportDetailSectionBlock) {
-  const title = `<h3>${escapeHtml(block.title)}</h3>`;
-  const description = block.description ? `<p class="description">${escapeHtml(block.description)}</p>` : '';
-  if (block.type === 'facts' || block.type === 'list') {
-    const rows = (block.items || []).map((item) => `
-      <li class="${escapeHtml(item.status || 'default')}">
-        <b>${escapeHtml(item.label)}</b>
-        <span>${escapeHtml(item.value)}</span>
-        ${item.note ? `<em>${escapeHtml(item.note)}</em>` : ''}
-        ${renderMedia(item.media || [])}
-      </li>
-    `).join('');
-    return `<div class="block ${escapeHtml(block.type)}">${title}${description}<ul>${rows || `<li class="empty">${escapeHtml(block.emptyMessage || 'No content')}</li>`}</ul></div>`;
-  }
-  if (block.type === 'table') {
-    const columns = block.columns || [];
-    const head = columns.map((column) => `<th>${escapeHtml(column)}</th>`).join('');
-    const body = (block.rows || []).map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(row[column] || '-')}</td>`).join('')}</tr>`).join('');
-    return `<div class="block table">${title}${description}<table><thead><tr>${head}</tr></thead><tbody>${body || `<tr><td colspan="${Math.max(1, columns.length)}">${escapeHtml(block.emptyMessage || 'No rows')}</td></tr>`}</tbody></table></div>`;
-  }
-  if (block.type === 'matrix') {
-    const matrix = block.matrix;
-    if (!matrix || matrix.rows.length === 0) {
-      return `<div class="block matrix">${title}${description}<p class="empty">${escapeHtml(block.emptyMessage || matrix?.emptyMessage || 'No matrix data')}</p></div>`;
-    }
-    const head = [
-      '<th class="matrix-item">维度/项目</th>',
-      ...matrix.objects.map((object) => `<th>${escapeHtml(object.label)}<small>${escapeHtml([object.subtitle, object.objectType].filter(Boolean).join(' / '))}</small></th>`),
-    ].join('');
-    let lastGroup = '';
-    const body = matrix.rows.map((row) => {
-      const group = row.group || '';
-      const groupRow = group && group !== lastGroup
-        ? `<tr class="matrix-group"><td colspan="${matrix.objects.length + 1}">${escapeHtml(group)}</td></tr>`
-        : '';
-      lastGroup = group;
-      if (row.rowKind === 'summary') {
-        const summary = row.summaryText || row.rowConclusion || '本大类暂无小结。';
-        return `
-      ${groupRow}
-      <tr class="matrix-summary">
-        <td class="matrix-item"><b>${escapeHtml(row.label || '本大类小结')}</b></td>
-        <td colspan="${Math.max(1, matrix.objects.length)}">${escapeHtml(summary)}</td>
-      </tr>
-    `;
-      }
-      return `
-      ${groupRow}
-      <tr>
-        <td class="matrix-item"><b>${escapeHtml(row.label)}</b></td>
-        ${matrix.objects.map((object) => {
-          const cell = row.cells[object.id];
-          if (isMatrixCellEmpty(cell)) return '<td class="matrix-empty">-</td>';
-          if (!cell) return '<td class="matrix-empty">-</td>';
-          const media = renderMedia(cell.media);
-          const problems = cell.problems.length ? `<p class="cell-risk">${escapeHtml(cell.problems.join('；'))}</p>` : '';
-          const anomaly = cell.anomaly ? `<p class="cell-warning">${escapeHtml(cell.anomaly)}</p>` : '';
-          return `<td class="${escapeHtml(cell.conclusionTag || 'default')}">
-            ${renderMatrixText(cell)}
-            ${cell.score ? `<em>Score: ${escapeHtml(cell.score)}</em>` : ''}
-            ${problems}
-            ${anomaly}
-            ${cell.aiStatus ? `<em>AI: ${escapeHtml(cell.aiStatus)}</em>` : ''}
-            ${media}
-          </td>`;
-        }).join('')}
-      </tr>
-    `;
-    }).join('');
-    return `<div class="block matrix">${title}${description}<table class="matrix-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
-  }
-  if (block.type === 'media') {
-    return `<div class="block media-block">${title}${description}${renderMedia(block.media || []) || `<p class="empty">${escapeHtml(block.emptyMessage || 'No media')}</p>`}</div>`;
-  }
-  return `<div class="block summary">${title}${description || `<p class="empty">${escapeHtml(block.emptyMessage || 'No summary')}</p>`}</div>`;
-}
-
-function renderMedia(media: NonNullable<ReportDetailSectionBlock['media']>) {
-  if (media.length === 0) return '';
-  return `<div class="media-grid">${media.map((item) => {
-    const src = escapeHtml(item.url);
+function renderMedia(items: PrintMedia[]) {
+  if (items.length === 0) return '';
+  return `<div class="paper-media">${items.map((item) => {
     const name = escapeHtml(item.name || item.id);
-    if (item.type === 'video') {
-      return `<div class="video-box"><video src="${src}" muted preload="metadata"></video><span>VIDEO</span><small>${name}</small></div>`;
+    if (item.type.toLowerCase().includes('video')) {
+      return `<figure class="paper-video" data-media-id="${escapeHtml(item.id)}"><div class="video-poster">VIDEO</div><figcaption>${name}</figcaption></figure>`;
     }
-    return `<figure><img src="${src}" alt="${name}" /><figcaption>${name}</figcaption></figure>`;
+    return `<figure data-media-id="${escapeHtml(item.id)}"><img src="${escapeHtml(item.url)}" alt="${name}" /><figcaption>${name}</figcaption></figure>`;
   }).join('')}</div>`;
 }
 
-export function renderReportDetailPdfHtml(model: ReportDetailModel, generatedAt = new Date()) {
-  const profile = model.printDelivery.profile;
-  const pageSize = `${profile.paper} ${profile.orientation}`;
-  const sections = model.sections.map((section) => `
-    <section>
-      <h2>${escapeHtml(section.title)}</h2>
-      ${section.summary ? `<p class="section-summary">${escapeHtml(section.summary)}</p>` : ''}
-      ${section.blocks.map(renderBlock).join('')}
-    </section>
-  `).join('');
-  const preflight = [
-    ...model.printDelivery.preflight.errors,
-    ...model.printDelivery.preflight.warnings,
-  ].map((issue) => `<li class="${escapeHtml(issue.severity)}"><b>${escapeHtml(issue.code)}</b>${escapeHtml(issue.message)}<em>${escapeHtml(issue.action)}</em></li>`).join('');
+function renderDataMatrix(matrix: Extract<PrintMatrix, { kind: 'data_v2' | 'data_v3' }>) {
+  const cards = matrix.rows.map((card) => {
+    const fields = card.fields.map((field) => {
+      const value = field.unit && !String(field.value).includes(field.unit) ? `${field.value} ${field.unit}` : String(field.value);
+      return `<div class="paper-field"><span>${escapeHtml(field.label)}</span><b>${escapeHtml(value)}</b></div>`;
+    }).join('');
+    const narratives = card.narratives.map((item) => `<p><b>${escapeHtml(item.label)}：</b>${escapeHtml(item.text)}</p>`).join('');
+    const issues = card.issues.map((item) => `<li>${escapeHtml(item.text)}${item.status ? `（${escapeHtml(item.status)}）` : ''}</li>`).join('');
+    const issueSummary = card.issueSummary
+      ? `<p class="issues">问题 ${card.issueSummary.count} 个${card.issueSummary.levels.length ? ` / ${escapeHtml(card.issueSummary.levels.join('、'))}` : ''}</p>`
+      : '';
+    return `<article class="paper-row" data-matrix-row="${escapeHtml(card.id)}"><h3>${escapeHtml(card.path.join(' / '))}</h3><div class="paper-fields">${fields}</div>${narratives}${issueSummary}${issues ? `<ul class="issues">${issues}</ul>` : ''}${renderMedia(card.media)}</article>`;
+  }).join('');
+  const narratives = matrix.narratives.map((item) => `<p class="matrix-narrative"><b>${escapeHtml(item.label)}：</b>${escapeHtml(item.text)}</p>`).join('');
+  return `<section data-print-matrix="${matrix.kind}"><h2>${escapeHtml(matrix.title)}</h2>${matrix.summary ? `<p class="muted">${escapeHtml(matrix.summary)}</p>` : ''}${cards}${narratives}</section>`;
+}
 
-  return `<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8" />
-  <style>
-    @page { size: ${pageSize}; margin: 14mm; }
-    * { box-sizing: border-box; }
-    body { margin: 0; color: #111827; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 12px; line-height: 1.55; }
-    h1 { margin: 0 0 6px; font-size: 24px; letter-spacing: 0; }
-    h2 { margin: 22px 0 10px; padding-bottom: 5px; border-bottom: 2px solid #0f766e; color: #0f766e; font-size: 17px; break-after: avoid; }
-    h3 { margin: 0 0 6px; font-size: 13px; color: #111827; break-after: avoid; }
-    section { break-inside: auto; }
-    .cover { border: 1px solid #d1d5db; border-radius: 6px; padding: 12px; margin-bottom: 12px; background: #f9fafb; }
-    .meta { color: #6b7280; margin-bottom: 8px; }
-    .preflight { border: 1px solid #d1d5db; border-radius: 6px; padding: 8px; margin: 12px 0; background: #fff; }
-    .preflight ul, .block ul { margin: 0; padding: 0; list-style: none; }
-    .preflight li, .block li { border: 1px solid #e5e7eb; border-radius: 4px; padding: 6px; margin-bottom: 5px; break-inside: avoid; }
-    .preflight .error { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
-    .preflight .warning, .warning { border-color: #fde68a; background: #fffbeb; color: #92400e; }
-    .risk { border-color: #fecaca !important; background: #fef2f2 !important; color: #991b1b; }
-    .positive { border-color: #bbf7d0 !important; background: #f0fdf4 !important; color: #166534; }
-    .block { border: 1px solid #d1d5db; border-radius: 6px; padding: 8px; margin: 8px 0; background: #fff; break-inside: avoid; }
-    .description, .section-summary, .empty { color: #6b7280; margin: 4px 0; white-space: pre-wrap; }
-    .block li b { display: block; margin-bottom: 2px; }
-    .block li em, .preflight li em { display: block; margin-top: 2px; color: #6b7280; font-style: normal; font-size: 10px; }
-    table { width: 100%; border-collapse: collapse; table-layout: fixed; break-inside: auto; }
-    thead { display: table-header-group; }
-    th, td { border: 1px solid #d1d5db; padding: 5px; vertical-align: top; word-break: break-word; }
-    th { background: #f0fdfa; color: #0f766e; }
-    .matrix { break-inside: auto; }
-    .matrix-table { table-layout: fixed; font-size: 9px; }
-    .matrix-table th, .matrix-table td { padding: 4px; }
-    .matrix-table small { display: block; color: #6b7280; font-weight: 400; margin-top: 2px; }
-    .matrix-item { width: 44mm; }
-    .matrix-table p { margin: 2px 0; }
-    .matrix-table em { display: block; color: #6b7280; font-style: normal; font-size: 8px; }
-    .matrix-table .risk { background: #fef2f2; color: #991b1b; }
-    .matrix-summary td { background: #fffbeb; color: #78350f; white-space: pre-wrap; }
-    .cell-risk { color: #991b1b; }
-    .cell-warning { color: #92400e; }
-    .media-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-    figure, .video-box { width: 86px; margin: 0; border: 1px solid #d1d5db; border-radius: 4px; padding: 3px; background: #f9fafb; break-inside: avoid; }
-    img, video { width: 78px; height: 78px; object-fit: cover; display: block; background: #f3f4f6; }
-    figcaption, .video-box small { display: block; margin-top: 2px; color: #6b7280; font-size: 8px; overflow-wrap: anywhere; }
-    .video-box { position: relative; }
-    .video-box span { position: absolute; left: 5px; top: 58px; color: #fff; background: rgba(0,0,0,.55); font-size: 8px; padding: 1px 3px; border-radius: 2px; }
-  </style>
-</head>
-<body>
-  <div class="cover">
-    <h1>${escapeHtml(model.header.title)}</h1>
-    <div class="meta">版式：${escapeHtml(profile.paper)} ${profile.orientation === 'landscape' ? '横向' : '纵向'} / 生成时间：${escapeHtml(generatedAt.toISOString())}</div>
-    <div>${escapeHtml(model.conclusion.keyConclusion)}</div>
-  </div>
-  <div class="preflight" data-testid="pdf-preflight-summary">
-    <b>打印预检：${model.printDelivery.preflight.ok ? '可导出' : '需处理'}</b>
-    <ul>${preflight || '<li class="positive">暂无影响导出的预检问题。</li>'}</ul>
-  </div>
-  ${sections}
-</body>
-</html>`;
+function renderComparison(matrix: Extract<PrintMatrix, { kind: 'comparison' }>) {
+  const head = matrix.columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join('');
+  const body = matrix.rows.map((row) => `<tr><th>${escapeHtml(row.path.join(' / '))}</th>${matrix.columns.map((column) => {
+    const cell = row.cells[column.id];
+    const notes = cell?.notes.map((item) => `<p><b>过程记录：</b>${escapeHtml(item)}</p>`).join('') || '';
+    const problems = cell?.problems.map((item) => `<p class="issues"><b>问题点：</b>${escapeHtml(item)}</p>`).join('') || '';
+    return `<td>${escapeHtml(cell?.value || '-')}${notes}${problems}${renderMedia(cell?.media || [])}</td>`;
+  }).join('')}</tr>`).join('');
+  return `<section data-print-matrix="comparison"><h2>${escapeHtml(matrix.title)}</h2><table class="comparison-table"><thead><tr><th>项目</th>${head}</tr></thead><tbody>${body}</tbody></table></section>`;
+}
+
+function renderIssues(model: PrintReportViewModel) {
+  if (model.issues.length === 0) return '';
+  return `<section><h2>问题</h2>${model.issues.map((issue) => {
+    const evaluations = issue.liveOverlay.reEvaluations.map((item) => {
+      const evaluation = record(item);
+      return `<div class="reevaluation"><b>复评：</b>${escapeHtml(text(evaluation.description || evaluation.result || evaluation.conclusion, '已完成复评'))}${renderMedia(mediaFromUnknown(evaluation.materials))}</div>`;
+    }).join('');
+    return `<article class="paper-row"><h3>${escapeHtml(issue.title)}</h3><p>${escapeHtml(issue.details)}</p>${issue.liveOverlay.status ? `<p>当前状态：${escapeHtml(issue.liveOverlay.status)}</p>` : ''}<p>整改：${escapeHtml(issue.liveOverlay.rectification || issue.liveOverlay.status || '待处理')}</p>${issue.evidence.length ? '<p><b>附录素材：</b></p>' : ''}${renderMedia(issue.evidence)}${issue.liveOverlay.evidence.length ? '<p><b>问题补充素材：</b></p>' : ''}${renderMedia(issue.liveOverlay.evidence)}${evaluations}</article>`;
+  }).join('')}</section>`;
+}
+
+function renderFunctions(model: PrintReportViewModel) {
+  if (model.functionEffects.length === 0) return '';
+  return `<section><h2>功能效果</h2>${model.functionEffects.map((effect) => {
+    const problems = problemTexts(effect.problemPoints);
+    const steps = effect.steps.map((item, index) => {
+      const step = record(item);
+      return `<div class="paper-step"><b>步骤 ${escapeHtml(step.step_number ?? index + 1)}</b> ${escapeHtml(text(step.operation || step.description))}${renderMedia(mediaFromUnknown(step.materials))}</div>`;
+    }).join('');
+    return `<article class="paper-row"><h3>${escapeHtml(effect.name)}</h3><p>${escapeHtml(effect.evaluation)}</p>${effect.score ? `<p>评分：${escapeHtml(effect.score)}</p>` : ''}${problems.length ? `<ul class="issues">${problems.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>` : ''}${renderMedia(effect.evidence)}${steps}</article>`;
+  }).join('')}</section>`;
+}
+
+export function renderPrintReportHtml(model: PrintReportViewModel, generatedAt = new Date()) {
+  const matrix = model.matrix
+    ? model.matrix.kind === 'comparison' ? renderComparison(model.matrix) : renderDataMatrix(model.matrix)
+    : '';
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8" /><style>
+    @page { size: ${model.page.paper} ${model.page.orientation}; margin: 12mm; }
+    * { box-sizing: border-box; } body { margin: 0; color: #111827; font-family: -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif; font-size: 11px; line-height: 1.55; }
+    h1 { margin: 0 0 4px; font-size: 22px; } h2 { margin: 18px 0 8px; padding-bottom: 4px; border-bottom: 2px solid #0f766e; color: #0f766e; font-size: 16px; break-after: avoid; } h3 { margin: 0 0 5px; font-size: 12px; break-after: avoid; }
+    section { break-inside: auto; } .cover,.paper-row { border: 1px solid #d1d5db; border-radius: 6px; padding: 9px; margin: 7px 0; background: #fff; break-inside: avoid; } .muted,.meta { color: #6b7280; }
+    .paper-fields { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 5px; } .paper-field { border: 1px solid #e5e7eb; border-radius: 4px; padding: 5px; } .paper-field span,.paper-field b { display: block; overflow-wrap: anywhere; }
+    .paper-media { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; } figure { width: 72px; margin: 0; border: 1px solid #d1d5db; border-radius: 4px; padding: 3px; break-inside: avoid; } figure img,.video-poster { width: 64px; height: 48px; object-fit: cover; display: flex; align-items: center; justify-content: center; background: #e5e7eb; color: #374151; font-weight: 700; } figcaption { margin-top: 2px; color: #6b7280; font-size: 8px; overflow-wrap: anywhere; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; } thead { display: table-header-group; } th,td { border: 1px solid #d1d5db; padding: 5px; vertical-align: top; overflow-wrap: anywhere; } th { background: #f0fdfa; color: #0f766e; } .issues { color: #991b1b; }
+  </style></head><body data-print-report-id="${escapeHtml(model.sourceReportId)}">
+    <header class="cover"><h1>${escapeHtml(model.header.title)}</h1>${model.header.productModel ? `<p>${escapeHtml(model.header.productModel)}</p>` : ''}<p class="meta">生成时间：${escapeHtml(generatedAt.toISOString())}</p></header>
+    <section><h2>总结</h2><p>${escapeHtml(model.summary.text || '暂无总结')}</p></section>
+    ${renderIssues(model)}${matrix}${renderFunctions(model)}
+  </body></html>`;
 }

@@ -1,12 +1,13 @@
 'use client';
 
-import { Fragment } from 'react';
+import { Fragment, type CSSProperties } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { pendingMediaDataUrl, toPublicMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import { cn } from '@/lib/utils';
 import type { ReportDetailMediaItem, ReportDetailModel, ReportDetailSection, ReportDetailSectionBlock } from '@/lib/server/report-detail';
 import { ReportDataMatrixReadView } from '@/components/reports/report-data-matrix-read-view';
 import { ReportMediaGrid, type ReportMediaItem, type ReportMediaRole } from '@/components/reports/report-media-grid';
+import type { PrintMedia, PrintReportViewModel } from '@/lib/server/report-print-renderer';
 
 function blockItemClass(status: string | undefined) {
   if (status === 'risk') return 'border-red-200 bg-red-50 text-red-800';
@@ -702,5 +703,123 @@ function PrintMediaThumbs({ media }: { media?: ReportDetailMediaItem[] }) {
       ))}
       {media.length > 4 && <span style={{ alignSelf: 'center', fontSize: '9px', color: '#6b7280' }}>+{media.length - 4}</span>}
     </div>
+  );
+}
+
+function paperRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function paperText(value: unknown, fallback = '') {
+  const result = value === null || value === undefined ? '' : String(value).trim();
+  return result || fallback;
+}
+
+function paperMediaFromUnknown(value: unknown): PrintMedia[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item, index) => {
+    const source = paperRecord(item);
+    const url = paperText(source.url || source.file_url || source.fileUrl || source.file_path || source.filePath);
+    if (!url) return [];
+    return [{
+      id: paperText(source.id || source.material_id || source.materialId, `${url}:${index}`),
+      name: paperText(source.name || source.file_name || source.fileName, '素材'),
+      type: paperText(source.type || source.material_type || source.materialType, 'image'),
+      url,
+    }];
+  });
+}
+
+function paperProblemTexts(value: unknown): string[] {
+  let source = value;
+  if (typeof source === 'string') {
+    const raw = source;
+    try { source = JSON.parse(raw); } catch { return raw.trim() ? [raw.trim()] : []; }
+  }
+  if (!Array.isArray(source)) return [];
+  return source.flatMap((item) => {
+    if (typeof item === 'string') return item.trim() ? [item.trim()] : [];
+    const result = paperText(paperRecord(item).text || paperRecord(item).issueText);
+    return result ? [result] : [];
+  });
+}
+
+function PaperMedia({ items }: { items: PrintMedia[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div data-testid="paper-media-grid" style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '6px' }}>
+      {items.map((item) => (
+        <figure key={`${item.id}:${item.url}`} data-media-id={item.id} style={{ width: '72px', margin: 0, border: '1px solid #d1d5db', borderRadius: '4px', padding: '3px', breakInside: 'avoid' }}>
+          {isVideoType(item.type) ? (
+            <div data-testid="paper-video-poster" style={{ width: '64px', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#e5e7eb', color: '#374151', fontSize: '10px', fontWeight: 700 }}>VIDEO</div>
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={item.url} alt={item.name} style={{ width: '64px', height: '48px', objectFit: 'cover', display: 'block', background: '#f3f4f6' }} />
+          )}
+          <figcaption style={{ marginTop: '2px', color: '#6b7280', fontSize: '8px', overflowWrap: 'anywhere' }}>{item.name}</figcaption>
+        </figure>
+      ))}
+    </div>
+  );
+}
+
+function PaperMatrix({ matrix }: { matrix: NonNullable<PrintReportViewModel['matrix']> }) {
+  if (matrix.kind === 'comparison') {
+    return (
+      <section data-testid="print-comparison-matrix" style={{ marginTop: '18px' }}>
+        <h2 style={{ fontSize: '16px', color: '#0f766e', borderBottom: '2px solid #0f766e', paddingBottom: '4px' }}>{matrix.title}</h2>
+        <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', fontSize: '9px' }}>
+          <thead><tr><th style={paperCellStyle}>项目</th>{matrix.columns.map((column) => <th key={column.id} style={paperCellStyle}>{column.label}</th>)}</tr></thead>
+          <tbody>{matrix.rows.map((row) => (
+            <tr key={row.id}><th style={paperCellStyle}>{row.path.join(' / ')}</th>{matrix.columns.map((column) => {
+              const cell = row.cells[column.id];
+              return <td key={column.id} style={paperCellStyle}>{cell?.value || '-'}{(cell ? cell.notes : []).map((item) => <p key={`note:${item}`}><b>过程记录：</b>{item}</p>)}{(cell ? cell.problems : []).map((item) => <p key={`problem:${item}`} style={{ color: '#991b1b' }}><b>问题点：</b>{item}</p>)}<PaperMedia items={cell?.media || []} /></td>;
+            })}</tr>
+          ))}</tbody>
+        </table>
+      </section>
+    );
+  }
+  return (
+    <section data-testid={`print-${matrix.kind}-matrix`} style={{ marginTop: '18px' }}>
+      <h2 style={{ fontSize: '16px', color: '#0f766e', borderBottom: '2px solid #0f766e', paddingBottom: '4px' }}>{matrix.title}</h2>
+      {matrix.summary && <p style={{ color: '#6b7280' }}>{matrix.summary}</p>}
+      {matrix.rows.map((row) => (
+        <article key={row.id} data-testid="print-matrix-paper-row" style={paperRowStyle}>
+          <h3 style={{ margin: '0 0 6px', fontSize: '12px' }}>{row.path.join(' / ')}</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: '5px' }}>
+            {row.fields.map((field) => {
+              const value = field.unit && !String(field.value).includes(field.unit) ? `${field.value} ${field.unit}` : String(field.value);
+              return <div key={field.id} style={{ border: '1px solid #e5e7eb', borderRadius: '4px', padding: '5px' }}><span style={{ display: 'block', color: '#6b7280' }}>{field.label}</span><b>{value}</b></div>;
+            })}
+          </div>
+          {row.narratives.map((item) => <p key={item.id}><b>{item.label}：</b>{item.text}</p>)}
+          {row.issueSummary && <p style={{ color: '#991b1b' }}>问题 {row.issueSummary.count} 个{row.issueSummary.levels.length > 0 ? ` / ${row.issueSummary.levels.join('、')}` : ''}</p>}
+          {row.issues.length > 0 && <ul style={{ color: '#991b1b' }}>{row.issues.map((item) => <li key={item.id}>{item.text}{item.status ? `（${item.status}）` : ''}</li>)}</ul>}
+          <PaperMedia items={row.media} />
+        </article>
+      ))}
+      {matrix.narratives.map((item) => <p key={item.id}><b>{item.label}：</b>{item.text}</p>)}
+    </section>
+  );
+}
+
+const paperRowStyle: CSSProperties = { border: '1px solid #d1d5db', borderRadius: '6px', padding: '9px', margin: '7px 0', breakInside: 'avoid' };
+const paperCellStyle: CSSProperties = { border: '1px solid #d1d5db', padding: '5px', verticalAlign: 'top', overflowWrap: 'anywhere' };
+
+export function ReportPrintDocument({ model }: { model: PrintReportViewModel }) {
+  return (
+    <article data-testid="report-print-document" data-report-id={model.sourceReportId} style={{ maxWidth: '100%', color: '#111827', fontSize: '11px', lineHeight: 1.55 }}>
+      <style>{`@page { size: ${model.page.paper} ${model.page.orientation}; margin: 12mm; } @media print { [data-testid="report-print-document"] { break-after: page; } [data-testid="report-print-document"]:last-child { break-after: auto; } }`}</style>
+      <header style={paperRowStyle}><h1 style={{ margin: '0 0 4px', fontSize: '22px' }}>{model.header.title}</h1>{model.header.productModel && <p>{model.header.productModel}</p>}</header>
+      <section><h2 style={{ fontSize: '16px', color: '#0f766e' }}>总结</h2><p style={{ whiteSpace: 'pre-wrap' }}>{model.summary.text || '暂无总结'}</p></section>
+      {model.issues.length > 0 && <section><h2 style={{ fontSize: '16px', color: '#0f766e' }}>问题</h2>{model.issues.map((issue) => (
+        <article key={issue.id} style={paperRowStyle}><h3>{issue.title}</h3><p>{issue.details}</p>{issue.liveOverlay.status && <p>当前状态：{issue.liveOverlay.status}</p>}<p>整改：{issue.liveOverlay.rectification || issue.liveOverlay.status || '待处理'}</p>{issue.evidence.length > 0 && <p><b>附录素材：</b></p>}<PaperMedia items={issue.evidence} />{issue.liveOverlay.evidence.length > 0 && <p><b>问题补充素材：</b></p>}<PaperMedia items={issue.liveOverlay.evidence} />{issue.liveOverlay.reEvaluations.map((item, index) => { const evaluation = paperRecord(item); return <div key={paperText(evaluation.id, String(index))}><b>复评：</b>{paperText(evaluation.description || evaluation.result || evaluation.conclusion, '已完成复评')}<PaperMedia items={paperMediaFromUnknown(evaluation.materials)} /></div>; })}</article>
+      ))}</section>}
+      {model.matrix && <PaperMatrix matrix={model.matrix} />}
+      {model.functionEffects.length > 0 && <section><h2 style={{ fontSize: '16px', color: '#0f766e' }}>功能效果</h2>{model.functionEffects.map((effect) => (
+        <article key={effect.id} style={paperRowStyle}><h3>{effect.name}</h3><p>{effect.evaluation}</p>{effect.score && <p>评分：{effect.score}</p>}{paperProblemTexts(effect.problemPoints).length > 0 && <ul style={{ color: '#991b1b' }}>{paperProblemTexts(effect.problemPoints).map((item) => <li key={item}>{item}</li>)}</ul>}<PaperMedia items={effect.evidence} />{effect.steps.map((item, index) => { const step = paperRecord(item); return <div key={paperText(step.id, String(index))}><b>步骤 {paperText(step.step_number, String(index + 1))}</b> {paperText(step.operation || step.description)}<PaperMedia items={paperMediaFromUnknown(step.materials)} /></div>; })}</article>
+      ))}</section>}
+    </article>
   );
 }
