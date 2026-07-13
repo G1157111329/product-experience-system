@@ -11,9 +11,8 @@ import {
 } from '@/lib/report-merge';
 import {
   attachLatestSnapshotForComparisonReport,
-  loadAnchoredReportSnapshot,
 } from '@/lib/server/report-snapshots';
-import { buildReportDetailModel } from '@/lib/server/report-detail';
+import { buildFrozenReportResponse } from '@/lib/server/report-frozen-view';
 
 type IssueRow = Record<string, unknown> & { id: string };
 type ReportRow = Record<string, unknown> & {
@@ -25,47 +24,8 @@ type ReportRow = Record<string, unknown> & {
   content?: { task?: Record<string, unknown> } | null;
 };
 
-async function loadRows(
-  query: PromiseLike<{ data: Array<Record<string, unknown>> | null; error?: { message?: string } | null }>,
-) {
-  const { data } = await query;
-  return Array.isArray(data) ? data : [];
-}
-
 async function buildPublicDetailModel(client: ReturnType<typeof getSupabaseClient>, report: ReportRow) {
-  const reportId = String(report.id || '');
-  const taskId = String(report.task_id || '');
-  const [snapshotResult, sourceIssues, taskIssues, materials, pdfJobs] = await Promise.all([
-    reportId ? loadAnchoredReportSnapshot(client, report) : Promise.resolve({ snapshot: null, resolution: 'none' as const }),
-    reportId
-      ? loadRows(client.from('issues').select('*').eq('source_report_id', reportId) as unknown as PromiseLike<{ data: Array<Record<string, unknown>> | null }>)
-      : Promise.resolve([]),
-    taskId
-      ? loadRows(client.from('issues').select('*').eq('task_id', taskId) as unknown as PromiseLike<{ data: Array<Record<string, unknown>> | null }>)
-      : Promise.resolve([]),
-    taskId
-      ? loadRows(client.from('materials').select('*').eq('task_id', taskId).order('media_display_order', { ascending: true }) as unknown as PromiseLike<{ data: Array<Record<string, unknown>> | null }>)
-      : Promise.resolve([]),
-    reportId
-      ? loadRows(client.from('pdf_generation_jobs').select('*').eq('report_id', reportId).order('created_at', { ascending: false }) as unknown as PromiseLike<{ data: Array<Record<string, unknown>> | null }>)
-      : Promise.resolve([]),
-  ]);
-  const snapshot = snapshotResult.snapshot;
-
-  const issueMap = new Map([...sourceIssues, ...taskIssues].map((issue) => [String(issue.id || ''), issue]));
-  const issueRows = Array.from(issueMap.values()) as IssueRow[];
-  const reEvaluationsMap = await loadReEvaluationsMap(client, issueRows);
-  const issuesWithReEvaluations = issueRows.map((issue) => ({
-    ...issue,
-    _reEvaluations: reEvaluationsMap[issue.id] || [],
-  }));
-  return buildReportDetailModel({
-    report,
-    snapshot,
-    issues: issuesWithReEvaluations,
-    materials,
-    pdfJobs,
-  });
+  return buildFrozenReportResponse(client, report, { audience: 'share' });
 }
 
 async function loadReEvaluationsMap(client: ReturnType<typeof getSupabaseClient>, issues: IssueRow[]) {
@@ -243,10 +203,15 @@ export async function GET(request: NextRequest) {
   });
 
   const reportWithSnapshot = await attachLatestSnapshotForComparisonReport(client, report as Record<string, unknown>);
-  const detailModel = await buildPublicDetailModel(client, reportWithSnapshot as ReportRow);
+  const primaryFrozenResponse = await buildPublicDetailModel(client, reportWithSnapshot as ReportRow);
+  const detailModel = primaryFrozenResponse.detailModel;
+  const frozenViewModel = primaryFrozenResponse.model;
   const siblingDetailModels: Record<string, unknown> = {};
+  const siblingFrozenViewModels: Record<string, unknown> = {};
   await Promise.all(siblingReports.map(async (sibling) => {
-    siblingDetailModels[sibling.id] = await buildPublicDetailModel(client, sibling);
+    const response = await buildPublicDetailModel(client, sibling);
+    siblingDetailModels[sibling.id] = response.detailModel;
+    siblingFrozenViewModels[sibling.id] = response.model;
   }));
 
   return NextResponse.json({
@@ -255,10 +220,12 @@ export async function GET(request: NextRequest) {
     data: {
       report: reportWithSnapshot,
       detailModel,
+      frozenViewModel,
       liveIssues,
       reEvaluationsMap,
       siblingReports,
       siblingDetailModels,
+      siblingFrozenViewModels,
       siblingIssuesMap,
       siblingReEvaluationsMap,
       shareInfo: {
