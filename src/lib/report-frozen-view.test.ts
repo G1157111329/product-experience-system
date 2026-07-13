@@ -122,6 +122,68 @@ const legacy = buildFrozenReportViewModel({
 }, { audience: 'internal' });
 assert.deepEqual(legacy.issues.map((item) => item.id), ['legacy-issue']);
 
+const legacyDuplicateEvidence = buildFrozenReportViewModel({
+  report: { id: 'legacy-duplicate', report_type: 'single_report', content: {} },
+  snapshot: null,
+  snapshotResolution: 'legacy_latest',
+  issues: [{
+    id: 'legacy-duplicate-issue',
+    title: 'Legacy duplicate',
+    materials: [{ id: 'same', file_name: 'same.jpg', material_type: 'image', file_url: '/uploads/same.jpg' }],
+  }],
+  issueEvidence: {
+    'legacy-duplicate-issue': [{ id: 'same', name: 'same.jpg', type: 'image', url: '/uploads/same.jpg' }],
+  },
+}, { audience: 'internal' });
+assert.deepEqual(legacyDuplicateEvidence.issues[0]?.evidence.map((item) => item.id), ['same']);
+assert.deepEqual(legacyDuplicateEvidence.issues[0]?.liveOverlay.evidence, []);
+
+const legacyPartialOverlap = buildFrozenReportViewModel({
+  report: { id: 'legacy-partial', report_type: 'single_report', content: {} },
+  snapshot: null,
+  snapshotResolution: 'legacy_latest',
+  issues: [{
+    id: 'legacy-partial-issue',
+    title: 'Legacy partial overlap',
+    materials: [{ id: 'base-a', file_name: 'A.jpg', material_type: 'image', file_url: '/uploads/a.jpg' }],
+    _reEvaluations: [{
+      materials: [{ id: 'reeval-c', file_name: 'C.jpg', material_type: 'image', file_url: '/uploads/c.jpg' }],
+    }],
+  }],
+  issueEvidence: {
+    'legacy-partial-issue': [
+      { id: 'base-a', name: 'A-copy.jpg', type: 'image', url: '/uploads/overlay-a.jpg' },
+      { id: 'overlay-b', name: 'A.jpg', type: 'image', url: '/uploads/b.jpg' },
+      { id: 'overlay-c', name: 'C-copy.jpg', type: 'image', url: '/uploads/c.jpg' },
+    ],
+  },
+}, { audience: 'internal' });
+assert.deepEqual(legacyPartialOverlap.issues[0]?.evidence.map((item) => item.id), ['base-a']);
+assert.deepEqual(legacyPartialOverlap.issues[0]?.liveOverlay.evidence.map((item) => item.id), ['overlay-b']);
+
+const anchoredDuplicateBehavior = buildFrozenReportViewModel({
+  report: {
+    id: 'anchored-duplicate',
+    report_type: 'single_report',
+    content: {
+      records: [{
+        id: 'anchored-record',
+        check_item: 'Anchored duplicate',
+        evaluation_result: 'fail',
+        materials: [{ id: 'anchored-same', file_name: 'same.jpg', material_type: 'image', file_url: '/uploads/same.jpg' }],
+      }],
+    },
+  },
+  snapshot: { snapshot_json: {} },
+  snapshotResolution: 'anchored',
+  issues: [{ id: 'anchored-issue', record_id: 'anchored-record', title: 'Live title' }],
+  issueEvidence: {
+    'anchored-issue': [{ id: 'anchored-same', name: 'same.jpg', type: 'image', url: '/uploads/same.jpg' }],
+  },
+}, { audience: 'internal' });
+assert.deepEqual(anchoredDuplicateBehavior.issues[0]?.evidence.map((item) => item.id), ['anchored-same']);
+assert.deepEqual(anchoredDuplicateBehavior.issues[0]?.liveOverlay.evidence.map((item) => item.id), ['anchored-same']);
+
 const frozenProblems = buildFrozenReportViewModel({
   report: {
     id: 'report-problems',

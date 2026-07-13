@@ -279,23 +279,37 @@ function findFrozenFactForLive(facts: Row[], live: Row) {
   return candidates.length === 1 ? candidates[0] : undefined;
 }
 
-export function overlayEvidenceWithoutReEvaluations(evidence: FrozenMedia[], evaluations: unknown[]): FrozenMedia[] {
+export function overlayEvidenceWithoutReEvaluations(
+  evidence: FrozenMedia[],
+  evaluations: unknown[],
+  baseEvidence: FrozenMedia[] = [],
+): FrozenMedia[] {
   const reevaluationMedia = rows(evaluations).flatMap((evaluation) => media(evaluation.materials));
-  const reevaluationIds = new Set(reevaluationMedia.map((item) => text(item.id)).filter(Boolean));
-  const reevaluationUrls = new Set(reevaluationMedia.map((item) => text(item.url)).filter(Boolean));
-  return evidence.filter((item) => (
-    !reevaluationIds.has(text(item.id))
-    && !reevaluationUrls.has(text(item.url))
-  ));
+  const excluded = [...reevaluationMedia, ...baseEvidence];
+  const excludedIds = new Set(excluded.map((item) => text(item.id)).filter(Boolean));
+  const excludedUrls = new Set(excluded.map((item) => text(item.url)).filter(Boolean));
+  const excludedNames = new Set(excluded.map((item) => text(item.name)).filter(Boolean));
+  return evidence.filter((item) => {
+    const id = text(item.id);
+    const url = text(item.url);
+    const name = text(item.name);
+    if (id && excludedIds.has(id)) return false;
+    if (url && excludedUrls.has(url)) return false;
+    return Boolean(id || url) || !name || !excludedNames.has(name);
+  });
 }
 
-function liveOverlay(issue: Row | undefined, evidence: FrozenMedia[] = []): FrozenIssueLiveOverlay {
+function liveOverlay(
+  issue: Row | undefined,
+  evidence: FrozenMedia[] = [],
+  baseEvidence: FrozenMedia[] = [],
+): FrozenIssueLiveOverlay {
   const reEvaluations = rows(issue?._reEvaluations);
   return {
     status: first(issue?.status, issue?.evaluation_result),
     rectification: first(issue?.improve_plan, issue?.rectification, issue?.no_improve_reason),
     reEvaluations,
-    evidence: overlayEvidenceWithoutReEvaluations(evidence, reEvaluations),
+    evidence: overlayEvidenceWithoutReEvaluations(evidence, reEvaluations, baseEvidence),
   };
 }
 
@@ -304,6 +318,7 @@ function frozenIssue(
   live: Row | undefined,
   evidence: FrozenMedia[],
   overlayEvidence: FrozenMedia[] = [],
+  overlayBaseEvidence: FrozenMedia[] = [],
 ): FrozenIssue {
   return {
     id: first(live?.id, base.id),
@@ -312,7 +327,7 @@ function frozenIssue(
     level: first(base.level, base.problem_level, live?.level, live?.problem_level),
     sourceType: first(base.source_type, base.standard_category, live?.source_type),
     evidence,
-    liveOverlay: liveOverlay(live, overlayEvidence),
+    liveOverlay: liveOverlay(live, overlayEvidence, overlayBaseEvidence),
   };
 }
 
@@ -341,11 +356,13 @@ function buildIssues(
     const baseMedia = cell
       ? [...rows(cell.inline_media), ...rows(cell.appendix_media), ...rows(cell.media)]
       : rows(frozenBase.materials);
+    const frozenEvidence = media(baseMedia);
     result.push(frozenIssue(
       frozenBase,
       live,
-      media(baseMedia),
+      frozenEvidence,
       issueEvidence[text(live.id)] ?? [],
+      snapshotResolution === 'legacy_latest' ? frozenEvidence : [],
     ));
   }
 
