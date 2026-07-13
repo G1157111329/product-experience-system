@@ -2,7 +2,7 @@
 
 import type { KeyboardEvent } from 'react';
 import { useImagePreview } from '@/components/image-preview';
-import { isAllowedMediaSource, isPendingMediaUrl, toPublicMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
+import { isAllowedMediaSource, isPendingMediaUrl, pendingMediaDataUrl, toPublicMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import { cn } from '@/lib/utils';
 
 interface Material {
@@ -36,7 +36,17 @@ function isDirectMediaUrl(value: string | null | undefined): boolean {
 function getInitialMediaUrl(material: Material): string {
   if (isDirectMediaUrl(material.file_path)) return material.file_path as string;
   if (isDirectMediaUrl(material.file_url)) return material.file_url;
-  return toPublicMediaUrl(material.file_path || material.file_url) || missingMediaDataUrl;
+  return pendingMediaDataUrl;
+}
+
+export function resolveGalleryMediaUrl(material: Material, resolvedUrl?: string): string {
+  const storageKey = material.file_path || material.file_url;
+  if (!resolvedUrl) return getInitialMediaUrl(material);
+  if (isPendingMediaUrl(resolvedUrl)) return resolvedUrl;
+  const rawStorageKey = Boolean(storageKey && !isAllowedMediaSource(storageKey));
+  const unsafeFallback = rawStorageKey ? toPublicMediaUrl(storageKey) : null;
+  if (unsafeFallback && resolvedUrl === unsafeFallback) return pendingMediaDataUrl;
+  return resolvedUrl;
 }
 
 function MediaThumbnail({
@@ -188,14 +198,15 @@ export function MediaGallery({
     <>
       <div className={cn('grid min-w-0', gridCols, gap, className)}>
         {materials.map((mat) => {
-          const resolvedUrl = presignedMap.get(mat.id) || getInitialMediaUrl(mat);
+          const resolvedUrl = resolveGalleryMediaUrl(mat, presignedMap.get(mat.id));
           const previewUrl = isPendingMediaUrl(resolvedUrl) ? (mat.file_path || mat.file_url || resolvedUrl) : resolvedUrl;
+          const pending = isPendingMediaUrl(resolvedUrl);
           return (
             <MediaThumbnail
               key={mat.id}
               url={resolvedUrl}
               type={mat.material_type === 'video' ? 'video' : 'image'}
-              onClick={() => open(previewUrl)}
+              onClick={pending ? undefined : () => open(previewUrl)}
               size={size}
               responsive={responsive}
             />
