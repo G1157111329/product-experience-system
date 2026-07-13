@@ -121,30 +121,26 @@ function reportMediaItems(media: ReportDetailMediaItem[] | undefined): ReportMed
 
 function InteractiveMediaStrip({
   media,
-  compact = false,
-  featured = false,
+  role = 'evidence',
   context,
   testId,
 }: {
   media?: ReportDetailSectionBlock['media'];
-  limit?: number;
-  compact?: boolean;
-  featured?: boolean;
+  role?: ReportMediaRole;
   context?: string;
   testId?: string;
 }) {
-  const role: ReportMediaRole = featured ? 'primary' : compact ? 'compact' : 'evidence';
   const items = reportMediaItems(media);
   if (!items.length) return null;
   return (
     <div data-testid="report-inline-media-strip" data-context={context} data-item-testid={testId} className="mt-2 min-w-0 pb-1">
-      <ReportMediaGrid items={items} role={role} />
+      <ReportMediaGrid items={items} role={role} carrierKey={context} />
     </div>
   );
 }
 
-function InlineMediaStrip({ media }: { media?: ReportDetailSectionBlock['media'] }) {
-  return <InteractiveMediaStrip media={media} />;
+function InlineMediaStrip({ media, role }: { media?: ReportDetailSectionBlock['media']; role?: ReportMediaRole }) {
+  return <InteractiveMediaStrip media={media} role={role} />;
 }
 
 function dataMatrixDimensionKey(dimension: Record<string, unknown>) {
@@ -184,8 +180,8 @@ function isMatrixCellEmpty(cell: NonNullable<NonNullable<ReportDetailSectionBloc
     && cell.media.length === 0;
 }
 
-function InteractiveMediaCards({ media }: { media?: ReportDetailSectionBlock['media'] }) {
-  return <ReportMediaGrid items={reportMediaItems(media)} role="evidence" />;
+function InteractiveMediaCards({ media, role }: { media?: ReportDetailSectionBlock['media']; role: ReportMediaRole }) {
+  return <ReportMediaGrid items={reportMediaItems(media)} role={role} />;
 }
 
 export function hasReadableSectionBlocks(model: ReportDetailModel | null | undefined) {
@@ -222,7 +218,7 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
               <p className="break-words font-medium text-muted-foreground">{item.label}</p>
               <p className="mt-1 break-words text-sm text-foreground">{item.value}</p>
               {item.note && <p className="mt-1 text-[11px] text-muted-foreground">{item.note}</p>}
-              <InlineMediaStrip media={item.media} />
+              <InlineMediaStrip media={item.media} role={item.mediaRole} />
             </div>
           ))}
         </div>
@@ -237,7 +233,7 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
                 {item.note && <span className="break-words text-[11px] text-muted-foreground">{item.note}</span>}
               </div>
               <p className="mt-1 break-words text-muted-foreground">{item.value}</p>
-              <InlineMediaStrip media={item.media} />
+              <InlineMediaStrip media={item.media} role={item.mediaRole} />
             </div>
           ))}
         </div>
@@ -374,7 +370,7 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
                             {cell.problems.length > 0 && <p className="mt-1 break-words text-red-700">{cell.problems.join('；')}</p>}
                             {cell.anomaly && !isBlankMatrixText(cell.anomaly) && <p className="mt-1 break-words text-amber-700">{cell.anomaly}</p>}
                             {cell.aiStatus && <p className="mt-1 text-[11px] text-muted-foreground">结论状态：{aiStatusLabel(cell.aiStatus)}</p>}
-                            <InteractiveMediaStrip media={cell.media} context={context} testId="report-matrix-media-item" />
+                            <InteractiveMediaStrip media={cell.media} role="compact" context={context} testId="report-matrix-media-item" />
                           </div>
                         ) : null}
                       </td>
@@ -401,7 +397,7 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
 
       {block.type === 'media' && (block.media?.length ?? 0) > 0 && (
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          <InteractiveMediaCards media={block.media} />
+          <InteractiveMediaCards media={block.media} role={block.mediaRole ?? 'evidence'} />
         </div>
       )}
 

@@ -24,9 +24,10 @@ interface ImagePreviewProps {
   url: string | null;
   onClose: () => void;
   onEdit?: (resolvedUrl: string) => void;
+  mediaType?: string;
 }
 
-export function ImagePreview({ url, onClose, onEdit }: ImagePreviewProps) {
+export function ImagePreview({ url, onClose, onEdit, mediaType }: ImagePreviewProps) {
   const [zoomed, setZoomed] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const presignedUrl = usePresignedUrl(url);
@@ -38,7 +39,9 @@ export function ImagePreview({ url, onClose, onEdit }: ImagePreviewProps) {
 
   if (!url) return null;
 
-  const isVideo = /\.(mp4|webm|mov|avi|mkv)(\?|$)/i.test(url) || url.includes('/video/');
+  const isVideo = mediaType?.toLowerCase().includes('video')
+    || /\.(mp4|webm|mov|avi|mkv)(\?|$)/i.test(url)
+    || url.includes('/video/');
 
   return (
     <Dialog open={!!url} onOpenChange={(open) => { if (!open) { setZoomed(false); onClose(); } }}>
@@ -204,9 +207,9 @@ export function MediaThumbnail({ url, type, onClick, size = 'md', responsive }: 
 }
 
 export function useImagePreview() {
-  const [preview, setPreview] = useState<{ url: string; onEdit?: (resolvedUrl: string) => void } | null>(null);
-  const open = useCallback((url: string, options?: { onEdit?: (resolvedUrl: string) => void }) => {
-    setPreview({ url, onEdit: options?.onEdit });
+  const [preview, setPreview] = useState<{ url: string; mediaType?: string; onEdit?: (resolvedUrl: string) => void } | null>(null);
+  const open = useCallback((url: string, options?: { mediaType?: string; onEdit?: (resolvedUrl: string) => void }) => {
+    setPreview({ url, mediaType: options?.mediaType, onEdit: options?.onEdit });
   }, []);
   const close = useCallback(() => setPreview(null), []);
 
@@ -214,6 +217,6 @@ export function useImagePreview() {
     previewUrl: preview?.url || null,
     open,
     close,
-    PreviewComponent: () => <ImagePreview url={preview?.url || null} onClose={close} onEdit={preview?.onEdit} />,
+    PreviewComponent: () => <ImagePreview url={preview?.url || null} mediaType={preview?.mediaType} onClose={close} onEdit={preview?.onEdit} />,
   };
 }

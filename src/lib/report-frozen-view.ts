@@ -279,12 +279,23 @@ function findFrozenFactForLive(facts: Row[], live: Row) {
   return candidates.length === 1 ? candidates[0] : undefined;
 }
 
+export function overlayEvidenceWithoutReEvaluations(evidence: FrozenMedia[], evaluations: unknown[]): FrozenMedia[] {
+  const reevaluationMedia = rows(evaluations).flatMap((evaluation) => media(evaluation.materials));
+  const reevaluationIds = new Set(reevaluationMedia.map((item) => text(item.id)).filter(Boolean));
+  const reevaluationUrls = new Set(reevaluationMedia.map((item) => text(item.url)).filter(Boolean));
+  return evidence.filter((item) => (
+    !reevaluationIds.has(text(item.id))
+    && !reevaluationUrls.has(text(item.url))
+  ));
+}
+
 function liveOverlay(issue: Row | undefined, evidence: FrozenMedia[] = []): FrozenIssueLiveOverlay {
+  const reEvaluations = rows(issue?._reEvaluations);
   return {
     status: first(issue?.status, issue?.evaluation_result),
     rectification: first(issue?.improve_plan, issue?.rectification, issue?.no_improve_reason),
-    reEvaluations: rows(issue?._reEvaluations),
-    evidence,
+    reEvaluations,
+    evidence: overlayEvidenceWithoutReEvaluations(evidence, reEvaluations),
   };
 }
 

@@ -99,8 +99,12 @@ const reportPageSource = readFileSync(
   'utf8',
 );
 assert.match(reportPageSource, /new AbortController\(\)/);
-assert.match(reportPageSource, /setHeader\(null\)/);
-assert.match(reportPageSource, /setActiveTab\('summary'\)/);
-assert.match(reportPageSource, /availableTabs\.includes\(current\)/);
+assert.match(reportPageSource, /setFrozenViewModel\(null\)/);
+const frozenReaderSource = readFileSync(
+  resolve(process.cwd(), 'src/components/reports/frozen-report-reader.tsx'),
+  'utf8',
+);
+assert.match(frozenReaderSource, /resolveFrozenReportTab/);
+assert.match(frozenReaderSource, /tabs\.includes\(current\)/);
 
 console.log('report-frozen-tabs contract tests passed');

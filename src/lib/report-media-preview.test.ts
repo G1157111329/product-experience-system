@@ -10,7 +10,8 @@ assert.equal(existsSync(previewPath), true, 'shared report media preview compone
 
 const previewSource = readFileSync(previewPath, 'utf8');
 assert.match(previewSource, /ImagePreview/);
-assert.match(previewSource, /usePresignedUrls/);
+assert.doesNotMatch(previewSource, /usePresignedUrls/);
+assert.match(previewSource, /mediaType=\{media\.type\}/);
 assert.match(previewSource, /report-media-placeholder/);
 assert.match(
   previewSource,
@@ -34,6 +35,8 @@ assert.match(compatibilitySource, /@\/components\/reports\/report-media-preview/
 
 const sharedPreviewSource = readFileSync(resolve(process.cwd(), 'src/components/image-preview.tsx'), 'utf8');
 assert.match(sharedPreviewSource, /<video[\s\S]+?controls/);
+assert.match(sharedPreviewSource, /mediaType\?:\s*string/);
+assert.match(sharedPreviewSource, /mediaType[\s\S]+?isVideo/);
 assert.doesNotMatch(
   sharedPreviewSource,
   /const displayUrl = presignedUrl \|\| url/,

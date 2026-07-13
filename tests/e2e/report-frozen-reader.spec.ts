@@ -94,6 +94,9 @@ test('anonymous reader presigns raw object keys without requesting them as page-
     presignBody = route.request().postDataJSON();
     await route.fulfill({ json: { code: 0, data: { 'garage/private/raw.jpg': 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==' } } });
   });
+  await page.route('**/api/materials/thumb/garage/private/raw.jpg', async (route) => {
+    await route.fulfill({ contentType: 'image/gif', body: Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64') });
+  });
 
   await page.goto('/reports/share/raw-media');
   await page.getByRole('tab', { name: '问题' }).click();
@@ -132,17 +135,19 @@ test('anonymous reader preserves a successful local-public presign result', asyn
   await page.route('**/uploads/garage/private/local.jpg', async (route) => {
     await route.fulfill({ contentType: 'image/gif', body: Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64') });
   });
+  await page.route('**/api/materials/thumb/garage/private/local.jpg', async (route) => {
+    await route.fulfill({ status: 404 });
+  });
 
   await page.goto('/reports/share/local-media');
   await page.getByRole('tab', { name: '问题' }).click();
   await expect(page.getByText('素材不可用')).toHaveCount(0);
   const localThumbnail = page.getByTestId('report-media-item');
   await expect(localThumbnail).toHaveCount(1);
-  await expect(localThumbnail.locator('img')).toHaveAttribute('src', '/api/materials/thumb/garage/private/local.jpg');
-  expect(localPublicRequests).toEqual([]);
+  await expect(localThumbnail.locator('img')).toHaveAttribute('src', '/uploads/garage/private/local.jpg');
+  await expect.poll(() => localPublicRequests.length).toBeGreaterThan(0);
   await localThumbnail.click();
   await expect(page.getByRole('dialog')).toBeVisible();
-  await expect.poll(() => localPublicRequests.length).toBeGreaterThan(0);
 });
 
 for (const failure of [{ name: 'empty result', status: 200 }, { name: 'server error', status: 500 }]) {
@@ -281,7 +286,7 @@ function semanticMedia(prefix: string, count: number, includeVideo = false) {
     id: `${prefix}-${index + 1}`,
     name: `${prefix}-${index + 1}.${includeVideo && index === 1 ? 'mp4' : 'jpg'}`,
     type: includeVideo && index === 1 ? 'video' : 'image',
-    url: transparentPixel,
+    url: includeVideo && index === 1 ? '/api/materials/file/video-no-extension' : transparentPixel,
   }));
 }
 
@@ -326,6 +331,9 @@ async function assertSemanticMedia(page: import('@playwright/test').Page) {
   await expect(primary.getByTestId('report-media-item')).toHaveCount(6);
   await expect(primary.locator('[data-media-type="image"]').first()).toHaveAttribute('data-aspect', '4/3');
   await expect(primary.locator('[data-media-type="video"]')).toHaveAttribute('data-aspect', '16/9');
+  await primary.locator('[data-media-type="video"]').click();
+  await expect(page.getByRole('dialog').locator('video[controls]')).toHaveCount(1);
+  await page.keyboard.press('Escape');
   await expect(primary.getByTestId('report-media-more')).toHaveText('+1');
   await primary.getByTestId('report-media-more').click();
   await expect(primary.getByTestId('report-media-item')).toHaveCount(7);
@@ -340,7 +348,7 @@ async function assertSemanticMedia(page: import('@playwright/test').Page) {
   const appendix = reader.getByTestId('report-media-grid-appendix');
   await expect(appendix).toHaveCount(3);
   await expect(reader.getByText('原始问题素材')).toBeVisible();
-  await expect(reader.getByText('整改素材')).toBeVisible();
+  await expect(reader.getByText('问题补充素材')).toBeVisible();
   await expect(reader.getByText('复评素材')).toBeVisible();
   await expect(appendix.first().getByTestId('report-media-item')).toHaveCount(4);
   await expect(appendix.first().getByTestId('report-media-more')).toHaveText('+1');
@@ -354,6 +362,12 @@ test('semantic media roles size detail and share grids consistently without mobi
   await loginForE2E(detail, 'dockeradmin', 'DockerLocal2026');
   await detail.route('**/api/reports/semantic-media/detail', (route) => route.fulfill({ json: { code: 0, data: { frozenViewModel: semanticMediaModel } } }));
   await share.route('**/api/reports/share?token=semantic-media', (route) => route.fulfill({ json: { code: 0, data: { frozenViewModel: semanticMediaModel, siblingReports: [], siblingFrozenViewModels: {} } } }));
+  for (const page of [detail, share]) {
+    await page.route('**/api/materials/file/video-no-extension', async (route) => {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 2_000));
+      await route.abort();
+    });
+  }
 
   try {
     await detail.goto('/reports/semantic-media');
@@ -364,4 +378,33 @@ test('semantic media roles size detail and share grids consistently without mobi
     await detail.close();
     await share.close();
   }
+});
+
+test('a semantic grid presigns all raw primary media in one batch', async ({ page }) => {
+  const paths = Array.from({ length: 6 }, (_, index) => `garage/private/batch-${index + 1}.jpg`);
+  const model = {
+    ...semanticMediaModel,
+    header: { ...semanticMediaModel.header, id: 'batch-media' },
+    tabs: ['summary', 'function_effect'],
+    issues: [],
+    functionEffects: [{
+      ...semanticMediaModel.functionEffects[0],
+      id: 'batch-effect',
+      evidence: paths.map((url, index) => ({ id: `batch-${index + 1}`, name: `batch-${index + 1}.jpg`, type: 'image', url })),
+      steps: [],
+    }],
+  };
+  const presignBodies: Array<{ paths?: string[] }> = [];
+  await page.route('**/api/reports/share?token=batch-media', (route) => route.fulfill({ json: { code: 0, data: { frozenViewModel: model, siblingReports: [], siblingFrozenViewModels: {} } } }));
+  await page.route('**/api/materials/presign', async (route) => {
+    const body = route.request().postDataJSON() as { paths?: string[] };
+    presignBodies.push(body);
+    await route.fulfill({ json: { code: 0, data: Object.fromEntries(paths.map((path) => [path, transparentPixel])) } });
+  });
+
+  await page.goto('/reports/share/batch-media');
+  await page.getByTestId('frozen-report-reader').getByRole('tab').nth(1).click();
+  await expect(page.getByTestId('report-media-grid-primary').getByTestId('report-media-item')).toHaveCount(6);
+  await expect.poll(() => presignBodies.length).toBe(1);
+  expect(presignBodies[0]?.paths).toEqual(paths);
 });

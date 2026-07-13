@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Play } from 'lucide-react';
 import { ImagePreview } from '@/components/image-preview';
 import {
@@ -8,8 +8,6 @@ import {
   isPendingMediaUrl,
   isUnavailableMediaUrl,
   pendingMediaDataUrl,
-  unavailableMediaDataUrl,
-  usePresignedUrls,
 } from '@/lib/use-presigned-url';
 import { cn } from '@/lib/utils';
 import type { ReportMediaItem, ReportMediaRole } from './report-media-grid';
@@ -21,6 +19,7 @@ interface ReportMediaPreviewProps {
   type?: string;
   name?: string;
   size?: 'xs' | 'sm' | 'md' | 'lg';
+  resolvedUrl?: string;
 }
 
 function storageKey(value: string) {
@@ -38,6 +37,7 @@ export function ReportMediaPreview({
   filePath = '',
   type = 'image',
   name = '',
+  resolvedUrl: resolvedUrlProp,
 }: ReportMediaPreviewProps) {
   const media = item ?? {
     id: filePath || name || 'report-media',
@@ -47,15 +47,9 @@ export function ReportMediaPreview({
   };
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [failedSource, setFailedSource] = useState<string | null>(null);
-  const material = useMemo(() => [{
-    id: media.id,
-    file_url: media.url,
-    file_path: media.url,
-  }], [media.id, media.url]);
-  const presigned = usePresignedUrls(material, { unavailableUrl: unavailableMediaDataUrl });
   if (!media.url) return null;
 
-  const resolvedUrl = presigned.get(media.id)
+  const resolvedUrl = resolvedUrlProp
     ?? (isAllowedMediaSource(media.url) ? media.url : pendingMediaDataUrl);
   const pending = isPendingMediaUrl(resolvedUrl);
   const unavailable = isUnavailableMediaUrl(resolvedUrl);
@@ -120,7 +114,7 @@ export function ReportMediaPreview({
           />
         )}
       </button>
-      <ImagePreview url={previewUrl} onClose={() => setPreviewUrl(null)} />
+      <ImagePreview url={previewUrl} mediaType={media.type} onClose={() => setPreviewUrl(null)} />
     </>
   );
 }

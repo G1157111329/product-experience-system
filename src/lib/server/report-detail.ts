@@ -67,6 +67,7 @@ export type ReportDetailSectionBlockItem = {
   note?: string;
   status?: 'default' | 'positive' | 'warning' | 'risk';
   media?: ReportDetailMediaItem[];
+  mediaRole?: 'primary' | 'evidence' | 'appendix' | 'compact';
 };
 
 export type ReportDetailMediaItem = {
@@ -206,6 +207,7 @@ export type ReportDetailSectionBlock = {
   rows?: Array<Record<string, string>>;
   items?: ReportDetailSectionBlockItem[];
   media?: ReportDetailMediaItem[];
+  mediaRole?: 'primary' | 'evidence' | 'appendix' | 'compact';
   matrix?: ReportDetailMatrix;
   dataMatrix?: ReportDetailDataMatrixProjection;
   dataMatrixV3?: ReportDetailDataMatrixV3Projection;
@@ -685,12 +687,6 @@ function reEvaluationRows(issue: Row) {
   return rows(issue._reEvaluations);
 }
 
-function reEvaluationMedia(issue: Row) {
-  return reEvaluationRows(issue).flatMap((item, index) =>
-    mediaItems(rows(item.materials), `${firstNonEmpty(issue.title, issue.id)} / re-evaluation ${index + 1}`),
-  );
-}
-
 function stepProblemText(step: Row) {
   const points = rows(step.problem_points)
     .map((point) => isRecord(point) ? text(point.text) : text(point))
@@ -884,10 +880,7 @@ function contentSections(report: Row, content: Row, issues: Row[], materials: Ro
   const issueSource = issues.length ? issues : failRecords;
   const allMaterials = [...contentMaterials, ...materials];
   const recordById = new Map(records.map((record) => [text(record.id), record]));
-  const issueMedia = (issue: Row) => [
-    ...issueEvidenceMedia(issue, recordById, allMaterials, recipes),
-    ...reEvaluationMedia(issue),
-  ];
+  const issueMedia = (issue: Row) => issueEvidenceMedia(issue, recordById, allMaterials, recipes);
   const recipeStepRows = recipes.flatMap((recipe) => rows(recipe.recipe_steps).map((step) => ({
     '功能/食谱': firstNonEmpty(recipe.name, recipe.id),
     '步骤': firstNonEmpty(step.step_number, '-'),
@@ -907,16 +900,13 @@ function contentSections(report: Row, content: Row, issues: Row[], materials: Ro
       '素材数': String(effectMedia.length + stepMediaCount),
     };
   });
-  const recipeMedia = recipes.flatMap((recipe) => [
-    ...mediaItems(rows(recipe.effect_materials), firstNonEmpty(recipe.name, recipe.id)),
-    ...rows(recipe.recipe_steps).flatMap((step) => mediaItems(rows(step.materials), `${firstNonEmpty(recipe.name, recipe.id)} / 步骤 ${firstNonEmpty(step.step_number, '')}`)),
-  ]);
   const effectProblemItems = recipes.flatMap((recipe) => parseProblemPoints(recipe.effect_problem_point).map((point, index) => ({
     label: `${firstNonEmpty(recipe.name, recipe.id)} 效果问题 ${index + 1}`,
     value: point.text,
     note: point.materialIds.length ? `素材：${point.materialIds.join('，')}` : undefined,
     status: 'warning' as const,
     media: mediaByIds(rows(recipe.effect_materials), point.materialIds, firstNonEmpty(recipe.name, recipe.id)),
+    mediaRole: 'primary' as const,
   })));
   const reEvaluationItems = issueSource.flatMap((issue) => reEvaluationRows(issue).map((item, index) => ({
     label: `${firstNonEmpty(issue.title, issue.check_item, issue.id)} 复评估 ${index + 1}`,
@@ -924,6 +914,7 @@ function contentSections(report: Row, content: Row, issues: Row[], materials: Ro
     note: firstNonEmpty(isRecord(item.ai_result) ? item.ai_result.score : '', item.created_at),
     status: 'positive' as const,
     media: mediaItems(rows(item.materials), `${firstNonEmpty(issue.title, issue.id)} / 复评估 ${index + 1}`),
+    mediaRole: 'appendix' as const,
   })));
 
   return [
@@ -973,6 +964,7 @@ function contentSections(report: Row, content: Row, issues: Row[], materials: Ro
             note: firstNonEmpty(issue.responsible_person, issue.category, issue.source_type),
             status: isHighRiskLevel(firstNonEmpty(issue.level, issue.problem_level)) ? 'risk' : 'default',
             media: issueMedia(issue),
+            mediaRole: 'appendix' as const,
           })),
           emptyMessage: '暂无问题详情。',
         }),
@@ -1012,7 +1004,8 @@ function contentSections(report: Row, content: Row, issues: Row[], materials: Ro
             value: stepProblemText(step),
             note: firstNonEmpty(step.operation, recipe.recipe_type),
             status: stepProblemText(step) !== '-' ? 'warning' as const : 'default' as const,
-            media: stepProblemMedia(step, `${firstNonEmpty(recipe.name, recipe.id)} / 步骤 ${firstNonEmpty(step.step_number, '')}`).slice(0, 6),
+            media: stepProblemMedia(step, `${firstNonEmpty(recipe.name, recipe.id)} / 步骤 ${firstNonEmpty(step.step_number, '')}`),
+            mediaRole: 'evidence' as const,
           }))),
           emptyMessage: '暂无步骤问题证据。',
         }),
@@ -1021,7 +1014,8 @@ function contentSections(report: Row, content: Row, issues: Row[], materials: Ro
           emptyMessage: '暂无效果问题点。',
         }),
         block('function_effect:media', 'media', '功能效果素材', {
-          media: recipeMedia.slice(0, 24),
+          media: recipes.flatMap((recipe) => mediaItems(rows(recipe.effect_materials), firstNonEmpty(recipe.name, recipe.id))),
+          mediaRole: 'primary',
           emptyMessage: '暂无功能效果素材。',
         }),
       ],

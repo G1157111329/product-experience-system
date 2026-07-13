@@ -377,7 +377,9 @@ export function usePresignedUrls<T extends { id: string; file_url?: string | nul
     return () => {
       mountedRef.current = false;
     };
-  }, [materials, materialSignature, unavailableUrl]);
+  // materialSignature fully represents every material field read by this effect.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [materialSignature, unavailableUrl]);
 
   return urlMap;
 }
