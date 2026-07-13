@@ -1,5 +1,6 @@
 'use client';
 
+import { useRef } from 'react';
 import { cn } from '@/lib/utils';
 
 interface ReportTabBarProps {
@@ -9,13 +10,34 @@ interface ReportTabBarProps {
 }
 
 export function ReportTabBar({ tabs, active, onChange }: ReportTabBarProps) {
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  const moveFocus = (index: number, direction: 1 | -1) => {
+    if (tabs.length === 0) return;
+    const next = (index + direction + tabs.length) % tabs.length;
+    onChange(tabs[next].key);
+    tabRefs.current[next]?.focus();
+  };
+
   return (
-    <nav className="flex items-center gap-1 border-b bg-muted/30 px-4 py-2">
-      {tabs.map((tab) => (
+    <nav role="tablist" aria-label="报告内容" className="flex items-center gap-1 overflow-x-auto border-b bg-muted/30 px-4 py-2">
+      {tabs.map((tab, index) => (
         <button
           key={tab.key}
+          ref={(node) => { tabRefs.current[index] = node; }}
+          id={`report-tab-${tab.key}`}
           type="button"
+          role="tab"
+          aria-selected={active === tab.key}
+          aria-controls={`report-panel-${tab.key}`}
+          tabIndex={active === tab.key ? 0 : -1}
           onClick={() => onChange(tab.key)}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowRight') { event.preventDefault(); moveFocus(index, 1); }
+            if (event.key === 'ArrowLeft') { event.preventDefault(); moveFocus(index, -1); }
+            if (event.key === 'Home') { event.preventDefault(); onChange(tabs[0].key); tabRefs.current[0]?.focus(); }
+            if (event.key === 'End') { event.preventDefault(); onChange(tabs[tabs.length - 1].key); tabRefs.current[tabs.length - 1]?.focus(); }
+          }}
           className={cn(
             'relative flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
             active === tab.key
