@@ -226,12 +226,12 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
     await updateIssueFields({ status: 'open', is_improve: true }, '已标记为待整改');
   };
 
-  // 直接标记为已整改（verified_closed），用户手动确认，不强制走完整状态机流转
+  // 直接标记为整改完成（verified_closed），用户手动确认。
   const markAsRectified = async () => {
     if (!current) return;
     const currentStatus = normalizeIssueStatus(current.status);
     if (currentStatus === 'verified_closed') return;
-    await updateIssueFields({ status: 'verified_closed', is_improve: true }, '已标记为已整改');
+    await updateIssueFields({ status: 'verified_closed', is_improve: true }, '已标记为整改完成');
   };
 
   const handleSaveReEvaluation = async () => {
@@ -391,7 +391,7 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
                       currentStatus === 'verified_closed' ? 'border-current text-emerald-600' : 'bg-background border-border hover:bg-muted/50',
                     )}
                   >
-                    已整改
+                    整改完成
                   </button>
                   <button
                     type="button"

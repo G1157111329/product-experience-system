@@ -22,9 +22,13 @@ const statusClass: Record<StatusBadgeKind, Record<string, string>> = {
   },
   issueStatus: {
     待整改: 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300',
+    open: 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300',
     整改中: 'bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300',
-    已验证: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
+    rectifying: 'bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300',
+    整改完成: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
+    verified_closed: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
     不整改: 'bg-muted text-muted-foreground',
+    waived: 'bg-muted text-muted-foreground',
   },
   report: {
     草稿: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
@@ -45,13 +49,16 @@ const statusClass: Record<StatusBadgeKind, Record<string, string>> = {
 
 export function StatusBadge({ kind = 'generic', value, className, variant = 'secondary', ...props }: StatusBadgeProps) {
   const label = value || '-';
+  const visibleLabel = kind === 'issueStatus'
+    ? ({ open: '待整改', rectifying: '整改中', verified_closed: '整改完成', waived: '不整改' }[label] || label)
+    : kind === 'report' && label === '草稿' ? '已完成' : label;
   return (
     <Badge
       variant={variant}
       className={cn('max-w-full text-[10px]', statusClass[kind][label], className)}
       {...props}
     >
-      <span className="truncate">{kind === 'report' && label === '草稿' ? '已完成' : label}</span>
+      <span className="truncate">{visibleLabel}</span>
     </Badge>
   );
 }

@@ -1,24 +1,15 @@
 /**
- * PRD V4.0 问题状态机
+ * 问题整改状态机
  *
- * 8 态：
- *   open → triaged → assigned → rectifying → pending_verification → verified_closed
- *   任意非终态 ──► waived
- *   verified_closed / waived ──► reopened
- *   reopened 可重新进入 triaged / assigned / rectifying
- *
- * 状态转换由角色 + 当前状态共同决定，转换时可校验必填字段。
+ * 权威状态只有四个：待整改、整改中、整改完成、不整改。旧八态只在读取
+ * 边界被折叠为这四态，不再作为可写状态或 UI 状态出现。
  */
 
 export type IssueStatus =
   | 'open'
-  | 'triaged'
-  | 'assigned'
   | 'rectifying'
-  | 'pending_verification'
   | 'verified_closed'
-  | 'waived'
-  | 'reopened';
+  | 'waived';
 
 export type IssueTransition =
   | 'triage'
@@ -27,8 +18,7 @@ export type IssueTransition =
   | 'submit_verification'
   | 'verify'
   | 'waive'
-  | 'reopen'
-  | 'return_to_rectifying'; // 复测失败，从 pending_verification 回到 rectifying
+  | 'return_to_rectifying';
 
 export type AuthRole =
   | 'executor'
@@ -48,47 +38,42 @@ interface TransitionRule {
 
 const TRANSITIONS: Record<IssueTransition, TransitionRule> = {
   triage: {
-    from: ['open', 'reopened'],
-    to: 'triaged',
+    from: ['open'],
+    to: 'open',
     allowedRoles: ['task_owner', 'product_manager', 'admin'],
   },
   assign: {
-    from: ['triaged', 'reopened'],
-    to: 'assigned',
+    from: ['open', 'rectifying'],
+    to: 'rectifying',
     allowedRoles: ['task_owner', 'admin'],
     requiredFields: ['responsible_person'],
   },
   start_rectify: {
-    from: ['assigned', 'reopened'],
+    from: ['open', 'rectifying'],
     to: 'rectifying',
     allowedRoles: ['rectification_owner', 'task_owner', 'admin'],
   },
   submit_verification: {
     from: ['rectifying'],
-    to: 'pending_verification',
+    to: 'rectifying',
     allowedRoles: ['rectification_owner', 'task_owner', 'admin'],
     requiredFields: ['verification_note'],
   },
   return_to_rectifying: {
-    from: ['pending_verification'],
+    from: ['verified_closed', 'rectifying'],
     to: 'rectifying',
     allowedRoles: ['rectification_owner', 'task_owner', 'reviewer', 'admin'],
   },
   verify: {
-    from: ['pending_verification'],
+    from: ['open', 'rectifying'],
     to: 'verified_closed',
     allowedRoles: ['reviewer', 'task_owner', 'product_manager', 'admin'],
   },
   waive: {
-    from: ['open', 'triaged', 'assigned', 'rectifying', 'pending_verification', 'reopened'],
+    from: ['open', 'rectifying', 'verified_closed'],
     to: 'waived',
     allowedRoles: ['task_owner', 'product_manager', 'admin'],
     requiredFields: ['no_improve_reason'],
-  },
-  reopen: {
-    from: ['verified_closed', 'waived'],
-    to: 'reopened',
-    allowedRoles: ['task_owner', 'product_manager', 'reviewer', 'admin'],
   },
 };
 
@@ -98,14 +83,20 @@ export const LEGACY_STATUS_MAP: Record<string, IssueStatus> = {
   待整改: 'open',
   整改中: 'rectifying',
   已验证: 'verified_closed',
+  已整改: 'verified_closed',
+  整改完成: 'verified_closed',
   不整改: 'waived',
   // V4.0 active Chinese labels (UI dictionary) are also accepted as aliases.
   待分派: 'open',
-  已分派: 'triaged',
-  已指派: 'assigned',
-  待验证: 'pending_verification',
+  已分派: 'open',
+  已指派: 'open',
+  待验证: 'rectifying',
   已验证关闭: 'verified_closed',
-  已重开: 'reopened',
+  已重开: 'rectifying',
+  triaged: 'open',
+  assigned: 'open',
+  pending_verification: 'rectifying',
+  reopened: 'rectifying',
 };
 
 export function normalizeIssueStatus(status: string | null | undefined): IssueStatus {
@@ -115,13 +106,9 @@ export function normalizeIssueStatus(status: string | null | undefined): IssueSt
   // Fallback to open if somehow invalid
   const allStatuses: IssueStatus[] = [
     'open',
-    'triaged',
-    'assigned',
     'rectifying',
-    'pending_verification',
     'verified_closed',
     'waived',
-    'reopened',
   ];
   return allStatuses.includes(valid) ? valid : 'open';
 }
@@ -130,18 +117,17 @@ export type IssueStatusPresentationKey = 'pending' | 'rectifying' | 'waived' | '
 
 export interface IssueStatusPresentation {
   key: IssueStatusPresentationKey;
-  label: '待整改' | '整改中' | '不整改' | '已整改';
+  label: '待整改' | '整改中' | '不整改' | '整改完成';
   className: string;
 }
 
 /**
- * Keep the richer historical lifecycle in storage while presenting the four
- * business states used by experience engineers throughout the UI.
+ * Present the same four states that are persisted as canonical storage codes.
  */
 export function getIssueStatusPresentation(status: string | null | undefined): IssueStatusPresentation {
   switch (normalizeIssueStatus(status)) {
     case 'verified_closed':
-      return { key: 'rectified', label: '已整改', className: 'text-emerald-600' };
+      return { key: 'rectified', label: '整改完成', className: 'text-emerald-600' };
     case 'waived':
       return { key: 'waived', label: '不整改', className: 'text-muted-foreground' };
     case 'open':
@@ -164,6 +150,7 @@ export function toStoredIssueStatus(status: string): IssueStatus {
     case 'waived':
       return 'waived';
     case '已整改':
+    case '整改完成':
     case 'rectified':
       return 'verified_closed';
     default:

@@ -180,7 +180,9 @@ async function applyRecipeCreate(client: Client, taskId: string, action: AgentAc
   const { data, error } = await client.from('recipes').insert({
     task_id: taskId,
     name,
-    description: optionalString(action.payload.description),
+    recipe_type: optionalString(action.payload.recipe_type) || '食谱',
+    effect_status: 'pending',
+    ingredients: optionalString(action.payload.description),
   }).select().single();
   if (error) throw new Error(error.message || '新建食谱失败');
   return successResult(action, '已新建食谱', data);

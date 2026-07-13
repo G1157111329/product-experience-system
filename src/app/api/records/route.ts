@@ -46,7 +46,8 @@ export async function POST(request: NextRequest) {
     if (!contextsAreValid) {
       return NextResponse.json({ code: 1, message: '食谱或步骤不属于当前体验计划' }, { status: 400 });
     }
-    const { data, error } = await client.from('check_records').insert(body).select();
+    const rows = body.map((row) => ({ ...row, evaluation_result: row.evaluation_result || '待定' }));
+    const { data, error } = await client.from('check_records').insert(rows).select();
     if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
     return NextResponse.json({ code: 0, message: '批量创建成功', data });
   }

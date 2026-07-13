@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
     issue_metrics AS (
       SELECT
         count(i.id)::text AS total_issues,
-        count(i.id) FILTER (WHERE i.status = '已验证')::text AS resolved_issues
+        count(i.id) FILTER (WHERE i.status IN ('verified_closed', '已验证', '已验证关闭', '已整改', '整改完成'))::text AS resolved_issues
       FROM issues i
       JOIN experience_tasks t ON t.id = i.task_id
       ${issueOwnerWhere}
@@ -71,7 +71,14 @@ export async function GET(request: NextRequest) {
   // 最近问题
   const { rows: recentIssueRows } = await pool.query<DashboardRow>(
     `
-    SELECT i.id, i.title, i.status, i.level, i.created_at
+    SELECT i.id, i.title,
+      CASE
+        WHEN i.status IN ('verified_closed', '已验证', '已验证关闭', '已整改', '整改完成') THEN 'verified_closed'
+        WHEN i.status IN ('waived', '不整改') THEN 'waived'
+        WHEN i.status IN ('rectifying', 'pending_verification', 'reopened', '整改中', '待验证', '已重开') THEN 'rectifying'
+        ELSE 'open'
+      END AS status,
+      i.level, i.created_at
     FROM issues i
     JOIN experience_tasks t ON t.id = i.task_id
     ${issueOwnerWhere}

@@ -71,7 +71,7 @@ export async function POST(
           title,
           description: point.issueText.trim(),
           level: '二类',
-          status: '待整改',
+          status: 'open',
           sourceType: 'matrix_issue',
           source: '数据矩阵',
         })

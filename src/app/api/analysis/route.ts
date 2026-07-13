@@ -101,7 +101,7 @@ export async function GET(request: NextRequest) {
       (SELECT count(*) FROM filtered_tasks)::text AS total_tasks,
       (SELECT count(*) FROM filtered_tasks WHERE status = '已完成')::text AS completed_tasks,
       (SELECT count(*) FROM filtered_issues)::text AS total_issues,
-      (SELECT count(*) FROM filtered_issues WHERE status = '已验证')::text AS rectified_issues
+      (SELECT count(*) FROM filtered_issues WHERE status IN ('verified_closed', '已验证', '已验证关闭', '已整改', '整改完成'))::text AS rectified_issues
     `,
     params,
   );
@@ -136,9 +136,15 @@ export async function GET(request: NextRequest) {
 
   const { rows: issueRectRows } = await pool.query<{ status: string; level: string; count: string }>(
     `${filteredCte}
-    SELECT COALESCE(status, '未分类') AS status, COALESCE(level, '未分类') AS level, count(*)::text AS count
+    SELECT CASE
+      WHEN status IN ('open', '待整改', '待分派', '已分派', '已指派') THEN '待整改'
+      WHEN status IN ('rectifying', 'pending_verification', 'reopened', '整改中', '待验证', '已重开') THEN '整改中'
+      WHEN status IN ('verified_closed', '已验证', '已验证关闭', '已整改', '整改完成') THEN '整改完成'
+      WHEN status IN ('waived', '不整改') THEN '不整改'
+      ELSE '待整改'
+    END AS status, COALESCE(level, '未分类') AS level, count(*)::text AS count
     FROM filtered_issues
-    GROUP BY status, level
+    GROUP BY 1, level
     `,
     params,
   );
@@ -163,7 +169,7 @@ export async function GET(request: NextRequest) {
       `${filteredCte}
       SELECT ${issueKeySql} AS key,
         count(*)::text AS issues,
-        count(*) FILTER (WHERE status = '已验证')::text AS rectified_issues
+        count(*) FILTER (WHERE status IN ('verified_closed', '已验证', '已验证关闭', '已整改', '整改完成'))::text AS rectified_issues
       FROM filtered_issues
       GROUP BY key
       `,
@@ -288,7 +294,15 @@ export async function POST(request: NextRequest) {
           write(issueHeaders);
           for (let offset = 0; ; offset += batchSize) {
             const { rows } = await pool.query<DataRow>(`
-              SELECT title, level, status, source_type, product_model, improve_plan, responsible_person, created_at
+              SELECT title, level,
+                CASE
+                  WHEN status IN ('open', '待整改', '待分派', '已分派', '已指派') THEN '待整改'
+                  WHEN status IN ('rectifying', 'pending_verification', 'reopened', '整改中', '待验证', '已重开') THEN '整改中'
+                  WHEN status IN ('verified_closed', '已验证', '已验证关闭', '已整改', '整改完成') THEN '整改完成'
+                  WHEN status IN ('waived', '不整改') THEN '不整改'
+                  ELSE '待整改'
+                END AS status,
+                source_type, product_model, improve_plan, responsible_person, created_at
               FROM issues
               WHERE COALESCE(source_type, '') NOT LIKE '%_old'
               ORDER BY created_at DESC

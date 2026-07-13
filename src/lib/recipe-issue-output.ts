@@ -15,13 +15,12 @@ export function normalizeRecipeIssueTitle(value: string) {
 export function findRecipeIssue(
   issues: RecipeIssueSummary[],
   recipeId: string,
-  problemText: string,
+  _problemText: string,
 ) {
-  const title = normalizeRecipeIssueTitle(problemText);
+  void _problemText;
   return issues.find((issue) => (
     issue.recipe_id === recipeId
     && issue.source_type === 'recipe_problem'
-    && normalizeRecipeIssueTitle(issue.title) === title
   ));
 }
 

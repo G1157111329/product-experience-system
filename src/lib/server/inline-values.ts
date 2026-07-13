@@ -14,6 +14,7 @@
  */
 import { getDb } from '@/storage/database/pg-db';
 import { eq, sql } from 'drizzle-orm';
+import { normalizeEvaluationStatus } from '@/lib/evaluation-status';
 import {
   checkRecords,
   recipes,
@@ -121,7 +122,15 @@ registerEntityHandler('sensory_record', async (input) => {
     .update(checkRecords)
     .set(patch)
     .where(eq(checkRecords.id, input.entityId))
-    .returning({ id: checkRecords.id })
+    .returning({
+      id: checkRecords.id,
+      taskId: checkRecords.taskId,
+      checkItem: checkRecords.checkItem,
+      evaluationResult: checkRecords.evaluationResult,
+      problemLevel: checkRecords.problemLevel,
+      standardCategory: checkRecords.standardCategory,
+      problemDescription: checkRecords.problemDescription,
+    })
     .execute();
   if (result.length === 0) return { kind: 'not_found' };
   return { kind: 'success', version: Date.now(), appliedValue: input.value };
@@ -133,6 +142,7 @@ registerEntityHandler('function_effect_record', async (input) => {
   const patch: Record<string, unknown> = { updatedAt: sql`NOW()` };
   if (input.fieldId === 'effect_description') patch.effectDescription = input.value ?? null;
   else if (input.fieldId === 'effect_problem_point') patch.effectProblemPoint = input.value ?? null;
+  else if (input.fieldId === 'effect_status') patch.effectStatus = normalizeEvaluationStatus(input.value);
   else if (input.fieldId === 'name') patch.name = input.value ?? null;
   else return { kind: 'unsupported' };
 
@@ -140,7 +150,13 @@ registerEntityHandler('function_effect_record', async (input) => {
     .update(recipes)
     .set(patch)
     .where(eq(recipes.id, input.entityId))
-    .returning({ id: recipes.id })
+    .returning({
+      id: recipes.id,
+      taskId: recipes.taskId,
+      name: recipes.name,
+      recipeType: recipes.recipeType,
+      effectStatus: recipes.effectStatus,
+    })
     .execute();
   if (result.length === 0) return { kind: 'not_found' };
   return { kind: 'success', version: Date.now(), appliedValue: input.value };

@@ -45,19 +45,10 @@ export const defaultDict: DictMap = {
     { code: "量产阶段", label: "量产阶段", sortOrder: 41, isActive: true, description: "兼容旧值" },
   ],
   issue_status_dict: [
-    { code: "open", label: "待分派", sortOrder: 10, isActive: true },
-    { code: "triaged", label: "已分派", sortOrder: 20, isActive: true },
-    { code: "assigned", label: "已指派", sortOrder: 30, isActive: true },
-    { code: "rectifying", label: "整改中", sortOrder: 40, isActive: true },
-    { code: "pending_verification", label: "待验证", sortOrder: 50, isActive: true },
-    { code: "verified_closed", label: "已验证关闭", sortOrder: 60, isActive: true },
-    { code: "waived", label: "不整改", sortOrder: 70, isActive: true },
-    { code: "reopened", label: "已重开", sortOrder: 80, isActive: true },
-    // 旧值兼容（inactive，仅用于数据迁移读取）
-    { code: "待整改", label: "待整改(旧)", sortOrder: 91, isActive: false, description: "V4.0 废弃，映射到 open" },
-    { code: "整改中", label: "整改中(旧)", sortOrder: 92, isActive: false, description: "V4.0 废弃，映射到 rectifying" },
-    { code: "已验证", label: "已验证(旧)", sortOrder: 93, isActive: false, description: "V4.0 废弃，映射到 verified_closed" },
-    { code: "不整改", label: "不整改(旧)", sortOrder: 94, isActive: false, description: "V4.0 废弃，映射到 waived" },
+    { code: "open", label: "待整改", sortOrder: 10, isActive: true },
+    { code: "rectifying", label: "整改中", sortOrder: 20, isActive: true },
+    { code: "verified_closed", label: "整改完成", sortOrder: 30, isActive: true },
+    { code: "waived", label: "不整改", sortOrder: 40, isActive: true },
   ],
   task_status_dict: [
     { code: "待执行", label: "待执行", sortOrder: 10, isActive: true },

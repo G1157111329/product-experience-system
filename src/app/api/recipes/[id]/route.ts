@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessRecipe, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { normalizeIngredientItems } from '@/lib/task-context-contract';
+import { normalizeEvaluationStatus } from '@/lib/evaluation-status';
 
 function collectProblemPointMaterialIds(value: unknown): string[] {
   if (!value) return [];
@@ -78,6 +79,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (body.effect_score !== undefined) updateData.effect_score = body.effect_score;
   if (body.effect_problem_point !== undefined) updateData.effect_problem_point = body.effect_problem_point;
   if (body.effect_ai_result !== undefined) updateData.effect_ai_result = body.effect_ai_result;
+  if (body.effect_status !== undefined) updateData.effect_status = normalizeEvaluationStatus(body.effect_status);
 
   const { data, error } = await client.from('recipes').update(updateData).eq('id', id).select().single();
 

@@ -515,7 +515,7 @@ export async function POST(request: NextRequest) {
           sourceReportId: report.id,
           sourceType: 'recipe_problem',
           description: `对象：${objText}\n项目：${nodeText}\n问题：${ppText}`,
-          status: '待整改',
+          status: 'open',
           sourceAssemblyId: assemblyId,
           sourceCellId: cellId || null,
           sourceItemNodeId: itemNodeId || null,
@@ -551,7 +551,7 @@ export async function POST(request: NextRequest) {
         sourceReportId: report.id,
         sourceType: 'record_fail',
         description: [record.check_requirement, record.check_standard, record.problem_description].filter(Boolean).join('\n'),
-        status: '待整改',
+        status: 'open',
         recordId: String(record.id || '') || null,
       });
       createdKeys.add(issueKey);
@@ -803,7 +803,7 @@ export async function POST(request: NextRequest) {
           sourceReportId: report.id,
           sourceType: 'record_fail',
           description: [record.check_requirement, record.check_standard, record.problem_description].filter(Boolean).join('\n'),
-          status: '待整改',
+          status: 'open',
           recordId: String(record.id || '') || null,
         });
       createdKeys.add(issueKey);
@@ -835,7 +835,7 @@ export async function POST(request: NextRequest) {
             sourceReportId: report.id,
             sourceType: 'recipe_problem',
             description: `步骤${step.step_number}: ${step.operation || ''}`,
-            status: '待整改',
+            status: 'open',
           });
           createdKeys.add(issueKey);
         }
@@ -872,7 +872,7 @@ export async function POST(request: NextRequest) {
             sourceReportId: report.id,
             sourceType: 'recipe_problem',
             description: '效果/出品效果评价问题',
-            status: '待整改',
+            status: 'open',
           });
           createdKeys.add(issueKey);
         }
@@ -898,7 +898,7 @@ export async function POST(request: NextRequest) {
           sourceReportId: report.id,
           sourceType: 'matrix_problem',
           description: hierarchy ? `矩阵位置：${hierarchy}` : null,
-          status: '待整改',
+          status: 'open',
           sourceCellId: point.id,
         });
         createdKeys.add(issueKey);

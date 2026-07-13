@@ -419,6 +419,7 @@ async function acceptRecipeSuggestions(client: ReturnType<typeof getSupabaseClie
         name,
         ingredients: recipe.ingredients || null,
         recipe_type: recipe.recipe_type || recipe.recipeType || '食谱',
+        effect_status: 'pending',
       })
       .select()
       .single();

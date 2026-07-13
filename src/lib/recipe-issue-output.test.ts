@@ -33,12 +33,12 @@ test('builds a traceable issue payload from an effect problem point', () => {
   );
 });
 
-test('matches an existing issue only within the same recipe and source', () => {
+test('matches the stable recipe source even when the legacy problem title changed', () => {
   const issues = [
     { id: 'other', recipe_id: 'recipe-2', source_type: 'recipe_problem', title: '口感偏粗糙' },
     { id: 'right', recipe_id: 'recipe-1', source_type: 'recipe_problem', title: ' 口感偏粗糙 ' },
   ];
 
   assert.equal(findRecipeIssue(issues, 'recipe-1', '口感偏粗糙')?.id, 'right');
-  assert.equal(findRecipeIssue(issues, 'recipe-1', '温度偏低'), undefined);
+  assert.equal(findRecipeIssue(issues, 'recipe-1', '温度偏低')?.id, 'right');
 });

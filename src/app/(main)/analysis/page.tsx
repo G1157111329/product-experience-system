@@ -39,7 +39,7 @@ const LEVEL_TEXT_COLORS: Record<string, string> = {
 };
 const RECT_STATUS_COLORS: Record<string, string> = {
   '待整改': 'bg-amber-100 text-amber-700', '整改中': 'bg-blue-100 text-blue-700',
-  '已验证': 'bg-emerald-100 text-emerald-700', '不整改': 'bg-muted text-muted-foreground',
+  '整改完成': 'bg-emerald-100 text-emerald-700', '不整改': 'bg-muted text-muted-foreground',
 };
 
 export default function AnalysisPage() {
@@ -348,7 +348,7 @@ export default function AnalysisPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {['待整改', '整改中', '已验证', '不整改'].map(status => {
+                    {['待整改', '整改中', '整改完成', '不整改'].map(status => {
                       const row = rectGrid[status] || {};
                       const rowTotal = (row['一类'] || 0) + (row['二类'] || 0) + (row['三类'] || 0);
                       return (
@@ -363,9 +363,9 @@ export default function AnalysisPage() {
                     })}
                     <tr className="font-medium">
                       <td className="py-2 px-3">合计</td>
-                      <td className="text-center py-2 px-3">{(rectGrid['待整改']?.['一类'] || 0) + (rectGrid['整改中']?.['一类'] || 0) + (rectGrid['已验证']?.['一类'] || 0) + (rectGrid['不整改']?.['一类'] || 0)}</td>
-                      <td className="text-center py-2 px-3">{(rectGrid['待整改']?.['二类'] || 0) + (rectGrid['整改中']?.['二类'] || 0) + (rectGrid['已验证']?.['二类'] || 0) + (rectGrid['不整改']?.['二类'] || 0)}</td>
-                      <td className="text-center py-2 px-3">{(rectGrid['待整改']?.['三类'] || 0) + (rectGrid['整改中']?.['三类'] || 0) + (rectGrid['已验证']?.['三类'] || 0) + (rectGrid['不整改']?.['三类'] || 0)}</td>
+                      <td className="text-center py-2 px-3">{(rectGrid['待整改']?.['一类'] || 0) + (rectGrid['整改中']?.['一类'] || 0) + (rectGrid['整改完成']?.['一类'] || 0) + (rectGrid['不整改']?.['一类'] || 0)}</td>
+                      <td className="text-center py-2 px-3">{(rectGrid['待整改']?.['二类'] || 0) + (rectGrid['整改中']?.['二类'] || 0) + (rectGrid['整改完成']?.['二类'] || 0) + (rectGrid['不整改']?.['二类'] || 0)}</td>
+                      <td className="text-center py-2 px-3">{(rectGrid['待整改']?.['三类'] || 0) + (rectGrid['整改中']?.['三类'] || 0) + (rectGrid['整改完成']?.['三类'] || 0) + (rectGrid['不整改']?.['三类'] || 0)}</td>
                       <td className="text-center py-2 px-3">{metrics.totalIssues}</td>
                     </tr>
                   </tbody>

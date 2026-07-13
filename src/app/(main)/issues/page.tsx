@@ -45,7 +45,7 @@ const LEVEL_COLORS: Record<string, string> = {
 };
 
 export default function IssuesPage() {
-  const statusList = ['待整改', '整改中', '不整改', '已整改'];
+  const statusList = ['待整改', '整改中', '整改完成', '不整改'];
   const levelList = ['一类', '二类', '三类'];
   const [issues, setIssues] = useState<Issue[]>([]);
   const [reports, setReports] = useState<{ id: string; title: string; task_id: string; created_at: string; content: Record<string, unknown> }[]>([]);
@@ -235,7 +235,7 @@ export default function IssuesPage() {
     }
   };
 
-  const handleStatusAction = async (issue: Issue, label: '待整改' | '整改中' | '不整改' | '已整改') => {
+  const handleStatusAction = async (issue: Issue, label: '待整改' | '整改中' | '不整改' | '整改完成') => {
     await handleStatusChange(issue.id, label);
     if (label === '整改中' || label === '不整改') {
       setSelectedIssue({ ...issue, status: toStoredIssueStatus(label), is_improve: label === '整改中' });
@@ -305,7 +305,7 @@ export default function IssuesPage() {
           { label: '待整改', value: pendingCount, color: 'text-foreground' },
           { label: '整改中', value: inProgressCount, color: 'text-amber-600' },
           { label: '不整改', value: waivedCount, color: 'text-muted-foreground' },
-          { label: '已整改', value: verifiedCount, color: 'text-emerald-600' },
+          { label: '整改完成', value: verifiedCount, color: 'text-emerald-600' },
         ].map((stat) => (
           <Card key={stat.label} className="lg:py-4">
             <CardContent className="p-4 text-center">
@@ -364,7 +364,7 @@ export default function IssuesPage() {
                       )}
                       <span className="text-sm flex-1 min-w-0 truncate">{issue.title}</span>
                       <div className="flex w-full shrink-0 flex-wrap gap-1 sm:w-auto" onClick={(e) => e.stopPropagation()}>
-                        {(['待整改', '整改中', '不整改', '已整改'] as const).map((label) => {
+                        {(['待整改', '整改中', '整改完成', '不整改'] as const).map((label) => {
                           const current = getIssueStatusPresentation(issue.status);
                           const candidate = getIssueStatusPresentation(label);
                           return (

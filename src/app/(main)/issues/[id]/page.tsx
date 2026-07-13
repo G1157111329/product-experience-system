@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { getIssueStatusPresentation } from '@/lib/server/issue-state-machine';
 
 interface IssueDetail {
   id: string;
@@ -75,7 +76,8 @@ export default function IssueDetailPage() {
   if (loading) return <div className="p-6 animate-pulse space-y-4"><div className="h-8 bg-muted rounded w-64" /></div>;
   if (!issue) return <div className="p-6">问题不存在</div>;
 
-  const statusFlow = ['待整改', '整改中', '已验证', '不整改'];
+  const statusFlow = ['待整改', '整改中', '整改完成', '不整改'];
+  const currentStatusLabel = getIssueStatusPresentation(form.status ?? issue.status).label;
 
   return (
     <div className="p-4 lg:p-6 space-y-4">
@@ -106,7 +108,7 @@ export default function IssueDetailPage() {
                   onClick={() => editing && setForm({ ...form, status: step })}
                   className={cn(
                     'flex min-h-10 w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors',
-                    issue.status === step ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground',
+                    currentStatusLabel === step ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground',
                     editing && 'cursor-pointer hover:opacity-80'
                   )}
                 >

@@ -63,8 +63,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (body.status !== undefined) {
     const allowed = await getDictCodeSet('issue_status_dict');
     targetStatus = toStoredIssueStatus(String(body.status));
-    // 字典校验失败时，回退到状态机合法状态集合（8 个英文枚举），避免字典表异常阻断业务
-    const machineStatuses: IssueStatus[] = ['open', 'triaged', 'assigned', 'rectifying', 'pending_verification', 'verified_closed', 'waived', 'reopened'];
+    // 字典异常时仍只允许四个权威状态，避免旧八态重新写回数据库。
+    const machineStatuses: IssueStatus[] = ['open', 'rectifying', 'verified_closed', 'waived'];
     const isAllowed = allowed.has(targetStatus) || machineStatuses.includes(targetStatus);
     if (!isAllowed) {
       return NextResponse.json({ code: 1, message: '无效的问题状态' }, { status: 400 });
@@ -84,7 +84,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         }
         targetStatus = applyTransition(currentStatus, transition);
       }
-      // 未指定 transition：视为用户手动直接设置状态（如标记"已整改"），允许合法状态间自由切换
+      // 未指定 transition：视为用户手动直接设置四态之一（如“整改完成”）。
     }
   }
 

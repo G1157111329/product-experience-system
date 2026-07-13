@@ -1,4 +1,4 @@
-import { pgTable, serial, timestamp, varchar, jsonb, boolean, index, foreignKey, integer, text, unique, date, bigint, numeric, smallint } from "drizzle-orm/pg-core"
+import { pgTable, serial, timestamp, varchar, jsonb, boolean, index, uniqueIndex, foreignKey, integer, text, unique, date, bigint, numeric, smallint } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 import type { AnyPgColumn } from "drizzle-orm/pg-core"
 
@@ -112,7 +112,7 @@ export const recipes = pgTable("recipes", {
 	effectScore: varchar("effect_score", { length: 20 }),
 	effectProblemPoint: text("effect_problem_point"),
 	effectAiResult: jsonb("effect_ai_result"),
-	effectStatus: varchar("effect_status", { length: 20 }),
+	effectStatus: varchar("effect_status", { length: 20 }).default('pending').notNull(),
 }, (table) => [
 	index("recipes_task_id_idx").using("btree", table.taskId.asc().nullsLast().op("text_ops")),
 	foreignKey({
@@ -233,7 +233,7 @@ export const issues = pgTable("issues", {
 	planCompleteDate: date("plan_complete_date"),
 	actualCompleteDate: date("actual_complete_date"),
 	isClosed: boolean("is_closed").default(false),
-	status: varchar({ length: 20 }).default('待整改').notNull(),
+	status: varchar({ length: 20 }).default('open').notNull(),
 	verificationNote: text("verification_note"),
 	recipeId: varchar("recipe_id", { length: 36 }),
 	recipeStepId: varchar("recipe_step_id", { length: 36 }),
@@ -265,6 +265,8 @@ export const issues = pgTable("issues", {
 	index("issues_severity_code_idx").using("btree", table.severityCode.asc().nullsLast().op("text_ops")),
 	index("issues_due_at_idx").using("btree", table.dueAt.asc().nullsLast().op("timestamptz_ops")),
 	index("issues_source_assembly_id_idx").using("btree", table.sourceAssemblyId.asc().nullsLast().op("text_ops")),
+	uniqueIndex("issues_recipe_source_unique").on(table.recipeId).where(sql`${table.sourceType} = 'recipe_problem' AND ${table.recipeId} IS NOT NULL AND ${table.sourceReportId} IS NULL`),
+	uniqueIndex("issues_record_source_unique").on(table.recordId).where(sql`${table.sourceType} = 'record_fail' AND ${table.recordId} IS NOT NULL AND ${table.sourceReportId} IS NULL`),
 	foreignKey({
 			columns: [table.taskId],
 			foreignColumns: [experienceTasks.id],
@@ -275,13 +277,13 @@ export const issues = pgTable("issues", {
 			foreignColumns: [checkRecords.id],
 			name: "issues_record_id_check_records_id_fk"
 		}).onDelete("set null"),
-	unique("issues_unique_per_task").on(table.taskId, table.title, table.sourceType),
 ]);
 
 export const issueReEvaluations = pgTable("issue_re_evaluations", {
 	id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
 	issueId: varchar("issue_id", { length: 36 }).notNull(),
 	description: text(),
+	result: varchar({ length: 20 }).default('pending').notNull(),
 	aiResult: jsonb("ai_result"),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	createdBy: varchar("created_by", { length: 36 }),

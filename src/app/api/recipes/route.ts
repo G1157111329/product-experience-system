@@ -5,6 +5,7 @@ import { recipeSteps, recipes } from '@/storage/database/shared/schema';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessRecipe, canAccessTask, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { normalizeIngredientItems } from '@/lib/task-context-contract';
+import { normalizeEvaluationStatus } from '@/lib/evaluation-status';
 
 function toApiStep(step: typeof recipeSteps.$inferSelect) {
   return {
@@ -36,6 +37,7 @@ function toApiRecipe(recipe: typeof recipes.$inferSelect, steps: Array<typeof re
     effect_score: recipe.effectScore,
     effect_problem_point: recipe.effectProblemPoint,
     effect_ai_result: recipe.effectAiResult,
+    effect_status: recipe.effectStatus,
     recipe_steps: steps.map(toApiStep),
   };
 }
@@ -110,6 +112,7 @@ export async function POST(request: NextRequest) {
     ingredients: body.ingredients || null,
     ingredientItems: normalizeIngredientItems(body.ingredient_items),
     recipeType: body.recipe_type || '食谱',
+    effectStatus: normalizeEvaluationStatus(body.effect_status),
   }).returning();
 
   return NextResponse.json({ code: 0, message: '创建成功', data: toApiRecipe(recipe) });
