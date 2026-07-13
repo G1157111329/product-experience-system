@@ -87,16 +87,28 @@ export function ReportDataMatrixReadView({ projection }: { projection: unknown }
               </div>
             )}
 
-            {card.issues.length > 0 && (
+            {(card.issueSummary || card.issues.length > 0) && (
               <div className="min-w-0 rounded-md border border-red-200 bg-red-50 px-2.5 py-2 text-xs text-red-800">
-                <p className="font-medium">问题点</p>
-                <ul className="mt-1 list-disc space-y-1 pl-4">
-                  {card.issues.map((issue) => (
-                    <li key={issue.id} className="break-words">
-                      {issue.text}{issue.status ? `（${issue.status}）` : ''}
-                    </li>
-                  ))}
-                </ul>
+                {card.issueSummary && (
+                  <div className="space-y-1">
+                    <p className="font-medium">问题 {card.issueSummary.count} 个</p>
+                    {card.issueSummary.levels.length > 0 && (
+                      <p className="break-words">等级：{card.issueSummary.levels.join('、')}</p>
+                    )}
+                  </div>
+                )}
+                {card.issues.length > 0 && (
+                  <>
+                    <p className={card.issueSummary ? 'mt-2 font-medium' : 'font-medium'}>问题点</p>
+                    <ul className="mt-1 list-disc space-y-1 pl-4">
+                      {card.issues.map((issue) => (
+                        <li key={issue.id} className="break-words">
+                          {issue.text}{issue.status ? `（${issue.status}）` : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
               </div>
             )}
 

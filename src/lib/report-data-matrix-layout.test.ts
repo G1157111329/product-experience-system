@@ -12,7 +12,7 @@ const v2 = {
       { dimensionKey: 'empty', displayName: '空字段', columnGroup: 'observed' },
     ],
   },
-  viewport: { totalGroups: 1, totalRows: 1 },
+  viewport: { totalGroups: 1, totalRows: 2 },
   groups: [{
     id: 'group-v2',
     label: '苹果组',
@@ -29,12 +29,22 @@ const v2 = {
       slots: {
         result: { summary: '效果稳定' },
         process: { note: '运行无抖动' },
-        issues: { count: 1, severitySummary: ['出汁口滴液'] },
+        issues: { count: 2, severitySummary: ['一类'] },
       },
       evidence: {
         primaryCount: 1,
         media: [{ id: 'media-v2', name: '出汁效果.jpg', type: 'image', url: '/uploads/v2.jpg' }],
       },
+    }, {
+      id: 'row-v2-empty-levels',
+      subject: { label: '样品 B' },
+      metrics: {},
+      slots: {
+        result: {},
+        process: {},
+        issues: { count: 1, severitySummary: [] },
+      },
+      evidence: { primaryCount: 0, media: [] },
     }],
   }],
 };
@@ -60,7 +70,14 @@ const v3 = {
     cells: { input: '0', calc: '0%', evaluation: '清透', empty: '', media: '' },
   }],
   cellMedia: {
-    'row-v3:media': [{ materialId: 'media-v3', materialType: 'image', fileName: '清透度.jpg', fileUrl: '/uploads/v3.jpg' }],
+    'row-v3:primary': [
+      { materialId: 'media-v3', materialType: 'image', fileName: '清透度.jpg', fileUrl: '/uploads/v3.jpg' },
+      { materialId: '', materialType: 'image', fileName: '无 ID 素材.jpg', fileUrl: '/uploads/no-id.jpg' },
+    ],
+    'row-v3:media': [
+      { materialId: 'media-v3', materialType: 'image', fileName: '清透度.jpg', fileUrl: '/uploads/v3.jpg' },
+      { materialId: '', materialType: 'image', fileName: '无 ID 素材.jpg', fileUrl: '/uploads/no-id.jpg' },
+    ],
   },
   narratives: [{ blockType: 'summary', content: '整体表现稳定', showInReport: true }],
   issuePoints: [{ id: 'issue-v3', leafRowId: 'row-v3', columnId: 'evaluation', leafRowIndex: 1, issueText: '果渣偏多', status: 'open', materialIds: ['media-v3'] }],
@@ -69,7 +86,7 @@ const v3 = {
 
 const v2Layout = dataMatrixReadLayout(v2);
 assert.equal(v2Layout.title, '原汁机数据矩阵');
-assert.equal(v2Layout.cards.length, 1);
+assert.equal(v2Layout.cards.length, 2);
 assert.deepEqual(v2Layout.cards[0]?.path, ['苹果组', '样品 A']);
 assert.deepEqual(v2Layout.cards[0]?.fields.map((field) => [field.label, field.group]), [
   ['温度', 'inputs'],
@@ -79,7 +96,9 @@ assert.deepEqual(v2Layout.cards[0]?.fields.map((field) => [field.label, field.gr
 ]);
 assert.equal(v2Layout.cards[0]?.fields.find((field) => field.label === '出汁率')?.value, 0);
 assert.equal(v2Layout.cards[0]?.fields.some((field) => field.value === ''), false);
-assert.deepEqual(v2Layout.cards[0]?.issues.map((issue) => issue.text), ['出汁口滴液']);
+assert.deepEqual(v2Layout.cards[0]?.issues, []);
+assert.deepEqual(v2Layout.cards[0]?.issueSummary, { count: 2, levels: ['一类'] });
+assert.deepEqual(v2Layout.cards[1]?.issueSummary, { count: 1, levels: [] });
 assert.deepEqual(v2Layout.cards[0]?.media.map((item) => item.url), ['/uploads/v2.jpg']);
 assert.deepEqual(v2Layout.cards[0]?.narratives.map((item) => item.text), ['室温静置 30 分钟', '运行无抖动']);
 
@@ -94,7 +113,8 @@ assert.deepEqual(v3Layout.cards[0]?.fields.map((field) => [field.label, field.gr
 assert.equal(v3Layout.cards[0]?.fields.find((field) => field.label === '温度')?.value, '0');
 assert.equal(v3Layout.cards[0]?.fields.some((field) => field.value === ''), false);
 assert.deepEqual(v3Layout.cards[0]?.issues.map((issue) => [issue.text, issue.status]), [['果渣偏多', 'open']]);
-assert.deepEqual(v3Layout.cards[0]?.media.map((item) => item.url), ['/uploads/v3.jpg']);
+assert.deepEqual(v3Layout.cards[0]?.media.map((item) => item.url), ['/uploads/v3.jpg', '/uploads/no-id.jpg']);
+assert.deepEqual(v3Layout.cards[0]?.media.map((item) => item.id), ['media-v3', 'file:/uploads/no-id.jpg|无 ID 素材.jpg']);
 assert.deepEqual(v3Layout.narratives.map((item) => item.text), ['整体表现稳定']);
 
 console.log('report data matrix read layout tests passed');

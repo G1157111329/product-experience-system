@@ -21,6 +21,11 @@ export interface ReportDataMatrixReadIssue {
   status?: string;
 }
 
+export interface ReportDataMatrixIssueSummary {
+  count: number;
+  levels: string[];
+}
+
 export interface ReportDataMatrixReadNarrative {
   id: string;
   label: string;
@@ -33,6 +38,7 @@ export interface ReportDataMatrixReadCard {
   fields: ReportDataMatrixReadField[];
   media: ReportDataMatrixReadMedia[];
   issues: ReportDataMatrixReadIssue[];
+  issueSummary?: ReportDataMatrixIssueSummary;
   narratives: ReportDataMatrixReadNarrative[];
 }
 
@@ -82,13 +88,14 @@ function fieldGroup(value: UnknownRecord): ReportDataMatrixFieldGroup {
   return 'inputs';
 }
 
-function mediaItem(value: unknown, fallbackId: string): ReportDataMatrixReadMedia | null {
+function mediaItem(value: unknown): ReportDataMatrixReadMedia | null {
   const item = record(value);
   const url = text(item.url || item.fileUrl || item.file_url || item.filePath || item.file_path);
   if (!url) return null;
+  const name = text(item.name || item.fileName || item.file_name) || '素材';
   return {
-    id: text(item.id || item.materialId || item.material_id) || fallbackId,
-    name: text(item.name || item.fileName || item.file_name) || '素材',
+    id: text(item.id || item.materialId || item.material_id) || `file:${url}|${name}`,
+    name,
     type: text(item.type || item.materialType || item.material_type) || 'image',
     url,
   };
@@ -131,12 +138,10 @@ function v2Layout(source: UnknownRecord): ReportDataMatrixReadLayout {
       if (conclusion) {
         fields.push({ id: `${rowId}:result`, label: '效果结论', value: conclusion, group: 'evaluation' });
       }
-      const issues = array(issueSlot.severitySummary).flatMap((issue, issueIndex): ReportDataMatrixReadIssue[] => {
-        const issueText = text(issue);
-        return issueText ? [{ id: `${rowId}:issue:${issueIndex}`, text: issueText }] : [];
-      });
-      const media = array(evidence.media).flatMap((item, itemIndex) => {
-        const mapped = mediaItem(item, `${rowId}:media:${itemIndex}`);
+      const issueCount = Math.max(0, Number(issueSlot.count ?? 0));
+      const issueLevels = [...new Set(array(issueSlot.severitySummary).map(text).filter(Boolean))];
+      const media = array(evidence.media).flatMap((item) => {
+        const mapped = mediaItem(item);
         return mapped ? [mapped] : [];
       });
       const narratives: ReportDataMatrixReadNarrative[] = [];
@@ -149,7 +154,8 @@ function v2Layout(source: UnknownRecord): ReportDataMatrixReadLayout {
         path: [groupLabel, text(record(row.subject).label) || rowId].filter(Boolean),
         fields,
         media,
-        issues,
+        issues: [],
+        ...(issueCount > 0 ? { issueSummary: { count: issueCount, levels: issueLevels } } : {}),
         narratives,
       };
     });
@@ -190,13 +196,14 @@ function v3Layout(source: UnknownRecord): ReportDataMatrixReadLayout {
         unit: text(column.unitText) || undefined,
       }];
     });
-    const media = Object.entries(cellMedia).flatMap(([key, items]) => {
+    const mediaCandidates = Object.entries(cellMedia).flatMap(([key, items]) => {
       if (!key.startsWith(`${rowId}:`)) return [];
-      return array(items).flatMap((item, itemIndex) => {
-        const mapped = mediaItem(item, `${key}:${itemIndex}`);
+      return array(items).flatMap((item) => {
+        const mapped = mediaItem(item);
         return mapped ? [mapped] : [];
       });
     });
+    const media = [...new Map(mediaCandidates.map((item) => [item.id, item])).values()];
     const issues = issuePoints.flatMap((issue, issueIndex): ReportDataMatrixReadIssue[] => {
       if (text(issue.leafRowId) !== rowId) return [];
       const issueText = text(issue.issueText);
