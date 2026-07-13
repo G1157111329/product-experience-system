@@ -19,5 +19,10 @@ const paperRendererSource = readFileSync(resolve(process.cwd(), 'src/components/
 assert.match(paperRendererSource, /cell\.notes/);
 assert.match(paperRendererSource, /row\.issueSummary/);
 assert.match(paperRendererSource, /paperProblemTexts\(effect\.problemPoints\)/);
+assert.match(paperRendererSource, /item\.posterUrl/);
+assert.match(paperRendererSource, /source\.posterUrl/);
+assert.match(paperRendererSource, /data-testid="paper-video-poster"/);
+assert.match(paperRendererSource, /<img[\s\S]+?data-video-poster/);
+assert.doesNotMatch(paperRendererSource, /<video\b/);
 
 console.log('report-print-matrix tests passed');

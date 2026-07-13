@@ -3,10 +3,11 @@ import type { FrozenMedia, FrozenReportViewModel } from '@/lib/report-frozen-vie
 
 type Row = Record<string, unknown>;
 
-export type PrintMedia = FrozenMedia;
+export type PrintMedia = FrozenMedia & { posterUrl?: string };
 
 export type PrintComparisonCell = {
   value: string;
+  score: string;
   notes: string[];
   problems: string[];
   media: PrintMedia[];
@@ -51,17 +52,50 @@ function text(value: unknown, fallback = '') {
   return result || fallback;
 }
 
+function videoType(type: string, url: string) {
+  return type.toLowerCase().includes('video') || /\.(mp4|m4v|mov|webm)(?:\?|$)/i.test(url);
+}
+
+function posterDerivativeUrl(url: string) {
+  const withoutQuery = url.split('?')[0] || '';
+  let key = '';
+  if (withoutQuery.startsWith('/api/materials/file/')) key = withoutQuery.slice('/api/materials/file/'.length);
+  else if (withoutQuery.startsWith('/uploads/')) key = withoutQuery.slice('/uploads/'.length);
+  else if (!/^(?:https?:|data:|blob:|\/api\/)/i.test(withoutQuery)) key = withoutQuery.replace(/^\/+/, '');
+  return key ? `/api/materials/poster/${key.split('/').map(encodeURIComponent).join('/')}` : '';
+}
+
+function dedupeMedia(items: PrintMedia[]) {
+  const ids = new Set<string>();
+  const urls = new Set<string>();
+  const names = new Set<string>();
+  return items.filter((item) => {
+    const id = text(item.id);
+    const url = text(item.url);
+    const name = text(item.name);
+    const duplicate = Boolean((id && ids.has(id)) || (url && urls.has(url)) || (name && names.has(name)));
+    if (id) ids.add(id);
+    if (url) urls.add(url);
+    if (name) names.add(name);
+    return !duplicate;
+  });
+}
+
 function mediaFromUnknown(value: unknown): PrintMedia[] {
-  return rows(value).flatMap((item, index) => {
+  const projected = rows(value).flatMap((item, index) => {
     const url = text(item.url || item.file_url || item.fileUrl || item.file_path || item.filePath);
     if (!url) return [];
+    const type = text(item.type || item.material_type || item.materialType, 'image');
+    const explicitPoster = text(item.posterUrl || item.poster_url || item.thumbnailUrl || item.thumbnail_url);
     return [{
       id: text(item.id || item.material_id || item.materialId, `${url}:${index}`),
       name: text(item.name || item.file_name || item.fileName, '素材'),
-      type: text(item.type || item.material_type || item.materialType, 'image'),
+      type,
       url,
+      ...(videoType(type, url) ? { posterUrl: explicitPoster || posterDerivativeUrl(url) || undefined } : {}),
     }];
   });
+  return dedupeMedia(projected);
 }
 
 function textList(value: unknown): string[] {
@@ -71,7 +105,7 @@ function textList(value: unknown): string[] {
 }
 
 function cloneMedia(items: FrozenMedia[]): PrintMedia[] {
-  return items.map((item) => ({ ...item }));
+  return mediaFromUnknown(items);
 }
 
 function cloneFrozenModelParts(model: FrozenReportViewModel) {
@@ -105,7 +139,9 @@ function comparisonMatrix(snapshotValue: unknown): PrintMatrix {
   const snapshot = record(snapshotValue);
   const assembly = record(snapshot.assembly);
   const objects = rows(snapshot.objects);
-  const nodes = rows(snapshot.item_nodes).filter((node) => {
+  const allNodes = rows(snapshot.item_nodes);
+  const nodesById = new Map(allNodes.map((node) => [text(node.id), node]));
+  const nodes = allNodes.filter((node) => {
     const nodeType = text(node.node_type, 'item');
     return ['item', 'condition', 'process_node', 'metric', 'issue_group'].includes(nodeType);
   });
@@ -127,19 +163,29 @@ function comparisonMatrix(snapshotValue: unknown): PrintMatrix {
           && text(candidate.object_id || candidate.comparison_object_id) === column.id
         ));
         cellMap[column.id] = {
-          value: text(cell?.effect_summary || cell?.value || cell?.conclusion || cell?.text, '-'),
+          value: text(cell?.effect_summary || cell?.metric_value || cell?.measurement_value || cell?.value || cell?.conclusion || cell?.text || cell?.manual_score, '-'),
+          score: text(cell?.manual_score || cell?.ai_score),
           notes: textList(cell?.process_notes),
           problems: textList(cell?.problem_points),
-          media: [
+          media: dedupeMedia([
             ...mediaFromUnknown(cell?.inline_media),
             ...mediaFromUnknown(cell?.appendix_media),
             ...mediaFromUnknown(cell?.media),
-          ],
+          ]),
         };
+      }
+      const ancestors: string[] = [];
+      const visited = new Set<string>();
+      let parent = nodesById.get(text(node.parent_id));
+      while (parent && !visited.has(text(parent.id))) {
+        visited.add(text(parent.id));
+        const label = text(parent.node_label || parent.label);
+        if (label) ancestors.unshift(label);
+        parent = nodesById.get(text(parent.parent_id));
       }
       return {
         id,
-        path: [text(node.parent_label || node.group_label), text(node.node_label || node.label, `项目 ${rowIndex + 1}`)].filter(Boolean),
+        path: [...ancestors, text(node.parent_label || node.group_label), text(node.node_label || node.label, `项目 ${rowIndex + 1}`)].filter(Boolean),
         cells: cellMap,
       };
     }),
@@ -167,15 +213,26 @@ function projectMatrix(matrix: FrozenReportViewModel['matrix']): PrintMatrix | n
   };
 }
 
+export function printPageForMatrix(matrix: PrintMatrix | null): PrintReportViewModel['page'] {
+  if (!matrix || matrix.kind !== 'comparison') return { paper: 'A4', orientation: 'portrait' };
+  const estimatedColumns = matrix.columns.length + 1;
+  const denseRows = matrix.rows.filter((row) => Object.values(row.cells).some((cell) => (
+    cell.notes.length > 0 || cell.problems.length > 0 || cell.media.length > 0 || cell.value.length > 24
+  ))).length;
+  return estimatedColumns >= 4 || matrix.rows.length >= 8 || (estimatedColumns >= 3 && denseRows >= 4)
+    ? { paper: 'A3', orientation: 'landscape' }
+    : { paper: 'A4', orientation: 'portrait' };
+}
+
 export function buildPrintReportViewModel(model: FrozenReportViewModel): PrintReportViewModel {
   const frozen = cloneFrozenModelParts(model);
-  const comparison = model.matrix?.kind === 'comparison';
+  const matrix = projectMatrix(model.matrix);
   return {
     sourceReportId: model.header.id,
     snapshotResolution: model.snapshotResolution,
-    page: { paper: comparison ? 'A3' : 'A4', orientation: comparison ? 'landscape' : 'portrait' },
+    page: printPageForMatrix(matrix),
     ...frozen,
-    matrix: projectMatrix(model.matrix),
+    matrix,
   };
 }
 
@@ -222,8 +279,11 @@ function renderMedia(items: PrintMedia[]) {
   if (items.length === 0) return '';
   return `<div class="paper-media">${items.map((item) => {
     const name = escapeHtml(item.name || item.id);
-    if (item.type.toLowerCase().includes('video')) {
-      return `<figure class="paper-video" data-media-id="${escapeHtml(item.id)}"><div class="video-poster">VIDEO</div><figcaption>${name}</figcaption></figure>`;
+    if (videoType(item.type, item.url)) {
+      const poster = item.posterUrl
+        ? `<img data-video-poster src="${escapeHtml(item.posterUrl)}" alt="${name}" />`
+        : '';
+      return `<figure class="paper-video" data-media-id="${escapeHtml(item.id)}">${poster}<div class="video-label">VIDEO</div><figcaption>${name}</figcaption></figure>`;
     }
     return `<figure data-media-id="${escapeHtml(item.id)}"><img src="${escapeHtml(item.url)}" alt="${name}" /><figcaption>${name}</figcaption></figure>`;
   }).join('')}</div>`;
@@ -252,7 +312,7 @@ function renderComparison(matrix: Extract<PrintMatrix, { kind: 'comparison' }>) 
     const cell = row.cells[column.id];
     const notes = cell?.notes.map((item) => `<p><b>过程记录：</b>${escapeHtml(item)}</p>`).join('') || '';
     const problems = cell?.problems.map((item) => `<p class="issues"><b>问题点：</b>${escapeHtml(item)}</p>`).join('') || '';
-    return `<td>${escapeHtml(cell?.value || '-')}${notes}${problems}${renderMedia(cell?.media || [])}</td>`;
+    return `<td>${escapeHtml(cell?.value || '-')}${cell?.score ? `<p><b>评分：</b>${escapeHtml(cell.score)}</p>` : ''}${notes}${problems}${renderMedia(cell?.media || [])}</td>`;
   }).join('')}</tr>`).join('');
   return `<section data-print-matrix="comparison"><h2>${escapeHtml(matrix.title)}</h2><table class="comparison-table"><thead><tr><th>项目</th>${head}</tr></thead><tbody>${body}</tbody></table></section>`;
 }
@@ -290,7 +350,7 @@ export function renderPrintReportHtml(model: PrintReportViewModel, generatedAt =
     h1 { margin: 0 0 4px; font-size: 22px; } h2 { margin: 18px 0 8px; padding-bottom: 4px; border-bottom: 2px solid #0f766e; color: #0f766e; font-size: 16px; break-after: avoid; } h3 { margin: 0 0 5px; font-size: 12px; break-after: avoid; }
     section { break-inside: auto; } .cover,.paper-row { border: 1px solid #d1d5db; border-radius: 6px; padding: 9px; margin: 7px 0; background: #fff; break-inside: avoid; } .muted,.meta { color: #6b7280; }
     .paper-fields { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 5px; } .paper-field { border: 1px solid #e5e7eb; border-radius: 4px; padding: 5px; } .paper-field span,.paper-field b { display: block; overflow-wrap: anywhere; }
-    .paper-media { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; } figure { width: 72px; margin: 0; border: 1px solid #d1d5db; border-radius: 4px; padding: 3px; break-inside: avoid; } figure img,.video-poster { width: 64px; height: 48px; object-fit: cover; display: flex; align-items: center; justify-content: center; background: #e5e7eb; color: #374151; font-weight: 700; } figcaption { margin-top: 2px; color: #6b7280; font-size: 8px; overflow-wrap: anywhere; }
+    .paper-media { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; } figure { width: 72px; margin: 0; border: 1px solid #d1d5db; border-radius: 4px; padding: 3px; break-inside: avoid; } figure img { width: 64px; height: 48px; object-fit: cover; display: block; background: #e5e7eb; } .paper-video { position: relative; } .video-label { position: absolute; left: 3px; top: 35px; width: 64px; padding: 1px 0; background: rgba(17,24,39,.72); color: #fff; text-align: center; font-weight: 700; } figcaption { margin-top: 2px; color: #6b7280; font-size: 8px; overflow-wrap: anywhere; }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; } thead { display: table-header-group; } th,td { border: 1px solid #d1d5db; padding: 5px; vertical-align: top; overflow-wrap: anywhere; } th { background: #f0fdfa; color: #0f766e; } .issues { color: #991b1b; }
   </style></head><body data-print-report-id="${escapeHtml(model.sourceReportId)}">
     <header class="cover"><h1>${escapeHtml(model.header.title)}</h1>${model.header.productModel ? `<p>${escapeHtml(model.header.productModel)}</p>` : ''}<p class="meta">生成时间：${escapeHtml(generatedAt.toISOString())}</p></header>

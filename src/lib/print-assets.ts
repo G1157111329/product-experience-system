@@ -17,6 +17,24 @@ export function uniqueUrls(urls: string[]): string[] {
   return result;
 }
 
+const posterPathPrefix = '/api/materials/poster/';
+
+export function posterStorageKey(posterUrl: string) {
+  const pathname = new URL(posterUrl, 'http://print.local').pathname;
+  if (!pathname.startsWith(posterPathPrefix)) return '';
+  return pathname.slice(posterPathPrefix.length).split('/').map((segment) => {
+    try { return decodeURIComponent(segment); } catch { return segment; }
+  }).join('/');
+}
+
+export function signedPosterUrl(posterUrl: string, signedMediaUrl: string) {
+  const signedIsAbsolute = /^https?:\/\//i.test(signedMediaUrl);
+  const signed = new URL(signedMediaUrl, 'http://print.local');
+  const poster = new URL(posterUrl, 'http://print.local');
+  poster.search = signed.search;
+  return signedIsAbsolute ? `${signed.origin}${poster.pathname}${poster.search}` : `${poster.pathname}${poster.search}`;
+}
+
 export async function mapWithConcurrency<T, R>(
   items: T[],
   concurrency: number,

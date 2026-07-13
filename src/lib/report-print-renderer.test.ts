@@ -27,7 +27,7 @@ function frozenModel(matrix: FrozenReportViewModel['matrix']): FrozenReportViewM
     matrix,
     functionEffects: [{
       id: 'effect-1', name: 'Juice effect', evaluation: 'Clear and stable', score: '8', problemPoints: [{ text: 'Foam remains' }],
-      evidence: [{ id: 'effect-video', name: 'effect.mp4', type: 'video', url: '/api/materials/file/video-no-extension' }],
+      evidence: [{ id: 'effect-video', name: 'effect.mp4', type: 'video', url: '/api/materials/file/videos/effect.mp4' }],
       steps: [],
     }],
     capabilities: { canManageIssues: false, canShare: false, canExport: true },
@@ -86,21 +86,49 @@ for (const [model, expected] of [
 const comparison = frozenModel({
   kind: 'comparison',
   snapshot: {
-    matrix_name: 'Comparison Matrix', objects: [{ id: 'a', label: 'Machine A' }, { id: 'b', label: 'Machine B' }],
-    item_nodes: [{ id: 'row-c', node_type: 'item', label: 'Juice quality', parent_label: 'Effect' }],
+    matrix_name: 'Comparison Matrix', objects: [{ id: 'a', label: 'Machine A' }],
+    item_nodes: [
+      { id: 'parent-c', node_type: 'section', node_label: 'Effect' },
+      { id: 'row-c', node_type: 'metric', node_label: 'Juice quality', parent_id: 'parent-c' },
+    ],
     cells: [
-      { item_node_id: 'row-c', object_id: 'a', effect_summary: 'Clear', process_notes: ['Fast cycle'], problem_points: ['Foam'], inline_media: [{ id: 'comparison-video', name: 'comparison.mp4', type: 'video', url: '/api/materials/file/comparison' }] },
-      { item_node_id: 'row-c', comparison_object_id: 'b', value: 'Cloudy' },
+      {
+        item_node_id: 'row-c', object_id: 'a', metric_value: '72.1%', measurement_value: '71%', manual_score: 8,
+        process_notes: ['Fast cycle'], problem_points: ['Foam'],
+        inline_media: [{ id: 'comparison-video', name: 'comparison.mp4', material_type: 'video', file_path: 'videos/comparison.mp4' }],
+        appendix_media: [{ id: 'comparison-video', name: 'duplicate-by-id.mp4', material_type: 'video', file_path: 'videos/comparison-copy.mp4' }],
+        media: [
+          { id: 'legacy-by-url', name: 'duplicate-by-url.mp4', material_type: 'video', file_path: 'videos/comparison-copy.mp4' },
+          { id: 'legacy-by-name', name: 'comparison.mp4', material_type: 'video', file_path: 'videos/other.mp4' },
+        ],
+      },
     ],
   },
 });
 assert.equal(buildPrintReportViewModel(v2).page.orientation, 'portrait');
 assert.equal(buildPrintReportViewModel(v3).page.orientation, 'portrait');
-assert.equal(buildPrintReportViewModel(comparison).page.orientation, 'landscape');
-const comparisonHtml = renderPrintReportHtml(buildPrintReportViewModel(comparison));
-for (const expectedText of ['Comparison Matrix', 'Juice quality', 'Fast cycle', 'Foam', 'comparison.mp4']) {
+assert.deepEqual(buildPrintReportViewModel(comparison).page, { paper: 'A4', orientation: 'portrait' });
+const comparisonPrint = buildPrintReportViewModel(comparison);
+assert.equal(comparisonPrint.matrix?.kind === 'comparison' ? comparisonPrint.matrix.rows[0]?.cells.a.media.length : 0, 1, 'overlapping inline/appendix/legacy media must be deduplicated');
+assert.equal(comparisonPrint.matrix?.kind === 'comparison' ? comparisonPrint.matrix.rows[0]?.cells.a.value : '', '72.1%');
+assert.equal(comparisonPrint.matrix?.kind === 'comparison' ? (comparisonPrint.matrix.rows[0]?.cells.a as { score?: string }).score : '', '8');
+const comparisonHtml = renderPrintReportHtml(comparisonPrint);
+for (const expectedText of ['Comparison Matrix', 'Effect / Juice quality', '72.1%', '评分：8', 'Fast cycle', 'Foam', 'comparison.mp4', '/api/materials/poster/videos/comparison.mp4']) {
   assert.equal(comparisonHtml.includes(expectedText), true, `missing comparison ${expectedText}`);
 }
+assert.match(comparisonHtml, /<img[^>]+data-video-poster/);
+assert.equal((comparisonHtml.match(/data-media-id="comparison-video"/g) || []).length, 1);
+
+const wideComparison = frozenModel({
+  kind: 'comparison',
+  snapshot: {
+    matrix_name: 'Wide comparison',
+    objects: Array.from({ length: 4 }, (_, index) => ({ id: `object-${index}`, object_name: `Object ${index}` })),
+    item_nodes: Array.from({ length: 8 }, (_, index) => ({ id: `row-${index}`, node_type: 'metric', node_label: `Metric ${index}` })),
+    cells: [],
+  },
+});
+assert.deepEqual(buildPrintReportViewModel(wideComparison).page, { paper: 'A3', orientation: 'landscape' });
 const v2Html = renderPrintReportHtml(buildPrintReportViewModel(v2));
 assert.equal(v2Html.includes('问题 2 个'), true);
 assert.equal(v2Html.includes('II'), true);

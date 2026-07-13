@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { normalizePrintMode, uniqueUrls, mapWithConcurrency } from './print-assets';
+import { normalizePrintMode, uniqueUrls, mapWithConcurrency, posterStorageKey, signedPosterUrl } from './print-assets';
 
 assert.equal(normalizePrintMode('high'), 'high');
 assert.equal(normalizePrintMode('text'), 'text');
@@ -9,6 +9,16 @@ assert.equal(normalizePrintMode(null), 'fast');
 assert.deepEqual(
   uniqueUrls(['a.jpg', '', 'b.jpg', 'a.jpg', '  ', 'c.jpg', 'b.jpg']),
   ['a.jpg', 'b.jpg', 'c.jpg'],
+);
+
+assert.equal(posterStorageKey('/api/materials/poster/videos/demo%20clip.mp4'), 'videos/demo clip.mp4');
+assert.equal(
+  signedPosterUrl('/api/materials/poster/videos/demo%20clip.mp4', '/api/materials/file/videos/demo%20clip.mp4?exp=123&token=signed'),
+  '/api/materials/poster/videos/demo%20clip.mp4?exp=123&token=signed',
+);
+assert.equal(
+  signedPosterUrl('/api/materials/poster/videos/demo.mp4', 'https://media.example/api/materials/file/videos/demo.mp4?token=signed'),
+  'https://media.example/api/materials/poster/videos/demo.mp4?token=signed',
 );
 
 async function main() {

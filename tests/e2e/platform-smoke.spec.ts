@@ -104,10 +104,12 @@ test('comparison authoring saves inline cell text in an existing task', async ({
 
   await page.goto('/tasks/golden-task-comparison?tab=comparison');
   const expandSection = page.getByRole('button', { name: '展开大类' }).first();
-  if (await expandSection.count()) await expandSection.click();
-  await page.getByRole('button', { name: '展开细项' }).first().click();
+  await expect(expandSection).toBeVisible();
+  await expandSection.click();
+  const expandItem = page.getByRole('button', { name: '展开细项' }).first();
+  await expect(expandItem).toBeVisible();
+  await expandItem.click();
   await expect(page.locator('textarea').first(), 'inline matrix cell editor should be visible').toBeVisible();
-  await expect(page.locator('button:has(svg.lucide-save)').first(), 'inline matrix save button should be visible').toBeVisible();
 
   await page.getByRole('button', { name: /选择素材/ }).first().click();
   const materialDialog = page.getByRole('dialog', { name: /选择素材/ });
@@ -124,7 +126,7 @@ test('comparison authoring saves inline cell text in an existing task', async ({
 
   const marker = `E2E inline effect ${Date.now()}`;
   await page.locator('textarea').first().fill(marker);
-  await page.locator('button:has(svg.lucide-save)').first().click();
+  await page.locator('textarea').first().blur();
 
   await expect.poll(async () => {
     const updatedMatrixResponse = await page.request.get(`/api/comparison-matrix?assembly_id=${assemblyId}`);
@@ -158,20 +160,34 @@ test('report detail, print, and share keep the frozen report contract', async ({
   await page.getByRole('tab', { name: '对比矩阵', exact: true }).click();
   await expect(page.getByTestId('report-frozen-detail')).toBeVisible();
 
-  await page.goto('/reports/print?id=golden-report-single&mode=text');
-  await expect(page.getByTestId('print-product-info')).toBeVisible();
+  await page.goto('/reports/print?id=golden-report-comparison&mode=high');
+  await expect(page.getByTestId('print-report-ready')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'GT-02 三台 7L 和面机图片矩阵报告', exact: true })).toBeVisible();
+  await expect(page.getByText('中式面团效果', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('边缘粘附明显', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('golden-cell-a-noodle.png', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('print-comparison-matrix')).toBeVisible();
   await expect(page.getByTestId('print-legacy-content')).toHaveCount(0);
 
-  const singlePdfPreflightResponse = await page.request.get('/api/reports/golden-report-single/pdf?preflight=1');
-  expect(singlePdfPreflightResponse.ok(), 'single PDF preflight API should return 2xx').toBeTruthy();
+  const singlePdfPreflightResponse = await page.request.get('/api/reports/golden-report-comparison/pdf?preflight=1');
+  expect(singlePdfPreflightResponse.ok(), 'comparison PDF preflight API should return 2xx').toBeTruthy();
   const singlePdfPreflight = await singlePdfPreflightResponse.json();
-  expect(singlePdfPreflight.data?.profile?.id, 'single preflight should expose A4 profile').toBe('single_a4_portrait');
-  expect(singlePdfPreflight.data?.preflight?.ok, 'single PDF should pass blocking preflight').toBe(true);
+  expect(singlePdfPreflight.data?.profile?.id, 'comparison preflight should expose its frozen layout profile').toBe('comparison_image_matrix_a3_landscape');
+  expect(singlePdfPreflight.data?.preflight?.ok, 'comparison PDF should pass blocking preflight').toBe(true);
 
-  const singlePdfResponse = await page.request.get('/api/reports/golden-report-single/pdf');
-  expect(singlePdfResponse.ok(), 'single PDF API should return a PDF').toBeTruthy();
-  expect(singlePdfResponse.headers()['content-type'], 'single PDF should be a PDF response').toContain('application/pdf');
+  const singlePdfResponse = await page.request.get('/api/reports/golden-report-comparison/pdf');
+  expect(singlePdfResponse.ok(), 'comparison PDF API should return a PDF').toBeTruthy();
+  expect(singlePdfResponse.headers()['content-type'], 'comparison PDF should be a PDF response').toContain('application/pdf');
   expect(singlePdfResponse.headers()['content-disposition'], 'PDF filename should use the report title').toContain('filename*=UTF-8');
+  const pdfBuffer = await singlePdfResponse.body();
+  expect(pdfBuffer.subarray(0, 5).toString('ascii'), 'PDF payload should have a real PDF header').toBe('%PDF-');
+  const pdfParse = (await import('pdf-parse')).default;
+  const parsedPdf = await pdfParse(pdfBuffer);
+  const normalizedPdfText = parsedPdf.text.replace(/\s+/g, '');
+  expect(normalizedPdfText).toContain('GT-02三台7L和面机图片矩阵报告');
+  expect(normalizedPdfText).toContain('中式面团效果');
+  expect(normalizedPdfText).toContain('边缘粘附明显');
+  expect(normalizedPdfText).toContain('golden-cell-a-noodle.png');
 
   const shareResponse = await page.request.post('/api/reports/share', {
     data: { report_id: 'golden-report-single', duration: '7d' },
@@ -191,13 +207,13 @@ test('report detail keeps the latest report during a delayed client-side navigat
   const comparisonHeaderResponse = await page.request.get('/api/reports/golden-report-comparison/header');
   const comparisonHeader = (await comparisonHeaderResponse.json()).data as { title: string };
 
-  let markSlowHeaderStarted!: () => void;
-  const slowHeaderStarted = new Promise<void>((resolve) => { markSlowHeaderStarted = resolve; });
-  let releaseSlowHeader!: () => void;
-  const slowHeaderRelease = new Promise<void>((resolve) => { releaseSlowHeader = resolve; });
-  await page.route('**/api/reports/golden-report-single/header', async (route) => {
-    markSlowHeaderStarted();
-    await slowHeaderRelease;
+  let markSlowDetailStarted!: () => void;
+  const slowDetailStarted = new Promise<void>((resolve) => { markSlowDetailStarted = resolve; });
+  let releaseSlowDetail!: () => void;
+  const slowDetailRelease = new Promise<void>((resolve) => { releaseSlowDetail = resolve; });
+  await page.route('**/api/reports/golden-report-single/detail', async (route) => {
+    markSlowDetailStarted();
+    await slowDetailRelease;
     try {
       await route.continue();
     } catch {
@@ -218,18 +234,18 @@ test('report detail keeps the latest report during a delayed client-side navigat
   await page.goto('/reports/golden-report-comparison');
   await expect(page.getByText(comparisonHeader.title, { exact: true }).first()).toBeVisible();
   await clientPush('/reports/golden-report-single');
-  await slowHeaderStarted;
+  await slowDetailStarted;
   await expect(page).toHaveURL(/\/reports\/golden-report-single$/);
   await expect(page.getByText(comparisonHeader.title, { exact: true })).toHaveCount(0);
   await expect(page.getByTestId('report-frozen-detail')).toHaveCount(0);
   await clientPush('/reports/golden-report-comparison');
   await expect(page).toHaveURL(/\/reports\/golden-report-comparison$/);
-  await expect(page.getByRole('button', { name: '对比矩阵', exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: '对比矩阵', exact: true })).toBeVisible();
 
-  releaseSlowHeader();
+  releaseSlowDetail();
   await page.waitForTimeout(300);
   await expect(page.getByText(comparisonHeader.title, { exact: true }).first()).toBeVisible();
-  await expect(page.getByRole('button', { name: '对比矩阵', exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: '对比矩阵', exact: true })).toBeVisible();
 });
 
 test('permissions, share access, and mobile detail path are guarded', async ({ page, request, browser }) => {

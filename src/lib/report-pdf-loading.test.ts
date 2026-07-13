@@ -33,5 +33,9 @@ assert.doesNotMatch(routeSource, /loadAnchoredReportSnapshot/);
 assert.doesNotMatch(routeSource, /attachReEvaluations/);
 assert.doesNotMatch(routeSource, /buildReportDetailModel/);
 assert.match(routeSource, /renderPrintReportHtml\(printModel/);
+assert.match(routeSource, /posterStorageKey\(sourceUrl\)/);
+assert.match(routeSource, /signedPosterUrl\(target\.posterUrl,\s*signedUrl\)/);
+assert.match(routeSource, /startsWith\(['"]data:/);
+assert.doesNotMatch(routeSource, /item\.type\.toLowerCase\(\)\.includes\(['"]video['"]\)\s*\|\|/);
 
 console.log('report-pdf-loading tests passed');

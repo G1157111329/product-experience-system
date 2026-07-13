@@ -6,11 +6,12 @@ import { Loader2 } from 'lucide-react';
 import { ReportPrintDocument } from '@/components/reports/report-section-block-renderer';
 import { reportFilenameBase } from '@/lib/report-filename';
 import type { FrozenReportViewModel } from '@/lib/report-frozen-view';
-import { mapWithConcurrency, normalizePrintMode, uniqueUrls, type PrintMode } from '@/lib/print-assets';
+import { mapWithConcurrency, normalizePrintMode, posterStorageKey, signedPosterUrl, uniqueUrls, type PrintMode } from '@/lib/print-assets';
 import { resolvePresignBatches } from '@/lib/presign-batches';
 import {
   buildPrintReportViewModel,
   printReportMedia,
+  type PrintMedia,
   type PrintReportViewModel,
 } from '@/lib/server/report-print-renderer';
 import { isAllowedMediaSource } from '@/lib/use-presigned-url';
@@ -73,9 +74,15 @@ async function imageUrlToPrintableDataUrl(url: string, mode: PrintMode): Promise
 }
 
 async function presignPaths(paths: string[], reportId: string, shareToken: string | null) {
-  const objectKeys = uniqueUrls(paths).filter((path) => !isAllowedMediaSource(path) && !/^https?:\/\//i.test(path));
+  const entries = uniqueUrls(paths).flatMap((path) => {
+    const posterKey = posterStorageKey(path);
+    if (posterKey) return [{ path, key: posterKey, poster: true }];
+    if (isAllowedMediaSource(path) || /^https?:\/\//i.test(path)) return [];
+    return [{ path, key: path, poster: false }];
+  });
+  const objectKeys = uniqueUrls(entries.map((entry) => entry.key));
   if (objectKeys.length === 0) return {};
-  return resolvePresignBatches(objectKeys, async (batch) => {
+  const signedByKey = await resolvePresignBatches(objectKeys, async (batch) => {
     try {
       const response = await fetch('/api/materials/presign', {
         method: 'POST',
@@ -89,21 +96,35 @@ async function presignPaths(paths: string[], reportId: string, shareToken: strin
       return {};
     }
   });
+  return Object.fromEntries(entries.map((entry) => {
+    const signed = signedByKey[entry.key];
+    return [entry.path, signed ? (entry.poster ? signedPosterUrl(entry.path, signed) : signed) : entry.path];
+  }));
 }
 
 async function preparePrintModel(model: FrozenReportViewModel, mode: PrintMode, shareToken: string | null) {
   const projected = buildPrintReportViewModel(model);
   const media = printReportMedia(projected);
-  const sourceUrls = uniqueUrls(media.map((item) => item.url));
+  const printableMedia: Array<{ item: PrintMedia; field: 'url' | 'posterUrl'; url: string }> = [];
+  for (const item of media) {
+    if (item.type.toLowerCase().includes('video')) {
+      if (item.posterUrl) printableMedia.push({ item, field: 'posterUrl', url: item.posterUrl });
+    } else {
+      printableMedia.push({ item, field: 'url', url: item.url });
+    }
+  }
+  const sourceUrls = uniqueUrls(printableMedia.map((entry) => entry.url));
   const signed = await presignPaths(sourceUrls, projected.sourceReportId, shareToken);
-  for (const item of media) item.url = signed[item.url] ?? item.url;
+  for (const entry of printableMedia) entry.item[entry.field] = signed[entry.url] ?? entry.url;
 
   if (mode !== 'text') {
-    const images = media.filter((item) => !item.type.toLowerCase().includes('video'));
-    const printableUrls = uniqueUrls(images.map((item) => item.url));
+    const printableUrls = uniqueUrls(printableMedia.map((entry) => entry.item[entry.field] || ''));
     const converted = await mapWithConcurrency(printableUrls, 4, async (url) => imageUrlToPrintableDataUrl(url, mode));
     const convertedByUrl = new Map(printableUrls.map((url, index) => [url, converted[index]]));
-    for (const item of images) item.url = convertedByUrl.get(item.url) ?? item.url;
+    for (const entry of printableMedia) {
+      const current = entry.item[entry.field] || '';
+      entry.item[entry.field] = convertedByUrl.get(current) ?? current;
+    }
   }
   return projected;
 }

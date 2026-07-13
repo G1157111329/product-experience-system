@@ -10,6 +10,7 @@ import {
   type PrintReportViewModel,
 } from '@/lib/server/report-print-renderer';
 import { buildReportFilename } from '@/lib/report-filename';
+import { posterStorageKey, signedPosterUrl } from '@/lib/print-assets';
 
 type Row = Record<string, unknown>;
 
@@ -74,19 +75,25 @@ async function presignPrintReportMediaUrls(
 ) {
   const { generatePresignedUrl } = await import('@/lib/server/storage');
   const concurrency = Math.max(1, Math.min(12, options.concurrency ?? 6));
-  const byUrl = new Map<string, ReturnType<typeof printReportMedia>>();
+  const byUrl = new Map<string, Array<{ item: ReturnType<typeof printReportMedia>[number]; field: 'url' | 'posterUrl'; posterUrl?: string }>>();
   for (const item of printReportMedia(printModel)) {
-    if (item.type.toLowerCase().includes('video') || !item.url || item.url.startsWith('http') || item.url.startsWith('data:')) continue;
-    byUrl.set(item.url, [...(byUrl.get(item.url) ?? []), item]);
+    const field = item.type.toLowerCase().includes('video') ? 'posterUrl' : 'url';
+    const sourceUrl = item[field];
+    if (!sourceUrl || sourceUrl.startsWith('data:') || sourceUrl.startsWith('http')) continue;
+    const posterKey = posterStorageKey(sourceUrl);
+    const key = posterKey || sourceUrl;
+    byUrl.set(key, [...(byUrl.get(key) ?? []), { item, field, ...(posterKey ? { posterUrl: sourceUrl } : {}) }]);
   }
   const entries = [...byUrl.entries()];
   for (let offset = 0; offset < entries.length; offset += concurrency) {
-    await Promise.all(entries.slice(offset, offset + concurrency).map(async ([sourceUrl, items]) => {
+    await Promise.all(entries.slice(offset, offset + concurrency).map(async ([sourceUrl, targets]) => {
       try {
         const signedUrl = await generatePresignedUrl({ key: sourceUrl, expireTime: 30 * 60, absoluteUrl: true });
-        const parsed = new URL(signedUrl);
-        const resolved = `${options.absoluteBaseUrl.replace(/\/+$/, '')}${parsed.pathname}${parsed.search}`;
-        for (const item of items) item.url = resolved;
+        for (const target of targets) {
+          const accessUrl = target.posterUrl ? signedPosterUrl(target.posterUrl, signedUrl) : signedUrl;
+          const parsed = new URL(accessUrl, options.absoluteBaseUrl);
+          target.item[target.field] = `${options.absoluteBaseUrl.replace(/\/+$/, '')}${parsed.pathname}${parsed.search}`;
+        }
       } catch (error) {
         console.error('[report-pdf] presign failed for media url:', sourceUrl, error);
       }

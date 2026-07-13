@@ -726,6 +726,9 @@ function paperMediaFromUnknown(value: unknown): PrintMedia[] {
       name: paperText(source.name || source.file_name || source.fileName, '素材'),
       type: paperText(source.type || source.material_type || source.materialType, 'image'),
       url,
+      ...(paperText(source.posterUrl || source.poster_url || source.thumbnailUrl || source.thumbnail_url)
+        ? { posterUrl: paperText(source.posterUrl || source.poster_url || source.thumbnailUrl || source.thumbnail_url) }
+        : {}),
     }];
   });
 }
@@ -751,7 +754,13 @@ function PaperMedia({ items }: { items: PrintMedia[] }) {
       {items.map((item) => (
         <figure key={`${item.id}:${item.url}`} data-media-id={item.id} style={{ width: '72px', margin: 0, border: '1px solid #d1d5db', borderRadius: '4px', padding: '3px', breakInside: 'avoid' }}>
           {isVideoType(item.type) ? (
-            <div data-testid="paper-video-poster" style={{ width: '64px', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#e5e7eb', color: '#374151', fontSize: '10px', fontWeight: 700 }}>VIDEO</div>
+            <div data-testid="paper-video-poster" style={{ position: 'relative', width: '64px', height: '48px', background: '#e5e7eb' }}>
+              {item.posterUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img data-video-poster src={item.posterUrl} alt={item.name} style={{ width: '64px', height: '48px', objectFit: 'cover', display: 'block' }} />
+              )}
+              <span style={{ position: 'absolute', inset: 'auto 0 0', background: 'rgba(17,24,39,.72)', color: '#fff', textAlign: 'center', fontSize: '9px', fontWeight: 700 }}>VIDEO</span>
+            </div>
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={item.url} alt={item.name} style={{ width: '64px', height: '48px', objectFit: 'cover', display: 'block', background: '#f3f4f6' }} />
@@ -773,7 +782,7 @@ function PaperMatrix({ matrix }: { matrix: NonNullable<PrintReportViewModel['mat
           <tbody>{matrix.rows.map((row) => (
             <tr key={row.id}><th style={paperCellStyle}>{row.path.join(' / ')}</th>{matrix.columns.map((column) => {
               const cell = row.cells[column.id];
-              return <td key={column.id} style={paperCellStyle}>{cell?.value || '-'}{(cell ? cell.notes : []).map((item) => <p key={`note:${item}`}><b>过程记录：</b>{item}</p>)}{(cell ? cell.problems : []).map((item) => <p key={`problem:${item}`} style={{ color: '#991b1b' }}><b>问题点：</b>{item}</p>)}<PaperMedia items={cell?.media || []} /></td>;
+              return <td key={column.id} style={paperCellStyle}>{cell?.value || '-'}{cell?.score && <p><b>评分：</b>{cell.score}</p>}{(cell ? cell.notes : []).map((item) => <p key={`note:${item}`}><b>过程记录：</b>{item}</p>)}{(cell ? cell.problems : []).map((item) => <p key={`problem:${item}`} style={{ color: '#991b1b' }}><b>问题点：</b>{item}</p>)}<PaperMedia items={cell?.media || []} /></td>;
             })}</tr>
           ))}</tbody>
         </table>
