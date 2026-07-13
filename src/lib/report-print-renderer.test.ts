@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import type { FrozenReportViewModel } from './report-frozen-view';
-import { buildPrintReportViewModel, renderPrintReportHtml } from './server/report-print-renderer';
+import { buildPrintReportViewModel, pdfProfileForPrintModel, renderPrintReportHtml } from './server/report-print-renderer';
 
 const pixel = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
 
@@ -109,7 +109,7 @@ assert.equal(buildPrintReportViewModel(v2).page.orientation, 'portrait');
 assert.equal(buildPrintReportViewModel(v3).page.orientation, 'portrait');
 assert.deepEqual(buildPrintReportViewModel(comparison).page, { paper: 'A4', orientation: 'portrait' });
 const comparisonPrint = buildPrintReportViewModel(comparison);
-assert.equal(comparisonPrint.matrix?.kind === 'comparison' ? comparisonPrint.matrix.rows[0]?.cells.a.media.length : 0, 1, 'overlapping inline/appendix/legacy media must be deduplicated');
+assert.equal(comparisonPrint.matrix?.kind === 'comparison' ? comparisonPrint.matrix.rows[0]?.cells.a.media.length : 0, 2, 'same id or URL deduplicates while different id/URL with the same name remains');
 assert.equal(comparisonPrint.matrix?.kind === 'comparison' ? comparisonPrint.matrix.rows[0]?.cells.a.value : '', '72.1%');
 assert.equal(comparisonPrint.matrix?.kind === 'comparison' ? (comparisonPrint.matrix.rows[0]?.cells.a as { score?: string }).score : '', '8');
 const comparisonHtml = renderPrintReportHtml(comparisonPrint);
@@ -118,17 +118,44 @@ for (const expectedText of ['Comparison Matrix', 'Effect / Juice quality', '72.1
 }
 assert.match(comparisonHtml, /<img[^>]+data-video-poster/);
 assert.equal((comparisonHtml.match(/data-media-id="comparison-video"/g) || []).length, 1);
+assert.equal((comparisonHtml.match(/data-media-id="legacy-by-name"/g) || []).length, 1);
+
+const tallNarrowComparison = frozenModel({
+  kind: 'comparison',
+  snapshot: {
+    matrix_name: 'Tall narrow comparison',
+    objects: [{ id: 'only-object', object_name: 'Only object' }],
+    item_nodes: Array.from({ length: 8 }, (_, index) => ({ id: `short-row-${index}`, node_type: 'metric', node_label: `M${index}` })),
+    cells: [],
+  },
+});
+const tallNarrowPrint = buildPrintReportViewModel(tallNarrowComparison);
+assert.deepEqual(tallNarrowPrint.page, { paper: 'A4', orientation: 'portrait' });
+assert.equal(pdfProfileForPrintModel(tallNarrowPrint).id, 'comparison_a4_portrait');
+
+const threeShortObjects = frozenModel({
+  kind: 'comparison',
+  snapshot: {
+    matrix_name: 'Three short objects',
+    objects: Array.from({ length: 3 }, (_, index) => ({ id: `short-object-${index}`, object_name: `${index}` })),
+    item_nodes: [{ id: 'short-metric', node_type: 'metric', node_label: 'M' }],
+    cells: [],
+  },
+});
+assert.deepEqual(buildPrintReportViewModel(threeShortObjects).page, { paper: 'A4', orientation: 'portrait' });
 
 const wideComparison = frozenModel({
   kind: 'comparison',
   snapshot: {
     matrix_name: 'Wide comparison',
     objects: Array.from({ length: 4 }, (_, index) => ({ id: `object-${index}`, object_name: `Object ${index}` })),
-    item_nodes: Array.from({ length: 8 }, (_, index) => ({ id: `row-${index}`, node_type: 'metric', node_label: `Metric ${index}` })),
+    item_nodes: [{ id: 'wide-row', node_type: 'metric', node_label: 'Wide metric' }],
     cells: [],
   },
 });
-assert.deepEqual(buildPrintReportViewModel(wideComparison).page, { paper: 'A3', orientation: 'landscape' });
+const widePrint = buildPrintReportViewModel(wideComparison);
+assert.deepEqual(widePrint.page, { paper: 'A3', orientation: 'landscape' });
+assert.equal(pdfProfileForPrintModel(widePrint).id, 'comparison_a3_landscape');
 const v2Html = renderPrintReportHtml(buildPrintReportViewModel(v2));
 assert.equal(v2Html.includes('问题 2 个'), true);
 assert.equal(v2Html.includes('II'), true);

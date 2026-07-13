@@ -172,12 +172,13 @@ test('report detail, print, and share keep the frozen report contract', async ({
   const singlePdfPreflightResponse = await page.request.get('/api/reports/golden-report-comparison/pdf?preflight=1');
   expect(singlePdfPreflightResponse.ok(), 'comparison PDF preflight API should return 2xx').toBeTruthy();
   const singlePdfPreflight = await singlePdfPreflightResponse.json();
-  expect(singlePdfPreflight.data?.profile?.id, 'comparison preflight should expose its frozen layout profile').toBe('comparison_image_matrix_a3_landscape');
+  expect(singlePdfPreflight.data?.profile?.id, 'comparison preflight should expose its actual adaptive page profile').toBe('comparison_a3_landscape');
   expect(singlePdfPreflight.data?.preflight?.ok, 'comparison PDF should pass blocking preflight').toBe(true);
 
   const singlePdfResponse = await page.request.get('/api/reports/golden-report-comparison/pdf');
   expect(singlePdfResponse.ok(), 'comparison PDF API should return a PDF').toBeTruthy();
   expect(singlePdfResponse.headers()['content-type'], 'comparison PDF should be a PDF response').toContain('application/pdf');
+  expect(singlePdfResponse.headers()['x-pdf-profile'], 'comparison PDF header should match its actual page profile').toBe('comparison_a3_landscape');
   expect(singlePdfResponse.headers()['content-disposition'], 'PDF filename should use the report title').toContain('filename*=UTF-8');
   const pdfBuffer = await singlePdfResponse.body();
   expect(pdfBuffer.subarray(0, 5).toString('ascii'), 'PDF payload should have a real PDF header').toBe('%PDF-');

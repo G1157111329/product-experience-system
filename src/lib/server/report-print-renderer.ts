@@ -65,18 +65,35 @@ function posterDerivativeUrl(url: string) {
   return key ? `/api/materials/poster/${key.split('/').map(encodeURIComponent).join('/')}` : '';
 }
 
+function normalizedMediaUrl(value: string) {
+  const url = value.trim().replace(/\\/g, '/');
+  if (!url || url.startsWith('data:')) return url;
+  try {
+    const absolute = /^https?:\/\//i.test(url);
+    const parsed = new URL(url, 'http://print.local');
+    for (const key of [...parsed.searchParams.keys()]) {
+      if (key === 'exp' || key === 'token' || key.toLowerCase().startsWith('x-amz-')) parsed.searchParams.delete(key);
+    }
+    parsed.searchParams.sort();
+    return absolute ? `${parsed.origin}${parsed.pathname}${parsed.search}` : `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return url;
+  }
+}
+
 function dedupeMedia(items: PrintMedia[]) {
   const ids = new Set<string>();
   const urls = new Set<string>();
   const names = new Set<string>();
   return items.filter((item) => {
     const id = text(item.id);
-    const url = text(item.url);
+    const url = normalizedMediaUrl(text(item.url));
     const name = text(item.name);
-    const duplicate = Boolean((id && ids.has(id)) || (url && urls.has(url)) || (name && names.has(name)));
+    const fallbackName = !id && !url ? name : '';
+    const duplicate = Boolean((id && ids.has(id)) || (url && urls.has(url)) || (fallbackName && names.has(fallbackName)));
     if (id) ids.add(id);
     if (url) urls.add(url);
-    if (name) names.add(name);
+    if (fallbackName) names.add(fallbackName);
     return !duplicate;
   });
 }
@@ -215,13 +232,23 @@ function projectMatrix(matrix: FrozenReportViewModel['matrix']): PrintMatrix | n
 
 export function printPageForMatrix(matrix: PrintMatrix | null): PrintReportViewModel['page'] {
   if (!matrix || matrix.kind !== 'comparison') return { paper: 'A4', orientation: 'portrait' };
-  const estimatedColumns = matrix.columns.length + 1;
-  const denseRows = matrix.rows.filter((row) => Object.values(row.cells).some((cell) => (
-    cell.notes.length > 0 || cell.problems.length > 0 || cell.media.length > 0 || cell.value.length > 24
-  ))).length;
-  return estimatedColumns >= 4 || matrix.rows.length >= 8 || (estimatedColumns >= 3 && denseRows >= 4)
+  const estimatedWidth = 18 + matrix.columns.reduce((total, column) => {
+    const contentLength = Math.max(column.label.length, ...matrix.rows.map((row) => row.cells[column.id]?.value.length || 0));
+    return total + Math.min(34, Math.max(16, contentLength * 1.6));
+  }, 0);
+  return matrix.columns.length >= 4 || estimatedWidth > 68
     ? { paper: 'A3', orientation: 'landscape' }
     : { paper: 'A4', orientation: 'portrait' };
+}
+
+export function pdfProfileForPrintModel(model: PrintReportViewModel) {
+  const scope = model.matrix?.kind === 'comparison' ? 'comparison' : 'single';
+  return {
+    id: `${scope}_${model.page.paper.toLowerCase()}_${model.page.orientation}`,
+    paper: model.page.paper,
+    orientation: model.page.orientation,
+    description: `${scope} ${model.page.paper} ${model.page.orientation}`,
+  };
 }
 
 export function buildPrintReportViewModel(model: FrozenReportViewModel): PrintReportViewModel {

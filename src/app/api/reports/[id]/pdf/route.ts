@@ -5,6 +5,7 @@ import { writeSecurityAudit } from '@/lib/server/security-audit';
 import { buildFrozenReportResponse } from '@/lib/server/report-frozen-view';
 import {
   buildPrintReportViewModel,
+  pdfProfileForPrintModel,
   printReportMedia,
   renderPrintReportHtml,
   type PrintReportViewModel,
@@ -110,16 +111,18 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const frozen = await buildFrozenReportResponse(client, report, { audience: access.user ? 'internal' : 'share' });
   const printModel = buildPrintReportViewModel(frozen.model);
   const delivery = frozen.detailModel.printDelivery;
+  const actualProfile = pdfProfileForPrintModel(printModel);
+  const actualDelivery = { ...delivery, profile: actualProfile };
   const snapshot = frozen.snapshot;
 
   if (request.nextUrl.searchParams.get('preflight') === '1') {
-    return NextResponse.json({ code: 0, message: 'success', data: { ...delivery, page: printModel.page } });
+    return NextResponse.json({ code: 0, message: 'success', data: { ...actualDelivery, page: printModel.page } });
   }
-  if (!delivery.preflight.ok) {
-    return NextResponse.json({ code: 1, message: 'PDF导出预检未通过', data: delivery }, { status: 400 });
+  if (!actualDelivery.preflight.ok) {
+    return NextResponse.json({ code: 1, message: 'PDF导出预检未通过', data: actualDelivery }, { status: 400 });
   }
 
-  const job = await createPdfJob(client, reportId, snapshot, delivery.profile.id, delivery.preflight, access.user);
+  const job = await createPdfJob(client, reportId, snapshot, actualProfile.id, actualDelivery.preflight, access.user);
   let browser: Awaited<ReturnType<(typeof import('playwright'))['chromium']['launch']>> | null = null;
   try {
     const { chromium } = await import('playwright');
@@ -147,7 +150,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
     await writeSecurityAudit(client, {
       request, actor: access.user, action: 'report.pdf.download', outcome: 'success', targetType: 'report', targetId: reportId,
-      metadata: { profile: delivery.profile.id, snapshotId: snapshot?.id || null, jobId: job?.id || null },
+      metadata: { profile: actualProfile.id, snapshotId: snapshot?.id || null, jobId: job?.id || null },
     });
     const filename = buildReportFilename(report.title);
     return new NextResponse(new Uint8Array(pdfBuffer), {
@@ -157,7 +160,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         'Content-Disposition': `attachment; filename="report.pdf"; filename*=UTF-8''${encodeURIComponent(filename)}`,
         'Cache-Control': 'no-store',
         ...(job?.id ? { 'X-PDF-Job-Id': String(job.id) } : {}),
-        'X-PDF-Profile': delivery.profile.id,
+        'X-PDF-Profile': actualProfile.id,
       },
     });
   } catch (error) {
@@ -168,7 +171,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
     await writeSecurityAudit(client, {
       request, actor: access.user, action: 'report.pdf.download', outcome: 'failed', targetType: 'report', targetId: reportId,
-      metadata: { profile: delivery.profile.id, snapshotId: snapshot?.id || null, jobId: job?.id || null, reason: message.slice(0, 200) },
+      metadata: { profile: actualProfile.id, snapshotId: snapshot?.id || null, jobId: job?.id || null, reason: message.slice(0, 200) },
     });
     return NextResponse.json({ code: 1, message }, { status: 500 });
   }

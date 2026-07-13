@@ -29,6 +29,11 @@ assert.match(
 );
 assert.match(routeSource, /buildFrozenReportResponse\(client,\s*report/);
 assert.match(routeSource, /buildPrintReportViewModel\(frozen\.model\)/);
+assert.match(routeSource, /pdfProfileForPrintModel\(printModel\)/);
+assert.match(routeSource, /createPdfJob\([\s\S]+?actualProfile\.id/);
+assert.match(routeSource, /['"]X-PDF-Profile['"]:\s*actualProfile\.id/);
+assert.match(routeSource, /metadata:\s*\{[\s\S]+?profile:\s*actualProfile\.id/);
+assert.doesNotMatch(routeSource, /createPdfJob\([\s\S]+?delivery\.profile\.id/);
 assert.doesNotMatch(routeSource, /loadAnchoredReportSnapshot/);
 assert.doesNotMatch(routeSource, /attachReEvaluations/);
 assert.doesNotMatch(routeSource, /buildReportDetailModel/);
