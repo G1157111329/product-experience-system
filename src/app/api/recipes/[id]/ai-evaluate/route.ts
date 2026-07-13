@@ -94,7 +94,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     let recipeSnapshot = `食谱/功能名称：${recipe.name}\n`;
     if (recipe.ingredients) recipeSnapshot += `食材/参数：${recipe.ingredients}\n`;
     if (recipe.effect_description) recipeSnapshot += `效果评价描述：${recipe.effect_description}\n`;
-    if (recipe.effect_problem_point) recipeSnapshot += `已知问题点：${recipe.effect_problem_point}\n`;
 
     const userPromptText = userPromptTemplate
       ? renderPromptTemplate(userPromptTemplate, { recipe_snapshot: recipeSnapshot })
@@ -125,19 +124,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     // Parse the structured AI result
     const parsedResult = parseAiResult(aiContent);
-    const overallScore = String(parsedResult.score);
-
-    // Save both score and full AI result to recipe
-    await client.from('recipes').update({
-      effect_score: overallScore,
-      effect_ai_result: parsedResult,
-      updated_at: new Date().toISOString(),
-    }).eq('id', id);
-
     return NextResponse.json({
       code: 0,
       message: 'AI评价完成',
-      data: { result: parsedResult, score: overallScore, rawContent: aiContent },
+      data: { summary: parsedResult.summary },
     });
   } catch (err) {
     console.error('[ai-evaluate] Error:', err);
@@ -146,40 +136,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 }
 
-
-/**
- * DELETE /api/recipes/[id]/ai-evaluate
- * Clear AI evaluation results (effect_ai_result and effect_score).
- * User rejects AI-generated evaluation, reverting to manual-only state.
- */
-export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const client = getSupabaseClient();
-  const user = await requireUser(request, client);
-  if (isAuthResponse(user)) return user;
-  if (!(await canAccessRecipe(client, user, id))) {
-    return NextResponse.json({ code: 1, message: "无权删除该食谱的评价" }, { status: 403 });
-  }
-
-  const { data: recipe, error: recipeError } = await client
-    .from("recipes").select("id").eq("id", id).single();
-
-  if (recipeError || !recipe) {
-    return NextResponse.json({ code: 1, message: "食谱不存在" }, { status: 404 });
-  }
-
-  const { error } = await client.from("recipes").update({
-    effect_ai_result: null,
-    effect_score: null,
-    updated_at: new Date().toISOString(),
-  }).eq("id", id);
-
-  if (error) {
-    return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
-  }
-
-  return NextResponse.json({ code: 0, message: "AI评价已删除" });
-}
 
 interface AiEvaluationResult {
   score: number;

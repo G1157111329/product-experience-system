@@ -207,8 +207,6 @@ async function applyRecipeStepCreate(client: Client, taskId: string, action: Age
       recipe_id: recipeId,
       step_number: nextNumber,
       operation,
-      problem_point: optionalString(action.payload.problem_point),
-      problem_points: [],
       sort_order: Number(latestStep?.sort_order || latestStep?.step_number || 0) + 1,
     })
     .select()
@@ -223,7 +221,6 @@ async function applyRecipeStepUpdate(client: Client, taskId: string, action: Age
 
   const update: Row = { updated_at: new Date().toISOString() };
   if (action.payload.operation !== undefined) update.operation = requiredString(action.payload.operation, '步骤描述不能为空');
-  if (action.payload.problem_point !== undefined) update.problem_point = optionalString(action.payload.problem_point);
   if (Object.keys(update).length === 1) throw new Error('没有可更新的步骤字段');
 
   const { data, error } = await client.from('recipe_steps').update(update).eq('id', stepId).select().single();

@@ -90,8 +90,8 @@ function buildAgentSystemPrompt() {
 
 允许的动作类型和 payload：
 1. recipe_create: { "name": "食谱名", "description": "可选说明" }
-2. recipe_step_create: { "recipe_id": "必须使用上下文里的食谱ID", "operation": "步骤描述", "problem_point": "可选问题点" }
-3. recipe_step_update: { "step_id": "必须使用上下文里的步骤ID", "operation": "新的步骤描述", "problem_point": "可选问题点" }
+2. recipe_step_create: { "recipe_id": "必须使用上下文里的食谱ID", "operation": "步骤描述" }
+3. recipe_step_update: { "step_id": "必须使用上下文里的步骤ID", "operation": "新的步骤描述" }
 4. comparison_matrix_seed: {
    "objects": [{ "name": "A对象", "type": "product_model" }],
    "sections": [{ "label": "大类", "items": ["对比项1", "对比项2"] }],
@@ -199,7 +199,7 @@ function buildTaskContextText(context: Awaited<ReturnType<typeof loadTaskAgentCo
       `${index + 1}. 食谱ID=${recipeId} 名称=${recipe.name || '-'} 类型=${recipe.recipe_type || '-'} 参数=${recipe.ingredients || '-'}`,
     ];
     for (const step of stepsByRecipeId.get(recipeId) || []) {
-      lines.push(`   - 步骤ID=${step.id} 序号=${step.step_number || '-'} 内容=${step.operation || '-'} 问题=${step.problem_point || ''}`);
+      lines.push(`   - 步骤ID=${step.id} 序号=${step.step_number || '-'} 内容=${step.operation || '-'}`);
     }
     return lines;
   });

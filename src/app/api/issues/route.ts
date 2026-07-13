@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { canAccessTask, canReadReport, forbidden, isAuthResponse, isRecipeContextInTask, requireUser } from '@/lib/server/auth';
+import { canAccessRecipe, canAccessTask, canReadReport, forbidden, isAuthResponse, isRecipeContextInTask, requireUser } from '@/lib/server/auth';
 import { createIssueOccurrence } from '@/lib/server/issue-lifecycle';
 import { normalizeIssueStatus } from '@/lib/server/issue-state-machine';
 
@@ -21,6 +21,14 @@ export async function GET(request: NextRequest) {
   const include_archived = searchParams.get('include_archived') === '1';
   const limit = Math.min(500, Math.max(1, parseInt(searchParams.get('limit') || '100', 10)));
   const offset = Math.max(0, parseInt(searchParams.get('offset') || '0', 10) || 0);
+  let scopedAccess = false;
+  if (recipe_id) {
+    scopedAccess = await canAccessRecipe(client, user, recipe_id);
+    if (!scopedAccess) return forbidden();
+  } else if (task_id) {
+    scopedAccess = await canAccessTask(client, user, task_id);
+    if (!scopedAccess) return forbidden();
+  }
 
   let query = client.from('issues').select('*', { count: 'exact' });
   if (!include_archived && !source_report_id) {
@@ -40,7 +48,7 @@ export async function GET(request: NextRequest) {
     const ids = task_ids.split(',').filter(Boolean);
     if (ids.length > 0) query = query.in('task_id', ids);
   }
-  if (user.role !== 'admin' && !source_report_id) {
+  if (user.role !== 'admin' && !source_report_id && !scopedAccess) {
     const { data: userTasks } = await client.from('experience_tasks').select('id').eq('created_by', user.id);
     const userTaskIds = (userTasks || []).map((task: { id: string }) => task.id);
     if (userTaskIds.length === 0) return NextResponse.json({ code: 0, message: 'success', data: { list: [], total: 0 } });

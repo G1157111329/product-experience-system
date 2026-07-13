@@ -197,13 +197,6 @@ export function FunctionsInputWorkspace({
                     <Badge variant={recipe.effect_description ? 'secondary' : 'outline'} className="text-[10px]">
                       {recipe.effect_description ? '有效果评价' : '缺效果评价'}
                     </Badge>
-                    <Badge
-                      variant={getRecipeStatistics(recipe).problemCount > 0 ? 'destructive' : 'outline'}
-                      className="justify-center text-[10px]"
-                    >
-                      {getRecipeStatistics(recipe).problemCount} 问题
-                    </Badge>
-                    {recipe.effect_score && <Badge className="justify-center text-[10px]">{recipe.effect_score} 分</Badge>}
                   </div>
                 </div>
 
@@ -287,7 +280,6 @@ export function FunctionsInputWorkspace({
                         <div className="text-sm cursor-pointer">{step.operation || '暂无操作说明'}</div>
                         <div className="mt-1 flex flex-wrap gap-1">
                           <Badge variant="outline" className="text-[10px]">{step.materials?.length || 0} 个素材</Badge>
-                          {step.problem_point && <Badge variant="destructive" className="text-[10px]">有问题点</Badge>}
                         </div>
                       </button>
                       <div className="flex shrink-0 items-center gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover/step:opacity-100">

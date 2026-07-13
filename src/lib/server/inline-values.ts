@@ -141,7 +141,6 @@ registerEntityHandler('function_effect_record', async (input) => {
   const db = await getDb();
   const patch: Record<string, unknown> = { updatedAt: sql`NOW()` };
   if (input.fieldId === 'effect_description') patch.effectDescription = input.value ?? null;
-  else if (input.fieldId === 'effect_problem_point') patch.effectProblemPoint = input.value ?? null;
   else if (input.fieldId === 'effect_status') patch.effectStatus = normalizeEvaluationStatus(input.value);
   else if (input.fieldId === 'name') patch.name = input.value ?? null;
   else return { kind: 'unsupported' };

@@ -3,23 +3,7 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessRecipe, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { normalizeIngredientItems } from '@/lib/task-context-contract';
 import { normalizeEvaluationStatus } from '@/lib/evaluation-status';
-
-function collectProblemPointMaterialIds(value: unknown): string[] {
-  if (!value) return [];
-  try {
-    const parsed: unknown = typeof value === 'string' ? JSON.parse(value) : value;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.flatMap((item) => {
-      if (!item || typeof item !== 'object') return [];
-      const materialIds = (item as Record<string, unknown>).material_ids;
-      return Array.isArray(materialIds)
-        ? materialIds.filter((id): id is string => typeof id === 'string' && id.trim() !== '')
-        : [];
-    });
-  } catch {
-    return [];
-  }
-}
+import { classifyRecipeEvaluationSaveError, saveRecipeEvaluation } from '@/lib/server/recipe-evaluation-save';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -38,12 +22,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     .single();
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 404 });
 
-  // Fetch effect materials (linked via recipe_id)
-  const { data: effectMaterials } = await client
-    .from('materials')
-    .select('*')
-    .eq('recipe_id', id);
-
+  const { data: effectMaterials } = await client.from('materials').select('*').eq('recipe_id', id);
   return NextResponse.json({
     code: 0,
     message: 'success',
@@ -61,49 +40,49 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const body = await request.json();
+  const hasEvaluationUpdate = body.effect_description !== undefined
+    || body.effect_status !== undefined
+    || body.effect_material_ids !== undefined;
 
-  // Update recipe basic fields + effect fields
-  const updateData: Record<string, unknown> = {
-    name: body.name,
-    ingredients: body.ingredients,
-    recipe_type: body.recipe_type,
-    problem_count: body.problem_count,
-    updated_at: new Date().toISOString(),
-  };
-  if (body.ingredient_items !== undefined) {
-    updateData.ingredient_items = normalizeIngredientItems(body.ingredient_items);
-  }
-
-  // Effect evaluation fields
-  if (body.effect_description !== undefined) updateData.effect_description = body.effect_description;
-  if (body.effect_score !== undefined) updateData.effect_score = body.effect_score;
-  if (body.effect_problem_point !== undefined) updateData.effect_problem_point = body.effect_problem_point;
-  if (body.effect_ai_result !== undefined) updateData.effect_ai_result = body.effect_ai_result;
-  if (body.effect_status !== undefined) updateData.effect_status = normalizeEvaluationStatus(body.effect_status);
-
-  const { data, error } = await client.from('recipes').update(updateData).eq('id', id).select().single();
-
-  if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
-
-  // Handle effect material linking/unlinking
-  if (body.effect_material_ids !== undefined) {
-    const effectMaterialIds = Array.isArray(body.effect_material_ids)
-      ? body.effect_material_ids.filter((matId: unknown): matId is string => typeof matId === 'string' && matId.trim() !== '')
-      : [];
-    const problemPointMaterialIds = collectProblemPointMaterialIds(body.effect_problem_point);
-    const materialIdsToLink = [...new Set([...effectMaterialIds, ...problemPointMaterialIds])];
-
-    // First, unlink all current effect materials for this recipe
-    await client.from('materials').update({ recipe_id: null }).eq('recipe_id', id);
-
-    // Then link the new ones
-    if (materialIdsToLink.length > 0) {
-      for (const matId of materialIdsToLink) {
-        await client.from('materials').update({ recipe_id: id }).eq('id', matId);
-      }
+  if (hasEvaluationUpdate) {
+    if (body.effect_material_ids !== undefined && !Array.isArray(body.effect_material_ids)) {
+      return NextResponse.json({ code: 1, message: '素材列表格式错误' }, { status: 400 });
+    }
+    try {
+      const saved = await saveRecipeEvaluation(client, {
+        recipeId: id,
+        status: body.effect_status === undefined ? undefined : normalizeEvaluationStatus(body.effect_status),
+        description: body.effect_description === undefined ? undefined : String(body.effect_description || ''),
+        materialIds: body.effect_material_ids === undefined
+          ? undefined
+          : body.effect_material_ids.filter((value: unknown): value is string => typeof value === 'string'),
+        name: body.name === undefined ? undefined : String(body.name),
+        ingredients: body.ingredients === undefined ? undefined : body.ingredients === null ? null : String(body.ingredients),
+        recipeType: body.recipe_type === undefined ? undefined : String(body.recipe_type),
+        problemCount: body.problem_count === undefined ? undefined : Number(body.problem_count),
+        ingredientItems: body.ingredient_items === undefined ? undefined : normalizeIngredientItems(body.ingredient_items),
+      });
+      return NextResponse.json({
+        code: 0,
+        message: '更新成功',
+        data: { ...saved.recipe, effect_materials: saved.materials },
+      });
+    } catch (saveError) {
+      const classified = classifyRecipeEvaluationSaveError(saveError);
+      if (classified.log) console.error('[recipes] atomic evaluation save failed', saveError);
+      return NextResponse.json({ code: 1, message: classified.message }, { status: classified.status });
     }
   }
 
+  const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (body.name !== undefined) updateData.name = body.name;
+  if (body.ingredients !== undefined) updateData.ingredients = body.ingredients;
+  if (body.recipe_type !== undefined) updateData.recipe_type = body.recipe_type;
+  if (body.problem_count !== undefined) updateData.problem_count = body.problem_count;
+  if (body.ingredient_items !== undefined) updateData.ingredient_items = normalizeIngredientItems(body.ingredient_items);
+
+  const { data, error } = await client.from('recipes').update(updateData).eq('id', id).select().single();
+  if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
   return NextResponse.json({ code: 0, message: '更新成功', data });
 }
 
@@ -116,12 +95,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     return NextResponse.json({ code: 1, message: '无权删除该食谱' }, { status: 403 });
   }
 
-  // Unlink effect materials first
   await client.from('materials').update({ recipe_id: null }).eq('recipe_id', id);
-
-  // Unlink all step materials for this recipe's steps
   const { data: steps } = await client.from('recipe_steps').select('id').eq('recipe_id', id);
-  const stepIds = ((steps || []) as Array<{ id: string }>).map((s) => s.id);
+  const stepIds = ((steps || []) as Array<{ id: string }>).map((step) => step.id);
   if (stepIds.length > 0) {
     await client.from('materials').update({ recipe_step_id: null }).in('recipe_step_id', stepIds);
   }

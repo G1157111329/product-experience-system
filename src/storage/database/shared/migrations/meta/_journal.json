@@ -18,6 +18,7 @@
     { "idx": 13, "version": "7", "when": 1783950000000, "tag": "0013_atomic_report_snapshot_rpc", "breakpoints": true },
     { "idx": 14, "version": "7", "when": 1783951000000, "tag": "0014_idempotent_report_snapshot_rpc", "breakpoints": true },
     { "idx": 15, "version": "7", "when": 1783952000000, "tag": "0015_validate_snapshot_idempotency_replays", "breakpoints": true },
-    { "idx": 16, "version": "7", "when": 1783953000000, "tag": "0016_recipe_evaluation_retest", "breakpoints": true }
+    { "idx": 16, "version": "7", "when": 1783953000000, "tag": "0016_recipe_evaluation_retest", "breakpoints": true },
+    { "idx": 17, "version": "7", "when": 1783954000000, "tag": "0017_atomic_recipe_evaluation", "breakpoints": true }
   ]
 }

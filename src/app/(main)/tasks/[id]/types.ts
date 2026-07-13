@@ -102,6 +102,7 @@ export interface Recipe {
   problem_count: number;
   recipe_steps: RecipeStep[];
   effect_description?: string | null;
+  effect_status?: 'qualified' | 'unqualified' | 'pending' | null;
   effect_score?: string | null;
   effect_problem_point?: string | null;
   effect_problem_points?: ProblemPoint[];
