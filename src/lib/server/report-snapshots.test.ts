@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   loadAnchoredReportSnapshot,
   loadNextReportSnapshotVersion,
+  loadReportSnapshotWithLegacyErrorFallback,
   persistAnchoredReportSnapshot,
 } from './report-snapshots';
 
@@ -370,6 +371,117 @@ async function run() {
       /version query (failed|rejected)/,
     );
     assert.deepEqual(deletedReportIds, ['new-report']);
+  }
+
+  {
+    const deleted: string[] = [];
+    const client = {
+      from(table: string) {
+        if (table === 'report_snapshots') {
+          return {
+            insert: () => ({
+              select: () => ({
+                single: async () => ({ data: { id: 'snapshot-1', report_id: 'existing-report' }, error: null }),
+              }),
+            }),
+            delete: () => ({
+              eq: async () => {
+                deleted.push('snapshot');
+                return { error: null };
+              },
+            }),
+          };
+        }
+        return {
+          update: () => ({
+            eq: () => ({
+              select: () => ({
+                single: async () => { throw new Error('anchor response rejected after commit'); },
+              }),
+            }),
+          }),
+          delete: () => ({
+            eq: async () => {
+              deleted.push('report');
+              return { error: null };
+            },
+          }),
+        };
+      },
+    };
+
+    await assert.rejects(
+      persistAnchoredReportSnapshot(
+        client as never,
+        'existing-report',
+        { report_id: 'existing-report' },
+        { deleteReportOnFailure: false },
+      ),
+      /anchor response rejected after commit/,
+    );
+    assert.deepEqual(deleted, []);
+
+    const anchoredClient = createSnapshotClient([
+      { id: 'snapshot-1', report_id: 'existing-report', version: 1 },
+    ]).client;
+    const anchored = await loadAnchoredReportSnapshot(anchoredClient as never, {
+      id: 'existing-report',
+      snapshot_id: 'snapshot-1',
+    });
+    assert.equal(anchored.snapshot?.id, 'snapshot-1');
+  }
+
+  {
+    const failingLegacyClient = {
+      from() {
+        return {
+          select() {
+            return {
+              eq() {
+                return {
+                  order() {
+                    return {
+                      async limit() {
+                        return { data: null, error: { message: 'legacy lookup failed' } };
+                      },
+                    };
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+    };
+    assert.deepEqual(
+      await loadReportSnapshotWithLegacyErrorFallback(failingLegacyClient as never, {
+        id: 'legacy-report',
+        snapshot_id: null,
+      }),
+      { snapshot: null, resolution: 'none' },
+    );
+    const failingAnchoredClient = {
+      from() {
+        return {
+          select() {
+            const builder = {
+              eq() { return builder; },
+              async maybeSingle() {
+                return { data: null, error: { message: 'anchored lookup failed' } };
+              },
+            };
+            return builder;
+          },
+        };
+      },
+    };
+    await assert.rejects(
+      loadReportSnapshotWithLegacyErrorFallback(failingAnchoredClient as never, {
+        id: 'anchored-report',
+        snapshot_id: 'snapshot-1',
+      }),
+      /anchored lookup failed/,
+    );
   }
 
   console.log('report snapshot anchoring contract tests passed');

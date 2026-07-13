@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { canAccessAssembly, canAccessReport, canReadReport, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { buildComparisonReportSnapshot } from '@/lib/server/comparison-assembly';
 import {
+  loadAnchoredReportSnapshot,
   loadNextReportSnapshotVersion,
   persistAnchoredReportSnapshot,
 } from '@/lib/server/report-snapshots';
@@ -27,19 +28,33 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ code: 1, message: '请提供 id 或 report_id' }, { status: 400 });
   }
 
-  let query = client.from('report_snapshots').select('*');
   if (id) {
-    query = query.eq('id', id);
-  } else if (reportId) {
-    query = query.eq('report_id', reportId).order('version', { ascending: false }).limit(1);
+    const { data, error } = await client.from('report_snapshots').select('*').eq('id', id).maybeSingle();
+    if (error) return NextResponse.json({ code: 1, message: error.message || '读取快照失败' }, { status: 500 });
+    if (!data) return NextResponse.json({ code: 1, message: '快照不存在' }, { status: 404 });
+    if (!(await canReadReport(client, user, String(data.report_id || '')))) return forbidden();
+    return NextResponse.json({ code: 0, message: 'success', data });
   }
 
-  const { data, error } = await query.maybeSingle();
-  if (error) return NextResponse.json({ code: 1, message: error.message || '读取快照失败' }, { status: 500 });
-  if (!data) return NextResponse.json({ code: 1, message: '快照不存在' }, { status: 404 });
-  if (!(await canReadReport(client, user, String(data.report_id || '')))) return forbidden();
+  const { data: report, error: reportError } = await client
+    .from('reports')
+    .select('id, snapshot_id')
+    .eq('id', reportId!)
+    .maybeSingle();
+  if (reportError) return NextResponse.json({ code: 1, message: reportError.message || '读取报告失败' }, { status: 500 });
+  if (!report) return NextResponse.json({ code: 1, message: '报告不存在' }, { status: 404 });
+  if (!(await canReadReport(client, user, String(report.id || '')))) return forbidden();
 
-  return NextResponse.json({ code: 0, message: 'success', data });
+  try {
+    const { snapshot } = await loadAnchoredReportSnapshot(client, report);
+    if (!snapshot) return NextResponse.json({ code: 1, message: '快照不存在' }, { status: 404 });
+    return NextResponse.json({ code: 0, message: 'success', data: snapshot });
+  } catch (error) {
+    return NextResponse.json({
+      code: 1,
+      message: error instanceof Error ? error.message : '读取快照失败',
+    }, { status: 500 });
+  }
 }
 
 export async function POST(request: NextRequest) {

@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canReadReport, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
-import { loadAnchoredReportSnapshot } from '@/lib/server/report-snapshots';
+import {
+  loadAnchoredReportSnapshot,
+  loadReportSnapshotWithLegacyErrorFallback,
+} from '@/lib/server/report-snapshots';
 import {
   hasMeaningfulComparisonCell,
   hasMeaningfulV2Projection,
@@ -92,7 +95,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       hasMatrix = false;
     }
   } else {
-    const { snapshot } = await loadAnchoredReportSnapshot(client, report);
+    const { snapshot } = await loadReportSnapshotWithLegacyErrorFallback(client, report);
     const snapshotJson = snapshot?.snapshot_json as Record<string, unknown> | undefined;
     const dataMatrixProjection = isRecordLike(snapshotJson?.matrix_projection)
       ? snapshotJson.matrix_projection

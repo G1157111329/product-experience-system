@@ -61,6 +61,12 @@ assert.ok(
 
 const directRoute = source('src/app/api/report-snapshots/route.ts');
 assert.match(directRoute, /persistAnchoredReportSnapshot/);
+assert.match(directRoute, /loadAnchoredReportSnapshot/);
+assert.doesNotMatch(
+  directRoute.slice(directRoute.indexOf('export async function GET'), directRoute.indexOf('export async function POST')),
+  /order\('version'/,
+  'default GET must resolve the report anchor instead of selecting the latest snapshot version',
+);
 assert.match(directRoute, /deleteReportOnFailure:\s*createdNewReport/);
 assert.match(directRoute, /if \(!report\)/, 'direct snapshot creation must reject an empty anchor update result');
 

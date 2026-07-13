@@ -93,6 +93,18 @@ export async function loadAnchoredReportSnapshot(
   return { snapshot: data, resolution: 'anchored' };
 }
 
+export async function loadReportSnapshotWithLegacyErrorFallback(
+  client: ClientLike,
+  report: ReportSnapshotAnchor,
+): Promise<ReportSnapshotResolution> {
+  try {
+    return await loadAnchoredReportSnapshot(client, report);
+  } catch (error) {
+    if (report.snapshot_id) throw error;
+    return { snapshot: null, resolution: 'none' };
+  }
+}
+
 export async function persistAnchoredReportSnapshot(
   client: ClientLike,
   reportId: string,
@@ -139,12 +151,14 @@ export async function persistAnchoredReportSnapshot(
     return { snapshot, report: anchorResult.data };
   } catch (error) {
     const primaryMessage = error instanceof Error ? error.message : String(error);
+    if (!deleteReportOnFailure) {
+      throw error instanceof Error ? error : new Error(primaryMessage);
+    }
     try {
-      const cleanupResult = deleteReportOnFailure
-        ? await (client.from('reports').delete().eq('id', reportId) as PromiseLike<{ error?: { message?: string } | null }>)
-        : snapshot?.id
-          ? await (client.from('report_snapshots').delete().eq('id', snapshot.id) as PromiseLike<{ error?: { message?: string } | null }>)
-          : { error: null };
+      const cleanupResult = await (client
+        .from('reports')
+        .delete()
+        .eq('id', reportId) as PromiseLike<{ error?: { message?: string } | null }>);
       if (cleanupResult?.error) {
         throw new Error(cleanupResult.error.message || 'cleanup delete failed');
       }
