@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canReadReport, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
-import { loadLatestReportSnapshot } from '@/lib/server/report-snapshots';
+import { loadAnchoredReportSnapshot } from '@/lib/server/report-snapshots';
 import { buildReportDetailModel } from '@/lib/server/report-detail';
 
 type Row = Record<string, unknown>;
@@ -66,7 +66,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (error || !report) return NextResponse.json({ code: 1, message: '报告不存在' }, { status: 404 });
 
   try {
-    const snapshot = await loadLatestReportSnapshot(client, id);
+    const { snapshot } = await loadAnchoredReportSnapshot(client, report);
     const reportRow = report as Row;
     const reportTaskId = String(reportRow.task_id || '');
     const [

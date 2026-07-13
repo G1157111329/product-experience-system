@@ -9,8 +9,10 @@ import {
   pickLatestReportPerTask,
   sortReportsByCreatedAtAsc,
 } from '@/lib/report-merge';
-import { attachLatestSnapshotForComparisonReport } from '@/lib/server/report-snapshots';
-import { loadLatestReportSnapshot } from '@/lib/server/report-snapshots';
+import {
+  attachLatestSnapshotForComparisonReport,
+  loadAnchoredReportSnapshot,
+} from '@/lib/server/report-snapshots';
 import { buildReportDetailModel } from '@/lib/server/report-detail';
 
 type IssueRow = Record<string, unknown> & { id: string };
@@ -19,6 +21,7 @@ type ReportRow = Record<string, unknown> & {
   task_id: string;
   product_model: string | null;
   created_at: string;
+  snapshot_id?: string | null;
   content?: { task?: Record<string, unknown> } | null;
 };
 
@@ -32,8 +35,8 @@ async function loadRows(
 async function buildPublicDetailModel(client: ReturnType<typeof getSupabaseClient>, report: ReportRow) {
   const reportId = String(report.id || '');
   const taskId = String(report.task_id || '');
-  const [snapshot, sourceIssues, taskIssues, materials, pdfJobs] = await Promise.all([
-    reportId ? loadLatestReportSnapshot(client, reportId) : Promise.resolve(null),
+  const [snapshotResult, sourceIssues, taskIssues, materials, pdfJobs] = await Promise.all([
+    reportId ? loadAnchoredReportSnapshot(client, report) : Promise.resolve({ snapshot: null, resolution: 'none' as const }),
     reportId
       ? loadRows(client.from('issues').select('*').eq('source_report_id', reportId) as unknown as PromiseLike<{ data: Array<Record<string, unknown>> | null }>)
       : Promise.resolve([]),
@@ -47,6 +50,7 @@ async function buildPublicDetailModel(client: ReturnType<typeof getSupabaseClien
       ? loadRows(client.from('pdf_generation_jobs').select('*').eq('report_id', reportId).order('created_at', { ascending: false }) as unknown as PromiseLike<{ data: Array<Record<string, unknown>> | null }>)
       : Promise.resolve([]),
   ]);
+  const snapshot = snapshotResult.snapshot;
 
   const issueMap = new Map([...sourceIssues, ...taskIssues].map((issue) => [String(issue.id || ''), issue]));
   const issueRows = Array.from(issueMap.values()) as IssueRow[];

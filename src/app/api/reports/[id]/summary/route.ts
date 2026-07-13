@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canReadReport, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
-import { loadLatestReportSnapshot } from '@/lib/server/report-snapshots';
+import { loadAnchoredReportSnapshot } from '@/lib/server/report-snapshots';
 
 function pickConclusionLevel(stats: { failCount: number; issueCount: number; totalCheckItems: number }): string {
   if (stats.failCount === 0 && stats.issueCount === 0) return 'positive';
@@ -93,13 +93,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   let matrixType: 'multi_matrix' | 'single_waterfall' | null = null;
   try {
-    const snapshot = await loadLatestReportSnapshot(client, id);
+    const { snapshot } = await loadAnchoredReportSnapshot(client, report);
     const snapshotJson = snapshot?.snapshot_json as Record<string, unknown> | undefined;
     const hasComparisonMatrix = Boolean(
       snapshotJson?.objects || snapshotJson?.comparison_objects || (Array.isArray(snapshotJson?.matrix_cells) && snapshotJson.matrix_cells.length > 0),
     );
     matrixType = hasComparisonMatrix ? 'multi_matrix' : recipes.length > 0 ? 'single_waterfall' : null;
-  } catch {
+  } catch (snapshotError) {
+    if (report.snapshot_id) throw snapshotError;
     matrixType = recipes.length > 0 ? 'single_waterfall' : null;
   }
 

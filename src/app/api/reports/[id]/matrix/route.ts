@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canReadReport, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
-import { loadLatestReportSnapshot } from '@/lib/server/report-snapshots';
+import { loadAnchoredReportSnapshot } from '@/lib/server/report-snapshots';
 import { type MatrixReadProjection } from '@/lib/matrix/projection';
 import { hasMeaningfulComparisonCell, hasMeaningfulV2Projection, hasMeaningfulV3Projection } from '@/lib/matrix/meaningful-content';
 import {
@@ -54,7 +54,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (isAuthResponse(user)) return user;
   if (!(await canReadReport(client, user, id))) return forbidden();
 
-  const { data: report, error } = await client.from('reports').select('id, task_id, content, report_type').eq('id', id).single();
+  const { data: report, error } = await client.from('reports').select('id, task_id, content, report_type, snapshot_id').eq('id', id).single();
   if (error || !report) {
     return NextResponse.json({ code: 1, message: '报告不存在' }, { status: 404 });
   }
@@ -66,9 +66,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   let snapshotJson: Row | undefined;
   let snapshotLoadError = '';
   try {
-    const snapshot = await loadLatestReportSnapshot(client, id);
+    const { snapshot } = await loadAnchoredReportSnapshot(client, report);
     snapshotJson = snapshot?.snapshot_json as Row | undefined;
   } catch (err) {
+    if (report.snapshot_id) throw err;
     snapshotJson = undefined;
     snapshotLoadError = err instanceof Error ? err.message : String(err);
   }

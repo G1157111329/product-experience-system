@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canReadReport, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
-import { loadLatestReportSnapshot } from '@/lib/server/report-snapshots';
+import { loadAnchoredReportSnapshot } from '@/lib/server/report-snapshots';
 
 type Row = Record<string, unknown>;
 
@@ -60,7 +60,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const { data: report, error } = await client
     .from('reports')
-    .select('id, task_id, content, report_type')
+    .select('id, task_id, content, report_type, snapshot_id')
     .eq('id', id)
     .single();
   if (error || !report) {
@@ -75,7 +75,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   let recipes = recipesFromContent;
   if (recipes.length === 0 && report.task_id) {
     try {
-      const snapshot = await loadLatestReportSnapshot(client, id);
+      const { snapshot } = await loadAnchoredReportSnapshot(client, report);
       const snapshotJson = snapshot?.snapshot_json as Row | undefined;
       if (snapshotJson) {
         // 快照中的 shared_recipe 或 item_nodes 里可能含食谱结构
@@ -92,7 +92,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           recipes = [];
         }
       }
-    } catch {
+    } catch (snapshotError) {
+      if (report.snapshot_id) throw snapshotError;
       // 快照加载失败，忽略
     }
   }

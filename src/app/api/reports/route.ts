@@ -27,6 +27,7 @@ import {
   isFrozenV3MatrixProjection,
   type ReportV3MatrixProjection,
 } from '@/lib/matrix/report-projection-v3-adapter';
+import { persistAnchoredReportSnapshot } from '@/lib/server/report-snapshots';
 
 /** Frozen report payload: V2 groups projection or V3 excel-like freeze. */
 type ReportDataMatrixProjection = MatrixReadProjection | (ReportV3MatrixProjection & { projectionVersion?: 'v3' });
@@ -423,28 +424,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ code: 1, message: reportError?.message || '对比报告创建失败' }, { status: 500 });
     }
 
-    const { data: savedSnapshot, error: snapshotError } = await client
-      .from('report_snapshots')
-      .insert({
+    let savedSnapshot: Record<string, unknown>;
+    try {
+      savedSnapshot = await persistAnchoredReportSnapshot(client, String(report.id), {
         report_id: report.id,
         report_type: 'comparison_report',
         version: 1,
         snapshot_json: snapshot,
         layout_profile: snapshot.layout_profile || 'comparison_image_matrix_a3_landscape',
         created_by: user.id,
-      })
-      .select()
-      .single();
-    if (snapshotError || !savedSnapshot) {
-      return NextResponse.json({ code: 1, message: snapshotError?.message || '对比报告快照创建失败' }, { status: 500 });
+      });
+    } catch (snapshotError) {
+      return NextResponse.json({
+        code: 1,
+        message: snapshotError instanceof Error ? snapshotError.message : '对比报告快照创建失败',
+      }, { status: 500 });
     }
-
-    const { data: updatedReport } = await client
-      .from('reports')
-      .update({ snapshot_id: savedSnapshot.id, updated_at: new Date().toISOString() })
-      .eq('id', report.id)
-      .select()
-      .single();
 
     await client
       .from('experience_tasks')
@@ -571,7 +566,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       code: 0,
       message: totalNewIssues > 0 ? `对比矩阵报告生成成功，已创建 ${totalNewIssues} 个问题点` : '对比矩阵报告生成成功',
-      data: updatedReport || report,
+      data: { ...report, snapshot_id: savedSnapshot.id },
     });
   }
   const { data: rawRecords } = await client.from('check_records').select('*').eq('task_id', body.task_id);
@@ -925,26 +920,19 @@ export async function POST(request: NextRequest) {
         source_task_ids: [body.task_id],
         matrix_projection: frozenProjection,
       };
-      const { data: savedSnapshot } = await client
-        .from('report_snapshots')
-        .insert({
-          report_id: savedReport.id,
-          report_type: 'single_report',
-          version: 1,
-          snapshot_json: frozenSnapshotJson,
-          layout_profile: 'single_a4_portrait',
-          created_by: user.id,
-        })
-        .select()
-        .single();
-      if (savedSnapshot?.id) {
-        await client
-          .from('reports')
-          .update({ snapshot_id: savedSnapshot.id, updated_at: new Date().toISOString() })
-          .eq('id', savedReport.id);
-      }
-    } catch {
-      // 快照写入失败不阻断报告生成；content.data_matrix_projection 仍可用
+      await persistAnchoredReportSnapshot(client, savedReport.id, {
+        report_id: savedReport.id,
+        report_type: 'single_report',
+        version: 1,
+        snapshot_json: frozenSnapshotJson,
+        layout_profile: 'single_a4_portrait',
+        created_by: user.id,
+      });
+    } catch (snapshotError) {
+      return NextResponse.json({
+        code: 1,
+        message: snapshotError instanceof Error ? snapshotError.message : '报告快照创建失败',
+      }, { status: 500 });
     }
   }
 

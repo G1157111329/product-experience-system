@@ -4,7 +4,7 @@ import { canReadReport, isAuthResponse, requireUser, type AuthUser } from '@/lib
 import { writeSecurityAudit } from '@/lib/server/security-audit';
 import { buildReportDetailModel, presignReportMediaUrls } from '@/lib/server/report-detail';
 import { renderReportDetailPdfHtml } from '@/lib/server/report-print-renderer';
-import { loadLatestReportSnapshot } from '@/lib/server/report-snapshots';
+import { loadAnchoredReportSnapshot } from '@/lib/server/report-snapshots';
 import { buildReportFilename } from '@/lib/report-filename';
 
 type Row = Record<string, unknown>;
@@ -99,7 +99,7 @@ async function attachReEvaluations(client: ReturnType<typeof getSupabaseClient>,
 async function buildDetailForReport(client: ReturnType<typeof getSupabaseClient>, report: Row) {
   const reportId = String(report.id || '');
   const reportTaskId = String(report.task_id || '');
-  const snapshot = await loadLatestReportSnapshot(client, reportId);
+  const { snapshot } = await loadAnchoredReportSnapshot(client, report);
   const [sourceReportIssues, taskIssues, materials, pdfJobs] = await Promise.all([
     selectRows(
       client.from('issues').select('*').eq('source_report_id', reportId) as unknown as PromiseLike<{ data: Row[] | null; error?: { message?: string } | null }>,

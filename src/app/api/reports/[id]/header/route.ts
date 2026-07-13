@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canReadReport, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
-import { loadLatestReportSnapshot } from '@/lib/server/report-snapshots';
+import { loadAnchoredReportSnapshot } from '@/lib/server/report-snapshots';
 import {
   hasMeaningfulComparisonCell,
   hasMeaningfulV2Projection,
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const { data: report, error } = await client
     .from('reports')
-    .select('id, title, product_model, status, report_type, task_id, version, created_at, updated_at, content')
+    .select('id, title, product_model, status, report_type, task_id, snapshot_id, version, created_at, updated_at, content')
     .eq('id', id)
     .single();
 
@@ -79,7 +79,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   let hasMatrix = false;
   if (isComparison) {
     try {
-      const snapshot = await loadLatestReportSnapshot(client, id);
+      const { snapshot } = await loadAnchoredReportSnapshot(client, report);
       const snapshotJson = snapshot?.snapshot_json as Record<string, unknown> | undefined;
       const objects = (snapshotJson?.objects ?? []) as unknown[];
       const nodes = (snapshotJson?.item_nodes ?? []) as unknown[];
@@ -87,11 +87,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       hasMatrix = objects.length > 0 && nodes.length > 0 && cells.some((cell) => (
         hasMeaningfulComparisonCell(cell) || hasSnapshotCellMedia(cell)
       ));
-    } catch {
+    } catch (snapshotError) {
+      if (report.snapshot_id) throw snapshotError;
       hasMatrix = false;
     }
   } else {
-    const snapshot = await loadLatestReportSnapshot(client, id).catch(() => null);
+    const { snapshot } = await loadAnchoredReportSnapshot(client, report);
     const snapshotJson = snapshot?.snapshot_json as Record<string, unknown> | undefined;
     const dataMatrixProjection = isRecordLike(snapshotJson?.matrix_projection)
       ? snapshotJson.matrix_projection
