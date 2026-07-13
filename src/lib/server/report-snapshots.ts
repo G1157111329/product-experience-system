@@ -60,30 +60,63 @@ export async function persistAnchoredReportSnapshot(
   client: ClientLike,
   reportId: string,
   snapshotRow: Record<string, unknown>,
+  options: {
+    deleteReportOnFailure?: boolean;
+    reportUpdate?: Record<string, unknown>;
+  } = {},
 ) {
-  const cleanupReport = async () => {
-    await (client.from('reports').delete().eq('id', reportId) as PromiseLike<unknown>);
-  };
+  const deleteReportOnFailure = options.deleteReportOnFailure !== false;
+  let snapshot: Record<string, unknown> | null = null;
+  try {
+    const insertResult = await client
+      .from('report_snapshots')
+      .insert(snapshotRow)
+      .select()
+      .single();
+    snapshot = insertResult.data;
+    if (insertResult.error || !snapshot?.id) {
+      throw new Error(insertResult.error?.message || 'Report snapshot creation failed');
+    }
 
-  const { data: snapshot, error: snapshotError } = await client
-    .from('report_snapshots')
-    .insert(snapshotRow)
-    .select()
-    .single();
-  if (snapshotError || !snapshot?.id) {
-    await cleanupReport();
-    throw new Error(snapshotError?.message || 'Report snapshot creation failed');
+    const anchorResult = await ((client
+      .from('reports')
+      .update({
+        ...options.reportUpdate,
+        snapshot_id: snapshot.id,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', reportId) as unknown as {
+        select: () => {
+          single: () => Promise<{
+            data: Record<string, unknown> | null;
+            error?: { message?: string } | null;
+          }>;
+        };
+      }).select().single());
+    if (anchorResult?.error || !anchorResult?.data) {
+      throw new Error(
+        anchorResult?.error?.message
+          || (!anchorResult?.data ? 'Report snapshot anchor update returned no report' : 'Report snapshot anchor update failed'),
+      );
+    }
+    return { snapshot, report: anchorResult.data };
+  } catch (error) {
+    const primaryMessage = error instanceof Error ? error.message : String(error);
+    try {
+      const cleanupResult = deleteReportOnFailure
+        ? await (client.from('reports').delete().eq('id', reportId) as PromiseLike<{ error?: { message?: string } | null }>)
+        : snapshot?.id
+          ? await (client.from('report_snapshots').delete().eq('id', snapshot.id) as PromiseLike<{ error?: { message?: string } | null }>)
+          : { error: null };
+      if (cleanupResult?.error) {
+        throw new Error(cleanupResult.error.message || 'cleanup delete failed');
+      }
+    } catch (cleanupError) {
+      const cleanupMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+      throw new Error(`${primaryMessage}; cleanup failed: ${cleanupMessage}`);
+    }
+    throw error instanceof Error ? error : new Error(primaryMessage);
   }
-
-  const anchorResult = await (client
-    .from('reports')
-    .update({ snapshot_id: snapshot.id, updated_at: new Date().toISOString() })
-    .eq('id', reportId) as PromiseLike<{ error?: { message?: string } | null }>);
-  if (anchorResult?.error) {
-    await cleanupReport();
-    throw new Error(anchorResult.error.message || 'Report snapshot anchor update failed');
-  }
-  return snapshot;
 }
 
 export async function attachLatestSnapshotForComparisonReport<T extends Record<string, unknown>>(

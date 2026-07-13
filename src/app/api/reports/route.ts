@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { getDb } from '@/storage/database/pg-db';
 import { canAccessTask, isAuthResponse, requireUser } from '@/lib/server/auth';
@@ -9,6 +9,7 @@ import {
   issues as issuesTable,
   recipeLibrary,
   recipeLibrarySteps,
+  reportSnapshots,
   reports as reportsTable,
 } from '@/storage/database/shared/schema';
 import { preserveReviewOverrides, type ReportContentWithReview } from '@/lib/report-review-overrides';
@@ -393,14 +394,6 @@ export async function POST(request: NextRequest) {
     const snapshot = await buildComparisonReportSnapshot(client, comparisonSource.assemblyId, { snapshotStatus: 'published' }) as Record<string, unknown>;
     const reportTitle = body.title || `${task?.task_name || '体验'}报告`;
 
-    if (previousReportIds.length > 0) {
-      await client.from('issues').delete().eq('task_id', body.task_id).in('source_report_id', previousReportIds);
-    }
-    await client
-      .from('reports')
-      .update({ status: 'archived', updated_at: new Date().toISOString() })
-      .eq('task_id', body.task_id);
-
     const { data: report, error: reportError } = await client
       .from('reports')
       .insert({
@@ -426,7 +419,7 @@ export async function POST(request: NextRequest) {
 
     let savedSnapshot: Record<string, unknown>;
     try {
-      savedSnapshot = await persistAnchoredReportSnapshot(client, String(report.id), {
+      const persisted = await persistAnchoredReportSnapshot(client, String(report.id), {
         report_id: report.id,
         report_type: 'comparison_report',
         version: 1,
@@ -434,12 +427,22 @@ export async function POST(request: NextRequest) {
         layout_profile: snapshot.layout_profile || 'comparison_image_matrix_a3_landscape',
         created_by: user.id,
       });
+      savedSnapshot = persisted.snapshot;
     } catch (snapshotError) {
       return NextResponse.json({
         code: 1,
         message: snapshotError instanceof Error ? snapshotError.message : '对比报告快照创建失败',
       }, { status: 500 });
     }
+
+    if (previousReportIds.length > 0) {
+      await client.from('issues').delete().eq('task_id', body.task_id).in('source_report_id', previousReportIds);
+    }
+    await client
+      .from('reports')
+      .update({ status: 'archived', updated_at: new Date().toISOString() })
+      .eq('task_id', body.task_id)
+      .neq('id', report.id);
 
     await client
       .from('experience_tasks')
@@ -689,20 +692,46 @@ export async function POST(request: NextRequest) {
     { preserve: body.preserve_review_overrides !== false },
   );
 
+  let frozenSnapshotJson: Record<string, unknown> | null = null;
+  if (dataMatrixProjection) {
+    try {
+      let frozenProjection: ReportDataMatrixProjection = dataMatrixProjection;
+      if (!(dataMatrix?.kind === 'v3' || isFrozenV3MatrixProjection(dataMatrixProjection))) {
+        const fresh = dataMatrix?.kind === 'v2' && dataMatrix.assemblyId
+          ? await loadDataMatrixProjection(client, body.task_id)
+          : null;
+        const freshProjection = (fresh?.kind === 'v2' ? fresh.projection : null) ?? dataMatrixProjection;
+        const assemblyId = (fresh?.kind === 'v2' ? fresh.assemblyId : undefined)
+          ?? (dataMatrix?.kind === 'v2' ? dataMatrix.assemblyId : undefined);
+        const assemblyMeta = assemblyId
+          ? await loadDataMatrixAssemblyMeta(client, String(assemblyId))
+          : null;
+        const freshProjectionMeta = freshProjection as unknown as Record<string, unknown>;
+        frozenProjection = {
+          ...(freshProjection as MatrixReadProjection),
+          comparabilityStatus: assemblyMeta?.comparabilityStatus ?? freshProjectionMeta.comparabilityStatus,
+          matrixSchemaVersionId: assemblyMeta?.matrixSchemaVersionId ?? freshProjectionMeta.matrixSchemaVersionId,
+        } as MatrixReadProjection;
+      }
+
+      frozenSnapshotJson = {
+        report_type: 'single_report',
+        snapshot_status: 'published',
+        generated_at: new Date().toISOString(),
+        primary_task_id: body.task_id,
+        source_task_ids: [body.task_id],
+        matrix_projection: frozenProjection,
+      };
+    } catch (snapshotError) {
+      return NextResponse.json({
+        code: 1,
+        message: snapshotError instanceof Error ? snapshotError.message : '报告快照创建失败',
+      }, { status: 500 });
+    }
+  }
+
   const db = getDb();
   const savedReport = await db.transaction(async (tx) => {
-    await tx.update(reportsTable)
-      .set({ status: 'archived', updatedAt: new Date().toISOString() })
-      .where(eq(reportsTable.taskId, body.task_id));
-
-    if (previousReportIds.length > 0) {
-      await tx.delete(issuesTable)
-        .where(and(
-          eq(issuesTable.taskId, body.task_id),
-          inArray(issuesTable.sourceReportId, previousReportIds),
-        ));
-    }
-
     const [report] = await tx.insert(reportsTable).values({
       taskId: body.task_id,
       templateId: body.template_id || null,
@@ -715,6 +744,36 @@ export async function POST(request: NextRequest) {
 
     if (!report) {
       throw new Error('报告创建失败');
+    }
+
+    if (frozenSnapshotJson) {
+      const [snapshot] = await tx.insert(reportSnapshots).values({
+        reportId: report.id,
+        reportType: 'single_report',
+        version: 1,
+        snapshotJson: frozenSnapshotJson,
+        layoutProfile: 'single_a4_portrait',
+        createdBy: user.id,
+      }).returning({ id: reportSnapshots.id });
+      if (!snapshot?.id) throw new Error('报告快照创建失败');
+      await tx.update(reportsTable)
+        .set({ snapshotId: snapshot.id, updatedAt: new Date().toISOString() })
+        .where(eq(reportsTable.id, report.id));
+    }
+
+    await tx.update(reportsTable)
+      .set({ status: 'archived', updatedAt: new Date().toISOString() })
+      .where(and(
+        eq(reportsTable.taskId, body.task_id),
+        ne(reportsTable.id, report.id),
+      ));
+
+    if (previousReportIds.length > 0) {
+      await tx.delete(issuesTable)
+        .where(and(
+          eq(issuesTable.taskId, body.task_id),
+          inArray(issuesTable.sourceReportId, previousReportIds),
+        ));
     }
 
     await tx.update(experienceTasks)
@@ -881,60 +940,6 @@ export async function POST(request: NextRequest) {
 
     return report;
   });
-
-  // ── 数据矩阵快照冻结（Sub-task C, §11.3 no-drift）──
-  // 当任务关联 data_matrix 组装时，发布一份快照并把完整投影冻结进
-  // snapshot_json.matrix_projection。V3 直接复用 content 已冻结投影；
-  // V2 仍可补充 assembly 可比性/schema version meta。绝不仅存 matrix_instance_id。
-  if (dataMatrixProjection) {
-    try {
-      let frozenProjection: ReportDataMatrixProjection = dataMatrixProjection;
-
-      if (dataMatrix?.kind === 'v3' || isFrozenV3MatrixProjection(dataMatrixProjection)) {
-        // V3 already frozen at content write — do not re-run V2 assembly meta.
-        frozenProjection = dataMatrixProjection;
-      } else {
-        // 重新读取最新投影以保证发布精度（绝不仅存 matrix_instance_id）。
-        const fresh = dataMatrix?.kind === 'v2' && dataMatrix.assemblyId
-          ? await loadDataMatrixProjection(client, body.task_id)
-          : null;
-        const freshProjection = (fresh?.kind === 'v2' ? fresh.projection : null) ?? dataMatrixProjection;
-        const assemblyId = (fresh?.kind === 'v2' ? fresh.assemblyId : undefined)
-          ?? (dataMatrix?.kind === 'v2' ? dataMatrix.assemblyId : undefined);
-        const assemblyMeta = assemblyId
-          ? await loadDataMatrixAssemblyMeta(client, String(assemblyId))
-          : null;
-        const freshProjectionMeta = freshProjection as unknown as Record<string, unknown>;
-        frozenProjection = {
-          ...(freshProjection as MatrixReadProjection),
-          comparabilityStatus: assemblyMeta?.comparabilityStatus ?? freshProjectionMeta.comparabilityStatus,
-          matrixSchemaVersionId: assemblyMeta?.matrixSchemaVersionId ?? freshProjectionMeta.matrixSchemaVersionId,
-        } as MatrixReadProjection;
-      }
-
-      const frozenSnapshotJson = {
-        report_type: 'single_report',
-        snapshot_status: 'published',
-        generated_at: new Date().toISOString(),
-        primary_task_id: body.task_id,
-        source_task_ids: [body.task_id],
-        matrix_projection: frozenProjection,
-      };
-      await persistAnchoredReportSnapshot(client, savedReport.id, {
-        report_id: savedReport.id,
-        report_type: 'single_report',
-        version: 1,
-        snapshot_json: frozenSnapshotJson,
-        layout_profile: 'single_a4_portrait',
-        created_by: user.id,
-      });
-    } catch (snapshotError) {
-      return NextResponse.json({
-        code: 1,
-        message: snapshotError instanceof Error ? snapshotError.message : '报告快照创建失败',
-      }, { status: 500 });
-    }
-  }
 
   const data = {
     ...savedReport,

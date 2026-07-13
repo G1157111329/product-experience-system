@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { canAccessAssembly, canAccessReport, canReadReport, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { buildComparisonReportSnapshot } from '@/lib/server/comparison-assembly';
+import { persistAnchoredReportSnapshot } from '@/lib/server/report-snapshots';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 
 type SnapshotData = {
@@ -85,6 +86,7 @@ export async function POST(request: NextRequest) {
     ? body.title.trim()
     : `${String(snapshot.assembly?.name || '对比报告')} - 草稿`;
   let reportId = typeof body.report_id === 'string' ? body.report_id : '';
+  let createdNewReport = false;
 
   if (reportId) {
     if (!(await canAccessReport(client, user, reportId))) return forbidden();
@@ -110,44 +112,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ code: 1, message: error?.message || '创建草稿报告失败' }, { status: 500 });
     }
     reportId = String(report.id);
+    createdNewReport = true;
   }
 
   const version = await nextSnapshotVersion(client, reportId);
-  const { data: savedSnapshot, error: snapshotError } = await client
-    .from('report_snapshots')
-    .insert({
+  try {
+    const { report, snapshot: savedSnapshot } = await persistAnchoredReportSnapshot(client, reportId, {
       report_id: reportId,
       report_type: 'comparison_report',
       version,
       snapshot_json: snapshot,
       layout_profile: snapshot.layout_profile,
       created_by: user.id,
-    })
-    .select()
-    .single();
-  if (snapshotError || !savedSnapshot) {
-    return NextResponse.json({ code: 1, message: snapshotError?.message || '创建报告快照失败' }, { status: 500 });
+    }, {
+      deleteReportOnFailure: createdNewReport,
+      reportUpdate: {
+        report_type: 'comparison_report',
+        assembly_id: assemblyId,
+        layout_profile: snapshot.layout_profile,
+      },
+    });
+    if (!report) throw new Error('Report snapshot anchor update returned no report');
+
+    return NextResponse.json({
+      code: 0,
+      message: 'comparison_report 草稿快照已生成',
+      data: {
+        report,
+        snapshot: savedSnapshot,
+      },
+    });
+  } catch (snapshotError) {
+    return NextResponse.json({
+      code: 1,
+      message: snapshotError instanceof Error ? snapshotError.message : '创建报告快照失败',
+    }, { status: 500 });
   }
-
-  const { data: report } = await client
-    .from('reports')
-    .update({
-      snapshot_id: savedSnapshot.id,
-      report_type: 'comparison_report',
-      assembly_id: assemblyId,
-      layout_profile: snapshot.layout_profile,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', reportId)
-    .select()
-    .single();
-
-  return NextResponse.json({
-    code: 0,
-    message: 'comparison_report 草稿快照已生成',
-    data: {
-      report,
-      snapshot: savedSnapshot,
-    },
-  });
 }

@@ -151,6 +151,184 @@ async function run() {
     assert.deepEqual(deletedReportIds, ['report-1']);
   }
 
+  {
+    const deletedReportIds: string[] = [];
+    const client = {
+      from(table: string) {
+        if (table === 'report_snapshots') {
+          return {
+            insert() {
+              return {
+                select() {
+                  return {
+                    async single() {
+                      return { data: { id: 'snapshot-1' }, error: null };
+                    },
+                  };
+                },
+              };
+            },
+          };
+        }
+        return {
+          update() {
+            return {
+              eq() {
+                return {
+                  select() {
+                    return {
+                      async single() {
+                        return { data: null, error: { message: 'anchor update failed' } };
+                      },
+                    };
+                  },
+                };
+              },
+            };
+          },
+          delete() {
+            return {
+              async eq(_field: string, value: unknown) {
+                deletedReportIds.push(String(value));
+                return { error: null };
+              },
+            };
+          },
+        };
+      },
+    };
+
+    await assert.rejects(
+      persistAnchoredReportSnapshot(client as never, 'report-1', { report_id: 'report-1' }),
+      /anchor update failed/,
+    );
+    assert.deepEqual(deletedReportIds, ['report-1']);
+  }
+
+  for (const anchorResult of [
+    async () => ({ data: null, error: null }),
+    async () => { throw new Error('anchor promise rejected'); },
+  ]) {
+    const deletedReportIds: string[] = [];
+    const client = {
+      from(table: string) {
+        if (table === 'report_snapshots') {
+          return {
+            insert() {
+              return {
+                select() {
+                  return {
+                    async single() {
+                      return { data: { id: 'snapshot-1' }, error: null };
+                    },
+                  };
+                },
+              };
+            },
+          };
+        }
+        return {
+          update() {
+            return {
+              eq() {
+                return { select: () => ({ single: anchorResult }) };
+              },
+            };
+          },
+          delete() {
+            return {
+              async eq(_field: string, value: unknown) {
+                deletedReportIds.push(String(value));
+                return { error: null };
+              },
+            };
+          },
+        };
+      },
+    };
+
+    await assert.rejects(
+      persistAnchoredReportSnapshot(client as never, 'report-1', { report_id: 'report-1' }),
+      /anchor (update returned no report|promise rejected)/,
+    );
+    assert.deepEqual(deletedReportIds, ['report-1']);
+  }
+
+  {
+    const deletedReportIds: string[] = [];
+    const client = {
+      from(table: string) {
+        if (table === 'report_snapshots') {
+          return {
+            insert() {
+              return {
+                select() {
+                  return {
+                    async single() {
+                      throw new Error('snapshot promise rejected');
+                    },
+                  };
+                },
+              };
+            },
+          };
+        }
+        return {
+          delete() {
+            return {
+              async eq(_field: string, value: unknown) {
+                deletedReportIds.push(String(value));
+                return { error: null };
+              },
+            };
+          },
+        };
+      },
+    };
+
+    await assert.rejects(
+      persistAnchoredReportSnapshot(client as never, 'report-1', { report_id: 'report-1' }),
+      /snapshot promise rejected/,
+    );
+    assert.deepEqual(deletedReportIds, ['report-1']);
+  }
+
+  {
+    const client = {
+      from(table: string) {
+        if (table === 'report_snapshots') {
+          return {
+            insert() {
+              return {
+                select() {
+                  return {
+                    async single() {
+                      return { data: null, error: { message: 'snapshot insert failed' } };
+                    },
+                  };
+                },
+              };
+            },
+          };
+        }
+        return {
+          delete() {
+            return {
+              async eq() {
+                return { error: { message: 'cleanup delete failed' } };
+              },
+            };
+          },
+        };
+      },
+    };
+
+    await assert.rejects(
+      persistAnchoredReportSnapshot(client as never, 'report-1', { report_id: 'report-1' }),
+      /snapshot insert failed.*cleanup failed: cleanup delete failed/,
+    );
+  }
+
   console.log('report snapshot anchoring contract tests passed');
 }
 
