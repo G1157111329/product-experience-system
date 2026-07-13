@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import type { FrozenMedia, FrozenReportViewModel } from '@/lib/report-frozen-view';
 import type { ReportFrozenTabKey } from '@/lib/report-frozen-tabs';
 import { ReportTabBar } from '@/app/(main)/reports/[id]/components/report-tab-bar';
+import { ReportMatrixTab, type MatrixData } from '@/app/(main)/reports/[id]/components/report-matrix-tab';
+import { MediaGallery } from '@/components/app/media-gallery';
 
 const TAB_LABELS: Record<ReportFrozenTabKey, string> = {
   summary: '总结',
@@ -16,27 +18,43 @@ const TAB_LABELS: Record<ReportFrozenTabKey, string> = {
 export function resolveFrozenReportTab(
   tabs: ReportFrozenTabKey[],
   current: ReportFrozenTabKey,
+  reportChanged = false,
 ): ReportFrozenTabKey {
+  if (reportChanged) return tabs.includes('summary') ? 'summary' : tabs[0] ?? 'summary';
   if (tabs.includes(current)) return current;
   if (tabs.includes('summary')) return 'summary';
   return tabs[0] ?? 'summary';
 }
 
+export function orderedFrozenModels(
+  primary: FrozenReportViewModel,
+  siblingReports: Array<{ id: string }> = [],
+  siblingFrozenViewModels: Record<string, FrozenReportViewModel> = {},
+) {
+  const seen = new Set([primary.header.id]);
+  return [primary, ...siblingReports.flatMap((report) => {
+    const model = siblingFrozenViewModels[report.id];
+    if (!model || seen.has(model.header.id)) return [];
+    seen.add(model.header.id);
+    return [model];
+  })];
+}
+
 function MediaList({ items }: { items: FrozenMedia[] }) {
   if (items.length === 0) return null;
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-      {items.map((item) => (
-        <figure key={item.id} data-content-id={`media:${item.id}`} className="overflow-hidden rounded-lg border bg-muted/20">
-          {item.type.includes('video') ? (
-            <video controls preload="metadata" src={item.url} className="aspect-video w-full object-cover" />
-          ) : (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={item.url} alt={item.name} className="aspect-[4/3] w-full object-cover" />
-          )}
-          <figcaption className="truncate px-2 py-1.5 text-xs text-muted-foreground">{item.name}</figcaption>
-        </figure>
-      ))}
+    <div data-content-id={`media-group:${items.map((item) => item.id).join(',')}`}>
+      <MediaGallery
+        materials={items.map((item) => ({
+          id: item.id,
+          file_url: item.url,
+          file_name: item.name,
+          material_type: item.type,
+        }))}
+        responsive
+        columns={{ mobile: 2, sm: 3, lg: 4 }}
+        gap="gap-3"
+      />
     </div>
   );
 }
@@ -49,6 +67,35 @@ function record(value: unknown): Record<string, unknown> {
 
 function valueText(...values: unknown[]) {
   return values.find((value) => typeof value === 'string' && value.trim()) as string | undefined;
+}
+
+function mediaFromUnknown(value: unknown): FrozenMedia[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item, index) => {
+    const source = record(item);
+    const url = valueText(source.file_url, source.fileUrl, source.file_path, source.url);
+    if (!url) return [];
+    return [{
+      id: String(source.id ?? source.materialId ?? `${url}:${index}`),
+      name: valueText(source.file_name, source.fileName, source.name) ?? '素材',
+      type: valueText(source.material_type, source.materialType, source.media_type) ?? 'image',
+      url,
+    }];
+  });
+}
+
+function problemTexts(value: unknown): string[] {
+  let source = value;
+  if (typeof source === 'string') {
+    const raw = source;
+    try { source = JSON.parse(raw); } catch { return raw.trim() ? [raw.trim()] : []; }
+  }
+  if (!Array.isArray(source)) return [];
+  return source.flatMap((item) => {
+    if (typeof item === 'string') return item.trim() ? [item.trim()] : [];
+    const text = valueText(record(item).text, record(item).issueText);
+    return text ? [text] : [];
+  });
 }
 
 function FrozenPanel({ model, active }: { model: FrozenReportViewModel; active: ReportFrozenTabKey }) {
@@ -80,7 +127,10 @@ function FrozenPanel({ model, active }: { model: FrozenReportViewModel; active: 
                   const id = String(evaluation.id ?? index);
                   return (
                     <div key={id} data-content-id={`re-evaluation:${id}`} className="rounded-md bg-muted/30 p-3 text-sm text-muted-foreground">
-                      {valueText(evaluation.description, evaluation.result, evaluation.conclusion) || '已完成复评'}
+                      <p>{valueText(evaluation.description, evaluation.result, evaluation.conclusion) || '已完成复评'}</p>
+                      {record(evaluation.ai_result).score !== undefined && <p className="mt-1">AI评分：{String(record(evaluation.ai_result).score)}</p>}
+                      {valueText(record(evaluation.ai_result).summary) && <p className="mt-1">AI评语：{valueText(record(evaluation.ai_result).summary)}</p>}
+                      <div className="mt-2"><MediaList items={mediaFromUnknown(evaluation.materials)} /></div>
                     </div>
                   );
                 })}
@@ -99,16 +149,25 @@ function FrozenPanel({ model, active }: { model: FrozenReportViewModel; active: 
             <h3 className="font-medium">{effect.name}</h3>
             {effect.evaluation && <p className="whitespace-pre-wrap text-sm text-muted-foreground">{effect.evaluation}</p>}
             {effect.score && <p className="text-sm">评分：{effect.score}</p>}
+            {problemTexts(effect.problemPoints).length > 0 && (
+              <ul className="list-disc space-y-1 pl-5 text-sm text-amber-700">
+                {problemTexts(effect.problemPoints).map((point, index) => <li key={`${point}:${index}`}>{point}</li>)}
+              </ul>
+            )}
             <MediaList items={effect.evidence} />
             {effect.steps.length > 0 && (
               <ol className="space-y-2 border-t pt-3">
                 {effect.steps.map((item, index) => {
                   const step = record(item);
                   const id = String(step.id ?? index);
+                  const problems = problemTexts(step.problem_points ?? step.problem_point);
                   return (
-                    <li key={id} data-content-id={`function-step:${id}`} className="text-sm">
-                      <span className="font-medium">步骤 {String(step.step_number ?? index + 1)}</span>
-                      {valueText(step.operation, step.description) && <span className="ml-2 text-muted-foreground">{valueText(step.operation, step.description)}</span>}
+                    <li key={id} data-content-id={`function-step:${id}`} className="space-y-2 text-sm">
+                      <div><span className="font-medium">步骤 {String(step.step_number ?? index + 1)}</span>
+                        {valueText(step.operation, step.description) && <span className="ml-2 text-muted-foreground">{valueText(step.operation, step.description)}</span>}
+                      </div>
+                      {problems.length > 0 && <ul className="list-disc pl-5 text-amber-700">{problems.map((point, pointIndex) => <li key={`${point}:${pointIndex}`}>{point}</li>)}</ul>}
+                      <MediaList items={mediaFromUnknown(step.materials)} />
                     </li>
                   );
                 })}
@@ -119,24 +178,18 @@ function FrozenPanel({ model, active }: { model: FrozenReportViewModel; active: 
       </div>
     );
   }
-  const matrixId = model.matrix?.kind === 'comparison'
-    ? String(model.matrix.snapshot.id ?? model.header.id)
-    : model.matrix
-      ? String(model.matrix.projection.matrixId ?? model.header.id)
-      : model.header.id;
-  return (
-    <section data-content-id={`matrix:${matrixId}`} className="rounded-lg border p-4">
-      <h3 className="font-medium">{active === 'comparison_matrix' ? '对比矩阵' : '数据矩阵'}</h3>
-      <p className="mt-2 text-sm text-muted-foreground">冻结矩阵内容</p>
-    </section>
-  );
+  let matrixData: MatrixData | null = null;
+  if (model.matrix?.kind === 'comparison') matrixData = { matrixType: 'multi_matrix', matrix: model.matrix.snapshot as never };
+  if (model.matrix?.kind === 'data_v2') matrixData = { matrixType: 'data_matrix', dataMatrix: model.matrix.projection as never };
+  if (model.matrix?.kind === 'data_v3') matrixData = { matrixType: 'data_matrix_v3', dataMatrixV3: model.matrix.projection as never };
+  return <div data-content-id={`matrix:${model.header.id}`}><ReportMatrixTab data={matrixData} /></div>;
 }
 
 export function FrozenReportReader({ model }: { model: FrozenReportViewModel }) {
   const tabSignature = model.tabs.join('|');
   const [active, setActive] = useState<ReportFrozenTabKey>(() => resolveFrozenReportTab(model.tabs, 'summary'));
   useEffect(() => {
-    setActive((current) => resolveFrozenReportTab(model.tabs, current));
+    setActive((current) => resolveFrozenReportTab(model.tabs, current, true));
   }, [model.header.id, tabSignature, model.tabs]);
   const tabs = useMemo(() => model.tabs.map((key) => ({
     key,

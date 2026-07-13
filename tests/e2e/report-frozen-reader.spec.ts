@@ -39,3 +39,62 @@ test('detail and anonymous share expose equivalent frozen reader content', async
     await anonymous.close();
   }
 });
+
+test('comparison reader renders frozen objects rows and cell values', async ({ browser }) => {
+  const authenticated = await browser.newPage();
+  await loginForE2E(authenticated, 'dockeradmin', 'DockerLocal2026');
+  const response = await authenticated.request.post('/api/reports/share', {
+    data: { report_id: 'golden-report-comparison', duration: '7d' },
+  });
+  const payload = await response.json();
+  const anonymous = await browser.newPage();
+  try {
+    await anonymous.goto(`/reports/share/${payload.data.share_token}`);
+    await anonymous.getByRole('tab', { name: '对比矩阵' }).click();
+    await expect(anonymous.getByText('中式面团效果')).toBeVisible();
+    await expect(anonymous.getByText('成团稳定，表面较光滑')).toBeVisible();
+    await expect(anonymous.getByText('成团略慢，边缘粘附')).toBeVisible();
+    await expect(anonymous.getByRole('button', { name: '导出PDF' })).toBeVisible();
+  } finally {
+    await authenticated.request.delete(`/api/reports/share/list?id=${encodeURIComponent(payload.data.id)}`);
+    await authenticated.close();
+    await anonymous.close();
+  }
+});
+
+test('anonymous reader presigns raw object keys without requesting them as page-relative media', async ({ page }) => {
+  const rawRequests: string[] = [];
+  let presignBody: Record<string, unknown> | null = null;
+  page.on('request', (request) => {
+    if (request.url().includes('garage/private/raw.jpg')) rawRequests.push(request.url());
+  });
+  await page.route('**/api/reports/share?token=raw-media', async (route) => {
+    await route.fulfill({ json: {
+      code: 0,
+      data: {
+        frozenViewModel: {
+          snapshotResolution: 'anchored',
+          header: { id: 'raw-report', title: 'Raw media report', reportType: 'single_report', status: 'published', productModel: null },
+          tabs: ['summary', 'issues'],
+          summary: { text: 'Raw summary', aiSummary: null },
+          issues: [{ id: 'raw-issue', title: 'Raw issue', details: '', level: '', sourceType: '', evidence: [{ id: 'raw-material', name: 'raw.jpg', type: 'image', url: 'garage/private/raw.jpg' }], liveOverlay: { status: '', rectification: '', reEvaluations: [], evidence: [] } }],
+          matrix: null,
+          functionEffects: [],
+          capabilities: { canManageIssues: false, canShare: false, canExport: true },
+        },
+        siblingReports: [],
+        siblingFrozenViewModels: {},
+      },
+    } });
+  });
+  await page.route('**/api/materials/presign', async (route) => {
+    presignBody = route.request().postDataJSON();
+    await route.fulfill({ json: { code: 0, data: { 'garage/private/raw.jpg': 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==' } } });
+  });
+
+  await page.goto('/reports/share/raw-media');
+  await page.getByRole('tab', { name: '问题' }).click();
+  await expect.poll(() => presignBody).not.toBeNull();
+  expect(presignBody).toMatchObject({ paths: ['garage/private/raw.jpg'], share_token: 'raw-media' });
+  expect(rawRequests).toEqual([]);
+});
