@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canReadReport, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
-import { loadAnchoredReportSnapshot } from '@/lib/server/report-snapshots';
+import { loadReportSnapshotWithLegacyErrorFallback } from '@/lib/server/report-snapshots';
 import { buildReportFrozenTabs } from '@/lib/report-frozen-tabs';
 
 function isRecordLike(value: unknown): value is Record<string, unknown> {
@@ -60,7 +60,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // Tab 仅由冻结内容决定；新合同显式区分数据矩阵和对比矩阵。
   const content = (report.content ?? null) as Record<string, unknown> | null;
   const recipes = (content?.recipes ?? []) as unknown[];
-  const { snapshot } = await loadAnchoredReportSnapshot(client, report);
+  const { snapshot } = await loadReportSnapshotWithLegacyErrorFallback(client, report);
   const snapshotJson = snapshot?.snapshot_json as Record<string, unknown> | undefined;
   const dataMatrixProjection = isRecordLike(snapshotJson?.matrix_projection)
     ? snapshotJson.matrix_projection

@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { buildReportFrozenTabs } from './report-frozen-tabs';
 
 const meaningfulV2Projection = {
@@ -25,6 +27,12 @@ const emptyV3Projection = {
   issuePoints: [],
 };
 
+const comparisonSnapshot = (cells: unknown[]) => ({
+  objects: [{ id: 'object-1' }],
+  item_nodes: [{ id: 'item-1' }],
+  cells,
+});
+
 assert.deepEqual(buildReportFrozenTabs({
   reportType: 'single',
   dataMatrixProjection: meaningfulV2Projection,
@@ -39,15 +47,27 @@ assert.deepEqual(buildReportFrozenTabs({
 
 assert.deepEqual(buildReportFrozenTabs({
   reportType: 'comparison_report',
-  comparisonSnapshot: { cells: [{ effect_summary: '口感稳定' }] },
+  comparisonSnapshot: comparisonSnapshot([{ effect_summary: '口感稳定' }]),
   recipes: [{}],
 }), ['summary', 'issues', 'comparison_matrix', 'function_effect']);
 
 assert.deepEqual(buildReportFrozenTabs({
   reportType: 'comparison_report',
-  comparisonSnapshot: { cells: [{ inline_media: [{ id: 'material-1' }] }] },
+  comparisonSnapshot: comparisonSnapshot([{ inline_media: [{ id: 'material-1' }] }]),
   recipes: [],
 }), ['summary', 'issues', 'comparison_matrix']);
+
+assert.deepEqual(buildReportFrozenTabs({
+  reportType: 'comparison_report',
+  comparisonSnapshot: { item_nodes: [{ id: 'item-1' }], cells: [{ effect_summary: '口感稳定' }] },
+  recipes: [],
+}), ['summary', 'issues']);
+
+assert.deepEqual(buildReportFrozenTabs({
+  reportType: 'comparison_report',
+  comparisonSnapshot: { objects: [{ id: 'object-1' }], cells: [{ effect_summary: '口感稳定' }] },
+  recipes: [],
+}), ['summary', 'issues']);
 
 assert.deepEqual(buildReportFrozenTabs({
   reportType: 'single',
@@ -57,7 +77,7 @@ assert.deepEqual(buildReportFrozenTabs({
 
 assert.deepEqual(buildReportFrozenTabs({
   reportType: 'comparison_report',
-  comparisonSnapshot: { cells: [{ effect_summary: ' ', inline_media: [] }] },
+  comparisonSnapshot: comparisonSnapshot([{ effect_summary: ' ', inline_media: [] }]),
   recipes: [],
 }), ['summary', 'issues']);
 
@@ -66,5 +86,21 @@ assert.deepEqual(buildReportFrozenTabs({
   dataMatrixProjection: null,
   recipes: [{}],
 }), ['summary', 'issues', 'function_effect']);
+
+const headerRouteSource = readFileSync(
+  resolve(process.cwd(), 'src/app/api/reports/[id]/header/route.ts'),
+  'utf8',
+);
+assert.match(headerRouteSource, /loadReportSnapshotWithLegacyErrorFallback/);
+assert.doesNotMatch(headerRouteSource, /await loadAnchoredReportSnapshot\(/);
+
+const reportPageSource = readFileSync(
+  resolve(process.cwd(), 'src/app/(main)/reports/[id]/page.tsx'),
+  'utf8',
+);
+assert.match(reportPageSource, /new AbortController\(\)/);
+assert.match(reportPageSource, /setHeader\(null\)/);
+assert.match(reportPageSource, /setActiveTab\('summary'\)/);
+assert.match(reportPageSource, /availableTabs\.includes\(current\)/);
 
 console.log('report-frozen-tabs contract tests passed');

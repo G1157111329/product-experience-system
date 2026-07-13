@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -82,6 +82,7 @@ export default function ReportDetailPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [rectificationOpen, setRectificationOpen] = useState(false);
   const [editingIssue, setEditingIssue] = useState<IssueItem | null>(null);
+  const headerRequestVersion = useRef(0);
   const { PreviewComponent } = useImagePreview();
 
   // V3 legacy redirect
@@ -91,61 +92,84 @@ export default function ReportDetailPage() {
     }
   }, [legacy, id]);
 
-  const fetchHeader = useCallback(async () => {
+  const fetchHeader = useCallback(async (signal?: AbortSignal) => {
+    const requestVersion = ++headerRequestVersion.current;
+    setLoading(true);
+    setLoadError(null);
     try {
-      const res = await fetch(`/api/reports/${id}/header`);
+      const res = await fetch(`/api/reports/${id}/header`, { signal });
       const data = await res.json();
+      if (signal?.aborted || requestVersion !== headerRequestVersion.current) return;
       if (data.code === 0) {
-        setHeader(data.data);
+        const nextHeader = data.data as HeaderData;
+        setHeader(nextHeader);
+        setActiveTab((current) => nextHeader.availableTabs.includes(current) ? current : 'summary');
       } else {
         setLoadError(data.message || '报告加载失败');
       }
-    } catch {
+    } catch (error) {
+      if (signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) return;
+      if (requestVersion !== headerRequestVersion.current) return;
       setLoadError('网络错误，请重试');
     } finally {
-      setLoading(false);
+      if (!signal?.aborted && requestVersion === headerRequestVersion.current) setLoading(false);
     }
   }, [id]);
 
   useEffect(() => {
-    void fetchHeader();
-  }, [fetchHeader]);
+    headerRequestVersion.current += 1;
+    setHeader(null);
+    setActiveTab('summary');
+    setSummary(null);
+    setIssues(null);
+    setMatrix(null);
+    setFunctionEffect(null);
+    setLoadError(null);
+    setLoading(true);
+    setRectificationOpen(false);
+    setEditingIssue(null);
 
-  const fetchSummary = useCallback(async () => {
-    if (summary) return;
-    const res = await fetch(`/api/reports/${id}/summary`);
-    const data = await res.json();
-    if (data.code === 0) setSummary(data.data);
-  }, [id, summary]);
-
-  const fetchIssues = useCallback(async () => {
-    if (issues) return;
-    const res = await fetch(`/api/reports/${id}/issues`);
-    const data = await res.json();
-    if (data.code === 0) setIssues(data.data || []);
-  }, [id, issues]);
-
-  const fetchMatrix = useCallback(async () => {
-    if (matrix) return;
-    const res = await fetch(`/api/reports/${id}/matrix`);
-    const data = await res.json();
-    if (data.code === 0) setMatrix(data.data);
-  }, [id, matrix]);
-
-  const fetchFunctionEffect = useCallback(async () => {
-    if (functionEffect) return;
-    const res = await fetch(`/api/reports/${id}/function-effect`);
-    const data = await res.json();
-    if (data.code === 0) setFunctionEffect(data.data);
-  }, [id, functionEffect]);
+    const controller = new AbortController();
+    void fetchHeader(controller.signal);
+    return () => {
+      controller.abort();
+      headerRequestVersion.current += 1;
+    };
+  }, [id, fetchHeader]);
 
   useEffect(() => {
-    if (!header) return;
-    if (activeTab === 'summary') void fetchSummary();
-    if (activeTab === 'issues') void fetchIssues();
-    if (isMatrixTab(activeTab)) void fetchMatrix();
-    if (activeTab === 'function_effect') void fetchFunctionEffect();
-  }, [activeTab, header, fetchSummary, fetchIssues, fetchMatrix, fetchFunctionEffect]);
+    if (!header || header.id !== id) return;
+
+    let endpoint: string | null = null;
+    let applyData: ((data: unknown) => void) | null = null;
+    if (activeTab === 'summary' && !summary) {
+      endpoint = 'summary';
+      applyData = (data) => setSummary(data as SummaryData);
+    } else if (activeTab === 'issues' && !issues) {
+      endpoint = 'issues';
+      applyData = (data) => setIssues((data || []) as IssueItem[]);
+    } else if (isMatrixTab(activeTab) && !matrix) {
+      endpoint = 'matrix';
+      applyData = (data) => setMatrix(data as MatrixData);
+    } else if (activeTab === 'function_effect' && !functionEffect) {
+      endpoint = 'function-effect';
+      applyData = (data) => setFunctionEffect(data as { recipes: Array<Record<string, unknown>> });
+    }
+    if (!endpoint || !applyData) return;
+
+    const controller = new AbortController();
+    const loadTab = async () => {
+      try {
+        const res = await fetch(`/api/reports/${id}/${endpoint}`, { signal: controller.signal });
+        const data = await res.json();
+        if (!controller.signal.aborted && data.code === 0) applyData(data.data);
+      } catch (error) {
+        if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) return;
+      }
+    };
+    void loadTab();
+    return () => controller.abort();
+  }, [activeTab, functionEffect, header, id, issues, matrix, summary]);
 
   const handleOpenRectification = (issue: IssueItem) => {
     setEditingIssue(issue);

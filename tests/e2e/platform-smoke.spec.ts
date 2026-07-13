@@ -187,6 +187,51 @@ test('report detail, print, and share keep the frozen report contract', async ({
   }
 });
 
+test('report detail keeps the latest report during a delayed client-side navigation', async ({ page }) => {
+  const comparisonHeaderResponse = await page.request.get('/api/reports/golden-report-comparison/header');
+  const comparisonHeader = (await comparisonHeaderResponse.json()).data as { title: string };
+
+  let markSlowHeaderStarted!: () => void;
+  const slowHeaderStarted = new Promise<void>((resolve) => { markSlowHeaderStarted = resolve; });
+  let releaseSlowHeader!: () => void;
+  const slowHeaderRelease = new Promise<void>((resolve) => { releaseSlowHeader = resolve; });
+  await page.route('**/api/reports/golden-report-single/header', async (route) => {
+    markSlowHeaderStarted();
+    await slowHeaderRelease;
+    try {
+      await route.continue();
+    } catch {
+      // Expected when the component aborts the obsolete request.
+    }
+  });
+
+  const clientPush = async (href: string) => {
+    await page.evaluate((path) => {
+      const router = (window as unknown as {
+        next?: { router?: { push: (value: string) => void } };
+      }).next?.router;
+      if (!router) throw new Error('Next client router is unavailable');
+      router.push(path);
+    }, href);
+  };
+
+  await page.goto('/reports/golden-report-comparison');
+  await expect(page.getByText(comparisonHeader.title, { exact: true }).first()).toBeVisible();
+  await clientPush('/reports/golden-report-single');
+  await slowHeaderStarted;
+  await expect(page).toHaveURL(/\/reports\/golden-report-single$/);
+  await expect(page.getByText(comparisonHeader.title, { exact: true })).toHaveCount(0);
+  await expect(page.getByTestId('report-frozen-detail')).toHaveCount(0);
+  await clientPush('/reports/golden-report-comparison');
+  await expect(page).toHaveURL(/\/reports\/golden-report-comparison$/);
+  await expect(page.getByRole('button', { name: '对比矩阵', exact: true })).toBeVisible();
+
+  releaseSlowHeader();
+  await page.waitForTimeout(300);
+  await expect(page.getByText(comparisonHeader.title, { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: '对比矩阵', exact: true })).toBeVisible();
+});
+
 test('permissions, share access, and mobile detail path are guarded', async ({ page, request, browser }) => {
   const anonymousDetail = await request.get('/api/reports/golden-report-single/detail');
   expect(anonymousDetail.status(), 'anonymous detail API should reject').toBe(401);

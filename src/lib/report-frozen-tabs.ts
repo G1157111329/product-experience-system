@@ -33,6 +33,8 @@ function hasCellMedia(value: unknown): boolean {
 
 function hasMeaningfulComparison(snapshot: unknown): boolean {
   if (!isRecord(snapshot)) return false;
+  if (!Array.isArray(snapshot.objects) || snapshot.objects.length === 0) return false;
+  if (!Array.isArray(snapshot.item_nodes) || snapshot.item_nodes.length === 0) return false;
   const cells = snapshot.cells ?? snapshot.matrix_cells;
   const values = Array.isArray(cells)
     ? cells
