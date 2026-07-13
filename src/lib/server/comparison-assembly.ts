@@ -167,9 +167,9 @@ export async function buildComparisonReportSnapshot(
   ] = await Promise.all([
     db.from('comparison_objects').select('*').eq('assembly_id', assemblyId).order('sort_order', { ascending: true }) as PromiseLike<{ data: Row[] | null }>,
     db.from('comparison_item_nodes').select('*').eq('assembly_id', assemblyId).order('sort_order', { ascending: true }) as PromiseLike<{ data: Row[] | null }>,
-    db.from('comparison_matrix_cells').select('*').eq('assembly_id', assemblyId) as PromiseLike<{ data: Row[] | null }>,
+    db.from('comparison_matrix_cells').select('*').eq('assembly_id', assemblyId).order('created_at', { ascending: true }).order('id', { ascending: true }) as PromiseLike<{ data: Row[] | null }>,
     db.from('materials').select('*').eq('comparison_assembly_id', assemblyId).order('media_display_order', { ascending: true }) as PromiseLike<{ data: Row[] | null }>,
-    db.from('comparison_ai_results').select('*').eq('assembly_id', assemblyId).eq('status', 'confirmed') as PromiseLike<{ data: Row[] | null }>,
+    db.from('comparison_ai_results').select('*').eq('assembly_id', assemblyId).eq('status', 'confirmed').order('created_at', { ascending: true }).order('id', { ascending: true }) as PromiseLike<{ data: Row[] | null }>,
   ]);
 
   const objects = asRows(objectsResult.data);

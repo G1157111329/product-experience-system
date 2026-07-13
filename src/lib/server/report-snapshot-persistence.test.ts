@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   buildSnapshotOperationKey,
+  buildSnapshotOperationFingerprint,
   IdempotencyConflictError,
   IdempotencySupersededError,
   persistExistingReportSnapshotAtomic,
@@ -126,6 +127,28 @@ async function run() {
   );
   assert.notEqual(buildSnapshotOperationKey(input), buildSnapshotOperationKey({ ...input, requestKey: 'explicit' }));
 
+  const entitySetA = {
+    ...input,
+    snapshotJson: { cells: [{ id: 'b', sort_order: 2 }, { id: 'a', sort_order: 1 }] },
+  };
+  const entitySetB = {
+    ...input,
+    snapshotJson: { cells: [{ id: 'a', sort_order: 1 }, { id: 'b', sort_order: 2 }] },
+  };
+  assert.equal(buildSnapshotOperationFingerprint(entitySetA), buildSnapshotOperationFingerprint(entitySetB));
+  assert.equal(buildSnapshotOperationKey(entitySetA), buildSnapshotOperationKey(entitySetB));
+  assert.notEqual(
+    buildSnapshotOperationFingerprint({ ...input, snapshotJson: { process: ['mix', 'heat'] } }),
+    buildSnapshotOperationFingerprint({ ...input, snapshotJson: { process: ['heat', 'mix'] } }),
+  );
+  assert.notEqual(
+    buildSnapshotOperationFingerprint(entitySetA),
+    buildSnapshotOperationFingerprint({
+      ...entitySetB,
+      snapshotJson: { cells: [{ id: 'a', sort_order: 9 }, { id: 'b', sort_order: 2 }] },
+    }),
+  );
+
   assert.deepEqual(
     serializeReportSnapshotDto({
       id: 'snapshot-1',
@@ -181,6 +204,9 @@ async function run() {
   assert.match(persistenceSource, /pg_advisory_xact_lock/);
   assert.match(persistenceSource, /FOR UPDATE/);
   assert.match(persistenceSource, /idempotencyKey/);
+  const comparisonSource = readFileSync('src/lib/server/comparison-assembly.ts', 'utf8');
+  assert.match(comparisonSource, /comparison_matrix_cells[\s\S]*order\('created_at'[\s\S]*order\('id'/);
+  assert.match(comparisonSource, /comparison_ai_results[\s\S]*order\('created_at'[\s\S]*order\('id'/);
 
   console.log('report snapshot persistence mode tests passed');
 }

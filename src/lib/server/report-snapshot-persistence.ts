@@ -42,9 +42,40 @@ type PersistenceDeps = {
 };
 
 const VOLATILE_FINGERPRINT_KEYS = new Set(['generated_at', 'created_at', 'updated_at', 'frozen_at']);
+const STABLE_ENTITY_ID_KEYS = [
+  'id',
+  'materialId', 'material_id',
+  'cellId', 'cell_id',
+  'objectId', 'object_id',
+  'itemNodeId', 'item_node_id',
+  'targetId', 'target_id',
+  'snapshotId', 'snapshot_id',
+  'reportId', 'report_id',
+];
+
+function stableEntityIdentity(value: unknown): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const row = value as Row;
+  for (const key of STABLE_ENTITY_ID_KEYS) {
+    const identifier = row[key];
+    if (typeof identifier === 'string' && identifier.trim()) return `${key}:${identifier}`;
+    if (typeof identifier === 'number' && Number.isFinite(identifier)) return `${key}:${identifier}`;
+  }
+  return null;
+}
 
 function canonicalize(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalize);
+  if (Array.isArray(value)) {
+    const identities = value.map(stableEntityIdentity);
+    const canSortAsEntitySet = identities.every((identity): identity is string => Boolean(identity))
+      && new Set(identities).size === identities.length;
+    const ordered = canSortAsEntitySet
+      ? value.map((entry, index) => ({ entry, identity: identities[index]! }))
+        .sort((left, right) => left.identity.localeCompare(right.identity))
+        .map(({ entry }) => entry)
+      : value;
+    return ordered.map(canonicalize);
+  }
   if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(
     Object.entries(value as Row)
