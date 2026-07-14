@@ -52,12 +52,29 @@ function hasMeaningfulDataMatrix(projection: unknown): boolean {
     : hasMeaningfulV2Projection(projection);
 }
 
+function hasMeaningfulFunctionEffect(recipes: unknown): boolean {
+  if (!Array.isArray(recipes)) return false;
+  return recipes.some((recipe) => {
+    if (!isRecord(recipe)) return false;
+    const hasEvaluation = ['effect_description', 'effect_evaluation', 'effect_score', 'effect_ai_result']
+      .some((key) => {
+        const value = recipe[key];
+        if (typeof value === 'string') return value.trim().length > 0;
+        if (typeof value === 'number') return Number.isFinite(value);
+        return isRecord(value);
+      });
+    const hasMedia = ['effect_materials', 'effect_material_ids', 'materials']
+      .some((key) => Array.isArray(recipe[key]) && recipe[key].length > 0);
+    return hasEvaluation || hasMedia;
+  });
+}
+
 export function buildReportFrozenTabs(input: FrozenTabInput): ReportFrozenTabKey[] {
   const tabs: ReportFrozenTabKey[] = ['summary', 'issues'];
-  if (hasMeaningfulDataMatrix(input.dataMatrixProjection)) tabs.push('data_matrix');
   if (input.reportType === 'comparison_report' && hasMeaningfulComparison(input.comparisonSnapshot)) {
     tabs.push('comparison_matrix');
   }
-  if (Array.isArray(input.recipes) && input.recipes.length > 0) tabs.push('function_effect');
+  if (hasMeaningfulDataMatrix(input.dataMatrixProjection)) tabs.push('data_matrix');
+  if (hasMeaningfulFunctionEffect(input.recipes)) tabs.push('function_effect');
   return tabs;
 }

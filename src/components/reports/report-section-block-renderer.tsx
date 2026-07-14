@@ -776,35 +776,74 @@ function PaperMatrix({ matrix }: { matrix: NonNullable<PrintReportViewModel['mat
 const paperRowStyle: CSSProperties = { border: '1px solid #d1d5db', borderRadius: '6px', padding: '9px', margin: '7px 0', breakInside: 'avoid' };
 const paperCellStyle: CSSProperties = { border: '1px solid #d1d5db', padding: '5px', verticalAlign: 'top', overflowWrap: 'anywhere' };
 
+function paperDate(value: unknown) {
+  if (!value) return '';
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return String(value);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(date);
+  const pick = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? '00';
+  return `${pick('year')}/${pick('month')}/${pick('day')}/${pick('hour')}/${pick('minute')}/${pick('second')}`;
+}
+
+function paperIssueSource(kind: PrintReportViewModel['issues'][number]['sourceKind']) {
+  return ({ sensory: '五感体验', function: '食谱/功能', comparison: '对比项', matrix: '数据矩阵' }[kind]);
+}
+
+function paperIssueStatus(status: string) {
+  return ({ open: '待整改', rectifying: '整改中', verified_closed: '整改完成', waived: '不整改' }[status] ?? status);
+}
+
 export function ReportPrintDocument({ model }: { model: PrintReportViewModel }) {
+  const task = model.summary.taskInfo ?? {};
+  const productInfo = [
+    ['单号', task.project_number], ['产品型号', task.product_model ?? model.header.productModel], ['产品', task.product],
+    ['品类', task.product_category], ['项目类型', task.project_type], ['项目阶段', task.project_phase],
+    ['体验人', task.organizer], ['体验时间', paperDate(task.test_date)], ['创建时间', paperDate(task.created_at)],
+  ].filter((item): item is [string, unknown] => item[1] !== null && item[1] !== undefined && String(item[1]).trim() !== '');
+  const stats = model.summary.stats;
+  const overview: Array<[string, string | number]> = [
+    ['问题点总数', stats.issueCount], ['五感体验问题点', stats.sensoryIssueCount], ['功能效果问题点', stats.functionIssueCount],
+    ['对比问题点', stats.comparisonIssueCount], ['整改率', `${stats.rectificationRate}%`],
+  ];
   return (
     <article data-testid="report-print-document" data-report-id={model.sourceReportId} style={{ maxWidth: '100%', color: '#111827', fontSize: '11px', lineHeight: 1.55 }}>
       <style>{`@page { size: ${model.page.paper} ${model.page.orientation}; margin: 12mm; } @media print { [data-testid="report-print-document"] { break-after: page; } [data-testid="report-print-document"]:last-child { break-after: auto; } }`}</style>
-      <header style={paperRowStyle}><h1 style={{ margin: '0 0 4px', fontSize: '22px' }}>{model.header.title}</h1>{model.header.productModel && <p>{model.header.productModel}</p>}</header>
-      <section><h2 style={{ fontSize: '16px', color: '#0f766e' }}>总结</h2><p style={{ whiteSpace: 'pre-wrap' }}>{model.summary.text || '暂无总结'}</p></section>
+      <header style={{ borderBottom: '2px solid #0f766e', paddingBottom: '9px' }}><h1 style={{ margin: '0 0 4px', fontSize: '22px', color: '#0f766e' }}>{model.header.title}</h1>{model.header.productModel && <p style={{ margin: 0, color: '#4b5563' }}>{model.header.productModel}</p>}</header>
+      {productInfo.length > 0 && <section><h2 style={{ fontSize: '16px', color: '#0f766e', borderBottom: '2px solid #0f766e', paddingBottom: '4px' }}>产品信息</h2><div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: '6px 12px' }}>{productInfo.map(([label, value]) => <p key={label} style={{ margin: 0 }}><span style={{ color: '#6b7280' }}>{label}：</span>{String(value)}</p>)}</div>{Boolean(task.test_purpose) && <p style={{ marginBottom: 0 }}><span style={{ color: '#6b7280' }}>体验目的：</span>{String(task.test_purpose)}</p>}</section>}
+      <section><h2 style={{ fontSize: '16px', color: '#0f766e', borderBottom: '2px solid #0f766e', paddingBottom: '4px' }}>概览统计</h2><div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,minmax(0,1fr))', gap: '5px' }}>{overview.map((entry) => {
+        const label = entry[0];
+        const value = String(entry[1]);
+        return <div key={label} style={{ border: '1px solid #d1d5db', padding: '6px', textAlign: 'center' }}><b style={{ display: 'block', fontSize: '15px' }}>{value}</b><span style={{ color: '#6b7280' }}>{label}</span></div>;
+      })}</div></section>
+      {model.summary.text && <section><h2 style={{ fontSize: '16px', color: '#0f766e', borderBottom: '2px solid #0f766e', paddingBottom: '4px' }}>总结</h2><p style={{ whiteSpace: 'pre-wrap' }}>{model.summary.text}</p></section>}
       {model.issues.length > 0 && <section><h2 style={{ fontSize: '16px', color: '#0f766e' }}>问题</h2>{model.issues.map((issue) => {
         const recipe = issue.recipe;
         const latest = issue.liveOverlay.retest.latest;
         const parameters = recipe?.parameters
           ? typeof recipe.parameters === 'string' ? recipe.parameters : Object.entries(recipe.parameters).map(([key, value]) => `${key}：${String(value)}`).join('；')
           : '';
-        return <article key={issue.id} style={paperRowStyle}><h3>{issue.title}</h3>
+        return <article key={issue.id} style={paperRowStyle}><h3>{issue.level && <span style={{ marginRight: '5px', color: '#4b5563' }}>{issue.level}</span>}<span style={{ marginRight: '5px', color: '#0f766e' }}>{paperIssueSource(issue.sourceKind)}</span>{issue.title}{issue.liveOverlay.status && <span style={{ float: 'right', color: '#4b5563', fontWeight: 400 }}>{paperIssueStatus(issue.liveOverlay.status)}</span>}</h3>
+          {(issue.context.object || issue.context.project || issue.context.item) && <div style={{ color: '#4b5563' }}>{issue.context.object && <p>对象：{issue.context.object}</p>}{issue.context.project && <p>项目：{issue.context.project}</p>}{issue.context.item && <p>细项：{issue.context.item}</p>}</div>}
           {recipe ? <>
             <p><b>食谱名称：</b>{recipe.name}</p>
             {recipe.formula && <p><b>食谱配方：</b>{recipe.formula}</p>}
             {parameters && <p><b>食谱参数：</b>{parameters}</p>}
-            {recipe.steps.length > 0 && <details><summary>食谱步骤：{recipe.steps.length}步</summary>{recipe.steps.map((step, index) => <div key={step.id}><b>步骤 {step.stepNumber ?? index + 1}</b> {step.operation}<PaperMedia items={step.evidence} /></div>)}</details>}
+            {recipe.steps.length > 0 && <div><p><b>食谱步骤：</b>{recipe.steps.length}步</p>{recipe.steps.map((step, index) => <div key={step.id}><b>步骤 {step.stepNumber ?? index + 1}</b> {step.operation}<PaperMedia items={step.evidence} /></div>)}</div>}
             <p><b>食谱效果评价：</b>{recipe.evaluation}（{evaluationStatusLabel(recipe.evaluationStatus)}）</p><PaperMedia items={recipe.evidence} />
-          </> : <><p>{issue.details}</p><PaperMedia items={issue.evidence} /></>}
-          {issue.liveOverlay.status && <p>当前状态：{({ open: '待整改', rectifying: '整改中', verified_closed: '整改完成', waived: '不整改' }[issue.liveOverlay.status] ?? issue.liveOverlay.status)}</p>}
+            <p><b>问题：</b>{issue.details || issue.title}</p><PaperMedia items={issue.evidence} />
+          </> : <><p><b>问题：</b>{issue.details || issue.title}</p><PaperMedia items={issue.evidence} /></>}
           {issue.liveOverlay.status === 'verified_closed' && (issue.liveOverlay.rectification || issue.liveOverlay.evidence.length > 0) && <><p><b>整改效果评价：</b>{issue.liveOverlay.rectification}</p><p><b>整改素材：</b></p><PaperMedia items={issue.liveOverlay.evidence} /></>}
           {latest && <div><b>整改复测：</b>{evaluationStatusLabel(latest.result)} {latest.description}<PaperMedia items={latest.evidence} />{issue.liveOverlay.retest.count >= 2 && <p>整改复测记录数：{issue.liveOverlay.retest.count}</p>}</div>}
         </article>;
       })}</section>}
+      {model.functionEffects.length > 0 && <section><h2 style={{ fontSize: '16px', color: '#0f766e' }}>功能效果</h2>{model.functionEffects.map((effect) => {
+        const issueCount = model.issues.filter((issue) => issue.recipe?.recipeId === effect.recipeId).length;
+        return <article key={effect.recipeId} style={paperRowStyle}><h3>{effect.name}<span style={{ marginLeft: '7px', color: '#6b7280', fontWeight: 400 }}>步骤数：{effect.steps.length}{effect.effectScore && `　效果评分：${effect.effectScore}`}　问题点数量：{issueCount}</span></h3>{effect.formula && <p><b>食谱/食材：</b>{effect.formula}</p>}{effect.parameters && <p><b>食谱参数：</b>{typeof effect.parameters === 'string' ? effect.parameters : Object.entries(effect.parameters).map(([key, value]) => `${key}：${String(value)}`).join('；')}</p>}<p><b>效果评价：</b>{effect.evaluation || '—'}（{evaluationStatusLabel(effect.evaluationStatus)}）</p><PaperMedia items={effect.evidence} />{effect.steps.length > 0 && <div><p><b>食谱步骤：</b>{effect.steps.length}步</p>{effect.steps.map((step, index) => <div key={step.id}><b>步骤 {step.stepNumber ?? index + 1}</b> {step.operation}<PaperMedia items={step.evidence} /></div>)}</div>}</article>;
+      })}</section>}
       {model.matrix && <PaperMatrix matrix={model.matrix} />}
-      {model.functionEffects.length > 0 && <section><h2 style={{ fontSize: '16px', color: '#0f766e' }}>功能效果</h2>{model.functionEffects.map((effect) => (
-        <article key={effect.recipeId} style={paperRowStyle}><h3>{effect.name}</h3><p>整体判断：{evaluationStatusLabel(effect.evaluationStatus)}</p><p>{effect.evaluation}</p><PaperMedia items={effect.evidence} />{effect.steps.map((step, index) => <div key={step.id}><b>步骤 {step.stepNumber ?? index + 1}</b> {step.operation}<PaperMedia items={step.evidence} /></div>)}</article>
-      ))}</section>}
     </article>
   );
 }

@@ -6,6 +6,7 @@ import { AlertCircle, Download, Loader2 } from 'lucide-react';
 import { FrozenReportReader, orderedFrozenModels } from '@/components/reports/frozen-report-reader';
 import type { FrozenReportViewModel } from '@/lib/report-frozen-view';
 import { Button } from '@/components/ui/button';
+import { FrozenReportHeaderMeta } from '@/components/reports/frozen-report-header-meta';
 
 type SiblingReport = { id: string };
 type SharePayload = {
@@ -62,9 +63,7 @@ export default function ShareReportPage() {
       <header className="border-b px-4 py-5 sm:px-6">
         <p className="text-xs font-medium text-muted-foreground">产品体验管理平台 · 匿名只读分享</p>
         <div className="flex items-start justify-between gap-4">
-          <div><h1 className="mt-1 text-xl font-semibold">{primary.header.title}</h1>
-            {primary.header.productModel && <p className="mt-1 text-sm text-muted-foreground">{primary.header.productModel}</p>}
-          </div>
+          <FrozenReportHeaderMeta title={primary.header.title} productModel={primary.header.productModel} taskInfo={primary.summary.taskInfo} />
           {primary.capabilities.canExport && <Button size="sm" onClick={handleExportPDF}><Download className="mr-1 h-4 w-4" />导出PDF</Button>}
         </div>
       </header>

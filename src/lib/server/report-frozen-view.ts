@@ -111,7 +111,7 @@ export async function buildFrozenReportResponse(
 }> {
   const reportId = text(report.id);
   const taskId = text(report.task_id);
-  const [snapshotResult, sourceIssues, taskIssues, materials, pdfJobs] = await Promise.all([
+  const [snapshotResult, sourceIssues, taskIssues, materials, pdfJobs, taskInfo] = await Promise.all([
     loadAnchoredReportSnapshot(client, report),
     selectRows(
       client.from('issues').select('*').eq('source_report_id', reportId) as unknown as PromiseLike<{ data: Row[] | null; error?: { message?: string } | null }>,
@@ -133,6 +133,13 @@ export async function buildFrozenReportResponse(
       client.from('pdf_generation_jobs').select('*').eq('report_id', reportId).order('created_at', { ascending: false }) as unknown as PromiseLike<{ data: Row[] | null; error?: { message?: string } | null }>,
       'Failed to load PDF jobs',
     ),
+    taskId
+      ? (async () => {
+        const { data, error } = await client.from('experience_tasks').select('*').eq('id', taskId).maybeSingle();
+        if (error) throw new Error(error.message || 'Failed to load report task');
+        return data as Row | null;
+      })()
+      : Promise.resolve(null),
   ]);
   const issueMap = new Map([...sourceIssues, ...taskIssues].map((issue) => [text(issue.id), issue]));
   const issues = await attachReEvaluations(client, Array.from(issueMap.values()));
@@ -140,6 +147,7 @@ export async function buildFrozenReportResponse(
   const detailModel = buildReportDetailModel({ report, snapshot, issues, materials, pdfJobs });
   const model = buildFrozenReportViewModel({
     report,
+    taskInfo,
     snapshot,
     snapshotResolution: snapshotResult.resolution,
     issues,

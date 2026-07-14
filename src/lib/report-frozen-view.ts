@@ -14,6 +14,7 @@ export type FrozenRecipeStep = {
   id: string;
   stepNumber: number | null;
   operation: string;
+  problemPoints: string[];
   evidence: FrozenMedia[];
 };
 
@@ -24,6 +25,7 @@ export type FrozenRecipeContext = {
   formula: string;
   parameters: Row | string | null;
   evaluationStatus: EvaluationStatus;
+  effectScore: string;
   evaluation: string;
   evidence: FrozenMedia[];
   steps: FrozenRecipeStep[];
@@ -60,6 +62,8 @@ export type FrozenIssue = {
   details: string;
   level: string;
   sourceType: string;
+  sourceKind: 'sensory' | 'function' | 'comparison' | 'matrix';
+  context: { object: string; project: string; item: string };
   evidence: FrozenMedia[];
   /** Present only for recipe/function whole-judgment issues. */
   recipe?: FrozenRecipeContext;
@@ -73,7 +77,18 @@ export type FrozenReportViewModel = {
   snapshotResolution: 'anchored' | 'legacy_latest' | 'none';
   header: { id: string; title: string; reportType: string; status: string; productModel: string | null };
   tabs: ReportFrozenTabKey[];
-  summary: { text: string; aiSummary: Row | null };
+  summary: {
+    text: string;
+    aiSummary: Row | null;
+    taskInfo: Row | null;
+    stats: {
+      issueCount: number;
+      sensoryIssueCount: number;
+      functionIssueCount: number;
+      comparisonIssueCount: number;
+      rectificationRate: number;
+    };
+  };
   issues: FrozenIssue[];
   matrix: FrozenMatrixView;
   dataMatrix?: FrozenMatrixView;
@@ -83,6 +98,7 @@ export type FrozenReportViewModel = {
 
 export type BuildFrozenReportViewInput = {
   report: Row;
+  taskInfo?: Row | null;
   snapshot?: Row | null;
   issues?: Row[];
   issueEvidence?: Record<string, FrozenMedia[]>;
@@ -117,6 +133,13 @@ function media(items: unknown): FrozenMedia[] {
   });
 }
 
+function problemTexts(value: unknown): string[] {
+  if (typeof value === 'string') return value.trim() ? [value.trim()] : [];
+  return Array.isArray(value)
+    ? value.map((item) => typeof item === 'string' ? item : first(isRecord(item) ? item.text : '')).filter(Boolean)
+    : [];
+}
+
 function failedRecord(record: Row): boolean {
   const result = text(record.evaluation_result).toLowerCase();
   return result.includes('fail') || result.includes('unqualified') || result.includes('not_pass') || result.includes('不合')
@@ -138,12 +161,14 @@ function recipeContext(recipe: Row): FrozenRecipeContext {
     formula: first(recipe.ingredients, recipe.formula, recipe.recipe_formula),
     parameters: isRecord(rawParameters) ? rawParameters : text(rawParameters) || null,
     evaluationStatus: normalizeEvaluationStatus(recipe.effect_status ?? recipe.evaluation_status ?? recipe.evaluation_result),
+    effectScore: first(recipe.effect_score, recipe.effectScore, recipe.ai_score),
     evaluation: first(recipe.effect_description, recipe.effect_evaluation),
     evidence: media(recipe.effect_materials),
     steps: rows(recipe.recipe_steps).map((step, index) => ({
       id: first(step.id, `${first(recipe.id, 'recipe')}:step:${index}`),
       stepNumber: Number.isFinite(Number(step.step_number)) ? Number(step.step_number) : null,
       operation: first(step.operation, step.description, step.name),
+      problemPoints: problemTexts(step.problem_points ?? step.problem_point ?? step.problemPoints),
       evidence: media(step.materials),
     })),
   };
@@ -271,12 +296,26 @@ function liveOverlay(issue: Row | undefined, evidence: FrozenMedia[] = [], baseE
 }
 
 function frozenIssue(base: FrozenFact, live: Row | undefined, evidence: FrozenMedia[], overlayEvidence: FrozenMedia[] = [], overlayBaseEvidence: FrozenMedia[] = []): FrozenIssue {
+  const sourceType = first(base.source_type, base.standard_category, live?.source_type);
+  const sourceKind: FrozenIssue['sourceKind'] = sourceType === 'matrix_problem'
+    ? 'matrix'
+    : Boolean(live?.source_assembly_id) || Boolean(base._comparisonCellId)
+      ? 'comparison'
+      : sourceType === 'record_fail' || sourceType === 'sensory_problem'
+        ? 'sensory'
+        : 'function';
   return {
     id: first(live?.id, base.id),
     title: first(base.title, base.check_item, base.problem_description, base.effect_summary, base.id),
     details: first(base.description, base.problem_description, base.check_requirement, base.check_standard),
     level: first(base.level, base.problem_level, live?.level, live?.problem_level),
-    sourceType: first(base.source_type, base.standard_category, live?.source_type),
+    sourceType,
+    sourceKind,
+    context: {
+      object: first(base.object_name, base.object_label, live?.object_name, live?.object_label),
+      project: first(base.project_name, base.task_name, base.project, live?.project_name),
+      item: first(base.check_item, base.item_name, base.node_label, base.sub_check_dimension, live?.check_item),
+    },
     evidence,
     ...(base._recipe ? { recipe: base._recipe } : {}),
     liveOverlay: liveOverlay(live, overlayEvidence, overlayBaseEvidence),
@@ -325,6 +364,15 @@ export function buildFrozenReportViewModel(input: BuildFrozenReportViewInput, op
   const reportType = first(input.report.report_type, snapshotJson.report_type, 'single_report');
   const tabs = buildReportFrozenTabs({ reportType, dataMatrixProjection: projection, comparisonSnapshot: snapshotJson, recipes });
   const aiSummary = isRecord(content.ai_summary) ? content.ai_summary : null;
+  const frozenIssues = buildIssues(content, snapshotJson, input.issues ?? [], input.issueEvidence ?? {}, input.snapshotResolution);
+  const issueCount = frozenIssues.length;
+  const countByKind = (kind: FrozenIssue['sourceKind']) => frozenIssues.filter((issue) => issue.sourceKind === kind).length;
+  const rectifiedCount = frozenIssues.filter((issue) => issue.liveOverlay.status === 'verified_closed').length;
+  const frozenTaskInfo = isRecord(content.task)
+    ? content.task
+    : isRecord(snapshotJson.task)
+      ? snapshotJson.task
+      : input.taskInfo ?? null;
   const internal = options.audience === 'internal';
   return {
     snapshotResolution: input.snapshotResolution,
@@ -333,8 +381,19 @@ export function buildFrozenReportViewModel(input: BuildFrozenReportViewInput, op
       status: text(input.report.status), productModel: text(input.report.product_model) || null,
     },
     tabs,
-    summary: { text: first(aiSummary?.summary, content.summary, input.report.title), aiSummary },
-    issues: buildIssues(content, snapshotJson, input.issues ?? [], input.issueEvidence ?? {}, input.snapshotResolution),
+    summary: {
+      text: first(aiSummary?.summary, content.summary, input.report.title),
+      aiSummary,
+      taskInfo: frozenTaskInfo,
+      stats: {
+        issueCount,
+        sensoryIssueCount: countByKind('sensory'),
+        functionIssueCount: countByKind('function'),
+        comparisonIssueCount: countByKind('comparison'),
+        rectificationRate: issueCount > 0 ? Math.round((rectifiedCount / issueCount) * 100) : 0,
+      },
+    },
+    issues: frozenIssues,
     matrix: comparisonMatrixView(reportType, snapshotJson, tabs),
     dataMatrix: dataMatrixView(projection, tabs),
     functionEffects: recipes.map(recipeContext),

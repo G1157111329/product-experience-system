@@ -328,6 +328,7 @@ function MatrixCell({ cell }: { cell: Row | undefined }) {
   const processNotes = cellProcessNotes(cell);
   const problems = cellProblems(cell);
   // 去重：与 summary 相同的问题文本不重复显示
+  const dedupedProcessNotes = processNotes.filter((note) => note !== summary);
   const dedupedProblems = problems.filter((p) => p !== summary);
   // 素材：snapshot 的 cell 注入了 inline_media / appendix_media
   const inlineMedia = (cell.inline_media || []) as Row[];
@@ -340,9 +341,9 @@ function MatrixCell({ cell }: { cell: Row | undefined }) {
         {conclusion && <span className={cn('font-semibold', conclusionColor(conclusion))}>{conclusion}</span>}
         {score && <span className="text-muted-foreground">{score}分</span>}
       </div>
-      {processNotes.length > 0 && (
+      {dedupedProcessNotes.length > 0 && (
         <p className="whitespace-pre-wrap text-[10px] text-muted-foreground">
-          <span className="font-medium">过程记录：</span>{processNotes.join('；')}
+          <span className="font-medium">过程记录：</span>{dedupedProcessNotes.join('；')}
         </p>
       )}
       {summary && (

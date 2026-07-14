@@ -50,6 +50,7 @@ export default function ReportDetailPage() {
         projectPhase={null}
         taskTitle={null}
         aiSummary={model.summary.aiSummary}
+        taskInfo={model.summary.taskInfo}
         onExport={() => window.open(`/reports/print?id=${id}&mode=fast`, '_blank')}
       />
       <FrozenReportReader model={model} />

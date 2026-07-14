@@ -1,20 +1,22 @@
 'use client';
 
+import React from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { AiSummaryLike } from '@/lib/report-review-overrides';
 
-interface ReportSummaryData {
+export interface ReportSummaryData {
   aiSummary?: Record<string, unknown> | null;
+  summaryText?: string | null;
   taskInfo?: Record<string, unknown> | null;
   stats?: {
-    totalCheckItems: number;
-    passCount: number;
-    failCount: number;
-    issueCount: number;
-    recipeCount: number;
+    totalCheckItems?: number;
+    passCount?: number;
+    failCount?: number;
+    issueCount?: number;
+    recipeCount?: number;
     sensoryIssueCount?: number;
     functionIssueCount?: number;
     comparisonIssueCount?: number;
@@ -34,14 +36,20 @@ function fmtDate(value: unknown): string {
   // 支持 ISO 字符串与 date 字段，格式化为 YYYY/MM/DD/HH/MM/SS
   const d = new Date(s);
   if (isNaN(d.getTime())) return s.length >= 10 ? s.slice(0, 10) : s;
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${pad(d.getHours())}/${pad(d.getMinutes())}/${pad(d.getSeconds())}`;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(d);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? '00';
+  return `${part('year')}/${part('month')}/${part('day')}/${part('hour')}/${part('minute')}/${part('second')}`;
 }
 
 export function ReportSummaryTab({ data }: { data: ReportSummaryData | null }) {
   if (!data) return null;
   const stats = data.stats || { totalCheckItems: 0, passCount: 0, failCount: 0, issueCount: 0, recipeCount: 0 };
-  const aiSummary = data.aiSummary as AiSummaryLike | undefined;
+  const aiSummary = (data.aiSummary ?? (data.summaryText ? { summary: data.summaryText } : null)) as AiSummaryLike | undefined;
   const task = (data.taskInfo || {}) as Record<string, unknown>;
 
   const productInfoItems: Array<{ label: string; value: unknown }> = [
@@ -60,9 +68,9 @@ export function ReportSummaryTab({ data }: { data: ReportSummaryData | null }) {
   // 概览统计 5 项（按问题点维度）
   const overviewStats = [
     { label: '问题点总数', value: stats.issueCount ?? 0, color: 'text-foreground' },
-    { label: '五感体验问题', value: stats.sensoryIssueCount ?? 0, color: 'text-amber-600' },
-    { label: '功能效果问题', value: stats.functionIssueCount ?? 0, color: 'text-orange-600' },
-    { label: '对比问题', value: stats.comparisonIssueCount ?? 0, color: 'text-purple-600' },
+    { label: '五感体验问题点', value: stats.sensoryIssueCount ?? 0, color: 'text-amber-600' },
+    { label: '功能效果问题点', value: stats.functionIssueCount ?? 0, color: 'text-orange-600' },
+    { label: '对比问题点', value: stats.comparisonIssueCount ?? 0, color: 'text-purple-600' },
     { label: '整改率', value: `${stats.rectificationRate ?? 0}%`, color: 'text-emerald-600' },
   ];
 

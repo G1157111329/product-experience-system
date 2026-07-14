@@ -174,7 +174,7 @@ const reportRouteSource = readFileSync(resolve(process.cwd(), 'src/app/api/repor
 assert.match(readerSource, /issue\.recipe/);
 assert.match(readerSource, /liveOverlay\.retest/);
 assert.doesNotMatch(readerSource, /problemPoints\(/);
-assert.doesNotMatch(readerSource, /AI评分|评分：/);
+assert.doesNotMatch(readerSource, /AI评分/);
 assert.doesNotMatch(printSource, /problemTexts\(effect\.problemPoints\)/);
 assert.doesNotMatch(printSource, /effect\.score/);
 assert.match(reportRouteSource, /report_content:\s*finalReportContent/);

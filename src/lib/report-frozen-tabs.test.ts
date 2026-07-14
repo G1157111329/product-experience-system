@@ -49,14 +49,14 @@ assert.deepEqual(buildReportFrozenTabs({
   reportType: 'comparison_report',
   comparisonSnapshot: comparisonSnapshot([{ effect_summary: '口感稳定' }]),
   recipes: [{}],
-}), ['summary', 'issues', 'comparison_matrix', 'function_effect']);
+}), ['summary', 'issues', 'comparison_matrix']);
 
 assert.deepEqual(buildReportFrozenTabs({
   reportType: 'comparison_report',
   comparisonSnapshot: comparisonSnapshot([{ effect_summary: '口感稳定' }]),
   dataMatrixProjection: meaningfulV3Projection,
   recipes: [{}],
-}), ['summary', 'issues', 'data_matrix', 'comparison_matrix', 'function_effect']);
+}), ['summary', 'issues', 'comparison_matrix', 'data_matrix']);
 
 assert.deepEqual(buildReportFrozenTabs({
   reportType: 'comparison_report',
@@ -92,6 +92,12 @@ assert.deepEqual(buildReportFrozenTabs({
   reportType: 'single',
   dataMatrixProjection: null,
   recipes: [{}],
+}), ['summary', 'issues']);
+
+assert.deepEqual(buildReportFrozenTabs({
+  reportType: 'single',
+  dataMatrixProjection: null,
+  recipes: [{ effect_description: '完成雪梨榨汁效果评价' }],
 }), ['summary', 'issues', 'function_effect']);
 
 const headerRouteSource = readFileSync(

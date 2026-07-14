@@ -39,7 +39,7 @@ interface IssueRowProps {
 
 function sourceLabelV2(issue: Record<string, unknown>): string {
   const sourceType = String(issue.source_type || '');
-  if (sourceType === 'matrix_problem') return '数据矩阵';
+  if (String(issue.source_assembly_id || '') || sourceType === 'matrix_problem') return '对比项';
   if (sourceType === 'recipe_problem') return '食谱/功能';
   if (sourceType === 'record_fail') return '五感体验';
   return '其他';
@@ -74,22 +74,15 @@ function RecipeIssueDetails({
           <div className="space-y-2 border-t p-2">
             {steps.map((step, index) => {
               const stepMaterials = (Array.isArray(step.materials) ? step.materials : []) as Row[];
-              const stepPoints = parseProblemPoints(step.problem_points).length > 0
-                ? parseProblemPoints(step.problem_points)
-                : parseProblemPoints(step.problem_point);
+              const stepProblemPoints = Array.isArray(step.problem_points)
+                ? step.problem_points.map((point) => typeof point === 'string' ? point : String((point as Row)?.text || '')).filter(Boolean)
+                : typeof step.problem_point === 'string' && step.problem_point.trim()
+                  ? [step.problem_point.trim()]
+                  : [];
               return (
                 <div key={String(step.id || index)} className="rounded border bg-background p-2">
                   <div><span className="font-medium">步骤{String(step.step_number || index + 1)}：</span>{String(step.operation || '-')}</div>
-                  {stepPoints.length > 0 && (
-                    <div className="mt-1 space-y-1 text-amber-600">
-                      {stepPoints.map((point, pointIndex) => (
-                        <div key={`${point.text}-${pointIndex}`}>
-                          <span className="font-medium">步骤问题点：</span>{point.text}
-                          <MaterialGrid materials={materialsForIds(stepMaterials, point.material_ids)} role="evidence" />
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  {stepProblemPoints.length > 0 && <div className="mt-1 text-muted-foreground">步骤问题点：{stepProblemPoints.join('；')}</div>}
                   <MaterialGrid materials={stepMaterials} role="evidence" />
                 </div>
               );
@@ -107,35 +100,6 @@ function RecipeIssueDetails({
       )}
     </div>
   );
-}
-
-function parseProblemPoints(value: unknown): Array<{ text: string; material_ids?: string[] }> {
-  if (!value) return [];
-  try {
-    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((item) => {
-        if (typeof item === 'string') return { text: item.trim() };
-        if (!item || typeof item !== 'object') return null;
-        const record = item as Row;
-        return {
-          text: String(record.text || '').trim(),
-          material_ids: Array.isArray(record.material_ids)
-            ? record.material_ids.filter((id): id is string => typeof id === 'string')
-            : undefined,
-        };
-      })
-      .filter((item): item is { text: string; material_ids?: string[] } => Boolean(item?.text));
-  } catch {
-    return String(value).split('\n').map((line) => line.trim()).filter(Boolean).map((text) => ({ text }));
-  }
-}
-
-function materialsForIds(materials: Row[] | undefined, ids: string[] | undefined) {
-  if (!materials?.length || !ids?.length) return [];
-  const idSet = new Set(ids);
-  return materials.filter((material) => idSet.has(String(material.id || '')));
 }
 
 function MaterialGrid({ materials, role = 'appendix' }: { materials?: Row[]; role?: ReportMediaRole }) {
@@ -200,16 +164,6 @@ export function IssueRow({ issue, onStatusClick }: IssueRowProps) {
 
       {expanded && (
         <div className="border-t px-3 py-3 space-y-2 text-xs">
-          <div>
-            <div className="font-medium text-foreground">问题点</div>
-            <div className="mt-1 whitespace-pre-wrap">{issue.title}</div>
-          </div>
-          {issue.description && issue.description !== issue.title && (
-            <div>
-              <div className="font-medium text-foreground">问题详情</div>
-              <div className="mt-1 whitespace-pre-wrap text-muted-foreground">{issue.description}</div>
-            </div>
-          )}
           {recipeContext ? (
             <RecipeIssueDetails
               recipe={recipeContext}
@@ -222,17 +176,17 @@ export function IssueRow({ issue, onStatusClick }: IssueRowProps) {
           {descMap['对象'] && <div><span className="text-muted-foreground">对象：</span>{descMap['对象']}</div>}
           {descMap['项目'] && <div><span className="text-muted-foreground">项目：</span>{descMap['项目']}</div>}
           {descMap['细项'] && <div><span className="text-muted-foreground">细项：</span>{descMap['细项']}</div>}
-          {/* 问题描述：如果有 descMap['问题'] 用它，否则用 issue.description 或 title */}
-          <div>
-            <span className="text-muted-foreground">问题：</span>
-            {descMap['问题'] || issue.title}
-          </div>
             </>
           )}
 
+          <div>
+            <span className="text-muted-foreground">问题：</span>
+            {descMap['问题'] || issue.description || issue.title}
+          </div>
+
           {materials.length > 0 && (
             <div className="space-y-1">
-              <div className="font-medium text-foreground">附录素材</div>
+              <div className="font-medium text-foreground">素材</div>
               <MaterialGrid materials={materials} role="appendix" />
             </div>
           )}

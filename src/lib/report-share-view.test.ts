@@ -31,7 +31,10 @@ const repeatedModel = {
   snapshotResolution: 'anchored',
   header: { id: 'same report/id', title: 'Repeated', reportType: 'single_report', status: 'published', productModel: null },
   tabs: ['summary', 'issues'],
-  summary: { text: 'Summary', aiSummary: null },
+  summary: {
+    text: 'Summary', aiSummary: null, taskInfo: null,
+    stats: { issueCount: 0, sensoryIssueCount: 0, functionIssueCount: 0, comparisonIssueCount: 0, rectificationRate: 0 },
+  },
   issues: [],
   matrix: null,
   functionEffects: [],

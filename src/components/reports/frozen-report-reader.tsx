@@ -7,6 +7,7 @@ import type { ReportFrozenTabKey } from '@/lib/report-frozen-tabs';
 import { ReportTabBar } from '@/app/(main)/reports/[id]/components/report-tab-bar';
 import { ReportMatrixTab, type MatrixData } from '@/app/(main)/reports/[id]/components/report-matrix-tab';
 import { ReportMediaGrid, type ReportMediaRole } from '@/components/reports/report-media-grid';
+import { ReportSummaryTab } from '@/app/(main)/reports/[id]/components/report-summary-tab';
 
 const TAB_LABELS: Record<ReportFrozenTabKey, string> = {
   summary: '总结',
@@ -71,6 +72,21 @@ function issueStatusLabel(status: string) {
   return ({ open: '待整改', rectifying: '整改中', verified_closed: '整改完成', waived: '不整改' }[status] ?? status);
 }
 
+function issueSourceLabel(kind: FrozenReportViewModel['issues'][number]['sourceKind']) {
+  return ({ sensory: '五感体验', function: '食谱/功能', comparison: '对比项', matrix: '数据矩阵' }[kind]);
+}
+
+function IssueContextLines({ issue }: { issue: FrozenReportViewModel['issues'][number] }) {
+  const lines = [
+    ['对象', issue.context.object],
+    ['项目', issue.context.project],
+    ['细项', issue.context.item],
+  ].filter((line): line is [string, string] => Boolean(line[1]));
+  return lines.length > 0 ? <div className="space-y-1 text-sm text-muted-foreground">
+    {lines.map(([label, value]) => <p key={label}><span className="font-medium text-foreground">{label}：</span>{value}</p>)}
+  </div> : null;
+}
+
 function RecipeIssueFacts({ recipe, carrierKey }: { recipe: FrozenRecipeContext; carrierKey: string }) {
   return <div className="space-y-3 text-sm">
     <div>
@@ -85,7 +101,8 @@ function RecipeIssueFacts({ recipe, carrierKey }: { recipe: FrozenRecipeContext;
           {recipe.steps.map((step, index) => (
             <li key={step.id} data-content-id={`function-step:${step.id}`}>
               <p><span className="font-medium">步骤 {step.stepNumber ?? index + 1}</span>{step.operation && <span className="ml-2 text-muted-foreground">{step.operation}</span>}</p>
-              <div className="mt-2"><MediaList items={step.evidence} role="evidence" label="步骤证据素材" carrierKey={carrierKey} /></div>
+              {step.problemPoints.length > 0 && <p className="mt-1 whitespace-pre-wrap text-muted-foreground">步骤问题点：{step.problemPoints.join('；')}</p>}
+              <div className="mt-2"><MediaList items={step.evidence} role="evidence" label="素材" carrierKey={carrierKey} /></div>
             </li>
           ))}
         </ol>
@@ -95,14 +112,19 @@ function RecipeIssueFacts({ recipe, carrierKey }: { recipe: FrozenRecipeContext;
       <p className="font-medium">食谱效果评价</p>
       <p className="mt-1 text-muted-foreground">整体判断：{evaluationStatusLabel(recipe.evaluationStatus)}</p>
       {recipe.evaluation && <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{recipe.evaluation}</p>}
-      <div className="mt-2"><MediaList items={recipe.evidence} role="primary" label="原始效果素材" carrierKey={carrierKey} /></div>
+      <div className="mt-2"><MediaList items={recipe.evidence} role="primary" label="素材" carrierKey={carrierKey} /></div>
     </div>
   </div>;
 }
 
 function FrozenPanel({ model, active }: { model: FrozenReportViewModel; active: ReportFrozenTabKey }) {
   if (active === 'summary') {
-    return <p data-content-id="summary" className="whitespace-pre-wrap text-sm leading-7">{model.summary.text || '暂无总结'}</p>;
+    return <ReportSummaryTab data={{
+      aiSummary: model.summary.aiSummary,
+      summaryText: model.summary.text,
+      taskInfo: model.summary.taskInfo,
+      stats: model.summary.stats,
+    }} />;
   }
   if (active === 'issues') {
     return model.issues.length > 0 ? (
@@ -111,14 +133,23 @@ function FrozenPanel({ model, active }: { model: FrozenReportViewModel; active: 
           const latest = issue.liveOverlay.retest.latest;
           const rectified = issue.liveOverlay.status === 'verified_closed';
           return <details key={issue.id} data-content-id={`issue:${issue.id}`} className="rounded-lg border p-4">
-            <summary className="cursor-pointer list-none font-medium marker:hidden">
-              <span>{issue.title}</span>
-              {issue.liveOverlay.status && <span className="ml-2 text-sm text-muted-foreground">{issueStatusLabel(issue.liveOverlay.status)}</span>}
+            <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 marker:hidden">
+              {issue.level && <span className="rounded border px-1.5 py-0.5 text-xs text-muted-foreground">{issue.level}</span>}
+              <span className="rounded border border-primary/30 bg-primary/5 px-1.5 py-0.5 text-xs text-primary">{issueSourceLabel(issue.sourceKind)}</span>
+              <span className="min-w-0 flex-1 font-medium">{issue.title}</span>
+              {issue.liveOverlay.status && <span className="text-sm text-muted-foreground">{issueStatusLabel(issue.liveOverlay.status)}</span>}
             </summary>
             <div className="mt-4 space-y-4">
-              {issue.recipe ? <RecipeIssueFacts recipe={issue.recipe} carrierKey={model.header.id} /> : <>
-                {issue.details && <p className="whitespace-pre-wrap text-sm text-muted-foreground">{issue.details}</p>}
-                <MediaList items={issue.evidence} role="appendix" label="原始问题素材" carrierKey={model.header.id} />
+              <IssueContextLines issue={issue} />
+              {issue.recipe ? <>
+                <RecipeIssueFacts recipe={issue.recipe} carrierKey={model.header.id} />
+                <div className="border-t pt-3 text-sm">
+                  <p className="whitespace-pre-wrap text-muted-foreground"><span className="font-medium text-foreground">问题：</span>{issue.details || issue.title}</p>
+                  <div className="mt-2"><MediaList items={issue.evidence} role="appendix" label="素材" carrierKey={model.header.id} /></div>
+                </div>
+              </> : <>
+                <p className="whitespace-pre-wrap text-sm text-muted-foreground"><span className="font-medium text-foreground">问题：</span>{issue.details || issue.title}</p>
+                <MediaList items={issue.evidence} role="appendix" label="素材" carrierKey={model.header.id} />
               </>}
               {rectified && (issue.liveOverlay.rectification || issue.liveOverlay.evidence.length > 0) && (
                 <div className="rounded-md bg-muted/40 p-3 text-sm">
@@ -148,28 +179,17 @@ function FrozenPanel({ model, active }: { model: FrozenReportViewModel; active: 
   if (active === 'function_effect') {
     return (
       <div className="space-y-4">
-        {model.functionEffects.map((effect) => (
-          <article key={effect.recipeId} data-content-id={`function:${effect.recipeId}`} className="space-y-3 rounded-lg border p-4">
-            <h3 className="font-medium">{effect.name}</h3>
-            <p className="text-sm text-muted-foreground">整体判断：{evaluationStatusLabel(effect.evaluationStatus)}</p>
-            {effect.evaluation && <p className="whitespace-pre-wrap text-sm text-muted-foreground">{effect.evaluation}</p>}
-            <MediaList items={effect.evidence} role="primary" label="效果素材" carrierKey={model.header.id} />
-            {effect.steps.length > 0 && (
-              <ol className="space-y-2 border-t pt-3">
-                {effect.steps.map((item, index) => {
-                  return (
-                    <li key={item.id} data-content-id={`function-step:${item.id}`} className="space-y-2 text-sm">
-                      <div><span className="font-medium">步骤 {String(item.stepNumber ?? index + 1)}</span>
-                        {item.operation && <span className="ml-2 text-muted-foreground">{item.operation}</span>}
-                      </div>
-                      <MediaList items={item.evidence} role="evidence" label="过程证据" carrierKey={model.header.id} />
-                    </li>
-                  );
-                })}
-              </ol>
-            )}
-          </article>
-        ))}
+        {model.functionEffects.map((effect) => {
+          const relatedIssues = model.issues.filter((issue) => issue.recipe?.recipeId === effect.recipeId);
+          return <article key={effect.recipeId} data-content-id={`function:${effect.recipeId}`} className="space-y-3 rounded-lg border p-4">
+            <div className="flex flex-wrap items-center gap-2"><h3 className="font-medium">{effect.name}</h3><span className="rounded border px-1.5 py-0.5 text-xs text-muted-foreground">步骤数：{effect.steps.length}</span>{effect.effectScore && <span className="rounded border px-1.5 py-0.5 text-xs text-muted-foreground">效果评分：{effect.effectScore}</span>}<span className="rounded border px-1.5 py-0.5 text-xs text-muted-foreground">问题点数量：{relatedIssues.length}</span></div>
+            {effect.formula && <p className="text-sm text-muted-foreground"><span className="font-medium text-foreground">食谱/食材：</span>{effect.formula}</p>}
+            {effect.parameters && <p className="text-sm text-muted-foreground"><span className="font-medium text-foreground">食谱参数：</span>{typeof effect.parameters === 'string' ? effect.parameters : Object.entries(effect.parameters).map(([key, value]) => `${key}：${String(value)}`).join('；')}</p>}
+            <div className="border-t pt-3"><p className="font-medium text-sm">效果评价</p><p className="mt-1 text-sm text-muted-foreground">整体判断：{evaluationStatusLabel(effect.evaluationStatus)}</p>{effect.evaluation && <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{effect.evaluation}</p>}<div className="mt-2"><MediaList items={effect.evidence} role="primary" label="素材" carrierKey={model.header.id} /></div></div>
+            {effect.steps.length > 0 && <details className="rounded-md border px-3 py-2"><summary className="cursor-pointer font-medium text-sm">食谱步骤：{effect.steps.length}步</summary><ol className="mt-3 space-y-2 border-t pt-3">{effect.steps.map((item, index) => <li key={item.id} data-content-id={`function-step:${item.id}`} className="space-y-2 text-sm"><div><span className="font-medium">步骤 {String(item.stepNumber ?? index + 1)}</span>{item.operation && <span className="ml-2 text-muted-foreground">{item.operation}</span>}</div>{item.problemPoints.length > 0 && <p className="whitespace-pre-wrap text-muted-foreground">步骤问题点：{item.problemPoints.join('；')}</p>}<MediaList items={item.evidence} role="evidence" label="素材" carrierKey={model.header.id} /></li>)}</ol></details>}
+            {relatedIssues.length > 0 && <div className="border-t pt-3 text-sm"><p className="font-medium">问题点</p>{relatedIssues.map((issue) => <div key={issue.id} className="mt-2 rounded-md bg-muted/30 p-3"><p className="whitespace-pre-wrap text-muted-foreground">{issue.details || issue.title}</p><MediaList items={issue.evidence} role="appendix" label="素材" carrierKey={model.header.id} /></div>)}</div>}
+          </article>;
+        })}
       </div>
     );
   }

@@ -16,6 +16,7 @@ interface FunctionEffectRecipe {
   effect_score?: string | null;
   effect_problem_point?: string | null;
   effect_ai_result?: { score?: number; summary?: string } | null;
+  effect_status?: string | null;
   problem_count?: number;
   recipe_steps?: Array<{
     id: string;
@@ -44,41 +45,13 @@ export function ReportFunctionEffectTab({ recipes }: { recipes: FunctionEffectRe
   );
 }
 
-function parseProblemPoints(raw: string | null | undefined): Array<{ text: string; material_ids?: string[] }> {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      return parsed
-        .map((p) => (typeof p === 'string' ? { text: p } : { text: String(p?.text ?? ''), material_ids: p?.material_ids }))
-        .filter((p) => p.text.trim());
-    }
-  } catch {
-    // 非 JSON，按换行分割
-    return raw.split('\n').map((t) => t.trim()).filter(Boolean).map((text) => ({ text }));
-  }
-  return [];
-}
-
-function materialsForIds(materials: Array<Record<string, unknown>> | undefined, ids: string[] | undefined) {
-  if (!materials?.length || !ids?.length) return [];
-  const idSet = new Set(ids);
-  return materials.filter((material) => idSet.has(String(material.id || '')));
-}
-
 function RecipeCard({ recipe }: { recipe: FunctionEffectRecipe }) {
   const [stepsExpanded, setStepsExpanded] = useState(false);
   const steps = recipe.recipe_steps || [];
-  const effectPps = parseProblemPoints(recipe.effect_problem_point);
   const effectScore = recipe.effect_score;
   const evaluationText = selectEffectEvaluationText(recipe);
-  // 实时计算步骤问题点 + 效果问题点（不依赖可能不准的 problem_count 字段）
-  const stepProblemCount = steps.reduce((sum, step) => {
-    const pps = step.problem_points;
-    if (Array.isArray(pps) && pps.length > 0) return sum + pps.filter((p) => p.text?.trim()).length;
-    return sum + (step.problem_point?.trim() ? 1 : 0);
-  }, 0);
-  const totalProblems = stepProblemCount + effectPps.length;
+  const totalProblems = Number(recipe.problem_count || 0)
+    || (recipe.effect_status && recipe.effect_status !== 'qualified' && recipe.effect_status !== '合格' ? 1 : 0);
 
   return (
     <Card>
@@ -130,23 +103,15 @@ function RecipeCard({ recipe }: { recipe: FunctionEffectRecipe }) {
             {stepsExpanded && (
               <div className="space-y-2 border-t p-2">
                 {steps.map((step, idx) => {
-                  const stepPps = step.problem_points && step.problem_points.length > 0
-                    ? step.problem_points.filter((p) => p.text.trim())
-                    : step.problem_point
-                      ? [{ text: step.problem_point }]
-                      : [];
+                  const stepProblemPoints = Array.isArray(step.problem_points)
+                    ? step.problem_points.map((point) => String(point.text || '').trim()).filter(Boolean)
+                    : step.problem_point?.trim() ? [step.problem_point.trim()] : [];
                   return (
                     <div key={step.id || idx} className="rounded border bg-background p-2">
                       <p className="text-xs font-medium">
                         步骤{step.step_number || idx + 1}：{step.operation || '—'}
                       </p>
-                      {stepPps.length > 0 && (
-                        <div className="mt-1 space-y-1">
-                          {stepPps.map((pp, pIdx) => (
-                            <p key={pIdx} className="text-xs text-amber-600">问题点：{pp.text}</p>
-                          ))}
-                        </div>
-                      )}
+                      {stepProblemPoints.length > 0 && <p className="mt-1 text-xs text-muted-foreground">步骤问题点：{stepProblemPoints.join('；')}</p>}
                       {step.materials && step.materials.length > 0 && (
                         <div className="mt-1">
                           <SemanticMediaGrid materials={step.materials} role="evidence" />
@@ -160,18 +125,6 @@ function RecipeCard({ recipe }: { recipe: FunctionEffectRecipe }) {
           </div>
         )}
 
-        {/* 问题点（效果评价问题点） */}
-        {effectPps.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-amber-600">问题点（{effectPps.length}条）</p>
-            {effectPps.map((pp, idx) => (
-              <div key={idx} className="rounded border border-amber-200/60 bg-amber-50/30 p-2">
-                <p className="text-xs">{pp.text}</p>
-                <SemanticMediaGrid materials={materialsForIds(recipe.effect_materials, pp.material_ids)} role="primary" />
-              </div>
-            ))}
-          </div>
-        )}
       </CardContent>
     </Card>
   );

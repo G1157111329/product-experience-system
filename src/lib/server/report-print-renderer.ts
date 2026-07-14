@@ -137,7 +137,12 @@ function cloneFrozenModelParts(model: FrozenReportViewModel) {
   });
   return {
     header: { ...model.header },
-    summary: { ...model.summary, aiSummary: model.summary.aiSummary ? { ...model.summary.aiSummary } : null },
+    summary: {
+      ...model.summary,
+      aiSummary: model.summary.aiSummary ? { ...model.summary.aiSummary } : null,
+      taskInfo: model.summary.taskInfo ? { ...model.summary.taskInfo } : null,
+      stats: { ...model.summary.stats },
+    },
     issues: model.issues.map((issue) => ({
       ...issue,
       evidence: cloneMedia(issue.evidence),
@@ -153,7 +158,7 @@ function cloneFrozenModelParts(model: FrozenReportViewModel) {
       },
       ...(issue.recipe ? { recipe: cloneRecipe(issue.recipe) } : {}),
     })),
-    functionEffects: model.functionEffects.map(cloneRecipe),
+    functionEffects: model.tabs.includes('function_effect') ? model.functionEffects.map(cloneRecipe) : [],
   };
 }
 
@@ -185,11 +190,12 @@ function comparisonMatrix(snapshotValue: unknown): PrintMatrix {
           text(candidate.item_node_id) === id
           && text(candidate.object_id || candidate.comparison_object_id) === column.id
         ));
+        const value = text(cell?.effect_summary || cell?.metric_value || cell?.measurement_value || cell?.value || cell?.conclusion || cell?.text || cell?.manual_score, '-');
         cellMap[column.id] = {
-          value: text(cell?.effect_summary || cell?.metric_value || cell?.measurement_value || cell?.value || cell?.conclusion || cell?.text || cell?.manual_score, '-'),
+          value,
           score: text(cell?.manual_score || cell?.ai_score),
-          notes: textList(cell?.process_notes),
-          problems: textList(cell?.problem_points),
+          notes: textList(cell?.process_notes).filter((note) => note !== value),
+          problems: textList(cell?.problem_points).filter((problem) => problem !== value),
           media: dedupeMedia([
             ...mediaFromUnknown(cell?.inline_media),
             ...mediaFromUnknown(cell?.appendix_media),
@@ -347,7 +353,7 @@ function renderIssues(model: PrintReportViewModel) {
       ? typeof recipe.parameters === 'string' ? recipe.parameters : Object.entries(recipe.parameters).map(([key, value]) => `${key}：${String(value)}`).join('；')
       : '';
     const steps = recipe?.steps.length
-      ? `<details><summary>食谱步骤：${recipe.steps.length}步</summary>${recipe.steps.map((step, index) => `<div class="paper-step"><b>步骤 ${escapeHtml(step.stepNumber ?? index + 1)}</b> ${escapeHtml(step.operation)}${renderMedia(step.evidence)}</div>`).join('')}</details>`
+      ? `<div><p><b>食谱步骤：</b>${recipe.steps.length}步</p>${recipe.steps.map((step, index) => `<div class="paper-step"><b>步骤 ${escapeHtml(step.stepNumber ?? index + 1)}</b> ${escapeHtml(step.operation)}${renderMedia(step.evidence)}</div>`).join('')}</div>`
       : '';
     const latest = issue.liveOverlay.retest.latest;
     const retest = latest
@@ -357,10 +363,12 @@ function renderIssues(model: PrintReportViewModel) {
       ? `<div><p><b>整改效果评价：</b>${escapeHtml(issue.liveOverlay.rectification)}</p><p><b>整改素材：</b></p>${renderMedia(issue.liveOverlay.evidence)}</div>`
       : '';
     const original = recipe
-      ? `<p><b>食谱名称：</b>${escapeHtml(recipe.name)}</p>${recipe.formula ? `<p><b>食谱配方：</b>${escapeHtml(recipe.formula)}</p>` : ''}${parameters ? `<p><b>食谱参数：</b>${escapeHtml(parameters)}</p>` : ''}${steps}<p><b>食谱效果评价：</b>${escapeHtml(recipe.evaluation)}（${escapeHtml(evaluationStatusLabel(recipe.evaluationStatus))}）</p><p><b>原始效果素材：</b></p>${renderMedia(recipe.evidence)}`
-      : `<p>${escapeHtml(issue.details)}</p>${issue.evidence.length ? '<p><b>附录素材：</b></p>' : ''}${renderMedia(issue.evidence)}`;
-    const status = issue.liveOverlay.status ? `<p>当前状态：${escapeHtml(({ open: '待整改', rectifying: '整改中', verified_closed: '整改完成', waived: '不整改' }[issue.liveOverlay.status] ?? issue.liveOverlay.status))}</p>` : '';
-    return `<article class="paper-row"><h3>${escapeHtml(issue.title)}</h3>${original}${status}${rectification}${retest}</article>`;
+      ? `<p><b>食谱名称：</b>${escapeHtml(recipe.name)}</p>${recipe.formula ? `<p><b>食谱配方：</b>${escapeHtml(recipe.formula)}</p>` : ''}${parameters ? `<p><b>食谱参数：</b>${escapeHtml(parameters)}</p>` : ''}${steps}<p><b>食谱效果评价：</b>${escapeHtml(recipe.evaluation)}（${escapeHtml(evaluationStatusLabel(recipe.evaluationStatus))}）</p>${recipe.evidence.length ? '<p><b>素材：</b></p>' : ''}${renderMedia(recipe.evidence)}<p><b>问题：</b>${escapeHtml(issue.details || issue.title)}</p>${renderMedia(issue.evidence)}`
+      : `<p><b>问题：</b>${escapeHtml(issue.details || issue.title)}</p>${issue.evidence.length ? '<p><b>素材：</b></p>' : ''}${renderMedia(issue.evidence)}`;
+    const status = issue.liveOverlay.status ? escapeHtml(({ open: '待整改', rectifying: '整改中', verified_closed: '整改完成', waived: '不整改' }[issue.liveOverlay.status] ?? issue.liveOverlay.status)) : '';
+    const source = ({ sensory: '五感体验', function: '食谱/功能', comparison: '对比项', matrix: '数据矩阵' }[issue.sourceKind] ?? issue.sourceType);
+    const context = `${issue.context.object ? `<p><b>对象：</b>${escapeHtml(issue.context.object)}</p>` : ''}${issue.context.project ? `<p><b>项目：</b>${escapeHtml(issue.context.project)}</p>` : ''}${issue.context.item ? `<p><b>细项：</b>${escapeHtml(issue.context.item)}</p>` : ''}`;
+    return `<article class="paper-row"><h3>${issue.level ? `<span class="meta">${escapeHtml(issue.level)}</span> ` : ''}<span class="meta">${escapeHtml(source)}</span> ${escapeHtml(issue.title)}${status ? `<span class="meta"> ${status}</span>` : ''}</h3>${context}${original}${rectification}${retest}</article>`;
   }).join('')}</section>`;
 }
 
@@ -370,11 +378,31 @@ function renderFunctions(model: PrintReportViewModel) {
     const steps = effect.steps.map((step, index) => {
       return `<div class="paper-step"><b>步骤 ${escapeHtml(step.stepNumber ?? index + 1)}</b> ${escapeHtml(step.operation)}${renderMedia(step.evidence)}</div>`;
     }).join('');
-    return `<article class="paper-row"><h3>${escapeHtml(effect.name)}</h3><p>整体判断：${escapeHtml(evaluationStatusLabel(effect.evaluationStatus))}</p><p>${escapeHtml(effect.evaluation)}</p>${renderMedia(effect.evidence)}${steps}</article>`;
+    const issueCount = model.issues.filter((issue) => issue.recipe?.recipeId === effect.recipeId).length;
+    const score = effect.effectScore ? `　效果评分：${escapeHtml(effect.effectScore)}` : '';
+    return `<article class="paper-row"><h3>${escapeHtml(effect.name)} <span class="meta">步骤数：${effect.steps.length}${score}　问题点数量：${issueCount}</span></h3>${effect.formula ? `<p><b>食谱/食材：</b>${escapeHtml(effect.formula)}</p>` : ''}${effect.parameters ? `<p><b>食谱参数：</b>${escapeHtml(typeof effect.parameters === 'string' ? effect.parameters : Object.entries(effect.parameters).map(([key, value]) => `${key}：${String(value)}`).join('；'))}</p>` : ''}<p><b>效果评价：</b>${escapeHtml(effect.evaluation)}（${escapeHtml(evaluationStatusLabel(effect.evaluationStatus))}）</p>${renderMedia(effect.evidence)}${steps}</article>`;
   }).join('')}</section>`;
 }
 
-export function renderPrintReportHtml(model: PrintReportViewModel, generatedAt = new Date()) {
+function renderProductInfo(model: PrintReportViewModel) {
+  const task = model.summary.taskInfo ?? {};
+  const fields: Array<[string, unknown]> = [
+    ['单号', task.project_number], ['产品型号', task.product_model ?? model.header.productModel], ['产品', task.product],
+    ['品类', task.product_category], ['项目类型', task.project_type], ['项目阶段', task.project_phase],
+    ['体验人', task.organizer], ['体验时间', task.test_date], ['创建时间', task.created_at],
+  ].filter((item): item is [string, unknown] => item[1] !== null && item[1] !== undefined && text(item[1]) !== '');
+  const stats = model.summary.stats;
+  const overview = [
+    ['问题点总数', stats.issueCount], ['五感体验问题点', stats.sensoryIssueCount], ['功能效果问题点', stats.functionIssueCount],
+    ['对比问题点', stats.comparisonIssueCount], ['整改率', `${stats.rectificationRate}%`],
+  ];
+  const taskGrid = fields.length ? `<section><h2>产品信息</h2><div class="task-grid">${fields.map(([label, value]) => `<p><span>${escapeHtml(label)}：</span>${escapeHtml(value)}</p>`).join('')}</div>${task.test_purpose ? `<p><span>体验目的：</span>${escapeHtml(task.test_purpose)}</p>` : ''}</section>` : '';
+  const overviewGrid = `<section><h2>概览统计</h2><div class="overview-grid">${overview.map(([label, value]) => `<div><b>${escapeHtml(value)}</b><span>${escapeHtml(label)}</span></div>`).join('')}</div></section>`;
+  return `${taskGrid}${overviewGrid}`;
+}
+
+export function renderPrintReportHtml(model: PrintReportViewModel, _generatedAt = new Date()) {
+  void _generatedAt;
   const matrix = model.matrix
     ? model.matrix.kind === 'comparison' ? renderComparison(model.matrix) : renderDataMatrix(model.matrix)
     : '';
@@ -383,12 +411,12 @@ export function renderPrintReportHtml(model: PrintReportViewModel, generatedAt =
     * { box-sizing: border-box; } body { margin: 0; color: #111827; font-family: -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif; font-size: 11px; line-height: 1.55; }
     h1 { margin: 0 0 4px; font-size: 22px; } h2 { margin: 18px 0 8px; padding-bottom: 4px; border-bottom: 2px solid #0f766e; color: #0f766e; font-size: 16px; break-after: avoid; } h3 { margin: 0 0 5px; font-size: 12px; break-after: avoid; }
     section { break-inside: auto; } .cover,.paper-row { border: 1px solid #d1d5db; border-radius: 6px; padding: 9px; margin: 7px 0; background: #fff; break-inside: avoid; } .muted,.meta { color: #6b7280; }
-    .paper-fields { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 5px; } .paper-field { border: 1px solid #e5e7eb; border-radius: 4px; padding: 5px; } .paper-field span,.paper-field b { display: block; overflow-wrap: anywhere; }
+    .paper-fields,.task-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 5px; } .paper-field { border: 1px solid #e5e7eb; border-radius: 4px; padding: 5px; } .paper-field span,.paper-field b { display: block; overflow-wrap: anywhere; } .task-grid p { margin: 0; } .task-grid span { color: #6b7280; } .overview-grid { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 5px; } .overview-grid div { border: 1px solid #d1d5db; padding: 6px; text-align: center; } .overview-grid b,.overview-grid span { display:block; } .overview-grid span { color:#6b7280; }
     .paper-media { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; } figure { width: 72px; margin: 0; border: 1px solid #d1d5db; border-radius: 4px; padding: 3px; break-inside: avoid; } figure img { width: 64px; height: 48px; object-fit: cover; display: block; background: #e5e7eb; } .paper-video { position: relative; } .video-label { position: absolute; left: 3px; top: 35px; width: 64px; padding: 1px 0; background: rgba(17,24,39,.72); color: #fff; text-align: center; font-weight: 700; } figcaption { margin-top: 2px; color: #6b7280; font-size: 8px; overflow-wrap: anywhere; }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; } thead { display: table-header-group; } th,td { border: 1px solid #d1d5db; padding: 5px; vertical-align: top; overflow-wrap: anywhere; } th { background: #f0fdfa; color: #0f766e; } .issues { color: #991b1b; }
   </style></head><body data-print-report-id="${escapeHtml(model.sourceReportId)}">
-    <header class="cover"><h1>${escapeHtml(model.header.title)}</h1>${model.header.productModel ? `<p>${escapeHtml(model.header.productModel)}</p>` : ''}<p class="meta">生成时间：${escapeHtml(generatedAt.toISOString())}</p></header>
-    <section><h2>总结</h2><p>${escapeHtml(model.summary.text || '暂无总结')}</p></section>
-    ${renderIssues(model)}${matrix}${renderFunctions(model)}
+    <header class="cover"><h1>${escapeHtml(model.header.title)}</h1>${model.header.productModel ? `<p>${escapeHtml(model.header.productModel)}</p>` : ''}</header>
+    ${renderProductInfo(model)}${model.summary.text ? `<section><h2>总结</h2><p>${escapeHtml(model.summary.text)}</p></section>` : ''}
+    ${renderIssues(model)}${renderFunctions(model)}${matrix}
   </body></html>`;
 }

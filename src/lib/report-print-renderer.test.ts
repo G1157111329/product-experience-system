@@ -15,9 +15,13 @@ function frozenModel(matrix: FrozenReportViewModel['matrix']): FrozenReportViewM
       productModel: 'Model P',
     },
     tabs: ['summary', 'issues', 'data_matrix', 'function_effect'],
-    summary: { text: 'Frozen summary', aiSummary: null },
+    summary: {
+      text: 'Frozen summary', aiSummary: null, taskInfo: null,
+      stats: { issueCount: 1, sensoryIssueCount: 1, functionIssueCount: 0, comparisonIssueCount: 0, rectificationRate: 0 },
+    },
     issues: [{
-      id: 'issue-1', title: 'Frozen issue', details: 'Frozen issue details', level: 'II', sourceType: 'record_fail',
+      id: 'issue-1', title: 'Frozen issue', details: 'Frozen issue details', level: 'II', sourceType: 'record_fail', sourceKind: 'sensory',
+      context: { object: '', project: '', item: '' },
       evidence: [{ id: 'issue-image', name: 'issue.jpg', type: 'image', url: pixel }],
       liveOverlay: {
         status: 'rectifying', rectification: 'Replace seal', evidence: [],
@@ -29,7 +33,7 @@ function frozenModel(matrix: FrozenReportViewModel['matrix']): FrozenReportViewM
     }],
     matrix,
     functionEffects: [{
-      recipeId: 'effect-1', subjectName: 'Juice effect食谱', name: 'Juice effect', formula: '', parameters: null, evaluationStatus: 'qualified', evaluation: 'Clear and stable',
+      recipeId: 'effect-1', subjectName: 'Juice effect食谱', name: 'Juice effect', formula: '', parameters: null, evaluationStatus: 'qualified', effectScore: '', evaluation: 'Clear and stable',
       evidence: [{ id: 'effect-video', name: 'effect.mp4', type: 'video', url: '/api/materials/file/videos/effect.mp4' }],
       steps: [],
     }],
