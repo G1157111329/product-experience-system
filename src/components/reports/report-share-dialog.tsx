@@ -44,12 +44,25 @@ export function ReportShareDialog({
       }
       const url = `${window.location.origin}/reports/share/${json.data.share_token}`;
       setShareUrl(url);
-      await copyToClipboard(url);
-      toast.success('分享链接已生成并复制');
+      try {
+        await copyToClipboard(url);
+        toast.success('分享链接已生成并复制');
+      } catch {
+        toast.warning('分享链接已生成，请点击右侧复制按钮');
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '分享链接创建失败');
     } finally {
       setCreating(false);
+    }
+  };
+
+  const copyShareUrl = async () => {
+    try {
+      await copyToClipboard(shareUrl);
+      toast.success('分享链接已复制');
+    } catch {
+      toast.error('浏览器未授予剪贴板权限，请手动复制链接');
     }
   };
 
@@ -88,7 +101,7 @@ export function ReportShareDialog({
         {shareUrl && (
           <div className="flex items-center gap-2 rounded-md bg-muted p-2">
             <span className="min-w-0 flex-1 break-all text-xs text-muted-foreground">{shareUrl}</span>
-            <Button variant="ghost" size="icon" onClick={() => void copyToClipboard(shareUrl)} aria-label="复制分享链接">
+            <Button variant="ghost" size="icon" onClick={() => void copyShareUrl()} aria-label="复制分享链接">
               <Copy className="h-4 w-4" />
             </Button>
           </div>
