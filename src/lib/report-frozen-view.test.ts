@@ -139,6 +139,18 @@ const anchoredWithoutContent = buildFrozenReportViewModel({
 assert.equal(anchoredWithoutContent.functionEffects.length, 0, '带 snapshot_id 的旧快照不得静默读取实时食谱');
 assert.equal(anchoredWithoutContent.issues.length, 0, '带 snapshot_id 的旧快照不得由实时食谱生成问题');
 
+const anchoredLegacyIssue = buildFrozenReportViewModel({
+  report: { id: 'anchored-legacy-issue', report_type: 'comparison_report', content: {} },
+  snapshot: { snapshot_json: { objects: [{ id: 'object-1' }], item_nodes: [{ id: 'item-1' }], cells: [] } },
+  snapshotResolution: 'anchored',
+  issues: [{
+    id: 'legacy-sensory-issue', source_report_id: 'anchored-legacy-issue', source_type: 'record_fail',
+    title: '历史五感问题', description: '历史快照未写入记录时仍应保留同报告问题', status: 'open',
+  }],
+}, { audience: 'internal' });
+assert.equal(anchoredLegacyIssue.issues.length, 1, '旧冻结快照仍需保留明确归属当前报告的问题');
+assert.equal(anchoredLegacyIssue.issues[0]?.sourceKind, 'sensory');
+
 const qualifiedAtFreeze = buildFrozenReportViewModel({
   report: { id: 'qualified-at-freeze', report_type: 'single_report', content: {} },
   snapshot: { snapshot_json: { report_content: { recipes: [{ id: 'recipe-qualified', name: '冻结时合格', effect_status: 'qualified' }] } } },

@@ -322,14 +322,22 @@ function frozenIssue(base: FrozenFact, live: Row | undefined, evidence: FrozenMe
   };
 }
 
-function buildIssues(content: Row, snapshotJson: Row, liveIssues: Row[], issueEvidence: Record<string, FrozenMedia[]>, resolution: BuildFrozenReportViewInput['snapshotResolution']): FrozenIssue[] {
+function buildIssues(
+  content: Row,
+  snapshotJson: Row,
+  liveIssues: Row[],
+  issueEvidence: Record<string, FrozenMedia[]>,
+  resolution: BuildFrozenReportViewInput['snapshotResolution'],
+  reportId: string,
+): FrozenIssue[] {
   const facts = frozenIssueFacts(content, snapshotJson);
   const consumed = new Set<FrozenFact>();
   const result: FrozenIssue[] = [];
   for (const live of liveIssues) {
     const base = findFrozenFactForLive(facts, live);
     if (base?._sourceKind === 'recipe' && !base._reportable) continue;
-    if (!base && resolution !== 'legacy_latest') continue;
+    const isCurrentReportLegacyIssue = text(live.source_report_id) === reportId;
+    if (!base && resolution !== 'legacy_latest' && !isCurrentReportLegacyIssue) continue;
     const frozenBase = base ?? live as FrozenFact;
     consumed.add(frozenBase);
     const evidence = media(rows(frozenBase.materials));
@@ -364,7 +372,9 @@ export function buildFrozenReportViewModel(input: BuildFrozenReportViewInput, op
   const reportType = first(input.report.report_type, snapshotJson.report_type, 'single_report');
   const tabs = buildReportFrozenTabs({ reportType, dataMatrixProjection: projection, comparisonSnapshot: snapshotJson, recipes });
   const aiSummary = isRecord(content.ai_summary) ? content.ai_summary : null;
-  const frozenIssues = buildIssues(content, snapshotJson, input.issues ?? [], input.issueEvidence ?? {}, input.snapshotResolution);
+  const frozenIssues = buildIssues(
+    content, snapshotJson, input.issues ?? [], input.issueEvidence ?? {}, input.snapshotResolution, text(input.report.id),
+  );
   const issueCount = frozenIssues.length;
   const countByKind = (kind: FrozenIssue['sourceKind']) => frozenIssues.filter((issue) => issue.sourceKind === kind).length;
   const rectifiedCount = frozenIssues.filter((issue) => issue.liveOverlay.status === 'verified_closed').length;
