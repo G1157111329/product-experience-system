@@ -17,10 +17,10 @@ type MatrixMobileCell = {
 
 export type MatrixMobileGroupId = 'input' | 'calculation' | 'media' | 'evaluation' | 'issue';
 
-export type MatrixMobileGroup = {
+export type MatrixMobileGroup<TColumn extends MatrixMobileColumn = MatrixMobileColumn> = {
   id: MatrixMobileGroupId;
   label: string;
-  columns: MatrixMobileColumn[];
+  columns: TColumn[];
   defaultExpanded: boolean;
 };
 
@@ -52,19 +52,19 @@ function hasCellContent(cell: MatrixMobileCell | undefined): boolean {
   );
 }
 
-export function buildMatrixMobileGroups({
+export function buildMatrixMobileGroups<TColumn extends MatrixMobileColumn>({
   columns,
   cells,
   cellMedia,
   issuePoints,
   leafRowId,
 }: {
-  columns: readonly MatrixMobileColumn[];
+  columns: readonly TColumn[];
   cells: Record<string, MatrixMobileCell>;
   cellMedia: Record<string, Array<{ materialId: string }>>;
   issuePoints: Array<{ leafRowId: string; columnId: string; issueText: string }>;
   leafRowId: string;
-}): MatrixMobileGroup[] {
+}): MatrixMobileGroup<TColumn>[] {
   return GROUPS.flatMap(({ id, label }) => {
     const groupColumns = columns.filter((column) => getGroupId(column) === id);
     if (groupColumns.length === 0) return [];
