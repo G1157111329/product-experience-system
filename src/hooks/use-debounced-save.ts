@@ -101,8 +101,9 @@ export function useDebouncedSave<T>(
             savedFlashRef.current = null;
           }, savedFlashMs);
         }
-      } catch {
+      } catch (error) {
         setStatusState('error');
+        throw error;
       }
     })()),
     [savedFlashMs],
@@ -116,7 +117,10 @@ export function useDebouncedSave<T>(
       timerRef.current = setTimeout(() => {
         timerRef.current = null;
         const v = pendingValueRef.current;
-        if (v !== null) void runSave(v);
+        // The registry retains the original rejection for a parent that is
+        // waiting to navigate, while this fire-and-forget trigger must not
+        // create an unhandled browser rejection.
+        if (v !== null) void runSave(v).catch(() => undefined);
       }, debounceMs);
     },
     [debounceMs, runSave],
@@ -130,7 +134,7 @@ export function useDebouncedSave<T>(
     const v = pendingValueRef.current;
     if (v !== null) {
       pendingValueRef.current = null;
-      void runSave(v);
+      void runSave(v).catch(() => undefined);
     }
   }, [runSave]);
 

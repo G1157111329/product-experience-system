@@ -498,6 +498,48 @@ test('mobile matrix shows one current row with bounded navigation', async ({ pag
   }
 });
 
+test('mobile matrix keeps the current row when its pending save fails', async ({ page }) => {
+  const marker = `E2E mobile save failure ${Date.now()}`;
+  await page.setViewportSize({ width: 390, height: 844 });
+  const taskResponse = await page.request.post('/api/tasks', {
+    data: { task_name: marker, product_category: '通用标准', product: 'E2E', product_model: marker, task_mode: 'single' },
+  });
+  const taskPayload = await taskResponse.json();
+  expect(taskPayload.code, taskPayload.message).toBe(0);
+  const taskId = taskPayload.data.id as string;
+  let matrixId = '';
+
+  try {
+    const matrixResponse = await page.request.post(`/api/v1/tasks/${taskId}/matrices`, {
+      data: { name: `${marker} - matrix`, view_mode: 'excel_like_dynamic_matrix' },
+    });
+    const matrixPayload = await matrixResponse.json();
+    matrixId = matrixPayload.data.id as string;
+    const projectionResponse = await page.request.get(`/api/v1/matrices/${matrixId}/v3-projection`);
+    const projection = (await projectionResponse.json()).data;
+    const addRow = await page.request.post(`/api/v1/matrices/${matrixId}/hierarchy-nodes`, {
+      data: { level: 2, parentId: projection.hierarchy[0].id, nodeLabel: '第二行' },
+    });
+    expect((await addRow.json()).code).toBe(0);
+
+    await page.goto(`/tasks/${taskId}?tab=matrix`);
+    await expect(page.getByText('当前行 1 / 2', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '输入', exact: true }).click();
+    const currentRowTextarea = page.getByPlaceholder('…').first();
+    await expect(currentRowTextarea).toBeVisible();
+    await currentRowTextarea.fill('待保存文本');
+    await page.route(`**/api/v1/matrices/${matrixId}/cells/**`, async (route) => {
+      await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ code: 1, message: '保存失败' }) });
+    });
+    await page.getByRole('button', { name: '下一行', exact: true }).click();
+    await expect(page.getByText('当前行 1 / 2', { exact: true })).toBeVisible();
+    await expect(page.getByText('当前行保存失败，请修复后再切换', { exact: true })).toBeVisible();
+  } finally {
+    if (matrixId) await page.request.post(`/api/v1/matrices/${matrixId}/lifecycle`, { data: { action: 'archive', reason: 'e2e_cleanup' } });
+    await page.request.delete(`/api/tasks/${taskId}`);
+  }
+});
+
 test('concurrent first matrix creation is idempotent without opening the matrix tab', async ({ page }) => {
   const marker = `E2E concurrent matrix ${Date.now()}`;
   const taskResponse = await page.request.post('/api/tasks', {

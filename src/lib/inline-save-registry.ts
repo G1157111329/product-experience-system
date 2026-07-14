@@ -14,3 +14,12 @@ export async function waitForPendingInlineSaves(): Promise<void> {
     await Promise.allSettled(Array.from(pendingInlineSaves));
   }
 }
+
+/** Wait for all currently pending saves and surface a persistence failure to the caller. */
+export async function waitForPendingInlineSavesOrThrow(): Promise<void> {
+  while (pendingInlineSaves.size > 0) {
+    const results = await Promise.allSettled(Array.from(pendingInlineSaves));
+    const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failed) throw failed.reason;
+  }
+}

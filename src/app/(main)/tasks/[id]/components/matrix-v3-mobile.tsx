@@ -4,13 +4,15 @@
  * MatrixV3Mobile — card-based entry for narrow screens (PRD §7.15).
  * Renders each leaf row as a card with hierarchy labels + editable fields.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { InlineEditable } from '@/components/inline-editable';
 import { putMatrixCellValue } from '@/lib/inline-save-helpers';
+import { waitForPendingInlineSavesOrThrow } from '@/lib/inline-save-registry';
+import { toast } from 'sonner';
 import type { V3MatrixProjection, V3HierarchyNode } from '@/lib/matrix/v3-types';
 import { cellKey } from '@/lib/matrix/v3-types';
 import { MatrixV3MediaCell } from './matrix-v3-media-cell';
@@ -59,6 +61,18 @@ export function MatrixV3Mobile({ matrixId, taskId, projection, onChanged }: Matr
     [leaf, projection.cellMedia, projection.cells, projection.columns, projection.issuePoints],
   );
 
+  const changeRow = useCallback(async (direction: -1 | 1) => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    window.dispatchEvent(new Event('inline-save:flush'));
+    try {
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      await waitForPendingInlineSavesOrThrow();
+      setCurrentRowIndex((index) => getAdjacentMatrixRowIndex(index, direction, rows.length));
+    } catch {
+      toast.error('当前行保存失败，请修复后再切换');
+    }
+  }, [rows.length]);
+
   if (rows.length === 0) {
     return (
       <Card>
@@ -74,14 +88,8 @@ export function MatrixV3Mobile({ matrixId, taskId, projection, onChanged }: Matr
       <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
         <Badge variant="secondary">当前行 {currentRowIndex + 1} / {rows.length}</Badge>
         <div className="flex items-center gap-1">
-          <Button type="button" size="sm" variant="outline" className="h-7 px-2" disabled={currentRowIndex === 0} onClick={() => {
-            if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-            setCurrentRowIndex((index) => getAdjacentMatrixRowIndex(index, -1, rows.length));
-          }}><ChevronLeft className="mr-1 h-3.5 w-3.5" />上一行</Button>
-          <Button type="button" size="sm" variant="outline" className="h-7 px-2" disabled={currentRowIndex === rows.length - 1} onClick={() => {
-            if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-            setCurrentRowIndex((index) => getAdjacentMatrixRowIndex(index, 1, rows.length));
-          }}>下一行<ChevronRight className="ml-1 h-3.5 w-3.5" /></Button>
+          <Button type="button" size="sm" variant="outline" className="h-7 px-2" disabled={currentRowIndex === 0} onClick={() => void changeRow(-1)}><ChevronLeft className="mr-1 h-3.5 w-3.5" />上一行</Button>
+          <Button type="button" size="sm" variant="outline" className="h-7 px-2" disabled={currentRowIndex === rows.length - 1} onClick={() => void changeRow(1)}>下一行<ChevronRight className="ml-1 h-3.5 w-3.5" /></Button>
         </div>
       </div>
       {leaf && (() => {
