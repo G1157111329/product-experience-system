@@ -732,3 +732,10 @@ node_modules/.bin/tsx src/lib/report-print-matrix.test.ts
 - V3 矩阵行显示顺序必须按一级/二级/三级层级排序，而非叶子行创建顺序；同父级同层级重名返回 409 及可读提示，不得透出 Drizzle SQL。
 - 数据矩阵和对比矩阵小结均通过输入框右下角 AI 图标回填到当前草稿；不额外打开独立小结编辑面板。数据矩阵仅在存在实质输入、结论、问题或素材时进入冻结报告 Tab，报告阅读器不允许横向拖动。
 - 对比报告生成不得提前返回只含对比矩阵的空快照；快照必须同时冻结报告正文、问题、功能效果、可用数据矩阵和对比矩阵。详情、匿名分享、浏览器打印与服务端 PDF 继续以同一快照为真源。
+
+### 2026-07-14 手机视频播放兼容规则
+
+- 手机上传的 `.mov` / `.m4v` 在创建 `materials` 记录前，必须规范为带 `faststart` 的 MP4；H.264/AAC 可无损 remux，其他视频或音频编码转为 H.264/AAC、`yuv420p`。不得只移动 moov atom 后继续把 `video/quicktime` 交给 Chromium。
+- 运行时使用 `FFMPEG_BIN`（默认 `ffmpeg`）；本地 Docker 复用 Playwright 镜像已有的 ffmpeg 二进制。不得移除该运行时依赖或将视频规范化改成后台任务，否则浏览器可能先读到未就绪素材。
+- 迁移存量 MOV 时保留原文件作回退，更新 `materials.file_name/file_path/file_url/file_size` 到 MP4，并仅替换冻结快照中的同一素材 key；不得删除素材实体或改变其他冻结内容。
+- 视频验收至少同时验证：`ffprobe` 输出 H.264/AAC、访问 URL 返回 `Content-Type: video/mp4`、`206 Partial Content`、`Accept-Ranges: bytes` 与正确 `Content-Range`。
