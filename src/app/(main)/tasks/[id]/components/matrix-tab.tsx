@@ -21,6 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import type { MatrixReadProjectionV2 } from '@/lib/matrix/task-matrix-types';
 import type { V3MatrixProjection } from '@/lib/matrix/v3-types';
+import { selectCurrentMatrix } from '@/lib/matrix/current-matrix-selection';
 import { MatrixDesigner } from './matrix-designer';
 import { DesktopMatrixGrid } from './matrix-desktop-grid';
 import { MobileMatrixCards } from './matrix-mobile-v2';
@@ -37,7 +38,7 @@ interface TabStatePayload {
   enabled: boolean;
   permission: 'editable' | 'none';
   state: TabState;
-  matrices: Array<{ id: string; name: string; status: string; updatedAt: string }>;
+  matrices: Array<{ id: string; name: string; status: string; updatedAt: string; meaningful: boolean; contentUpdatedAt: string | null }>;
   cta: { primary: 'create_matrix' | null };
   flags?: {
     dynamicMatrixExcelLikeViewEnabled?: boolean;
@@ -147,9 +148,9 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
 
   useEffect(() => {
     void fetchTabState().then((data) => {
-      const activeMatrices = data?.matrices?.filter((matrix) => matrix.status !== 'archived') ?? [];
-      if (data?.state === 'ready' && activeMatrices.length === 1) {
-        setSelectedMatrixId((current) => current ?? activeMatrices[0].id);
+      const currentMatrix = selectCurrentMatrix(data?.matrices ?? []);
+      if (data?.state === 'ready' && currentMatrix) {
+        setSelectedMatrixId((current) => current ?? currentMatrix.id);
       }
     });
   }, [fetchTabState]);
@@ -208,8 +209,22 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
     return (
       <div className="space-y-3">
         <div className="flex items-center gap-2 flex-wrap">
+          <label className="sr-only" htmlFor="task-matrix-selector">切换数据矩阵</label>
+          <select
+            id="task-matrix-selector"
+            aria-label="切换数据矩阵"
+            className="h-9 max-w-[260px] rounded-md border border-input bg-background px-2 text-sm"
+            value={selectedMatrixId}
+            onChange={(event) => setSelectedMatrixId(event.target.value)}
+          >
+            {matrices.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name} · {STATUS_LABELS[item.status] ?? item.status}{item.meaningful ? ' · 有内容' : ''}
+              </option>
+            ))}
+          </select>
           <Button variant="ghost" size="sm" onClick={() => setSelectedMatrixId(null)}>
-            ← 返回矩阵列表
+            矩阵管理
           </Button>
           {matrix && (
             <>

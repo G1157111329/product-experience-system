@@ -15,8 +15,18 @@
  */
 import { NextRequest } from 'next/server';
 import { getDb } from '@/storage/database/pg-db';
-import { eq } from 'drizzle-orm';
-import { taskMatrices } from '@/storage/database/shared/schema';
+import { and, eq, inArray, max, or, sql } from 'drizzle-orm';
+import {
+  materialLinks,
+  matrixCellValues,
+  matrixFieldValues,
+  matrixGroups,
+  matrixIssuePoints,
+  matrixNarrativeBlocks,
+  matrixNarratives,
+  matrixRows,
+  taskMatrices,
+} from '@/storage/database/shared/schema';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessTask, requireUser, isAuthResponse } from '@/lib/server/auth';
 import { getV3FeatureFlags, resolveMatrixTabStateFromFlags } from '@/lib/feature-flags-v3';
@@ -30,6 +40,8 @@ interface MatrixListItem {
   name: string;
   status: string;
   updatedAt: string;
+  meaningful: boolean;
+  contentUpdatedAt: string | null;
 }
 
 interface MatrixTabStateResponse {
@@ -153,7 +165,75 @@ export async function GET(
       name: r.name,
       status: r.status,
       updatedAt: r.updatedAt,
+      meaningful: false,
+      contentUpdatedAt: null,
     }));
+
+    const matrixIds = matrices.map((matrix) => matrix.id);
+    if (matrixIds.length > 0) {
+      const [v3CellContent, v3NarrativeContent, v3IssueContent, v2ValueContent, v2NarrativeContent, v3MediaContent] = await Promise.all([
+        db.select({ matrixId: matrixCellValues.matrixId, updatedAt: max(matrixCellValues.updatedAt) })
+          .from(matrixCellValues)
+          .where(and(
+            inArray(matrixCellValues.matrixId, matrixIds),
+            eq(matrixCellValues.valueState, 'filled'),
+            sql`(
+              btrim(coalesce(${matrixCellValues.valueText}, '')) <> ''
+              OR ${matrixCellValues.valueNumber} IS NOT NULL
+              OR ${matrixCellValues.valueDurationSeconds} IS NOT NULL
+              OR ${matrixCellValues.valuePercentage} IS NOT NULL
+              OR btrim(coalesce(${matrixCellValues.displayText}, '')) <> ''
+            )`,
+          )).groupBy(matrixCellValues.matrixId).execute(),
+        db.select({ matrixId: matrixNarrativeBlocks.matrixId, updatedAt: max(matrixNarrativeBlocks.updatedAt) })
+          .from(matrixNarrativeBlocks)
+          .where(and(inArray(matrixNarrativeBlocks.matrixId, matrixIds), sql`btrim(coalesce(${matrixNarrativeBlocks.content}, '')) <> ''`))
+          .groupBy(matrixNarrativeBlocks.matrixId).execute(),
+        db.select({ matrixId: matrixIssuePoints.matrixId, updatedAt: max(matrixIssuePoints.updatedAt) })
+          .from(matrixIssuePoints)
+          .where(and(inArray(matrixIssuePoints.matrixId, matrixIds), sql`btrim(coalesce(${matrixIssuePoints.issueText}, '')) <> ''`))
+          .groupBy(matrixIssuePoints.matrixId).execute(),
+        db.select({ matrixId: matrixRows.matrixId, updatedAt: max(matrixFieldValues.updatedAt) })
+          .from(matrixFieldValues).innerJoin(matrixRows, eq(matrixFieldValues.rowId, matrixRows.id))
+          .where(and(
+            inArray(matrixRows.matrixId, matrixIds),
+            or(eq(matrixFieldValues.valueState, 'valid'), eq(matrixFieldValues.valueState, 'filled')),
+            sql`(
+              ${matrixFieldValues.numericValue} IS NOT NULL
+              OR btrim(coalesce(${matrixFieldValues.textValue}, '')) <> ''
+              OR ${matrixFieldValues.durationMs} IS NOT NULL
+              OR ${matrixFieldValues.booleanValue} IS NOT NULL
+              OR ${matrixFieldValues.dateTimeValue} IS NOT NULL
+              OR btrim(coalesce(${matrixFieldValues.enumValue}, '')) <> ''
+            )`,
+          )).groupBy(matrixRows.matrixId).execute(),
+        db.select({ matrixId: sql<string>`coalesce(${matrixNarratives.matrixId}, ${matrixGroups.matrixId})`, updatedAt: max(matrixNarratives.updatedAt) })
+          .from(matrixNarratives).leftJoin(matrixGroups, eq(matrixNarratives.groupId, matrixGroups.id))
+          .where(and(
+            sql`btrim(coalesce(${matrixNarratives.content}, '')) <> ''`,
+            or(inArray(matrixNarratives.matrixId, matrixIds), inArray(matrixGroups.matrixId, matrixIds)),
+          )).groupBy(sql`coalesce(${matrixNarratives.matrixId}, ${matrixGroups.matrixId})`).execute(),
+        db.select({ matrixId: matrixCellValues.matrixId, updatedAt: max(materialLinks.boundAt) })
+          .from(materialLinks).innerJoin(matrixCellValues, eq(materialLinks.targetId, matrixCellValues.id))
+          .where(and(
+            eq(materialLinks.targetType, 'dynamic_matrix_cell_value'),
+            inArray(matrixCellValues.matrixId, matrixIds),
+          )).groupBy(matrixCellValues.matrixId).execute(),
+      ]);
+      const matrixById = new Map(matrices.map((matrix) => [matrix.id, matrix]));
+      const mark = (matrixId: string | null, updatedAt: string | null) => {
+        if (!matrixId) return;
+        const matrix = matrixById.get(matrixId);
+        if (!matrix) return;
+        matrix.meaningful = true;
+        if (!matrix.contentUpdatedAt || (updatedAt && updatedAt > matrix.contentUpdatedAt)) {
+          matrix.contentUpdatedAt = updatedAt;
+        }
+      };
+      for (const item of [...v3CellContent, ...v3NarrativeContent, ...v3IssueContent, ...v2ValueContent, ...v2NarrativeContent, ...v3MediaContent]) {
+        mark(item.matrixId, item.updatedAt);
+      }
+    }
 
     const hasMatrices = matrices.length > 0;
     // When task_matrix_enabled=false, keep empty + no create CTA even if rows exist.

@@ -277,6 +277,72 @@ test('data-matrix problem and appendix material reach report detail and print', 
   }
 });
 
+test('matrix tab opens the newest meaningful matrix instead of a newer empty draft', async ({ page }) => {
+  const marker = `E2E current matrix ${Date.now()}`;
+  const taskResponse = await page.request.post('/api/tasks', {
+    data: {
+      task_name: marker,
+      product_category: '通用标准',
+      product: 'E2E',
+      product_model: marker,
+      task_mode: 'single',
+    },
+  });
+  const taskPayload = await taskResponse.json();
+  expect(taskPayload.code, taskPayload.message).toBe(0);
+  const taskId = taskPayload.data.id as string;
+  const matrixIds: string[] = [];
+
+  try {
+    const olderResponse = await page.request.post(`/api/v1/tasks/${taskId}/matrices`, {
+      data: { name: `${marker} - filled`, view_mode: 'excel_like_dynamic_matrix' },
+    });
+    const olderPayload = await olderResponse.json();
+    expect(olderPayload.code, olderPayload.message).toBe(0);
+    const olderMatrixId = olderPayload.data.id as string;
+    matrixIds.push(olderMatrixId);
+
+    const projectionResponse = await page.request.get(`/api/v1/matrices/${olderMatrixId}/v3-projection`);
+    const projectionPayload = await projectionResponse.json();
+    expect(projectionPayload.code, projectionPayload.message).toBe(0);
+    const projection = projectionPayload.data as {
+      rows: Array<{ id: string }>;
+      columns: Array<{ id: string; columnZone: string; dataType: string }>;
+    };
+    const rowId = projection.rows[0]?.id;
+    const column = projection.columns.find((item) => item.columnZone === 'evaluation')
+      ?? projection.columns.find((item) => item.dataType === 'long_text');
+    expect(rowId).toBeTruthy();
+    expect(column?.id).toBeTruthy();
+    const valueResponse = await page.request.put(`/api/v1/matrices/${olderMatrixId}/cells/${rowId}/${column!.id}`, {
+      data: { valueText: '较早的有效录入', displayText: '较早的有效录入' },
+    });
+    expect(valueResponse.ok()).toBeTruthy();
+
+    const newerResponse = await page.request.post(`/api/tasks/${taskId}/matrices`, {
+      data: { name: `${marker} - empty` },
+    });
+    const newerPayload = await newerResponse.json();
+    expect(newerPayload.code, newerPayload.message).toBe(0);
+    const newerMatrixId = newerPayload.data.id as string;
+    matrixIds.push(newerMatrixId);
+
+    const stateResponse = await page.request.get(`/api/v1/tasks/${taskId}/matrix-tab-state`);
+    const statePayload = await stateResponse.json();
+    const stateMatrices = statePayload.data.matrices as Array<{ id: string; meaningful: boolean; contentUpdatedAt: string | null }>;
+    expect(stateMatrices.find((item) => item.id === olderMatrixId)).toMatchObject({ meaningful: true });
+    expect(stateMatrices.find((item) => item.id === newerMatrixId)).toMatchObject({ meaningful: false, contentUpdatedAt: null });
+
+    await page.goto(`/tasks/${taskId}?tab=matrix`);
+    await expect(page.getByLabel('切换数据矩阵')).toHaveValue(olderMatrixId);
+  } finally {
+    for (const matrixId of matrixIds) {
+      await page.request.post(`/api/v1/matrices/${matrixId}/lifecycle`, { data: { action: 'archive', reason: 'e2e_cleanup' } });
+    }
+    await page.request.delete(`/api/tasks/${taskId}`);
+  }
+});
+
 test('first matrix entry auto-creates one default matrix and reuses it after tab switching', async ({ page }) => {
   const marker = `E2E auto matrix ${Date.now()}`;
   const taskResponse = await page.request.post('/api/tasks', {
