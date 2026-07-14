@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
-import { faststartRemux } from '@/lib/server/video';
+import { prepareVideoForBrowser } from '@/lib/server/video';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessAssembly, canAccessTask, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { checkSharedRateLimit } from '@/lib/server/rate-limit';
@@ -255,7 +255,7 @@ export async function POST(request: NextRequest) {
     const existingFileNames = (existingNamedMaterials || [])
       .map((material: { file_name?: unknown }) => material.file_name)
       .filter((name: unknown): name is string => typeof name === 'string' && name.length > 0);
-    const generatedFileName = copy_source_file_name
+    let generatedFileName = copy_source_file_name
       ? allocateEditedCopyFileName({
         originalFileName: replaceFileExtension(copy_source_file_name, uploadType.extension),
         existingFileNames,
@@ -270,7 +270,7 @@ export async function POST(request: NextRequest) {
     // GET /api/materials endpoint can serve them directly from the filesystem.
     const localDir = path.join(process.cwd(), 'public', 'uploads', 'materials', folderId);
     fs.mkdirSync(localDir, { recursive: true });
-    const storageFileName = path.join(localDir, generatedFileName);
+    let storageFileName = path.join(localDir, generatedFileName);
 
     let fileKey: string | undefined;
     const maxRetries = isLargeFile ? 2 : 0;
@@ -296,13 +296,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ code: 1, message: '文件上传失败' }, { status: 500 });
     }
 
-    // Faststart remux for video files: move moov atom to beginning
-    // so browsers can load metadata without seeking to end of file.
+    // Do not expose a phone MOV before it is remuxed/transcoded into the
+    // browser baseline MP4. `video/quicktime` is not reliable in Chromium.
     if (materialType === 'video') {
-      const videoPath = path.join(process.cwd(), 'public', 'uploads', fileKey);
-      faststartRemux(videoPath).catch(err =>
-        console.warn('[upload] faststart background task failed:', err)
-      );
+      const preparedPath = await prepareVideoForBrowser(storageFileName);
+      if (preparedPath !== storageFileName) {
+        storageFileName = preparedPath;
+        generatedFileName = path.basename(preparedPath);
+        fileKey = `materials/${folderId}/${generatedFileName}`;
+      }
     }
 
     const { data, error } = await client.from('materials').insert({

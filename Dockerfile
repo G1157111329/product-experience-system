@@ -37,6 +37,9 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+# The Playwright base image already ships this binary. Reuse it instead of
+# downloading OS packages during every local acceptance build.
+ENV FFMPEG_BIN=/ms-playwright/ffmpeg-1011/ffmpeg-linux
 
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
