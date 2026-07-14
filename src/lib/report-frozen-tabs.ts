@@ -54,10 +54,9 @@ function hasMeaningfulDataMatrix(projection: unknown): boolean {
 
 export function buildReportFrozenTabs(input: FrozenTabInput): ReportFrozenTabKey[] {
   const tabs: ReportFrozenTabKey[] = ['summary', 'issues'];
-  if (input.reportType === 'comparison_report') {
-    if (hasMeaningfulComparison(input.comparisonSnapshot)) tabs.push('comparison_matrix');
-  } else if (hasMeaningfulDataMatrix(input.dataMatrixProjection)) {
-    tabs.push('data_matrix');
+  if (hasMeaningfulDataMatrix(input.dataMatrixProjection)) tabs.push('data_matrix');
+  if (input.reportType === 'comparison_report' && hasMeaningfulComparison(input.comparisonSnapshot)) {
+    tabs.push('comparison_matrix');
   }
   if (Array.isArray(input.recipes) && input.recipes.length > 0) tabs.push('function_effect');
   return tabs;

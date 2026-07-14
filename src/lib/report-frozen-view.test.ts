@@ -147,6 +147,27 @@ const qualifiedAtFreeze = buildFrozenReportViewModel({
 }, { audience: 'internal' });
 assert.equal(qualifiedAtFreeze.issues.length, 0, '冻结时合格的食谱不得因之后同 recipe 的旧 issue 回流到报告');
 
+const mixedMatrices = buildFrozenReportViewModel({
+  report: { id: 'mixed-matrices', report_type: 'comparison_report', content: {} },
+  snapshot: {
+    snapshot_json: {
+      report_type: 'comparison_report',
+      report_content: {
+        data_matrix_projection: {
+          projectionVersion: 'v3',
+          rows: [{ id: 'row-1', cells: { 'column-1': '85' } }],
+        },
+      },
+      objects: [{ id: 'object-1' }],
+      item_nodes: [{ id: 'item-1' }],
+      cells: [{ id: 'cell-1', effect_summary: '结果稳定' }],
+    },
+  },
+  snapshotResolution: 'anchored',
+}, { audience: 'internal' });
+assert.equal(mixedMatrices.matrix?.kind, 'comparison');
+assert.equal(mixedMatrices.dataMatrix?.kind, 'data_v3');
+
 const readerSource = readFileSync(resolve(process.cwd(), 'src/components/reports/frozen-report-reader.tsx'), 'utf8');
 const printSource = readFileSync(resolve(process.cwd(), 'src/lib/server/report-print-renderer.ts'), 'utf8');
 const reportRouteSource = readFileSync(resolve(process.cwd(), 'src/app/api/reports/route.ts'), 'utf8');

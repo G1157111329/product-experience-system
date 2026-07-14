@@ -40,6 +40,7 @@ import type {
 } from './v3-types';
 import { cellKey, styleKey } from './v3-types';
 import { generatePresignedUrl } from '@/lib/server/storage';
+import { orderRowsByHierarchy } from './hierarchy-row-order';
 
 // ---------------------------------------------------------------------------
 // Hierarchy tree assembly
@@ -176,8 +177,9 @@ export async function getV3MatrixProjection(
       db.select().from(matrixFormulaDefinitionsV3).where(eq(matrixFormulaDefinitionsV3.matrixId, matrixId)).execute(),
     ]);
 
-  // Leaf rows: active only, ordered by visible_row_index.
-  const rows: V3LeafRow[] = leafRowsRaw
+  // Leaf rows: active only.  Creation order is not display order once a later
+  // level-3 child is inserted under an earlier level-2 node.
+  const rowCandidates: V3LeafRow[] = leafRowsRaw
     .filter((r) => r.status === 'active')
     .map((r) => ({
       id: r.id,
@@ -189,8 +191,9 @@ export async function getV3MatrixProjection(
       groupRowIndex: r.groupRowIndex,
       status: r.status as 'active' | 'archived',
       archivedAt: r.archivedAt,
-    }))
-    .sort((a, b) => a.visibleRowIndex - b.visibleRowIndex);
+    }));
+  const hierarchySortOrderById = new Map(hierarchyRows.map((node) => [node.id, node.sortOrder]));
+  const rows = orderRowsByHierarchy(rowCandidates, hierarchySortOrderById);
 
   // Leaf-row count per hierarchy node (for rowspan + merged-header rendering).
   const leafRowCounts = new Map<string, number>();

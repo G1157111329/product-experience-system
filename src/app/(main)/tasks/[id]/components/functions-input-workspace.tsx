@@ -119,7 +119,7 @@ export function FunctionsInputWorkspace({
   };
 
   return (
-    <section className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
+    <section className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
       {/* Left panel: Recipe list */}
       <div className="rounded-lg border bg-card p-3 shadow-sm">
         <div className="flex items-start justify-between gap-3">

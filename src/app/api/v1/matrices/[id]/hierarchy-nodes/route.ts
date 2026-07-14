@@ -31,6 +31,19 @@ import { recomputeMatrixFormulas } from '@/lib/matrix/recompute-v3';
 
 export const dynamic = 'force-dynamic';
 
+function databaseErrorCode(error: unknown): string {
+  let current = error;
+  const visited = new Set<object>();
+  while (typeof current === 'object' && current !== null && !visited.has(current)) {
+    visited.add(current);
+    if ('code' in current && typeof (current as { code?: unknown }).code === 'string') {
+      return (current as { code: string }).code;
+    }
+    current = 'cause' in current ? (current as { cause?: unknown }).cause : undefined;
+  }
+  return '';
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -179,6 +192,10 @@ export async function POST(
 
     return ok(created, traceId, 'created');
   } catch (err) {
+    const code = databaseErrorCode(err);
+    if (code === '23505') {
+      return fail(traceId, { message: '同一层级下已存在该名称，请修改后再创建', status: 409 });
+    }
     const message = err instanceof Error ? err.message : '创建失败';
     return fail(traceId, { message, status: 500 });
   }

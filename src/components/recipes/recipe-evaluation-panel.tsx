@@ -216,7 +216,7 @@ export function RecipeEvaluationPanel({
         </span>
       </div>
 
-      <div role="radiogroup" aria-label="效果评价结果" className="grid grid-cols-3 gap-1 rounded-lg bg-muted p-1">
+      <div role="radiogroup" aria-label="效果评价结果" className="grid grid-cols-3 gap-1 rounded-md bg-muted p-0.5">
         {(['qualified', 'unqualified', 'pending'] as const).map((value) => (
           <Button
             key={value}
@@ -225,7 +225,7 @@ export function RecipeEvaluationPanel({
             aria-checked={status === value}
             variant={status === value ? 'default' : 'ghost'}
             size="sm"
-            className="min-h-11"
+            className="h-8 min-h-8 px-2 text-xs"
             onClick={() => chooseStatus(value)}
           >
             {evaluationStatusLabel(value)}

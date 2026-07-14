@@ -208,9 +208,18 @@ registerEntityHandler('report_summary', async (input) => {
     updatedAt: sql`NOW()`,
   };
   if (input.fieldId === 'task_name') patch.taskName = input.value ?? null;
+  else if (input.fieldId === 'product_category') patch.productCategory = input.value ?? null;
+  else if (input.fieldId === 'product') patch.product = input.value ?? null;
   else if (input.fieldId === 'product_model') patch.productModel = input.value ?? null;
+  else if (input.fieldId === 'project_number') patch.projectNumber = input.value ?? null;
+  else if (input.fieldId === 'project_type') patch.projectType = input.value ?? null;
+  else if (input.fieldId === 'project_phase') patch.projectPhase = input.value ?? null;
+  else if (input.fieldId === 'test_date') patch.testDate = input.value ?? null;
+  else if (input.fieldId === 'organizer') patch.organizer = input.value ?? null;
+  else if (input.fieldId === 'target_user') patch.targetUser = input.value ?? null;
   else if (input.fieldId === 'test_purpose') patch.testPurpose = input.value ?? null;
   else if (input.fieldId === 'test_method') patch.testMethod = input.value ?? null;
+  else if (input.fieldId === 'status') patch.status = input.value ?? null;
   else return { kind: 'unsupported' };
 
   await db

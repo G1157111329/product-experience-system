@@ -53,6 +53,13 @@ assert.deepEqual(buildReportFrozenTabs({
 
 assert.deepEqual(buildReportFrozenTabs({
   reportType: 'comparison_report',
+  comparisonSnapshot: comparisonSnapshot([{ effect_summary: '口感稳定' }]),
+  dataMatrixProjection: meaningfulV3Projection,
+  recipes: [{}],
+}), ['summary', 'issues', 'data_matrix', 'comparison_matrix', 'function_effect']);
+
+assert.deepEqual(buildReportFrozenTabs({
+  reportType: 'comparison_report',
   comparisonSnapshot: comparisonSnapshot([{ inline_media: [{ id: 'material-1' }] }]),
   recipes: [],
 }), ['summary', 'issues', 'comparison_matrix']);

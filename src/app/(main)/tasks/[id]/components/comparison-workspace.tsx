@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, GitCompareArrows, Loader2, Plus, Table2, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, GitCompareArrows, Loader2, Plus, Sparkles, Table2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { MaterialPicker, type Material } from '@/components/material-picker';
 import { Badge } from '@/components/ui/badge';
@@ -137,6 +137,7 @@ export function ComparisonWorkspace({
   const [editingNodeId, setEditingNodeId] = useState('');
   const [editingNodeLabel, setEditingNodeLabel] = useState('');
   const [summaryDrafts, setSummaryDrafts] = useState<Record<string, string>>({});
+  const [summaryAiNodeId, setSummaryAiNodeId] = useState<string | null>(null);
   const [cellMediaById, setCellMediaById] = useState<CellMediaMap>({});
   const [cellMediaSavingId, setCellMediaSavingId] = useState('');
   const [collapsedSectionIds, setCollapsedSectionIds] = useState<Set<string>>(new Set());
@@ -416,6 +417,24 @@ export function ComparisonWorkspace({
   // Retained for the legacy explicit-save flow; current summary fields autosave.
   void saveSummaryNode;
 
+  const fillSummaryWithAi = async (node: ComparisonItemNode) => {
+    setSummaryAiNodeId(node.id);
+    try {
+      const res = await fetch(`/api/comparison-item-nodes/${node.id}/ai`, { method: 'POST' });
+      const data = await res.json() as ApiResponse<{ summary?: string }>;
+      const summary = data.data?.summary?.trim();
+      if (data.code !== 0 || !summary) {
+        toast.error(data.message || 'AI 小结生成失败');
+        return;
+      }
+      setSummaryDrafts((current) => ({ ...current, [node.id]: summary }));
+    } catch {
+      toast.error('AI 小结生成失败');
+    } finally {
+      setSummaryAiNodeId(null);
+    }
+  };
+
   const deleteNode = async (nodeId: string) => {
     const res = await fetch(`/api/comparison-item-nodes/${nodeId}`, { method: 'DELETE' });
     const data = await res.json() as ApiResponse<unknown>;
@@ -621,8 +640,8 @@ export function ComparisonWorkspace({
         </div>
       </TableCell>
       <TableCell colSpan={matrix?.objects.length || 1} className="p-2 align-top">
-        <div className="rounded-md border border-amber-200 bg-background p-2">
-          <InlineEditable.Textarea
+          <div className="relative rounded-md border border-amber-200 bg-background p-2">
+            <InlineEditable.Textarea
             value={summaryDrafts[node.id] ?? summaryTextOf(node)}
             placeholder="输入针对该大类/食谱/项目的总结"
             rows={4}
@@ -642,9 +661,22 @@ export function ComparisonWorkspace({
               if (data.code !== 0) throw new Error(data.message || '保存大类小结失败');
               await refreshMatrix();
             }}
-            inputClassName="min-h-24 text-sm"
-          />
-        </div>
+              inputClassName="min-h-24 resize-y pr-9 text-sm"
+            />
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="absolute bottom-3 right-3 h-7 w-7 text-muted-foreground hover:text-primary"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => void fillSummaryWithAi(node)}
+              disabled={summaryAiNodeId === node.id}
+              aria-label={`AI 填充小结 ${node.node_label}`}
+              title="AI 填充小结"
+            >
+              {summaryAiNodeId === node.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
       </TableCell>
     </TableRow>
   );

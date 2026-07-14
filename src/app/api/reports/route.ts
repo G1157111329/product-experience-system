@@ -27,7 +27,6 @@ import {
   isFrozenV3MatrixProjection,
   type ReportV3MatrixProjection,
 } from '@/lib/matrix/report-projection-v3-adapter';
-import { persistAnchoredReportSnapshot } from '@/lib/server/report-snapshots';
 
 /** Frozen report payload: V2 groups projection or V3 excel-like freeze. */
 type ReportDataMatrixProjection = MatrixReadProjection | (ReportV3MatrixProjection & { projectionVersion?: 'v3' });
@@ -388,68 +387,18 @@ export async function POST(request: NextRequest) {
   // 自动生成报告 - 从任务和记录中填充内容
   const { data: task } = await client.from('experience_tasks').select('*').eq('id', body.task_id).single();
   const comparisonSource = await loadTaskComparisonReportSource(client, body.task_id);
-  if (comparisonSource) {
-    const snapshot = await buildComparisonReportSnapshot(client, comparisonSource.assemblyId, { snapshotStatus: 'published' }) as Record<string, unknown>;
-    const reportTitle = body.title || `${task?.task_name || '体验'}报告`;
-
-    const { data: report, error: reportError } = await client
-      .from('reports')
-      .insert({
-        task_id: body.task_id,
-        template_id: body.template_id || null,
-        title: reportTitle,
-        product_model: task?.product_model || null,
-        content: null,
-        version: nextVersion,
-        status: '已完成',
-        report_type: 'comparison_report',
-        source_task_ids: snapshot.source_task_ids || [body.task_id],
-        source_report_ids: snapshot.source_report_ids || [],
-        assembly_id: comparisonSource.assemblyId,
-        layout_profile: snapshot.layout_profile || 'comparison_image_matrix_a3_landscape',
-        ai_confirmation_status: 'pending',
-      })
-      .select()
-      .single();
-    if (reportError || !report) {
-      return NextResponse.json({ code: 1, message: reportError?.message || '对比报告创建失败' }, { status: 500 });
-    }
-
-    let savedSnapshot: Record<string, unknown>;
-    try {
-      const persisted = await persistAnchoredReportSnapshot(client, String(report.id), {
-        report_id: report.id,
-        report_type: 'comparison_report',
-        version: 1,
-        snapshot_json: snapshot,
-        layout_profile: snapshot.layout_profile || 'comparison_image_matrix_a3_landscape',
-        created_by: user.id,
-      });
-      savedSnapshot = persisted.snapshot;
-    } catch (snapshotError) {
-      return NextResponse.json({
-        code: 1,
-        message: snapshotError instanceof Error ? snapshotError.message : '对比报告快照创建失败',
-      }, { status: 500 });
-    }
-
-    await client
-      .from('reports')
-      .update({ status: 'archived', updated_at: new Date().toISOString() })
-      .eq('task_id', body.task_id)
-      .neq('id', report.id);
-
-    await client
-      .from('experience_tasks')
-      .update({ status: '\u5df2\u5b8c\u6210', updated_at: new Date().toISOString() })
-      .eq('id', body.task_id);
-
-    return NextResponse.json({
-      code: 0,
-      message: '对比矩阵报告生成成功',
-      data: { ...report, snapshot_id: savedSnapshot.id },
-    });
-  }
+  const comparisonSnapshot = comparisonSource
+    ? await buildComparisonReportSnapshot(client, comparisonSource.assemblyId, { snapshotStatus: 'published' }) as Record<string, unknown>
+    : null;
+  const comparisonSourceTaskIds = Array.isArray(comparisonSnapshot?.source_task_ids)
+    ? comparisonSnapshot.source_task_ids.filter((id): id is string => typeof id === 'string')
+    : [body.task_id];
+  const comparisonSourceReportIds = Array.isArray(comparisonSnapshot?.source_report_ids)
+    ? comparisonSnapshot.source_report_ids.filter((id): id is string => typeof id === 'string')
+    : [];
+  const comparisonLayoutProfile = typeof comparisonSnapshot?.layout_profile === 'string'
+    ? comparisonSnapshot.layout_profile
+    : 'comparison_image_matrix_a3_landscape';
   const { data: rawRecords } = await client.from('check_records').select('*').eq('task_id', body.task_id);
   const { data: materials } = await client.from('materials').select('*').eq('task_id', body.task_id);
   const { data: aiSummaryData } = await client
@@ -580,6 +529,16 @@ export async function POST(request: NextRequest) {
     source_task_ids: [body.task_id],
     report_content: finalReportContent,
   };
+  if (comparisonSnapshot) {
+    frozenSnapshotJson = {
+      ...comparisonSnapshot,
+      ...frozenSnapshotJson,
+      report_type: 'comparison_report',
+      layout_profile: comparisonLayoutProfile,
+      source_task_ids: comparisonSourceTaskIds,
+      source_report_ids: comparisonSourceReportIds,
+    };
+  }
   if (dataMatrixProjection) {
     try {
       let frozenProjection: ReportDataMatrixProjection = dataMatrixProjection;
@@ -623,6 +582,12 @@ export async function POST(request: NextRequest) {
       content: finalReportContent,
       version: nextVersion,
       status: '已完成',
+      reportType: comparisonSnapshot ? 'comparison_report' : 'single_report',
+      sourceTaskIds: comparisonSourceTaskIds,
+      sourceReportIds: comparisonSourceReportIds,
+      assemblyId: comparisonSource?.assemblyId || null,
+      layoutProfile: comparisonSnapshot ? comparisonLayoutProfile : 'single_a4_portrait',
+      aiConfirmationStatus: 'pending',
     }).returning();
 
     if (!report) {
@@ -632,10 +597,10 @@ export async function POST(request: NextRequest) {
     {
       const [snapshot] = await tx.insert(reportSnapshots).values({
         reportId: report.id,
-        reportType: 'single_report',
+        reportType: comparisonSnapshot ? 'comparison_report' : 'single_report',
         version: 1,
         snapshotJson: frozenSnapshotJson,
-        layoutProfile: 'single_a4_portrait',
+        layoutProfile: comparisonSnapshot ? comparisonLayoutProfile : 'single_a4_portrait',
         createdBy: user.id,
       }).returning({ id: reportSnapshots.id });
       if (!snapshot?.id) throw new Error('报告快照创建失败');

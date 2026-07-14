@@ -173,10 +173,11 @@ function FrozenPanel({ model, active }: { model: FrozenReportViewModel; active: 
       </div>
     );
   }
+  const selectedMatrix = active === 'data_matrix' ? (model.dataMatrix ?? model.matrix) : model.matrix;
   let matrixData: MatrixData | null = null;
-  if (model.matrix?.kind === 'comparison') matrixData = { matrixType: 'multi_matrix', matrix: model.matrix.snapshot as never };
-  if (model.matrix?.kind === 'data_v2') matrixData = { matrixType: 'data_matrix', dataMatrix: model.matrix.projection as never };
-  if (model.matrix?.kind === 'data_v3') matrixData = { matrixType: 'data_matrix_v3', dataMatrixV3: model.matrix.projection as never };
+  if (selectedMatrix?.kind === 'comparison') matrixData = { matrixType: 'multi_matrix', matrix: selectedMatrix.snapshot as never };
+  if (selectedMatrix?.kind === 'data_v2') matrixData = { matrixType: 'data_matrix', dataMatrix: selectedMatrix.projection as never };
+  if (selectedMatrix?.kind === 'data_v3') matrixData = { matrixType: 'data_matrix_v3', dataMatrixV3: selectedMatrix.projection as never };
   return <div data-content-id={`matrix:${model.header.id}`}><ReportMatrixTab data={matrixData} /></div>;
 }
 

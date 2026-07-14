@@ -76,6 +76,7 @@ export type FrozenReportViewModel = {
   summary: { text: string; aiSummary: Row | null };
   issues: FrozenIssue[];
   matrix: FrozenMatrixView;
+  dataMatrix?: FrozenMatrixView;
   functionEffects: FrozenFunctionEffect[];
   capabilities: { canManageIssues: boolean; canShare: boolean; canExport: boolean };
 };
@@ -303,8 +304,12 @@ function buildIssues(content: Row, snapshotJson: Row, liveIssues: Row[], issueEv
   return result;
 }
 
-function matrixView(reportType: string, projection: unknown, snapshotJson: Row, tabs: ReportFrozenTabKey[]): FrozenMatrixView {
+function comparisonMatrixView(reportType: string, snapshotJson: Row, tabs: ReportFrozenTabKey[]): FrozenMatrixView {
   if (reportType === 'comparison_report' && tabs.includes('comparison_matrix')) return { kind: 'comparison', snapshot: snapshotJson };
+  return null;
+}
+
+function dataMatrixView(projection: unknown, tabs: ReportFrozenTabKey[]): FrozenMatrixView {
   if (!isRecord(projection) || !tabs.includes('data_matrix')) return null;
   const isV3 = projection.projectionVersion === 'v3' || projection.matrixProjectionVersion === 'v3';
   return { kind: isV3 ? 'data_v3' : 'data_v2', projection };
@@ -313,7 +318,9 @@ function matrixView(reportType: string, projection: unknown, snapshotJson: Row, 
 export function buildFrozenReportViewModel(input: BuildFrozenReportViewInput, options: { audience: 'internal' | 'share' }): FrozenReportViewModel {
   const snapshotJson = isRecord(input.snapshot?.snapshot_json) ? input.snapshot.snapshot_json : {};
   const content = frozenReportContent(input, snapshotJson);
-  const projection = input.snapshot ? snapshotJson.matrix_projection : content.data_matrix_projection;
+  const projection = isRecord(snapshotJson.matrix_projection)
+    ? snapshotJson.matrix_projection
+    : content.data_matrix_projection;
   const recipes = rows(content.recipes);
   const reportType = first(input.report.report_type, snapshotJson.report_type, 'single_report');
   const tabs = buildReportFrozenTabs({ reportType, dataMatrixProjection: projection, comparisonSnapshot: snapshotJson, recipes });
@@ -328,7 +335,8 @@ export function buildFrozenReportViewModel(input: BuildFrozenReportViewInput, op
     tabs,
     summary: { text: first(aiSummary?.summary, content.summary, input.report.title), aiSummary },
     issues: buildIssues(content, snapshotJson, input.issues ?? [], input.issueEvidence ?? {}, input.snapshotResolution),
-    matrix: matrixView(reportType, projection, snapshotJson, tabs),
+    matrix: comparisonMatrixView(reportType, snapshotJson, tabs),
+    dataMatrix: dataMatrixView(projection, tabs),
     functionEffects: recipes.map(recipeContext),
     capabilities: { canManageIssues: internal, canShare: internal, canExport: true },
   };

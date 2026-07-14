@@ -40,10 +40,6 @@ import type {
 import { cellKey, styleKey } from '@/lib/matrix/v3-types';
 import { MatrixFormulaEditor } from './matrix-formula-editor';
 import { MatrixV3MediaCell } from './matrix-v3-media-cell';
-import {
-  MatrixSummarySuggestionsDialog,
-  type SummarySuggestion,
-} from './matrix-summary-suggestions-dialog';
 import { MatrixV3Mobile } from './matrix-v3-mobile';
 import { MatrixStyleToolbar, type StyleTarget } from './matrix-style-toolbar';
 import { MatrixColumnConfigDialog, type ColumnConfigValues } from './matrix-column-config-dialog';
@@ -53,6 +49,12 @@ import {
   getMatrixZoneAnchors,
   getPinnedHierarchyOffsets,
 } from '@/lib/matrix/matrix-zone-layout';
+
+type MatrixSummarySuggestion = {
+  id: string;
+  content: string;
+  scopeNodeId?: string | null;
+};
 
 interface MatrixV3GridProps {
   matrixId: string;
@@ -150,6 +152,15 @@ function buildGridRows(projection: V3MatrixProjection): GridRow[] {
   });
 }
 
+function findHierarchyNode(nodes: V3HierarchyNode[], nodeId: string): V3HierarchyNode | null {
+  for (const node of nodes) {
+    if (node.id === nodeId) return node;
+    const child = findHierarchyNode(node.children, nodeId);
+    if (child) return child;
+  }
+  return null;
+}
+
 export function MatrixV3Grid({
   matrixId,
   taskId,
@@ -185,8 +196,6 @@ export function MatrixV3Grid({
 
   // Wave 5 Hermes summary
   const [summaryBusy, setSummaryBusy] = useState(false);
-  const [summarySuggestions, setSummarySuggestions] = useState<SummarySuggestion[]>([]);
-  const [summaryDialogOpen, setSummaryDialogOpen] = useState(false);
 
   useEffect(() => {
     setGridRows(buildGridRows(projection));
@@ -238,10 +247,10 @@ export function MatrixV3Grid({
   // first row of its level1/level2/level3 group (rowspan start) and the span.
   const mergeInfo = computeMerges(gridRows);
 
-  const handleGenerateSummary = useCallback(async () => {
+  const handleGenerateSummary = useCallback(async (): Promise<string | null> => {
     if (!hermesEnabled) {
       toast.message('助手功能未启用');
-      return;
+      return null;
     }
     setSummaryBusy(true);
     try {
@@ -253,21 +262,39 @@ export function MatrixV3Grid({
       const json = await res.json();
       if (json.code !== 0) {
         toast.error(json.message || '助手暂不可用');
-        return;
+        return null;
       }
-      const suggestions = (json.data?.suggestions ?? []) as SummarySuggestion[];
+      const suggestions = (json.data?.suggestions ?? []) as MatrixSummarySuggestion[];
       if (suggestions.length === 0) {
         toast.message('未生成可用建议，请补充矩阵数据后重试');
-        return;
+        return null;
       }
-      setSummarySuggestions(suggestions);
-      setSummaryDialogOpen(true);
+      const suggestion = suggestions.find((item) => !item.scopeNodeId) ?? suggestions[0];
+      if (!suggestion?.content?.trim()) {
+        toast.message('未生成可用小结，请补充矩阵数据后重试');
+        return null;
+      }
+      // The skill persists suggestions for audit. Accept it immediately so this
+      // direct-input interaction does not leave invisible pending suggestions.
+      const accept = await fetch(`/api/v1/agent/suggestion-blocks/${suggestion.id}/decide`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision: 'accepted', matrixId }),
+      });
+      const accepted = await accept.json();
+      if (accepted.code !== 0) {
+        toast.error(accepted.message || 'AI 小结写入失败');
+        return null;
+      }
+      onChanged();
+      return suggestion.content.trim();
     } catch {
       toast.error('助手暂不可用');
+      return null;
     } finally {
       setSummaryBusy(false);
     }
-  }, [hermesEnabled, matrixId]);
+  }, [hermesEnabled, matrixId, onChanged]);
 
   const handleAddLevel1 = useCallback(async () => {
     if (!newNodeLabel.trim()) return;
@@ -316,7 +343,8 @@ export function MatrixV3Grid({
   }, [matrixId, onChanged]);
 
   const handleAddLevel3 = useCallback(async (parentId: string) => {
-    const label = window.prompt('三级细项名称：', '新三级细项');
+    const parent = findHierarchyNode(projection.hierarchy, parentId);
+    const label = window.prompt('三级细项名称：', `新三级细项${(parent?.children.length ?? 0) + 1}`);
     if (!label?.trim()) return;
     try {
       const res = await fetch(`/api/v1/matrices/${matrixId}/hierarchy-nodes`, {
@@ -334,7 +362,7 @@ export function MatrixV3Grid({
     } catch {
       toast.error('创建失败，请重试');
     }
-  }, [matrixId, onChanged]);
+  }, [matrixId, onChanged, projection.hierarchy]);
 
   const handleDeleteHierarchyNode = useCallback(async (nodeId: string) => {
     const remove = async (confirmArchive: boolean) => {
@@ -763,9 +791,8 @@ export function MatrixV3Grid({
           label="小结"
           placeholder="总结本矩阵结果（可点击 AI 生成建议）"
           onChanged={onChanged}
-          hermesEnabled={hermesEnabled}
           summaryBusy={summaryBusy}
-          onGenerateSummary={() => void handleGenerateSummary()}
+          onGenerateSummary={handleGenerateSummary}
         />
         {noteBlocks.map((nb) => (
           <NarrativeEditor
@@ -816,14 +843,6 @@ export function MatrixV3Grid({
           onSaved={onChanged}
         />
       )}
-
-      <MatrixSummarySuggestionsDialog
-        open={summaryDialogOpen}
-        onOpenChange={setSummaryDialogOpen}
-        matrixId={matrixId}
-        suggestions={summarySuggestions}
-        onApplied={onChanged}
-      />
 
       <MatrixColumnConfigDialog
         open={columnDialogOpen}
@@ -1331,7 +1350,6 @@ function NarrativeEditor({
   label,
   placeholder,
   onChanged,
-  hermesEnabled,
   summaryBusy,
   onGenerateSummary,
 }: {
@@ -1341,9 +1359,8 @@ function NarrativeEditor({
   label: string;
   placeholder: string;
   onChanged: () => void;
-  hermesEnabled?: boolean;
   summaryBusy?: boolean;
-  onGenerateSummary?: () => void;
+  onGenerateSummary?: () => Promise<string | null>;
 }) {
   const [content, setContent] = useState(block?.content ?? '');
   const [saving, setSaving] = useState(false);
@@ -1379,29 +1396,34 @@ function NarrativeEditor({
       <div className="flex items-center gap-2 mb-1">
         <span className="text-sm font-medium">{label}</span>
         {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
-        {blockType === 'summary' && hermesEnabled && onGenerateSummary && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-7 gap-1 text-xs ml-auto"
-            disabled={summaryBusy}
-            onClick={onGenerateSummary}
-            title="AI 生成小结建议"
-          >
-            {summaryBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
-            AI 小结
-          </Button>
-        )}
-      </div>
-      <Textarea
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        onBlur={save}
-        placeholder={placeholder}
-        rows={blockType === 'summary' ? 3 : 2}
-        className="text-sm"
-      />
+        </div>
+        <div className="relative">
+          <Textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            onBlur={save}
+            placeholder={placeholder}
+            rows={blockType === 'summary' ? 3 : 2}
+            className="resize-y pr-9 text-sm"
+          />
+          {blockType === 'summary' && onGenerateSummary && (
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="absolute bottom-1.5 right-1.5 h-7 w-7 text-muted-foreground hover:text-primary"
+              disabled={summaryBusy}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => void onGenerateSummary().then((result) => {
+                if (result !== null) setContent(result);
+              })}
+              aria-label="AI 填充小结"
+              title="AI 填充小结"
+            >
+              {summaryBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            </Button>
+          )}
+        </div>
     </div>
   );
 }
