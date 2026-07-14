@@ -458,6 +458,46 @@ test('first matrix entry auto-creates one default matrix and reuses it after tab
   }
 });
 
+test('mobile matrix shows one current row with bounded navigation', async ({ page }) => {
+  const marker = `E2E mobile matrix ${Date.now()}`;
+  await page.setViewportSize({ width: 390, height: 844 });
+  const taskResponse = await page.request.post('/api/tasks', {
+    data: {
+      task_name: marker,
+      product_category: '通用标准',
+      product: 'E2E',
+      product_model: marker,
+      task_mode: 'single',
+    },
+  });
+  const taskPayload = await taskResponse.json();
+  expect(taskPayload.code, taskPayload.message).toBe(0);
+  const taskId = taskPayload.data.id as string;
+  let matrixId = '';
+
+  try {
+    const matrixResponse = await page.request.post(`/api/v1/tasks/${taskId}/matrices`, {
+      data: { name: `${marker} - matrix`, view_mode: 'excel_like_dynamic_matrix' },
+    });
+    const matrixPayload = await matrixResponse.json();
+    expect(matrixPayload.code, matrixPayload.message).toBe(0);
+    matrixId = matrixPayload.data.id as string;
+
+    await page.goto(`/tasks/${taskId}?tab=matrix`);
+    await expect(page.getByText('当前行 1 / 1', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '上一行', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: '下一行', exact: true })).toBeDisabled();
+    expect(await page.locator('body').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBeTruthy();
+  } finally {
+    if (matrixId) {
+      await page.request.post(`/api/v1/matrices/${matrixId}/lifecycle`, {
+        data: { action: 'archive', reason: 'e2e_cleanup' },
+      });
+    }
+    await page.request.delete(`/api/tasks/${taskId}`);
+  }
+});
+
 test('concurrent first matrix creation is idempotent without opening the matrix tab', async ({ page }) => {
   const marker = `E2E concurrent matrix ${Date.now()}`;
   const taskResponse = await page.request.post('/api/tasks', {

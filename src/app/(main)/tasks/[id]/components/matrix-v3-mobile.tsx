@@ -4,15 +4,20 @@
  * MatrixV3Mobile — card-based entry for narrow screens (PRD §7.15).
  * Renders each leaf row as a card with hierarchy labels + editable fields.
  */
-import { useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { InlineEditable } from '@/components/inline-editable';
 import { putMatrixCellValue } from '@/lib/inline-save-helpers';
-import type { V3MatrixProjection, V3Column, V3HierarchyNode } from '@/lib/matrix/v3-types';
+import type { V3MatrixProjection, V3HierarchyNode } from '@/lib/matrix/v3-types';
 import { cellKey } from '@/lib/matrix/v3-types';
 import { MatrixV3MediaCell } from './matrix-v3-media-cell';
+import {
+  buildMatrixMobileGroups,
+  getAdjacentMatrixRowIndex,
+} from '@/lib/matrix/matrix-mobile-model';
 
 interface MatrixV3MobileProps {
   matrixId: string;
@@ -31,19 +36,28 @@ function findNode(nodes: V3HierarchyNode[], id: string | null | undefined): V3Hi
   return null;
 }
 
-function editableColumns(columns: V3Column[]): V3Column[] {
-  return columns.filter(
-    (c) =>
-      c.columnZone !== 'hierarchy' &&
-      c.columnZone !== 'calculation_dimension',
-  );
-}
-
 export function MatrixV3Mobile({ matrixId, taskId, projection, onChanged }: MatrixV3MobileProps) {
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const cols = useMemo(() => editableColumns(projection.columns), [projection.columns]);
-
   const rows = projection.rows;
+  const [currentRowIndex, setCurrentRowIndex] = useState(0);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    setCurrentRowIndex((index) => Math.min(index, Math.max(rows.length - 1, 0)));
+  }, [rows.length]);
+
+  const leaf = rows[currentRowIndex];
+  const groups = useMemo(
+    () => leaf
+      ? buildMatrixMobileGroups({
+          columns: projection.columns,
+          cells: projection.cells,
+          cellMedia: projection.cellMedia ?? {},
+          issuePoints: projection.issuePoints,
+          leafRowId: leaf.id,
+        })
+      : [],
+    [leaf, projection.cellMedia, projection.cells, projection.columns, projection.issuePoints],
+  );
 
   if (rows.length === 0) {
     return (
@@ -57,36 +71,47 @@ export function MatrixV3Mobile({ matrixId, taskId, projection, onChanged }: Matr
 
   return (
     <div className="space-y-3 md:hidden">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <Badge variant="secondary">{rows.length} 行</Badge>
-        <Badge variant="secondary">{cols.length} 可编辑列</Badge>
+      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <Badge variant="secondary">当前行 {currentRowIndex + 1} / {rows.length}</Badge>
+        <div className="flex items-center gap-1">
+          <Button type="button" size="sm" variant="outline" className="h-7 px-2" disabled={currentRowIndex === 0} onClick={() => {
+            if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+            setCurrentRowIndex((index) => getAdjacentMatrixRowIndex(index, -1, rows.length));
+          }}><ChevronLeft className="mr-1 h-3.5 w-3.5" />上一行</Button>
+          <Button type="button" size="sm" variant="outline" className="h-7 px-2" disabled={currentRowIndex === rows.length - 1} onClick={() => {
+            if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+            setCurrentRowIndex((index) => getAdjacentMatrixRowIndex(index, 1, rows.length));
+          }}>下一行<ChevronRight className="ml-1 h-3.5 w-3.5" /></Button>
+        </div>
       </div>
-      {rows.map((leaf) => {
+      {leaf && (() => {
         const l1 = findNode(projection.hierarchy, leaf.level1NodeId);
         const l2 = findNode(projection.hierarchy, leaf.level2NodeId);
         const l3 = findNode(projection.hierarchy, leaf.level3NodeId);
-        const open = expanded[leaf.id] ?? true;
         return (
-          <Card key={leaf.id} className="overflow-hidden">
+          <Card className="overflow-hidden">
             <CardHeader className="py-3 px-3">
-              <button
-                type="button"
-                className="flex w-full items-start gap-2 text-left"
-                onClick={() => setExpanded((s) => ({ ...s, [leaf.id]: !open }))}
-              >
-                {open ? <ChevronDown className="h-4 w-4 mt-0.5 shrink-0" /> : <ChevronRight className="h-4 w-4 mt-0.5 shrink-0" />}
-                <div className="min-w-0 space-y-0.5">
-                  <CardTitle className="text-sm font-medium truncate">{l1?.nodeLabel || '未命名大类'}</CardTitle>
-                  <p className="text-xs text-muted-foreground truncate">
-                    {[l2?.nodeLabel, l3?.nodeLabel].filter(Boolean).join(' / ') || '细项'}
-                  </p>
-                </div>
-              </button>
+              <CardTitle className="text-sm font-medium truncate">{l1?.nodeLabel || '未命名大类'}</CardTitle>
+              <p className="text-xs text-muted-foreground truncate mt-0.5">
+                {[l2?.nodeLabel, l3?.nodeLabel].filter(Boolean).join(' / ') || '细项'}
+              </p>
             </CardHeader>
-            {open && (
-              <CardContent className="space-y-3 px-3 pb-3 pt-0">
-                {cols.map((col) => {
+            <CardContent className="space-y-2 px-3 pb-3 pt-0">
+              {groups.map((group) => {
+                const groupKey = `${leaf.id}:${group.id}`;
+                const open = expandedGroups[groupKey] ?? group.defaultExpanded;
+                return (
+                  <section key={group.id} className="rounded-md border">
+                    <button type="button" className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-xs font-medium" onClick={() => setExpandedGroups((state) => ({ ...state, [groupKey]: !open }))}>
+                      {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                      {group.label}
+                    </button>
+                    {open && <div className="space-y-3 border-t px-2.5 py-3">
+                {group.columns.map((col) => {
                   const cell = projection.cells[cellKey(leaf.id, col.id)];
+                  if (col.columnZone === 'calculation_dimension') {
+                    return <div key={col.id} className="space-y-1"><p className="text-xs font-medium text-muted-foreground">{col.columnLabel}</p><p className="rounded bg-muted px-2 py-1.5 text-sm font-mono">{cell?.valueNumber ?? cell?.displayText ?? '—'}</p></div>;
+                  }
                   if (col.columnZone === 'primary_media' || col.columnZone === 'effect_media') {
                     return (
                       <div key={col.id} className="space-y-1">
@@ -154,11 +179,14 @@ export function MatrixV3Mobile({ matrixId, taskId, projection, onChanged }: Matr
                     </div>
                   );
                 })}
-              </CardContent>
-            )}
+                    </div>}
+                  </section>
+                );
+              })}
+            </CardContent>
           </Card>
         );
-      })}
+      })()}
     </div>
   );
 }
