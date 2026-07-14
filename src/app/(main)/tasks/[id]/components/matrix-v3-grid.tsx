@@ -15,7 +15,7 @@
  * no cross-matrix refs. Calculation columns open the A1 formula editor (Wave 3);
  * relative fill-down is handled server-side by recompute-v3.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Plus, Loader2, Type, Hash, Image as ImageIcon, AlertCircle, Calculator, Sparkles, Settings2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -47,6 +47,12 @@ import {
 import { MatrixV3Mobile } from './matrix-v3-mobile';
 import { MatrixStyleToolbar, type StyleTarget } from './matrix-style-toolbar';
 import { MatrixColumnConfigDialog, type ColumnConfigValues } from './matrix-column-config-dialog';
+import { MatrixZoneNavigator } from './matrix-zone-navigator';
+import {
+  getMatrixColumnDisplayWidth,
+  getMatrixZoneAnchors,
+  getPinnedHierarchyOffsets,
+} from '@/lib/matrix/matrix-zone-layout';
 
 interface MatrixV3GridProps {
   matrixId: string;
@@ -153,6 +159,7 @@ export function MatrixV3Grid({
   hermesEnabled = true,
   cellStyleEnabled = true,
 }: MatrixV3GridProps) {
+  const gridScrollRef = useRef<HTMLDivElement>(null);
   const [gridRows, setGridRows] = useState<GridRow[]>([]);
   const [addingNode, setAddingNode] = useState(false);
   const [newNodeLabel, setNewNodeLabel] = useState('');
@@ -190,7 +197,16 @@ export function MatrixV3Grid({
   );
   const columns = projection.columns.filter((column) => column.zoneRole !== 'C' || hasLevel3);
   const allColumns = columns;
-  const tableWidth = allColumns.reduce((total, column) => total + (column.zoneRole === 'B' ? Math.max(220, column.desktopWidthPx) : column.desktopWidthPx), 0);
+  const tableWidth = allColumns.reduce(
+    (total, column) => total + getMatrixColumnDisplayWidth(column),
+    0,
+  );
+  const zoneAnchors = getMatrixZoneAnchors(allColumns);
+  const pinnedHierarchyOffsets = getPinnedHierarchyOffsets(allColumns);
+
+  const scrollToZone = useCallback((scrollLeft: number) => {
+    gridScrollRef.current?.scrollTo({ left: scrollLeft, behavior: 'smooth' });
+  }, []);
 
   const formulaByColumnId = useCallback(
     (columnId: string): V3FormulaDefinition | undefined =>
@@ -552,7 +568,13 @@ export function MatrixV3Grid({
       />
 
       {/* Desktop grid */}
-      <div className="border rounded-lg overflow-auto max-h-[70vh] hidden md:block" style={{ minWidth: 0 }}>
+      <MatrixZoneNavigator anchors={zoneAnchors} onSelect={scrollToZone} />
+      <div
+        ref={gridScrollRef}
+        data-testid="matrix-v3-desktop-grid"
+        className="border rounded-lg overflow-auto max-h-[70vh] hidden md:block"
+        style={{ minWidth: 0 }}
+      >
         <table className="border-collapse text-sm" style={{ tableLayout: 'fixed', minWidth: tableWidth }}>
           {/* Header */}
           <thead className="sticky top-0 z-20 bg-muted/80 backdrop-blur">
@@ -561,17 +583,21 @@ export function MatrixV3Grid({
                 const headerStyle = projection.styles[styleKey('column_header', col.id)];
                 const isHeaderSelected =
                   styleTarget?.type === 'column_header' && styleTarget.id === col.id;
+                const isPinnedHierarchy = col.columnZone === 'hierarchy';
                 return (
                 <th
                   key={col.id}
+                  data-matrix-column-id={col.id}
                   className={cn(
                     'border-b border-r px-2 py-1.5 text-left font-medium whitespace-nowrap',
+                    isPinnedHierarchy && 'sticky z-30 bg-muted/95',
                     styleToClass(headerStyle),
                     cellStyleEnabled && 'cursor-pointer',
                     isHeaderSelected && 'ring-2 ring-inset ring-primary/50',
                   )}
                   style={{
-                    width: col.zoneRole === 'B' ? Math.max(220, col.desktopWidthPx) : col.desktopWidthPx,
+                    width: getMatrixColumnDisplayWidth(col),
+                    left: isPinnedHierarchy ? pinnedHierarchyOffsets[col.id] : undefined,
                   }}
                   onClick={() => handleColumnHeaderClick(col)}
                 >
@@ -629,17 +655,20 @@ export function MatrixV3Grid({
                     const cellId = cellKey(grow.leaf.id, col.id);
                     const isCellSelected =
                       styleTarget?.type === 'cell' && styleTarget.id === cellId;
+                    const isPinnedHierarchy = col.columnZone === 'hierarchy';
                     return (
                       <td
                         key={col.id}
                         className={cn(
                           'border-b border-r px-1 py-0.5 align-top',
+                          isPinnedHierarchy && 'sticky z-10 bg-background',
                           styleToClass(style),
                           pickMode && 'cursor-crosshair hover:bg-primary/10',
                           !pickMode && cellStyleEnabled && 'cursor-pointer',
                           isCellSelected && 'ring-2 ring-inset ring-primary/50',
                         )}
                         style={{
+                          left: isPinnedHierarchy ? pinnedHierarchyOffsets[col.id] : undefined,
                         }}
                         rowSpan={span && span > 1 ? span : undefined}
                         onClick={
@@ -1183,6 +1212,9 @@ function InlineCellNumber({
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => void save()}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.nativeEvent.isComposing) event.currentTarget.blur();
+        }}
         className="h-7 text-xs font-mono"
         disabled={saving}
       />

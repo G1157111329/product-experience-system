@@ -178,6 +178,10 @@ test('matrix cell saves on blur and new columns stay inside their semantic zones
       data: { columnZone: 'detail_dimension', columnLabel: '新增对比指标', dataType: 'text' },
     });
     expect((await detailResponse.json()).code).toBe(0);
+    const numericResponse = await page.request.post(`/api/v1/matrices/${matrixId}/columns`, {
+      data: { columnZone: 'detail_dimension', columnLabel: 'Enter 数值', dataType: 'number' },
+    });
+    expect((await numericResponse.json()).code).toBe(0);
 
     const orderedProjectionResponse = await page.request.get(`/api/v1/matrices/${matrixId}/v3-projection`);
     const orderedProjection = (await orderedProjectionResponse.json()).data;
@@ -201,6 +205,18 @@ test('matrix cell saves on blur and new columns stay inside their semantic zones
       return JSON.stringify((await response.json()).data);
     }).toContain('离开单元格后保存');
     await expect(page.getByText('加载矩阵数据…')).toHaveCount(0);
+
+    const numericHeader = page.getByRole('columnheader', { name: /Enter 数值/ });
+    await expect(numericHeader).toBeVisible();
+    const numericColumnIndex = await numericHeader.evaluate((element) => (element as HTMLTableCellElement).cellIndex);
+    const numericInput = page.locator('tbody tr').first().locator('td').nth(numericColumnIndex).locator('input').first();
+    const numericValue = '987654321';
+    await numericInput.fill(numericValue);
+    await numericInput.press('Enter');
+    await expect.poll(async () => {
+      const response = await page.request.get(`/api/v1/matrices/${matrixId}/v3-projection`);
+      return JSON.stringify((await response.json()).data);
+    }).toContain(numericValue);
   } finally {
     if (matrixId) await page.request.post(`/api/v1/matrices/${matrixId}/lifecycle`, { data: { action: 'archive', reason: 'e2e_cleanup' } });
     await page.request.delete(`/api/tasks/${taskId}`);
@@ -364,6 +380,29 @@ test('first matrix entry auto-creates one default matrix and reuses it after tab
     await expect(page.getByRole('button', { name: '新建数据矩阵', exact: true })).toHaveCount(0);
     await expect(page.getByText('当前任务尚未建立数据矩阵', { exact: true })).toHaveCount(0);
     await expect(page.locator('input[value="默认大类"]')).toBeVisible();
+    const matrixZoneNav = page.getByRole('navigation', { name: '数据矩阵分区' });
+    await expect(matrixZoneNav).toBeVisible();
+    for (const label of ['层级', '主素材', '对比/输入', '效果素材', '效果评价', '问题点']) {
+      await expect(matrixZoneNav.getByRole('button', { name: label, exact: true })).toBeVisible();
+    }
+    await matrixZoneNav.getByRole('button', { name: '问题点', exact: true }).click();
+    const desktopGrid = page.getByTestId('matrix-v3-desktop-grid');
+    await expect.poll(async () => desktopGrid.evaluate((element) => element.scrollLeft))
+      .toBeGreaterThan(0);
+    const [gridBox, hierarchyHeaderBox, secondHierarchyHeaderBox, issueHeaderBox] = await Promise.all([
+      desktopGrid.boundingBox(),
+      desktopGrid.locator('[data-matrix-column-id]').first().boundingBox(),
+      desktopGrid.locator('[data-matrix-column-id]').nth(1).boundingBox(),
+      page.getByRole('columnheader', { name: /问题点/ }).boundingBox(),
+    ]);
+    expect(gridBox).not.toBeNull();
+    expect(hierarchyHeaderBox).not.toBeNull();
+    expect(secondHierarchyHeaderBox).not.toBeNull();
+    expect(issueHeaderBox).not.toBeNull();
+    expect(hierarchyHeaderBox!.x).toBeGreaterThanOrEqual(gridBox!.x - 1);
+    expect(issueHeaderBox!.x).toBeGreaterThanOrEqual(
+      secondHierarchyHeaderBox!.x + secondHierarchyHeaderBox!.width - 1,
+    );
 
     const firstState = await page.request.get(`/api/v1/tasks/${taskId}/matrix-tab-state`);
     const firstPayload = await firstState.json();
