@@ -380,7 +380,7 @@ for (const matrixCase of [
     await share.route(`**/api/reports/share?token=responsive-${matrixCase.kind}`, (route) => route.fulfill({ json: { code: 0, data: { frozenViewModel: model, siblingReports: [], siblingFrozenViewModels: {} } } }));
 
     try {
-      for (const width of [390, 768, 1024]) {
+      for (const width of [390, 768, 1024, 1440]) {
         await detail.setViewportSize({ width, height: 900 });
         await share.setViewportSize({ width, height: 900 });
         await detail.goto(`/reports/responsive-${matrixCase.kind}`);
@@ -499,6 +499,15 @@ test('semantic media roles size detail and share grids consistently without mobi
   await detail.route('**/api/reports/semantic-media/detail', (route) => route.fulfill({ json: { code: 0, data: { frozenViewModel: semanticMediaModel } } }));
   await share.route('**/api/reports/share?token=semantic-media', (route) => route.fulfill({ json: { code: 0, data: { frozenViewModel: semanticMediaModel, siblingReports: [], siblingFrozenViewModels: {} } } }));
   for (const page of [detail, share]) {
+    await page.route('**/api/materials/presign', async (route) => {
+      const body = route.request().postDataJSON() as { paths?: string[] };
+      await route.fulfill({
+        json: {
+          code: 0,
+          data: Object.fromEntries((body.paths ?? []).map((path) => [path, `/api/materials/file/${path}`])),
+        },
+      });
+    });
     await page.route('**/api/materials/file/video-no-extension', async (route) => {
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 2_000));
       await route.abort();
