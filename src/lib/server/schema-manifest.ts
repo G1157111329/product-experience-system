@@ -108,6 +108,7 @@ export const REQUIRED_MIGRATIONS = [
   ['0023_security_schema_probe_rpc', 1784217603000, '6c22403e51c7c903a0bb359814f59f565593de25c524528c208dd9013a3fa451'],
   ['0024_material_owner_and_wecom_replay', 1784217604000, '8a9bb3153598f2306d161f426a792e68c10eb8d6b5b7bc63f476aef05e03bc43'],
   ['0025_frozen_media_reference_guard', 1784217605000, '93430b992f24e3526b79a72aa2ef0a36c1a499ba265e9170ffe692010bd89365'],
+  ['0026_recipe_material_authoritative_links', 1784217606000, '06da19b5ccdcf62791d0e74c3691403d09ad906cee369ca00a1a5e6b1b78b390'],
 ] as const;
 
 const fk = (name: string, table: string, columns: string[], targetTable: string, targetColumns = ['id'], onDelete?: RequiredForeignKey['onDelete']): RequiredForeignKey => ({ name, table, columns, targetTable, targetColumns, onDelete });

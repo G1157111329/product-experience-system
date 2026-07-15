@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import { verifyMigrationClosure, validateMigrationClosure } from './migration-closure';
 
 const result = verifyMigrationClosure(process.cwd());
-assert.equal(result.head, '0025_frozen_media_reference_guard');
-assert.equal(result.count, 26);
+assert.equal(result.head, '0026_recipe_material_authoritative_links');
+assert.equal(result.count, 27);
 
 assert.throws(() => validateMigrationClosure({
   journal: [
@@ -41,6 +41,7 @@ assert.match(bootstrap, /target_id VARCHAR\(160\) NOT NULL/, '0018 is represente
 assert.match(bootstrap, /issue_row\.source_report_id = mip\.id/, '0019 backfill is represented in bootstrap upgrades');
 assert.match(bootstrap, /request_options JSONB DEFAULT '\{\}'::jsonb/, '0020 AI request options are represented in bootstrap');
 assert.match(bootstrap, /ON CONFLICT \(material_id, target_type, target_id\)/, '0021 reusable material binding is represented in bootstrap');
+assert.match(bootstrap, /UPDATE materials SET recipe_id = NULL WHERE recipe_id = v_recipe_id/, '0026 authoritative recipe links are represented in bootstrap');
 assert.match(bootstrap, /reports_snapshot_id_report_snapshots_id_fkey/, '0022 report anchor constraint is represented in bootstrap');
 assert.match(bootstrap, /CREATE OR REPLACE FUNCTION public\.verify_security_schema_probe/, '0023 security probe is represented in bootstrap');
 

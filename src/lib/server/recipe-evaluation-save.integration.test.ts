@@ -25,6 +25,7 @@ async function main() {
   const taskId = id();
   const otherTaskId = id();
   const recipeId = id();
+  const sharedRecipeId = id();
   const deletedRecipeId = id();
   const materialA = id();
   const materialB = id();
@@ -67,8 +68,8 @@ async function main() {
     );
     await owner.query(
       `INSERT INTO recipes (id, task_id, name, effect_description)
-       VALUES ($1, $2, '原子评价食谱', '初始描述'), ($3, $2, '待删除食谱', '删除前')`,
-      [recipeId, taskId, deletedRecipeId],
+       VALUES ($1, $2, '原子评价食谱', '初始描述'), ($3, $2, '共享素材食谱', '初始描述'), ($4, $2, '待删除食谱', '删除前')`,
+      [recipeId, taskId, sharedRecipeId, deletedRecipeId],
     );
     await owner.query(
       `INSERT INTO materials (id, task_id, material_type, file_name, recipe_id)
@@ -84,7 +85,7 @@ async function main() {
         effect_description: '不应落库',
         material_ids: [otherTaskMaterial],
       }),
-      /invalid or occupied recipe material/,
+      /invalid recipe material/,
     );
     const unchanged = await owner.query<{ effect_status: string; effect_description: string }>(
       'SELECT effect_status, effect_description FROM recipes WHERE id = $1',
@@ -102,6 +103,14 @@ async function main() {
     });
     assert.equal(first.recipe.effect_status, 'qualified');
     assert.deepEqual(first.materials.map((row) => row.id), [materialB]);
+
+    const shared = await apply(owner, {
+      recipe_id: sharedRecipeId,
+      effect_status: 'qualified',
+      effect_description: '复用同一段视频素材',
+      material_ids: [materialB],
+    });
+    assert.deepEqual(shared.materials.map((row) => row.id), [materialB], '同一任务素材应可被多个食谱/功能同时引用');
 
     const partial = await apply(owner, { recipe_id: recipeId, effect_description: '仅更新描述' });
     assert.equal(partial.recipe.effect_status, 'qualified', 'partial update must retain status');
@@ -125,6 +134,22 @@ async function main() {
       ingredient_items: [{ name: '水', amount: '1L' }],
     });
 
+    await apply(owner, {
+      recipe_id: recipeId,
+      effect_status: 'pending',
+      material_ids: [materialC, materialB, materialC],
+    });
+    const orderedLinks = await owner.query<{ material_id: string; binding_order: number }>(
+      `SELECT material_id, binding_order FROM material_links
+       WHERE target_type = 'recipe' AND target_id = $1
+       ORDER BY binding_order`,
+      [recipeId],
+    );
+    assert.deepEqual(orderedLinks.rows, [
+      { material_id: materialC, binding_order: 1 },
+      { material_id: materialB, binding_order: 2 },
+    ], 'duplicate material ids must be removed without changing first-selection order');
+
     const concurrentA = new Client({ connectionString });
     const concurrentB = new Client({ connectionString });
     await Promise.all([concurrentA.connect(), concurrentB.connect()]);
@@ -137,7 +162,9 @@ async function main() {
       await Promise.all([concurrentA.end(), concurrentB.end()]);
     }
     const finalMaterials = await owner.query<{ id: string }>(
-      'SELECT id FROM materials WHERE recipe_id = $1 ORDER BY id',
+      `SELECT material_id AS id FROM material_links
+       WHERE target_type = 'recipe' AND target_id = $1
+       ORDER BY material_id`,
       [recipeId],
     );
     const finalIds = finalMaterials.rows.map((row) => row.id);

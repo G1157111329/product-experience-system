@@ -2384,9 +2384,14 @@ BEGIN
   IF p_command ? 'ingredient_items' THEN v_ingredient_items := p_command->'ingredient_items'; END IF;
 
   IF v_has_materials THEN
-  SELECT COALESCE(array_agg(DISTINCT value), ARRAY[]::TEXT[])
+  SELECT COALESCE(array_agg(value ORDER BY first_ordinality), ARRAY[]::TEXT[])
   INTO v_material_ids
-  FROM jsonb_array_elements_text(COALESCE(p_command->'material_ids', '[]'::jsonb));
+  FROM (
+    SELECT value, min(ordinality) AS first_ordinality
+    FROM jsonb_array_elements_text(COALESCE(p_command->'material_ids', '[]'::jsonb))
+      WITH ORDINALITY AS item(value, ordinality)
+    GROUP BY value
+  ) deduplicated_materials;
   v_requested_count := COALESCE(array_length(v_material_ids, 1), 0);
 
   PERFORM m.id
@@ -2443,6 +2448,10 @@ BEGIN
                   binding_method = EXCLUDED.binding_method,
                   bound_at = NOW(),
                   version = material_links.version + 1;
+
+    -- material_links is authoritative for replacement saves. Clear this
+    -- recipe's legacy fallback while preserving every other target link.
+    UPDATE materials SET recipe_id = NULL WHERE recipe_id = v_recipe_id;
   END IF;
 
   SELECT to_jsonb(r) INTO v_recipe FROM recipes r WHERE r.id = v_recipe_id;

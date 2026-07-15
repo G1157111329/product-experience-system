@@ -27,6 +27,7 @@
     { "idx": 22, "version": "7", "when": 1784217602000, "tag": "0022_report_snapshot_anchor_integrity", "breakpoints": true },
     { "idx": 23, "version": "7", "when": 1784217603000, "tag": "0023_security_schema_probe_rpc", "breakpoints": true },
     { "idx": 24, "version": "7", "when": 1784217604000, "tag": "0024_material_owner_and_wecom_replay", "breakpoints": true },
-    { "idx": 25, "version": "7", "when": 1784217605000, "tag": "0025_frozen_media_reference_guard", "breakpoints": true }
+    { "idx": 25, "version": "7", "when": 1784217605000, "tag": "0025_frozen_media_reference_guard", "breakpoints": true },
+    { "idx": 26, "version": "7", "when": 1784217606000, "tag": "0026_recipe_material_authoritative_links", "breakpoints": true }
   ]
 }

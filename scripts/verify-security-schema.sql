@@ -235,10 +235,11 @@ BEGIN
       ('0022_report_snapshot_anchor_integrity',1784217602000::bigint,'3fe16f4d1621c5cf20665304bf552a32d3fb398e1222e225dfc4f8c192a4ec68'),
       ('0023_security_schema_probe_rpc',1784217603000::bigint,'6c22403e51c7c903a0bb359814f59f565593de25c524528c208dd9013a3fa451'),
       ('0024_material_owner_and_wecom_replay',1784217604000::bigint,'8a9bb3153598f2306d161f426a792e68c10eb8d6b5b7bc63f476aef05e03bc43'),
-      ('0025_frozen_media_reference_guard',1784217605000::bigint,'93430b992f24e3526b79a72aa2ef0a36c1a499ba265e9170ffe692010bd89365')
+      ('0025_frozen_media_reference_guard',1784217605000::bigint,'93430b992f24e3526b79a72aa2ef0a36c1a499ba265e9170ffe692010bd89365'),
+      ('0026_recipe_material_authoritative_links',1784217606000::bigint,'06da19b5ccdcf62791d0e74c3691403d09ad906cee369ca00a1a5e6b1b78b390')
     ) required(tag,applied_at,expected_hash)
     WHERE NOT EXISTS (SELECT 1 FROM drizzle.__drizzle_migrations migrations WHERE migrations.created_at=required.applied_at AND migrations.hash=required.expected_hash) LIMIT 1;
     IF missing_tag IS NOT NULL THEN RAISE EXCEPTION 'startup schema manifest missing or mismatched migration tag/hash: %', missing_tag; END IF;
-    RAISE NOTICE 'startup schema provenance: drizzle-journal head=0025_frozen_media_reference_guard';
+    RAISE NOTICE 'startup schema provenance: drizzle-journal head=0026_recipe_material_authoritative_links';
   END IF;
 END $$;
