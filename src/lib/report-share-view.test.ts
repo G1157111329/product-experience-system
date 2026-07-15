@@ -22,6 +22,11 @@ assert.deepEqual(
     .map((item) => item.header.id),
   ['primary', 's2', 's1'],
 );
+assert.deepEqual(
+  orderedFrozenModels(model('primary'), [{ id: 's2' }, { id: 's1' }], { s1: model('s1'), s2: model('s2') }, ['s1', 'primary', 's2'])
+    .map((item) => item.header.id),
+  ['s1', 'primary', 's2'],
+);
 
 const safePrefix = frozenReaderDomPrefix('报告 id/with spaces', ':r1:');
 assert.match(safePrefix, /^[a-z][a-z0-9-]*$/);

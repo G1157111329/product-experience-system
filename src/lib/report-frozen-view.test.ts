@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { buildFrozenReportViewModel } from './report-frozen-view';
+import { buildFrozenReportViewModel, excludeClaimedRecipeMediaFromEffects } from './report-frozen-view';
 
 const frozenRecipe = {
   id: 'recipe-frozen',
@@ -34,7 +34,17 @@ const model = buildFrozenReportViewModel({
     snapshot_json: {
       report_content: {
         ai_summary: { summary: '冻结总结' },
-        recipes: [frozenRecipe],
+        recipes: [frozenRecipe, {
+          id: 'recipe-qualified-extra', name: '合格功能', effect_status: 'qualified',
+          effect_materials: [{ id: 'qualified-extra-media', file_url: '/uploads/qualified-extra.jpg' }],
+        }],
+        issues: [{
+          id: 'issue-frozen-recipe', recipe_id: 'recipe-frozen', source_type: 'recipe_problem',
+          materials: [
+            { id: 'original-effect', file_url: '/uploads/original-effect.jpg' },
+            { id: 'explicit-issue-proof', file_url: '/uploads/explicit-issue.jpg' },
+          ],
+        }],
       },
     },
   },
@@ -61,12 +71,15 @@ const model = buildFrozenReportViewModel({
   issueEvidence: {
     'issue-frozen-recipe': [{ id: 'rectification-proof', name: '整改素材', type: 'image', url: '/uploads/rectification.jpg' }],
   },
-}, { audience: 'internal' });
+}, { audience: 'internal', manageableIssueIds: new Set(['issue-frozen-recipe']) });
 
 assert.equal(model.summary.text, '冻结总结');
 assert.equal(model.functionEffects[0]?.name, '冷萃咖啡');
 assert.equal(model.functionEffects[0]?.evaluation, '口感偏酸，萃取不稳定。');
 assert.equal(model.functionEffects[0]?.evaluationStatus, 'unqualified');
+assert.deepEqual(model.functionEffects[0]?.evidence, [], 'failed recipe evidence is globally claimed by its issue context');
+assert.deepEqual(model.functionEffects[0]?.steps[0]?.evidence, [], 'failed recipe step evidence is not repeated in the function section');
+assert.deepEqual(model.functionEffects[1]?.evidence.map((item) => item.id), ['qualified-extra-media'], 'a non-issue recipe keeps its function evidence');
 const effectShape = model.functionEffects[0] as unknown as Record<string, unknown>;
 assert.equal(effectShape.score, undefined);
 assert.equal(effectShape.problemPoints, undefined);
@@ -74,7 +87,7 @@ assert.deepEqual(model.functionEffects[0]?.steps.map((step) => ({
   number: step.stepNumber,
   operation: step.operation,
   evidence: step.evidence.map((item) => item.id),
-})), [{ number: 1, operation: '冷藏萃取 12 小时', evidence: ['step-proof'] }]);
+})), [{ number: 1, operation: '冷藏萃取 12 小时', evidence: [] }]);
 
 assert.deepEqual(model.issues.map((issue) => issue.id), ['issue-frozen-recipe']);
 const issue = model.issues[0]!;
@@ -84,11 +97,21 @@ assert.equal(issue.recipe?.formula, '咖啡粉 20g；水 300ml');
 assert.deepEqual(issue.recipe?.parameters, { 水温: '5℃', 时间: '12小时' });
 assert.equal(issue.recipe?.evaluationStatus, 'unqualified');
 assert.deepEqual(issue.recipe?.steps.map((step) => step.stepNumber), [1]);
-assert.deepEqual(issue.evidence.map((item) => item.id), ['original-effect']);
+assert.deepEqual(issue.recipe?.steps[0]?.evidence.map((item) => item.id), ['step-proof'], 'issue recipe context retains claimed step evidence');
+assert.deepEqual(issue.recipe?.evidence.map((item) => item.id), ['original-effect'], 'recipe context evidence remains on the recipe');
+assert.deepEqual(issue.evidence.map((item) => item.id), ['explicit-issue-proof'], 'explicit issue evidence excludes recipe context evidence without losing issue-only media');
+assert.equal(issue.canManage, true, 'an explicitly authorized canonical issue is manageable');
+assert.equal(model.capabilities.canManageIssues, true);
+const browserDefensiveProjection = excludeClaimedRecipeMediaFromEffects([{
+  ...model.functionEffects[0]!,
+  evidence: [...issue.recipe!.evidence, ...issue.evidence],
+}], [issue]);
+assert.deepEqual(browserDefensiveProjection[0]?.evidence, [], 'browser projection also removes explicit issue evidence duplicated in the same function effect');
 assert.equal(issue.liveOverlay.status, 'verified_closed');
 assert.equal(issue.liveOverlay.rectification, '已调整冷萃时间');
 assert.equal(issue.liveOverlay.retest.count, 2);
 assert.equal(issue.liveOverlay.retest.latest?.id, 'retest-latest');
+assert.deepEqual(issue.liveOverlay.retest.history.map((item) => item.id), ['retest-latest', 'retest-old']);
 assert.equal(issue.liveOverlay.retest.latest?.result, 'qualified');
 assert.equal(issue.liveOverlay.retest.latest?.description, '最新复测合格');
 assert.deepEqual(issue.liveOverlay.retest.latest?.evidence.map((item) => item.id), ['latest-proof']);
@@ -206,7 +229,8 @@ const coalescedSources = buildFrozenReportViewModel({
 }, { audience: 'internal' });
 assert.deepEqual(coalescedSources.issues.map((issue) => issue.id), ['issue-record', 'issue-recipe'], 'one live issue must coalesce with its frozen source fact');
 assert.deepEqual(coalescedSources.issues[0]?.evidence.map((item) => item.id), ['record-evidence', 'record-issue-evidence']);
-assert.deepEqual(coalescedSources.issues[1]?.evidence.map((item) => item.id), ['recipe-evidence', 'recipe-issue-evidence']);
+assert.deepEqual(coalescedSources.issues[1]?.recipe?.evidence.map((item) => item.id), ['recipe-evidence']);
+assert.deepEqual(coalescedSources.issues[1]?.evidence.map((item) => item.id), ['recipe-issue-evidence']);
 assert.equal(coalescedSources.issues[0]?.liveOverlay.retest.count, 1, 'frozen re-evaluation history stays attached to the canonical issue');
 assert.deepEqual(coalescedSources.issues[0]?.liveOverlay.retest.latest?.evidence.map((item) => item.id), ['record-retest-evidence']);
 
@@ -246,6 +270,23 @@ assert.deepEqual(coalescedMatrixSources.issues.map((issue) => issue.sourceCellId
 assert.deepEqual(coalescedMatrixSources.issues.map((issue) => issue.context.primaryCategory), ['大类 A', '大类 B']);
 assert.deepEqual(coalescedMatrixSources.issues.map((issue) => issue.sourceKind), ['matrix', 'matrix']);
 
+const titleOnlyMustNotLink = buildFrozenReportViewModel({
+  report: { id: 'title-only-must-not-link', report_type: 'single_report', content: {} },
+  snapshot: {
+    snapshot_json: {
+      report_content: {
+        records: [{ id: 'frozen-record-without-link', evaluation_result: 'fail', check_item: '同名但无稳定关联' }],
+      },
+    },
+  },
+  snapshotResolution: 'anchored',
+  issues: [{ id: 'unrelated-live-issue', source_type: 'record_fail', title: '同名但无稳定关联', status: 'verified_closed' }],
+}, { audience: 'internal' });
+assert.equal(titleOnlyMustNotLink.issues[0]?.liveIssueId, undefined, 'title-only similarity must never attach a mutable issue');
+assert.equal(titleOnlyMustNotLink.issues[0]?.liveOverlay.status, '', 'title-only similarity must not leak another issue workflow status');
+assert.equal(titleOnlyMustNotLink.capabilities.canManageIssues, false, 'internal audience alone never grants issue management');
+assert.equal(titleOnlyMustNotLink.issues[0]?.canManage, false, 'an internal read-only actor receives a non-manageable issue');
+
 const comparisonProblemDedup = buildFrozenReportViewModel({
   report: { id: 'comparison-problem-dedup', report_type: 'comparison_report', content: {} },
   snapshot: {
@@ -278,6 +319,12 @@ assert.match(readerSource, /liveOverlay\.retest/);
 assert.match(readerSource, /data-issue-field="status"/, 'each issue row must expose one dedicated status field');
 assert.match(readerSource, /issueStatusLabel\(issue\.liveOverlay\.status \|\| 'open'\)/, 'the status field uses the four-state label with an open fallback');
 assert.doesNotMatch(readerSource, />\s*查看整改\s*</, 'the superseded management action must not be rendered');
+assert.match(readerSource, /关联缺失，无法进入整改/, 'unlinked frozen facts explain why management is unavailable');
+assert.match(readerSource, /issue\.recipe[\s\S]*items=\{issue\.evidence\}/, 'recipe issue rows render explicit issue evidence in addition to recipe context');
+const detailSource = readFileSync(resolve(process.cwd(), 'src/app/(main)/reports/[id]/page.tsx'), 'utf8');
+assert.doesNotMatch(detailSource, /fetch\(['"]\/api\/issues['"][\s\S]{0,240}method:\s*['"]POST['"]/, 'opening a frozen report must never create a canonical issue');
+assert.match(detailSource, /fetchFrozenReportProjection/, 'dialog saves refresh the authoritative frozen projection');
+assert.doesNotMatch(detailSource, /const applyIssueUpdate/, 'dialog saves must not patch only the status field');
 assert.doesNotMatch(readerSource, /problemPoints\(/);
 assert.doesNotMatch(readerSource, /AI评分/);
 assert.doesNotMatch(printSource, /problemTexts\(effect\.problemPoints\)/);

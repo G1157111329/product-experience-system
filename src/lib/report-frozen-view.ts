@@ -5,6 +5,8 @@ import {
   type EvaluationStatus,
 } from './evaluation-status';
 import { buildReportFrozenTabs, type ReportFrozenTabKey } from './report-frozen-tabs';
+import { sortFrozenIssues } from './stable-display-order';
+import { orderMaterialsByIds } from './material-selection-order';
 
 type Row = Record<string, unknown>;
 
@@ -40,7 +42,7 @@ export type FrozenRetest = {
   evidence: FrozenMedia[];
 };
 
-export type FrozenRetestSummary = { count: number; latest: FrozenRetest | null };
+export type FrozenRetestSummary = { count: number; latest: FrozenRetest | null; history: FrozenRetest[] };
 
 export type FrozenMatrixView =
   | { kind: 'comparison'; snapshot: Row }
@@ -58,12 +60,32 @@ export type FrozenIssueLiveOverlay = {
 
 export type FrozenIssue = {
   id: string;
+  /** Frozen source/problem creation time used for stable oldest-first display. */
+  createdAt?: string | null;
+  /** Canonical mutable issue id. Absent for a frozen fact without an issue record. */
+  liveIssueId?: string;
+  /** Request-scoped canonical authorization; frozen content never grants this by audience alone. */
+  canManage: boolean;
+  /** Stable frozen source identity for a matrix/comparison issue; never derived from its title. */
+  sourceCellId?: string;
   title: string;
   details: string;
   level: string;
   sourceType: string;
   sourceKind: 'sensory' | 'function' | 'comparison' | 'matrix';
-  context: { object: string; project: string; item: string };
+  context: {
+    object: string;
+    project: string;
+    item: string;
+    standardType?: string;
+    inspectionRange?: string;
+    inspectionStandard?: string;
+    nonStandardContent?: string;
+    checkResult?: string;
+    primaryCategory?: string;
+    secondaryDetail?: string;
+    comparisonDimension?: string;
+  };
   evidence: FrozenMedia[];
   /** Present only for recipe/function whole-judgment issues. */
   recipe?: FrozenRecipeContext;
@@ -73,9 +95,35 @@ export type FrozenIssue = {
 
 export type FrozenFunctionEffect = FrozenRecipeContext;
 
+export function excludeClaimedRecipeMediaFromEffects(
+  effects: FrozenFunctionEffect[],
+  issues: FrozenIssue[],
+): FrozenFunctionEffect[] {
+  const claimedByRecipe = new Map<string, Set<string>>();
+  for (const issue of issues) {
+    if (!issue.recipe) continue;
+    const claimed = claimedByRecipe.get(issue.recipe.recipeId) ?? new Set<string>();
+    [...issue.recipe.evidence, ...issue.recipe.steps.flatMap((step) => step.evidence), ...issue.evidence]
+      .forEach((item) => claimed.add(frozenMediaDedupeKey(item)));
+    claimedByRecipe.set(issue.recipe.recipeId, claimed);
+  }
+  return effects.map((effect) => {
+    const claimed = claimedByRecipe.get(effect.recipeId);
+    if (!claimed) return effect;
+    return {
+      ...effect,
+      evidence: effect.evidence.filter((item) => !claimed.has(frozenMediaDedupeKey(item))),
+      steps: effect.steps.map((step) => ({
+        ...step,
+        evidence: step.evidence.filter((item) => !claimed.has(frozenMediaDedupeKey(item))),
+      })),
+    };
+  });
+}
+
 export type FrozenReportViewModel = {
   snapshotResolution: 'anchored' | 'legacy_latest' | 'none';
-  header: { id: string; title: string; reportType: string; status: string; productModel: string | null };
+  header: { id: string; taskId?: string; title: string; reportType: string; status: string; productModel: string | null };
   tabs: ReportFrozenTabKey[];
   summary: {
     text: string;
@@ -116,11 +164,43 @@ function first(...values: unknown[]): string {
   return '';
 }
 
+function normalizedFrozenMediaUrl(value: string) {
+  return value.trim().normalize('NFKC').replace(/\\/g, '/').replace(/^\/+/, '');
+}
+
+export function frozenMediaDedupeKey(item: Pick<FrozenMedia, 'id' | 'url'>) {
+  const id = text(item.id);
+  return id ? `id:${id}` : `url:${normalizedFrozenMediaUrl(text(item.url))}`;
+}
+
+export function dedupeFrozenMedia(items: FrozenMedia[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = frozenMediaDedupeKey(item);
+    if (key === 'url:' || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export function subtractFrozenMedia(items: FrozenMedia[], excluded: FrozenMedia[]) {
+  const excludedKeys = new Set(excluded.map(frozenMediaDedupeKey));
+  return dedupeFrozenMedia(items).filter((item) => !excludedKeys.has(frozenMediaDedupeKey(item)));
+}
+
+export function normalizeFrozenIssueLevel(...values: unknown[]): string {
+  const level = first(...values);
+  const unknown = level.toLowerCase().replace(/\s+/g, '');
+  return !unknown || ['?', '??', '未知', 'unknown', 'n/a', 'na', '-', '—', 'null'].includes(unknown)
+    ? '二类'
+    : level;
+}
+
 function media(items: unknown): FrozenMedia[] {
   const seen = new Set<string>();
   return rows(items).flatMap((item) => {
-    const id = first(item.id, item.materialId, item.file_path, item.file_url, item.fileUrl);
-    const url = first(item.file_url, item.fileUrl, item.file_path, item.url);
+    const id = first(item.id, item.materialId, item.file_path, item.filePath, item.file_url, item.fileUrl);
+    const url = first(item.file_path, item.filePath, item.file_url, item.fileUrl, item.url);
     const key = id || url;
     if (!key || !url || seen.has(key)) return [];
     seen.add(key);
@@ -140,6 +220,10 @@ function problemTexts(value: unknown): string[] {
     : [];
 }
 
+function normalizedProblemText(value: unknown): string {
+  return text(value).normalize('NFKC').replace(/\s+/g, ' ').toLocaleLowerCase();
+}
+
 function failedRecord(record: Row): boolean {
   const result = text(record.evaluation_result).toLowerCase();
   return result.includes('fail') || result.includes('unqualified') || result.includes('not_pass') || result.includes('不合')
@@ -147,9 +231,7 @@ function failedRecord(record: Row): boolean {
 }
 
 function materialsByIds(materials: Row[], ids: string[]) {
-  if (ids.length === 0) return [];
-  const wanted = new Set(ids);
-  return materials.filter((item) => wanted.has(first(item.id, item.materialId)));
+  return orderMaterialsByIds(ids, materials.map((item) => ({ ...item, id: first(item.id, item.materialId) })));
 }
 
 function recipeContext(recipe: Row): FrozenRecipeContext {
@@ -190,6 +272,17 @@ function frozenReportContent(input: BuildFrozenReportViewInput, snapshotJson: Ro
   return reportContent;
 }
 
+function frozenMatrixProjection(content: Row, snapshotJson: Row): Row {
+  if (isRecord(snapshotJson.matrix_projection)) return snapshotJson.matrix_projection;
+  if (isRecord(content.data_matrix_projection)) return content.data_matrix_projection;
+  if (isRecord(content.matrix_projection)) return content.matrix_projection;
+  return {};
+}
+
+function cleanFrozenFieldValue(value: unknown): string {
+  return text(value).replace(/^(?:[:：]\s*)+/, '');
+}
+
 type FrozenFact = Row & { _recipe?: FrozenRecipeContext; _reportable?: boolean };
 
 function frozenIssueFacts(content: Row, snapshotJson: Row): FrozenFact[] {
@@ -215,39 +308,126 @@ function frozenIssueFacts(content: Row, snapshotJson: Row): FrozenFact[] {
     }),
   ];
 
-  const projection = isRecord(snapshotJson.matrix_projection) ? snapshotJson.matrix_projection : {};
+  const projection = frozenMatrixProjection(content, snapshotJson);
   const cellMedia = isRecord(projection.cellMedia) ? projection.cellMedia : {};
-  for (const point of rows(projection.issuePoints)) {
+  const matrixRows = rows(projection.rows ?? projection.matrix_rows);
+  const matrixColumns = rows(projection.columns ?? projection.matrix_columns);
+  for (const point of rows(projection.issuePoints ?? projection.issue_points)) {
     const pointId = text(point.id);
+    const sourceCellId = first(point.sourceCellId, point.source_cell_id, pointId, `${text(point.leafRowId)}:${text(point.columnId)}`);
     const leafRowId = text(point.leafRowId);
     const columnId = text(point.columnId);
     const pointMaterials = Object.entries(cellMedia).flatMap(([key, items]) => (
       key === `${leafRowId}:${columnId}` || key.startsWith(`${leafRowId}:`) ? rows(items) : []
     ));
     const materialIds = Array.isArray(point.materialIds) ? point.materialIds.map(text).filter(Boolean) : [];
+    const matrixRow = matrixRows.find((row) => text(row.id) === leafRowId);
+    const matrixColumn = matrixColumns.find((column) => text(column.id) === columnId);
     facts.push({
       id: pointId || `matrix-issue:${leafRowId}:${columnId}`,
       _frozenKey: `v3-issue:${pointId || `${leafRowId}:${columnId}`}`,
       _sourceKind: 'v3_issue_point', title: point.issueText, description: point.issueText,
-      source_type: 'matrix_problem', source_issue_point_id: pointId,
+      source_type: 'matrix_problem',
+      source_cell_id: sourceCellId,
+      source_issue_point_id: pointId,
+      linked_issue_id: text(point.linkedIssueId),
+      primary_category: first(matrixRow?.level1Label, matrixRow?.level_1),
+      secondary_detail: [first(matrixRow?.level2Label, matrixRow?.level_2), first(matrixRow?.level3Label, matrixRow?.level_3)].filter(Boolean).join(' / '),
+      comparison_dimension: first(matrixColumn?.label, matrixColumn?.columnLabel),
+      created_at: first(point.created_at, point.createdAt),
       materials: materialsByIds(pointMaterials, materialIds),
     });
   }
+const comparisonObjectsById = new Map(rows(snapshotJson.objects ?? snapshotJson.comparison_objects)
+    .map((item) => [text(item.id), item] as const)
+    .filter(([id]) => Boolean(id)));
+  const comparisonItemsById = new Map(rows(snapshotJson.item_nodes ?? snapshotJson.comparison_item_nodes)
+    .map((item) => [text(item.id), item] as const)
+    .filter(([id]) => Boolean(id)));
   for (const cell of rows(snapshotJson.cells ?? snapshotJson.matrix_cells)) {
     const cellId = text(cell.id);
+    const object = comparisonObjectsById.get(first(cell.object_id, cell.objectId));
+    const item = comparisonItemsById.get(first(cell.item_node_id, cell.itemNodeId));
+    const parent = item ? comparisonItemsById.get(first(item.parent_id, item.parentId)) : undefined;
     const points = Array.isArray(cell.problem_points) ? cell.problem_points : [];
-    rows(points).forEach((point, index) => facts.push({
+    const seenProblemTexts = new Set<string>();
+    points.forEach((rawPoint, index) => {
+      const point = typeof rawPoint === 'string' ? { text: rawPoint } : isRecord(rawPoint) ? rawPoint : {};
+      const pointText = first(point.text, point.issueText);
+      const normalizedText = normalizedProblemText(pointText);
+      if (!normalizedText || seenProblemTexts.has(normalizedText)) return;
+      seenProblemTexts.add(normalizedText);
+      facts.push({
       id: `comparison-cell:${cellId}:problem:${index}`,
       _frozenKey: `comparison-cell:${cellId}:problem:${index}`,
       _sourceKind: 'comparison_cell', _comparisonCellId: cellId,
-      title: first(point.text, point.issueText), description: first(cell.effect_summary, point.text, point.issueText),
-      source_type: 'recipe_problem', materials: [...rows(cell.inline_media), ...rows(cell.appendix_media), ...rows(cell.media)],
-    }));
+      title: pointText, description: first(cell.effect_summary, pointText),
+      source_type: 'recipe_problem',
+      created_at: first(point.created_at, point.createdAt, cell.created_at, cell.createdAt),
+      object_name: first(object?.object_name, object?.name, cell.object_name),
+      project_name: first(parent?.node_label, parent?.label, item?.project_name, cell.project_name),
+      item_name: first(item?.node_label, item?.label, cell.item_name),
+      materials: [...rows(cell.inline_media), ...rows(cell.appendix_media), ...rows(cell.media)],
+      });
+    });
   }
   return facts;
 }
 
+function explicitIssueMatchesSource(explicit: FrozenFact, source: FrozenFact) {
+  const sourceKind = text(source._sourceKind);
+  if (sourceKind === 'record' && text(explicit.record_id) === text(source.id)) return true;
+  if (sourceKind === 'recipe' && text(explicit.recipe_id) === text(source._recipeId)) return true;
+  if (sourceKind === 'v3_issue_point') {
+    if (text(source.linked_issue_id) && text(source.linked_issue_id) === text(explicit.id)) return true;
+    const explicitPointId = first(
+      explicit.source_cell_id,
+      explicit.sourceCellId,
+      explicit.source_issue_point_id,
+      text(explicit.source_type) === 'matrix_issue' ? explicit.source_report_id : '',
+    );
+    return Boolean(explicitPointId) && explicitPointId === first(source.source_issue_point_id, source.source_cell_id, source.id);
+  }
+  const explicitCellId = first(explicit.source_cell_id, explicit.sourceCellId, explicit.source_issue_point_id);
+  if (!explicitCellId) return false;
+  return explicitCellId === first(source.source_cell_id, source.source_issue_point_id, source._comparisonCellId);
+}
+
+function mergeFrozenSourceWithExplicitIssue(source: FrozenFact, explicit: FrozenFact): FrozenFact {
+  return {
+    ...explicit,
+    ...source,
+    _issueCreatedAt: first(explicit._issueCreatedAt, explicit.created_at, explicit.createdAt),
+    linked_issue_id: first(source.linked_issue_id, explicit.linked_issue_id, explicit.id),
+    materials: [...rows(source.materials), ...rows(explicit.materials)],
+    _reEvaluations: [...rows(source._reEvaluations), ...rows(explicit._reEvaluations)],
+  };
+}
+
+/**
+ * Generated report content includes canonical issue facts so issue/retest media
+ * can be frozen.  Record, recipe, and matrix facts already describe the same
+ * source, so collapse them before projection instead of rendering two rows.
+ */
+function coalesceExplicitIssueFacts(facts: FrozenFact[]): FrozenFact[] {
+  const explicit = facts.filter((fact) => text(fact._sourceKind) === 'explicit_issue');
+  const sourceFacts = facts.filter((fact) => text(fact._sourceKind) !== 'explicit_issue');
+  const matched = new Set<FrozenFact>();
+  const coalesced = sourceFacts.map((source) => {
+    const matches = explicit.filter((issue) => explicitIssueMatchesSource(issue, source));
+    if (matches.length === 0) return source;
+    matches.forEach((issue) => matched.add(issue));
+    return matches.reduce(mergeFrozenSourceWithExplicitIssue, source);
+  });
+  return [...coalesced, ...explicit.filter((issue) => !matched.has(issue))];
+}
+
 function findFrozenFactForLive(facts: FrozenFact[], live: Row) {
+  const liveIssueId = text(live.id);
+  if (liveIssueId) {
+    const linked = facts.find((item) => text(item.linked_issue_id) === liveIssueId);
+    if (linked) return linked;
+  }
   const recipeId = text(live.recipe_id);
   if (recipeId) return facts.find((item) => text(item._recipeId) === recipeId);
   const recordId = text(live.record_id);
@@ -256,9 +436,7 @@ function findFrozenFactForLive(facts: FrozenFact[], live: Row) {
   if (sourceCellId) return facts.find((item) => (
     text(item.id) === sourceCellId || text(item.source_issue_point_id) === sourceCellId || text(item._comparisonCellId) === sourceCellId
   ));
-  const sourceType = text(live.source_type);
-  const matching = facts.filter((item) => text(item.source_type) === sourceType && first(item.title) === first(live.title));
-  return matching.length === 1 ? matching[0] : undefined;
+  return undefined;
 }
 
 export function overlayEvidenceWithoutReEvaluations(
@@ -271,8 +449,14 @@ export function overlayEvidenceWithoutReEvaluations(
   return evidence.filter((item) => !ids.has(text(item.id)) && !urls.has(text(item.url)));
 }
 
-function retestSummary(issue: Row | undefined): FrozenRetestSummary {
-  const retests = rows(issue?._reEvaluations)
+function retestSummary(issue: Row | undefined, frozenReEvaluations: Row[] = []): FrozenRetestSummary {
+  const byId = new Map<string, Row>();
+  for (const item of [...frozenReEvaluations, ...rows(issue?._reEvaluations)]) {
+    const id = first(item.id);
+    if (id) byId.set(id, item);
+    else byId.set(`anonymous:${byId.size}`, item);
+  }
+  const retests = Array.from(byId.values())
     .map((item, index): FrozenRetest => ({
       id: first(item.id, `retest:${index}`),
       result: normalizeEvaluationStatus(item.result ?? item.evaluation_result ?? item.conclusion),
@@ -282,43 +466,61 @@ function retestSummary(issue: Row | undefined): FrozenRetestSummary {
       evidence: media(item.materials),
     }))
     .sort((left, right) => ((right.createdAt ?? '').localeCompare(left.createdAt ?? '') || right.id.localeCompare(left.id)));
-  return { count: retests.length, latest: retests[0] ?? null };
+  return { count: retests.length, latest: retests[0] ?? null, history: retests };
 }
 
-function liveOverlay(issue: Row | undefined, evidence: FrozenMedia[] = [], baseEvidence: FrozenMedia[] = []): FrozenIssueLiveOverlay {
-  const rawRetests = rows(issue?._reEvaluations);
+function liveOverlay(issue: Row | undefined, evidence: FrozenMedia[] = [], baseEvidence: FrozenMedia[] = [], frozenReEvaluations: Row[] = []): FrozenIssueLiveOverlay {
+  const rawRetests = [...frozenReEvaluations, ...rows(issue?._reEvaluations)];
   return {
     status: first(issue?.status, issue?.evaluation_result),
     rectification: first(issue?.improve_plan, issue?.rectification, issue?.no_improve_reason),
-    retest: retestSummary(issue),
+    retest: retestSummary(issue, frozenReEvaluations),
     evidence: overlayEvidenceWithoutReEvaluations(evidence, rawRetests, baseEvidence),
   };
 }
 
 function frozenIssue(base: FrozenFact, live: Row | undefined, evidence: FrozenMedia[], overlayEvidence: FrozenMedia[] = [], overlayBaseEvidence: FrozenMedia[] = []): FrozenIssue {
-  const sourceType = first(base.source_type, base.standard_category, live?.source_type);
-  const sourceKind: FrozenIssue['sourceKind'] = sourceType === 'matrix_problem'
+  const sourceType = first(base.source_type, live?.source_type, base.standard_category);
+  const isFrozenRecord = text(base._sourceKind) === 'record';
+  const sourceKind: FrozenIssue['sourceKind'] = sourceType === 'matrix_problem' || sourceType === 'matrix_issue'
     ? 'matrix'
     : Boolean(live?.source_assembly_id) || Boolean(base._comparisonCellId)
       ? 'comparison'
-      : sourceType === 'record_fail' || sourceType === 'sensory_problem'
+      : isFrozenRecord || sourceType === 'record_fail' || sourceType === 'sensory_problem'
         ? 'sensory'
         : 'function';
+  const standardType = first(base.standard_type, base.standardType, base.standard_category);
+  const nonStandard = standardType.includes('非标准');
+  const recipe = base._recipe;
   return {
     id: first(live?.id, base.id),
+    createdAt: first(base._issueCreatedAt, live?.created_at, live?.createdAt, base.created_at, base.createdAt) || null,
+    ...(text(live?.id) ? { liveIssueId: text(live?.id) } : {}),
+    canManage: false,
+    ...(first(base.source_cell_id, base.source_issue_point_id, base._comparisonCellId) ? {
+      sourceCellId: first(base.source_cell_id, base.source_issue_point_id, base._comparisonCellId),
+    } : {}),
     title: first(base.title, base.check_item, base.problem_description, base.effect_summary, base.id),
     details: first(base.description, base.problem_description, base.check_requirement, base.check_standard),
-    level: first(base.level, base.problem_level, live?.level, live?.problem_level),
+    level: normalizeFrozenIssueLevel(base.level, base.problem_level, live?.level, live?.problem_level),
     sourceType,
     sourceKind,
     context: {
-      object: first(base.object_name, base.object_label, live?.object_name, live?.object_label),
-      project: first(base.project_name, base.task_name, base.project, live?.project_name),
-      item: first(base.check_item, base.item_name, base.node_label, base.sub_check_dimension, live?.check_item),
+      object: cleanFrozenFieldValue(first(base.object_name, base.object_label, base.object, live?.object_name, live?.object_label)),
+      project: cleanFrozenFieldValue(first(base.project_name, base.task_name, base.project, live?.project_name)),
+      item: cleanFrozenFieldValue(first(base.check_item, base.item_name, base.node_label, base.sub_check_dimension, live?.check_item)),
+      standardType: nonStandard ? '' : cleanFrozenFieldValue(standardType),
+      inspectionRange: cleanFrozenFieldValue(first(base.touch_point, base.check_requirement, base.evaluation_prep, base.inspection_range)),
+      inspectionStandard: nonStandard ? '' : cleanFrozenFieldValue(first(base.experience_standard, base.check_standard, base.subjective_rating, base.subjective_score)),
+      nonStandardContent: nonStandard ? cleanFrozenFieldValue(first(base.check_item, base.problem_description, base.description)) : '',
+      checkResult: cleanFrozenFieldValue(first(base.check_result, base.evaluation_result, base.result, base.inspection_result)),
+      primaryCategory: cleanFrozenFieldValue(first(base.primary_category, base.level_1, base.level1, base.first_level_category)),
+      secondaryDetail: cleanFrozenFieldValue(first(base.secondary_detail, base.level_2, base.second_level_category, base.level_3, base.third_level_category)),
+      comparisonDimension: cleanFrozenFieldValue(first(base.comparison_dimension, base.compare_dimension, base.column_label, base.metric_name)),
     },
-    evidence,
-    ...(base._recipe ? { recipe: base._recipe } : {}),
-    liveOverlay: liveOverlay(live, overlayEvidence, overlayBaseEvidence),
+    evidence: recipe ? subtractFrozenMedia(evidence, recipe.evidence) : dedupeFrozenMedia(evidence),
+    ...(recipe ? { recipe } : {}),
+    liveOverlay: liveOverlay(live, overlayEvidence, overlayBaseEvidence, rows(base._reEvaluations)),
   };
 }
 
@@ -330,7 +532,7 @@ function buildIssues(
   resolution: BuildFrozenReportViewInput['snapshotResolution'],
   reportId: string,
 ): FrozenIssue[] {
-  const facts = frozenIssueFacts(content, snapshotJson);
+  const facts = coalesceExplicitIssueFacts(frozenIssueFacts(content, snapshotJson));
   const consumed = new Set<FrozenFact>();
   const result: FrozenIssue[] = [];
   for (const live of liveIssues) {
@@ -348,7 +550,7 @@ function buildIssues(
     if (fact._sourceKind === 'recipe' && !fact._reportable) continue;
     result.push(frozenIssue(fact, undefined, media(rows(fact.materials))));
   }
-  return result;
+  return sortFrozenIssues(result);
 }
 
 function comparisonMatrixView(reportType: string, snapshotJson: Row, tabs: ReportFrozenTabKey[]): FrozenMatrixView {
@@ -362,19 +564,24 @@ function dataMatrixView(projection: unknown, tabs: ReportFrozenTabKey[]): Frozen
   return { kind: isV3 ? 'data_v3' : 'data_v2', projection };
 }
 
-export function buildFrozenReportViewModel(input: BuildFrozenReportViewInput, options: { audience: 'internal' | 'share' }): FrozenReportViewModel {
+export function buildFrozenReportViewModel(
+  input: BuildFrozenReportViewInput,
+  options: { audience: 'internal' | 'share'; manageableIssueIds?: ReadonlySet<string> },
+): FrozenReportViewModel {
   const snapshotJson = isRecord(input.snapshot?.snapshot_json) ? input.snapshot.snapshot_json : {};
   const content = frozenReportContent(input, snapshotJson);
-  const projection = isRecord(snapshotJson.matrix_projection)
-    ? snapshotJson.matrix_projection
-    : content.data_matrix_projection;
+  const projection = frozenMatrixProjection(content, snapshotJson);
   const recipes = rows(content.recipes);
   const reportType = first(input.report.report_type, snapshotJson.report_type, 'single_report');
   const tabs = buildReportFrozenTabs({ reportType, dataMatrixProjection: projection, comparisonSnapshot: snapshotJson, recipes });
   const aiSummary = isRecord(content.ai_summary) ? content.ai_summary : null;
+  const manageableIssueIds = options.manageableIssueIds ?? new Set<string>();
   const frozenIssues = buildIssues(
     content, snapshotJson, input.issues ?? [], input.issueEvidence ?? {}, input.snapshotResolution, text(input.report.id),
-  );
+  ).map((issue) => ({
+    ...issue,
+    canManage: Boolean(issue.liveIssueId && manageableIssueIds.has(issue.liveIssueId)),
+  }));
   const issueCount = frozenIssues.length;
   const countByKind = (kind: FrozenIssue['sourceKind']) => frozenIssues.filter((issue) => issue.sourceKind === kind).length;
   const rectifiedCount = frozenIssues.filter((issue) => issue.liveOverlay.status === 'verified_closed').length;
@@ -384,11 +591,13 @@ export function buildFrozenReportViewModel(input: BuildFrozenReportViewInput, op
       ? snapshotJson.task
       : input.taskInfo ?? null;
   const internal = options.audience === 'internal';
+  const functionEffects = excludeClaimedRecipeMediaFromEffects(recipes.map(recipeContext), frozenIssues);
   return {
     snapshotResolution: input.snapshotResolution,
     header: {
       id: text(input.report.id), title: first(input.report.title, input.report.id), reportType,
       status: text(input.report.status), productModel: text(input.report.product_model) || null,
+      taskId: text(input.report.task_id) || undefined,
     },
     tabs,
     summary: {
@@ -406,7 +615,7 @@ export function buildFrozenReportViewModel(input: BuildFrozenReportViewInput, op
     issues: frozenIssues,
     matrix: comparisonMatrixView(reportType, snapshotJson, tabs),
     dataMatrix: dataMatrixView(projection, tabs),
-    functionEffects: recipes.map(recipeContext),
-    capabilities: { canManageIssues: internal, canShare: internal, canExport: true },
+    functionEffects,
+    capabilities: { canManageIssues: frozenIssues.some((issue) => issue.canManage), canShare: internal, canExport: true },
   };
 }

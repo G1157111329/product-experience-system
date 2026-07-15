@@ -1,6 +1,8 @@
-import { dataMatrixReadLayout, type ReportDataMatrixReadCard, type ReportDataMatrixReadNarrative } from '@/lib/report-data-matrix-layout';
+import { dataMatrixPrintColumns, dataMatrixReadLayout, type ReportDataMatrixReadCard, type ReportDataMatrixReadNarrative } from '@/lib/report-data-matrix-layout';
 import { evaluationStatusLabel } from '@/lib/evaluation-status';
-import type { FrozenMedia, FrozenRecipeContext, FrozenReportViewModel } from '@/lib/report-frozen-view';
+import { frozenMediaDedupeKey, normalizeFrozenIssueLevel, type FrozenMedia, type FrozenRecipeContext, type FrozenReportViewModel } from '@/lib/report-frozen-view';
+import { PRINT_GOLDEN_YELLOW, PRINT_GOLDEN_YELLOW_INK, PRINT_GOLDEN_YELLOW_SOFT } from '@/lib/report-print-theme';
+import { isPrintVideoSource } from '@/lib/print-assets';
 
 type Row = Record<string, unknown>;
 
@@ -14,6 +16,17 @@ export type PrintComparisonCell = {
   media: PrintMedia[];
 };
 
+export type PrintComparisonRow = {
+  id: string;
+  rowKind: 'group' | 'item' | 'summary';
+  label: string;
+  group: string;
+  summaryText: string;
+  /** Kept for compatibility with older print consumers. */
+  path: string[];
+  cells: Record<string, PrintComparisonCell>;
+};
+
 export type PrintMatrix =
   | {
     kind: 'comparison';
@@ -21,7 +34,7 @@ export type PrintMatrix =
     /** Explicitly frozen comparison layout, if the snapshot supplied one. */
     layoutProfile: string;
     columns: Array<{ id: string; label: string }>;
-    rows: Array<{ id: string; path: string[]; cells: Record<string, PrintComparisonCell> }>;
+    rows: PrintComparisonRow[];
   }
   | {
     kind: 'data_v2' | 'data_v3';
@@ -40,6 +53,8 @@ export type PrintReportViewModel = {
   issues: FrozenReportViewModel['issues'];
   functionEffects: FrozenReportViewModel['functionEffects'];
   matrix: PrintMatrix | null;
+  /** A report can freeze a comparison matrix and a data matrix at the same time. */
+  dataMatrix: PrintMatrix | null;
 };
 
 function record(value: unknown): Row {
@@ -56,16 +71,24 @@ function text(value: unknown, fallback = '') {
 }
 
 function videoType(type: string, url: string) {
-  return type.toLowerCase().includes('video') || /\.(mp4|m4v|mov|webm)(?:\?|$)/i.test(url);
+  return isPrintVideoSource(type, url);
 }
 
 function posterDerivativeUrl(url: string) {
   const withoutQuery = url.split('?')[0] || '';
+  let pathname = withoutQuery;
+  try {
+    pathname = new URL(url, 'http://print.local').pathname;
+  } catch {
+    // Keep the unparsed path for historical storage keys.
+  }
   let key = '';
-  if (withoutQuery.startsWith('/api/materials/file/')) key = withoutQuery.slice('/api/materials/file/'.length);
-  else if (withoutQuery.startsWith('/uploads/')) key = withoutQuery.slice('/uploads/'.length);
+  if (pathname.startsWith('/api/materials/file/')) key = pathname.slice('/api/materials/file/'.length);
+  else if (pathname.startsWith('/uploads/')) key = pathname.slice('/uploads/'.length);
   else if (!/^(?:https?:|data:|blob:|\/api\/)/i.test(withoutQuery)) key = withoutQuery.replace(/^\/+/, '');
-  return key ? `/api/materials/poster/${key.split('/').map(encodeURIComponent).join('/')}` : '';
+  return key ? `/api/materials/poster/${key.split('/').map((segment) => {
+    try { return encodeURIComponent(decodeURIComponent(segment)); } catch { return encodeURIComponent(segment); }
+  }).join('/')}` : '';
 }
 
 function normalizedMediaUrl(value: string) {
@@ -85,30 +108,27 @@ function normalizedMediaUrl(value: string) {
 }
 
 function dedupeMedia(items: PrintMedia[]) {
-  const ids = new Set<string>();
-  const urls = new Set<string>();
-  const names = new Set<string>();
+  const keys = new Set<string>();
   return items.filter((item) => {
     const id = text(item.id);
     const url = normalizedMediaUrl(text(item.url));
     const name = text(item.name);
-    const fallbackName = !id && !url ? name : '';
-    const duplicate = Boolean((id && ids.has(id)) || (url && urls.has(url)) || (fallbackName && names.has(fallbackName)));
-    if (id) ids.add(id);
-    if (url) urls.add(url);
-    if (fallbackName) names.add(fallbackName);
-    return !duplicate;
+    const key = id ? `id:${id}` : url ? `url:${url}` : name ? `name:${name}` : '';
+    if (!key || keys.has(key)) return false;
+    keys.add(key);
+    return true;
   });
 }
 
 function mediaFromUnknown(value: unknown): PrintMedia[] {
-  const projected = rows(value).flatMap((item, index) => {
+  const projected = rows(value).flatMap((item) => {
     const url = text(item.url || item.file_url || item.fileUrl || item.file_path || item.filePath);
     if (!url) return [];
-    const type = text(item.type || item.material_type || item.materialType, 'image');
+    const declaredType = text(item.type || item.material_type || item.materialType, 'image');
+    const type = videoType(declaredType, url) ? 'video' : declaredType;
     const explicitPoster = text(item.posterUrl || item.poster_url || item.thumbnailUrl || item.thumbnail_url);
     return [{
-      id: text(item.id || item.material_id || item.materialId, `${url}:${index}`),
+      id: text(item.id || item.material_id || item.materialId),
       name: text(item.name || item.file_name || item.fileName, '素材'),
       type,
       url,
@@ -135,6 +155,42 @@ function cloneFrozenModelParts(model: FrozenReportViewModel) {
     evidence: cloneMedia(recipe.evidence),
     steps: recipe.steps.map((step) => ({ ...step, evidence: cloneMedia(step.evidence) })),
   });
+  const issues = model.issues.map((issue) => ({
+    ...issue,
+    evidence: cloneMedia(issue.evidence),
+    liveOverlay: {
+      ...issue.liveOverlay,
+      evidence: cloneMedia(issue.liveOverlay.evidence),
+      retest: {
+        ...issue.liveOverlay.retest,
+        latest: issue.liveOverlay.retest.latest
+          ? { ...issue.liveOverlay.retest.latest, evidence: cloneMedia(issue.liveOverlay.retest.latest.evidence) }
+          : null,
+        history: issue.liveOverlay.retest.history.map((retest) => ({ ...retest, evidence: cloneMedia(retest.evidence) })),
+      },
+    },
+    ...(issue.recipe ? { recipe: cloneRecipe(issue.recipe) } : {}),
+  }));
+  const claimedByRecipe = new Map<string, Set<string>>();
+  for (const issue of issues) {
+    if (!issue.recipe) continue;
+    const keys = claimedByRecipe.get(issue.recipe.recipeId) ?? new Set<string>();
+    [...issue.recipe.evidence, ...issue.recipe.steps.flatMap((step) => step.evidence), ...issue.evidence]
+      .forEach((item) => keys.add(frozenMediaDedupeKey(item)));
+    claimedByRecipe.set(issue.recipe.recipeId, keys);
+  }
+  const functionEffects = model.tabs.includes('function_effect') ? model.functionEffects.map(cloneRecipe).map((effect) => {
+    const claimed = claimedByRecipe.get(effect.recipeId);
+    if (!claimed) return effect;
+    return {
+      ...effect,
+      evidence: effect.evidence.filter((item) => !claimed.has(frozenMediaDedupeKey(item))),
+      steps: effect.steps.map((step) => ({
+        ...step,
+        evidence: step.evidence.filter((item) => !claimed.has(frozenMediaDedupeKey(item))),
+      })),
+    };
+  }) : [];
   return {
     header: { ...model.header },
     summary: {
@@ -143,22 +199,8 @@ function cloneFrozenModelParts(model: FrozenReportViewModel) {
       taskInfo: model.summary.taskInfo ? { ...model.summary.taskInfo } : null,
       stats: { ...model.summary.stats },
     },
-    issues: model.issues.map((issue) => ({
-      ...issue,
-      evidence: cloneMedia(issue.evidence),
-      liveOverlay: {
-        ...issue.liveOverlay,
-        evidence: cloneMedia(issue.liveOverlay.evidence),
-        retest: {
-          ...issue.liveOverlay.retest,
-          latest: issue.liveOverlay.retest.latest
-            ? { ...issue.liveOverlay.retest.latest, evidence: cloneMedia(issue.liveOverlay.retest.latest.evidence) }
-            : null,
-        },
-      },
-      ...(issue.recipe ? { recipe: cloneRecipe(issue.recipe) } : {}),
-    })),
-    functionEffects: model.tabs.includes('function_effect') ? model.functionEffects.map(cloneRecipe) : [],
+    issues,
+    functionEffects,
   };
 }
 
@@ -168,10 +210,9 @@ function comparisonMatrix(snapshotValue: unknown): PrintMatrix {
   const objects = rows(snapshot.objects);
   const allNodes = rows(snapshot.item_nodes);
   const nodesById = new Map(allNodes.map((node) => [text(node.id), node]));
-  const nodes = allNodes.filter((node) => {
-    const nodeType = text(node.node_type, 'item');
-    return ['item', 'condition', 'process_node', 'metric', 'issue_group'].includes(nodeType);
-  });
+  const printableItemTypes = new Set(['item', 'condition', 'process_node', 'metric', 'issue_group']);
+  const sectionTypes = new Set(['section', 'group', 'category']);
+  const summaryTypes = new Set(['summary', 'section_summary', 'group_summary']);
   const cells = rows(snapshot.cells);
   const columns = objects.map((object, index) => ({
     id: text(object.id, String(index)),
@@ -182,8 +223,39 @@ function comparisonMatrix(snapshotValue: unknown): PrintMatrix {
     layoutProfile: text(snapshot.layout_profile),
     title: text(snapshot.matrix_name || assembly.name, '对比矩阵'),
     columns,
-    rows: nodes.map((node, rowIndex) => {
+    rows: allNodes.flatMap<PrintComparisonRow>((node, rowIndex) => {
       const id = text(node.id, String(rowIndex));
+      const nodeType = text(node.node_type, 'item');
+      if (!printableItemTypes.has(nodeType) && !sectionTypes.has(nodeType) && !summaryTypes.has(nodeType)) return [];
+      const nodeLabel = text(node.node_label || node.label, `Item ${rowIndex + 1}`);
+      const itemAncestors: string[] = [];
+      const itemVisited = new Set<string>();
+      let itemParent = nodesById.get(text(node.parent_id));
+      while (itemParent && !itemVisited.has(text(itemParent.id))) {
+        itemVisited.add(text(itemParent.id));
+        const label = text(itemParent.node_label || itemParent.label);
+        if (label) itemAncestors.unshift(label);
+        itemParent = nodesById.get(text(itemParent.parent_id));
+      }
+      const group = text(node.group_label || node.parent_label || itemAncestors[0] || (sectionTypes.has(nodeType) ? nodeLabel : ''));
+      if (sectionTypes.has(nodeType)) {
+        return [{ id, rowKind: 'group' as const, label: nodeLabel, group: nodeLabel, summaryText: '', path: [nodeLabel], cells: {} }];
+      }
+      const config = record(node.config_json || node.config || node.metadata);
+      if (summaryTypes.has(nodeType)) {
+        const attachedCellText = cells
+          .filter((candidate) => text(candidate.item_node_id) === id)
+          .map((candidate) => text(candidate.summary_text || candidate.effect_summary || candidate.value || candidate.text || candidate.conclusion))
+          .filter(Boolean)
+          .join(' / ');
+        const summaryText = text(
+          node.summary_text || node.content || node.description || node.value
+          || config.summary_text || config.summary || config.content || config.description
+          || attachedCellText,
+          '-',
+        );
+        return [{ id, rowKind: 'summary' as const, label: nodeLabel || '本大类小结', group, summaryText, path: [...itemAncestors, nodeLabel].filter(Boolean), cells: {} }];
+      }
       const cellMap: Record<string, PrintComparisonCell> = {};
       for (const column of columns) {
         const cell = cells.find((candidate) => (
@@ -212,16 +284,20 @@ function comparisonMatrix(snapshotValue: unknown): PrintMatrix {
         if (label) ancestors.unshift(label);
         parent = nodesById.get(text(parent.parent_id));
       }
-      return {
+      return [{
         id,
+        rowKind: 'item' as const,
+        label: nodeLabel,
+        group,
+        summaryText: '',
         path: [...ancestors, text(node.parent_label || node.group_label), text(node.node_label || node.label, `项目 ${rowIndex + 1}`)].filter(Boolean),
         cells: cellMap,
-      };
+      }];
     }),
   };
 }
 
-function projectMatrix(matrix: FrozenReportViewModel['matrix']): PrintMatrix | null {
+function projectMatrix(matrix: FrozenReportViewModel['matrix'] | FrozenReportViewModel['dataMatrix']): PrintMatrix | null {
   if (!matrix) return null;
   if (matrix.kind === 'comparison') return comparisonMatrix(matrix.snapshot);
   const layout = dataMatrixReadLayout(matrix.projection);
@@ -233,7 +309,7 @@ function projectMatrix(matrix: FrozenReportViewModel['matrix']): PrintMatrix | n
       ...card,
       path: [...card.path],
       fields: card.fields.map((field) => ({ ...field })),
-      media: card.media.map((item) => ({ ...item })),
+      media: cloneMedia(card.media),
       issues: card.issues.map((item) => ({ ...item })),
       narratives: card.narratives.map((item) => ({ ...item })),
       ...(card.issueSummary ? { issueSummary: { count: card.issueSummary.count, levels: [...card.issueSummary.levels] } } : {}),
@@ -243,17 +319,10 @@ function projectMatrix(matrix: FrozenReportViewModel['matrix']): PrintMatrix | n
 }
 
 export function printPageForMatrix(matrix: PrintMatrix | null): PrintReportViewModel['page'] {
-  if (!matrix || matrix.kind !== 'comparison') return { paper: 'A4', orientation: 'portrait' };
-  // Snapshot layout is authoritative for historical reports. The adaptive
-  // fallback below is only for snapshots without an explicit layout anchor.
-  if (/a3[_-]landscape/i.test(matrix.layoutProfile)) return { paper: 'A3', orientation: 'landscape' };
-  const estimatedWidth = 18 + matrix.columns.reduce((total, column) => {
-    const contentLength = Math.max(column.label.length, ...matrix.rows.map((row) => row.cells[column.id]?.value.length || 0));
-    return total + Math.min(34, Math.max(16, contentLength * 1.6));
-  }, 0);
-  return matrix.columns.length >= 4 || estimatedWidth > 68
-    ? { paper: 'A3', orientation: 'landscape' }
-    : { paper: 'A4', orientation: 'portrait' };
+  if (!matrix) return { paper: 'A4', orientation: 'portrait' };
+  // Frozen comparison/data matrices remain one complete A4 landscape table,
+  // rather than falling back to a split card layout or horizontal scrolling.
+  return { paper: 'A4', orientation: 'landscape' };
 }
 
 export function pdfProfileForPrintModel(model: PrintReportViewModel) {
@@ -268,30 +337,36 @@ export function pdfProfileForPrintModel(model: PrintReportViewModel) {
 
 export function buildPrintReportViewModel(model: FrozenReportViewModel): PrintReportViewModel {
   const frozen = cloneFrozenModelParts(model);
-  const matrix = projectMatrix(model.matrix);
+  const primaryMatrix = projectMatrix(model.matrix);
+  const secondaryDataMatrix = projectMatrix(model.dataMatrix);
+  const matrix = primaryMatrix ?? secondaryDataMatrix;
+  const dataMatrix = primaryMatrix ? secondaryDataMatrix : null;
   return {
     sourceReportId: model.header.id,
     snapshotResolution: model.snapshotResolution,
-    page: printPageForMatrix(matrix),
+    page: printPageForMatrix(dataMatrix ?? matrix),
     ...frozen,
     matrix,
+    dataMatrix,
   };
 }
 
 export function printReportMedia(model: PrintReportViewModel): PrintMedia[] {
   const issueMedia = model.issues.flatMap((issue) => [
     ...issue.evidence,
+    ...(issue.recipe?.evidence ?? []),
+    ...(issue.recipe?.steps.flatMap((step) => step.evidence) ?? []),
     ...issue.liveOverlay.evidence,
-    ...(issue.liveOverlay.retest.latest?.evidence ?? []),
+    ...issue.liveOverlay.retest.history.flatMap((retest) => retest.evidence),
   ]);
   const functionMedia = model.functionEffects.flatMap((effect) => [
     ...effect.evidence,
     ...effect.steps.flatMap((step) => step.evidence),
   ]);
-  const matrixMedia = !model.matrix ? [] : model.matrix.kind === 'comparison'
-    ? model.matrix.rows.flatMap((row) => Object.values(row.cells).flatMap((cell) => cell.media))
-    : model.matrix.rows.flatMap((row) => row.media);
-  return [...issueMedia, ...functionMedia, ...matrixMedia];
+  const matrixMedia = [model.matrix, model.dataMatrix].filter((matrix): matrix is PrintMatrix => Boolean(matrix)).flatMap((matrix) => matrix.kind === 'comparison'
+    ? matrix.rows.flatMap((row) => Object.values(row.cells).flatMap((cell) => cell.media))
+    : matrix.rows.flatMap((row) => row.media));
+  return dedupeMedia([...issueMedia, ...functionMedia, ...matrixMedia]);
 }
 
 function escapeHtml(value: unknown) {
@@ -303,46 +378,88 @@ function escapeHtml(value: unknown) {
     .replace(/'/g, '&#39;');
 }
 
-function renderMedia(items: PrintMedia[]) {
+function renderMedia(items: PrintMedia[], options: { compact?: boolean } = {}) {
   if (items.length === 0) return '';
-  return `<div class="paper-media">${items.map((item) => {
+  const compact = options.compact === true;
+  return `<div class="paper-media${compact ? ' paper-media-compact' : ''}">${items.map((item) => {
     const name = escapeHtml(item.name || item.id);
     if (videoType(item.type, item.url)) {
-      const poster = item.posterUrl
-        ? `<img data-video-poster src="${escapeHtml(item.posterUrl)}" alt="${name}" />`
-        : '';
-      return `<figure class="paper-video" data-media-id="${escapeHtml(item.id)}">${poster}<div class="video-label">VIDEO</div><figcaption>${name}</figcaption></figure>`;
+      const posterUrl = item.posterUrl || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 160 90%22%3E%3Crect width=%22160%22 height=%2290%22 fill=%22%231e293b%22/%3E%3Cpath d=%22M64 25l42 20-42 20z%22 fill=%22white%22/%3E%3C/svg%3E';
+      const poster = `<img data-video-poster src="${escapeHtml(posterUrl)}" alt="${name}" />`;
+      return `<figure class="paper-video" data-media-id="${escapeHtml(item.id)}">${poster}<div class="video-label">VIDEO</div>${compact ? '' : `<figcaption>${name}</figcaption>`}</figure>`;
     }
-    return `<figure data-media-id="${escapeHtml(item.id)}"><img src="${escapeHtml(item.url)}" alt="${name}" /><figcaption>${name}</figcaption></figure>`;
+    return `<figure data-media-id="${escapeHtml(item.id)}"><img src="${escapeHtml(item.url)}" alt="${name}" />${compact ? '' : `<figcaption>${name}</figcaption>`}</figure>`;
   }).join('')}</div>`;
 }
 
 function renderDataMatrix(matrix: Extract<PrintMatrix, { kind: 'data_v2' | 'data_v3' }>) {
-  const cards = matrix.rows.map((card) => {
-    const fields = card.fields.map((field) => {
-      const value = field.unit && !String(field.value).includes(field.unit) ? `${field.value} ${field.unit}` : String(field.value);
-      return `<div class="paper-field"><span>${escapeHtml(field.label)}</span><b>${escapeHtml(value)}</b></div>`;
+  const fieldColumns = dataMatrixPrintColumns(matrix.rows);
+  const valueColumns = fieldColumns.filter((column) => column.group !== 'evaluation');
+  const evaluationColumns = fieldColumns.filter((column) => column.group === 'evaluation');
+  const hierarchyLabels = ['一级大类', '二级细项'];
+  const hasNarratives = matrix.rows.some((row) => row.narratives.length > 0);
+  const valueColumnWidth = (hasNarratives ? 34 : 44) / Math.max(valueColumns.length, 1);
+  const colgroup = `<colgroup><col style="width:10%"><col style="width:12%">${valueColumns.map(() => `<col style="width:${valueColumnWidth}%">`).join('')}<col style="width:16%">${evaluationColumns.map(() => `<col style="width:${10 / Math.max(evaluationColumns.length, 1)}%">`).join('')}<col style="width:8%">${hasNarratives ? '<col style="width:10%">' : ''}</colgroup>`;
+  const groups = matrix.rows.reduce<Array<{ label: string; rows: typeof matrix.rows }>>((items, row) => {
+    const label = row.path[0] || '未分类';
+    const current = items[items.length - 1];
+    if (current?.label === label) current.rows.push(row);
+    else items.push({ label, rows: [row] });
+    return items;
+  }, []);
+  const head = [
+    ...hierarchyLabels.map((label) => `<th>${label}</th>`),
+    ...valueColumns.map((column) => `<th>${escapeHtml(column.label)}${column.unit ? ` (${escapeHtml(column.unit)})` : ''}</th>`),
+    '<th>效果素材</th>',
+    ...evaluationColumns.map((column) => `<th>${escapeHtml(column.label)}${column.unit ? ` (${escapeHtml(column.unit)})` : ''}</th>`),
+    '<th>问题点</th>',
+    ...(hasNarratives ? ['<th>过程/备注</th>'] : []),
+  ].join('');
+  const body = groups.flatMap((group) => group.rows.map((row, rowIndex) => {
+    const values = new Map(row.fields.map((field) => [field.id, field]));
+    const cells = valueColumns.map((column) => {
+      const field = values.get(column.id);
+      const value = field
+        ? field.unit && !String(field.value).includes(field.unit) ? `${field.value} ${field.unit}` : String(field.value)
+        : '-';
+      return `<td>${escapeHtml(value)}</td>`;
     }).join('');
-    const narratives = card.narratives.map((item) => `<p><b>${escapeHtml(item.label)}：</b>${escapeHtml(item.text)}</p>`).join('');
-    const issues = card.issues.map((item) => `<li>${escapeHtml(item.text)}${item.status ? `（${escapeHtml(item.status)}）` : ''}</li>`).join('');
-    const issueSummary = card.issueSummary
-      ? `<p class="issues">问题 ${card.issueSummary.count} 个${card.issueSummary.levels.length ? ` / ${escapeHtml(card.issueSummary.levels.join('、'))}` : ''}</p>`
-      : '';
-    return `<article class="paper-row" data-matrix-row="${escapeHtml(card.id)}"><h3>${escapeHtml(card.path.join(' / '))}</h3><div class="paper-fields">${fields}</div>${narratives}${issueSummary}${issues ? `<ul class="issues">${issues}</ul>` : ''}${renderMedia(card.media)}</article>`;
-  }).join('');
+    const evaluations = evaluationColumns.map((column) => {
+      const field = values.get(column.id);
+      const value = field
+        ? field.unit && !String(field.value).includes(field.unit) ? `${field.value} ${field.unit}` : String(field.value)
+        : '-';
+      return `<td>${escapeHtml(value)}</td>`;
+    }).join('');
+    const issues = [
+      ...(row.issueSummary ? [`问题 ${row.issueSummary.count} 个${row.issueSummary.levels.length ? ` / ${row.issueSummary.levels.join('、')}` : ''}`] : []),
+      ...row.issues.map((item) => `${item.text}${item.status ? `（${item.status}）` : ''}`),
+    ].filter(Boolean).join('\n');
+    const narratives = row.narratives.map((item) => `${item.label}：${item.text}`).join('\n');
+    return `<tr data-matrix-row="${escapeHtml(row.id)}">${rowIndex === 0 ? `<th rowspan="${group.rows.length}">${escapeHtml(group.label)}</th>` : ''}<th>${escapeHtml(row.path[1] || '-')}</th>${cells}<td class="matrix-media-cell">${renderMedia(row.media, { compact: true })}</td>${evaluations}<td class="issues">${escapeHtml(issues || '-')}</td>${hasNarratives ? `<td>${escapeHtml(narratives || '-')}</td>` : ''}</tr>`;
+  })).join('');
   const narratives = matrix.narratives.map((item) => `<p class="matrix-narrative"><b>${escapeHtml(item.label)}：</b>${escapeHtml(item.text)}</p>`).join('');
-  return `<section data-print-matrix="${matrix.kind}"><h2>${escapeHtml(matrix.title)}</h2>${matrix.summary ? `<p class="muted">${escapeHtml(matrix.summary)}</p>` : ''}${cards}${narratives}</section>`;
+  return `<section class="print-matrix-section" data-print-matrix="${matrix.kind}"><h2>${escapeHtml(matrix.title)}</h2>${matrix.summary ? `<p class="muted">${escapeHtml(matrix.summary)}</p>` : ''}<table class="data-matrix-table">${colgroup}<thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>${narratives}</section>`;
 }
 
 function renderComparison(matrix: Extract<PrintMatrix, { kind: 'comparison' }>) {
   const head = matrix.columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join('');
-  const body = matrix.rows.map((row) => `<tr><th>${escapeHtml(row.path.join(' / '))}</th>${matrix.columns.map((column) => {
+  const colgroup = `<colgroup><col style="width:14%">${matrix.columns.map(() => `<col style="width:${86 / Math.max(matrix.columns.length, 1)}%">`).join('')}</colgroup>`;
+  const body = matrix.rows.map((row) => {
+    if (row.rowKind === 'group') {
+      return `<tr class="comparison-group-row" data-comparison-group="${escapeHtml(row.id)}"><th colspan="${matrix.columns.length + 1}">${escapeHtml(row.label)}</th></tr>`;
+    }
+    if (row.rowKind === 'summary') {
+      return `<tr class="comparison-summary-row" data-comparison-summary="${escapeHtml(row.id)}"><th>${escapeHtml(row.label || '本大类小结')}</th><td colspan="${matrix.columns.length}">${escapeHtml(row.summaryText || '-')}</td></tr>`;
+    }
+    return `<tr class="comparison-item-row"><th>${escapeHtml(row.label || row.path.join(' / '))}</th>${matrix.columns.map((column) => {
     const cell = row.cells[column.id];
     const notes = cell?.notes.map((item) => `<p><b>过程记录：</b>${escapeHtml(item)}</p>`).join('') || '';
     const problems = cell?.problems.map((item) => `<p class="issues"><b>问题点：</b>${escapeHtml(item)}</p>`).join('') || '';
-    return `<td>${escapeHtml(cell?.value || '-')}${cell?.score ? `<p><b>评分：</b>${escapeHtml(cell.score)}</p>` : ''}${notes}${problems}${renderMedia(cell?.media || [])}</td>`;
-  }).join('')}</tr>`).join('');
-  return `<section data-print-matrix="comparison"><h2>${escapeHtml(matrix.title)}</h2><table class="comparison-table"><thead><tr><th>项目</th>${head}</tr></thead><tbody>${body}</tbody></table></section>`;
+    return `<td>${escapeHtml(cell?.value || '-')}${cell?.score ? `<p><b>评分：</b>${escapeHtml(cell.score)}</p>` : ''}${notes}${problems}${renderMedia(cell?.media || [], { compact: true })}</td>`;
+    }).join('')}</tr>`;
+  }).join('');
+  return `<section class="print-matrix-section" data-print-matrix="comparison"><h2>${escapeHtml(matrix.title)}</h2><table class="comparison-table">${colgroup}<thead><tr><th>项目</th>${head}</tr></thead><tbody>${body}</tbody></table></section>`;
 }
 
 function renderIssues(model: PrintReportViewModel) {
@@ -353,22 +470,37 @@ function renderIssues(model: PrintReportViewModel) {
       ? typeof recipe.parameters === 'string' ? recipe.parameters : Object.entries(recipe.parameters).map(([key, value]) => `${key}：${String(value)}`).join('；')
       : '';
     const steps = recipe?.steps.length
-      ? `<div><p><b>食谱步骤：</b>${recipe.steps.length}步</p>${recipe.steps.map((step, index) => `<div class="paper-step"><b>步骤 ${escapeHtml(step.stepNumber ?? index + 1)}</b> ${escapeHtml(step.operation)}${renderMedia(step.evidence)}</div>`).join('')}</div>`
+      ? `<div><p><b>食谱步骤：</b>${recipe.steps.length}步</p>${recipe.steps.map((step, index) => `<div class="paper-step"><b>步骤 ${escapeHtml(step.stepNumber ?? index + 1)}</b> ${escapeHtml(step.operation)}${step.problemPoints.length ? `<p class="issues"><b>步骤问题点：</b>${escapeHtml(step.problemPoints.join('；'))}</p>` : ''}${renderMedia(step.evidence)}</div>`).join('')}</div>`
       : '';
     const latest = issue.liveOverlay.retest.latest;
+    const olderRetests = issue.liveOverlay.retest.history.slice(1).sort((left, right) => (
+      (left.createdAt ?? '').localeCompare(right.createdAt ?? '') || left.id.localeCompare(right.id)
+    ));
+    const retestHistory = olderRetests.length > 0
+      ? `<div class="retest-history"><b>历史复测：</b><ol>${olderRetests.map((item) => `<li>${item.createdAt ? `<span class="meta">${escapeHtml(item.createdAt)}</span> ` : ''}${escapeHtml(evaluationStatusLabel(item.result))}${item.description ? ` · ${escapeHtml(item.description)}` : ''}${item.createdBy ? ` · ${escapeHtml(item.createdBy)}` : ''}${renderMedia(item.evidence, { compact: true })}</li>`).join('')}</ol></div>`
+      : '';
     const retest = latest
-      ? `<div class="reevaluation"><b>整改复测：</b>${escapeHtml(evaluationStatusLabel(latest.result))}${latest.description ? ` ${escapeHtml(latest.description)}` : ''}${latest.createdAt || latest.createdBy ? `<p class="meta">${escapeHtml([latest.createdAt, latest.createdBy].filter(Boolean).join(' · '))}</p>` : ''}${renderMedia(latest.evidence)}${issue.liveOverlay.retest.count >= 2 ? `<p>整改复测记录数：${issue.liveOverlay.retest.count}</p>` : ''}</div>`
+      ? `<div class="reevaluation"><b>最新整改复测：</b>${escapeHtml(evaluationStatusLabel(latest.result))}${latest.description ? ` ${escapeHtml(latest.description)}` : ''}${latest.createdAt || latest.createdBy ? `<p class="meta">${escapeHtml([latest.createdAt, latest.createdBy].filter(Boolean).join(' · '))}</p>` : ''}${renderMedia(latest.evidence)}${retestHistory}${issue.liveOverlay.retest.count >= 2 ? `<p>整改复测记录数：${issue.liveOverlay.retest.count}</p>` : ''}</div>`
       : '';
     const rectification = issue.liveOverlay.status === 'verified_closed' && (issue.liveOverlay.rectification || issue.liveOverlay.evidence.length)
       ? `<div><p><b>整改效果评价：</b>${escapeHtml(issue.liveOverlay.rectification)}</p><p><b>整改素材：</b></p>${renderMedia(issue.liveOverlay.evidence)}</div>`
       : '';
     const original = recipe
-      ? `<p><b>食谱名称：</b>${escapeHtml(recipe.name)}</p>${recipe.formula ? `<p><b>食谱配方：</b>${escapeHtml(recipe.formula)}</p>` : ''}${parameters ? `<p><b>食谱参数：</b>${escapeHtml(parameters)}</p>` : ''}${steps}<p><b>食谱效果评价：</b>${escapeHtml(recipe.evaluation)}（${escapeHtml(evaluationStatusLabel(recipe.evaluationStatus))}）</p>${recipe.evidence.length ? '<p><b>素材：</b></p>' : ''}${renderMedia(recipe.evidence)}<p><b>问题：</b>${escapeHtml(issue.details || issue.title)}</p>${renderMedia(issue.evidence)}`
-      : `<p><b>问题：</b>${escapeHtml(issue.details || issue.title)}</p>${issue.evidence.length ? '<p><b>素材：</b></p>' : ''}${renderMedia(issue.evidence)}`;
-    const status = issue.liveOverlay.status ? escapeHtml(({ open: '待整改', rectifying: '整改中', verified_closed: '整改完成', waived: '不整改' }[issue.liveOverlay.status] ?? issue.liveOverlay.status)) : '';
-    const source = ({ sensory: '五感体验', function: '食谱/功能', comparison: '对比项', matrix: '数据矩阵' }[issue.sourceKind] ?? issue.sourceType);
-    const context = `${issue.context.object ? `<p><b>对象：</b>${escapeHtml(issue.context.object)}</p>` : ''}${issue.context.project ? `<p><b>项目：</b>${escapeHtml(issue.context.project)}</p>` : ''}${issue.context.item ? `<p><b>细项：</b>${escapeHtml(issue.context.item)}</p>` : ''}`;
-    return `<article class="paper-row"><h3>${issue.level ? `<span class="meta">${escapeHtml(issue.level)}</span> ` : ''}<span class="meta">${escapeHtml(source)}</span> ${escapeHtml(issue.title)}${status ? `<span class="meta"> ${status}</span>` : ''}</h3>${context}${original}${rectification}${retest}</article>`;
+      ? `<p><b>食谱名称：</b>${escapeHtml(recipe.name)}</p>${recipe.formula ? `<p><b>食谱配方：</b>${escapeHtml(recipe.formula)}</p>` : ''}${parameters ? `<p><b>食谱参数：</b>${escapeHtml(parameters)}</p>` : ''}${steps}<p><b>食谱效果评价：</b>${escapeHtml(recipe.evaluation)}（${escapeHtml(evaluationStatusLabel(recipe.evaluationStatus))}）</p>${renderMedia(recipe.evidence)}${renderMedia(issue.evidence)}`
+      : issue.sourceKind === 'comparison' || issue.sourceKind === 'matrix'
+        ? `<p><b>问题：</b>${escapeHtml(issue.details || issue.title)}</p>${renderMedia(issue.evidence)}`
+        : renderMedia(issue.evidence);
+    const status = issue.liveOverlay.status ? escapeHtml(({ open: '待整改', rectifying: '整改中', verified_closed: '已整改', waived: '不整改' }[issue.liveOverlay.status] ?? issue.liveOverlay.status)) : '';
+    const source = ({ sensory: '五感体验', function: '食谱/功能', comparison: '食谱/功能-对比矩阵', matrix: '数据矩阵' }[issue.sourceKind] ?? issue.sourceType);
+    const issueContext = issue.context ?? { object: '', project: '', item: '' };
+    const context = issue.sourceKind === 'sensory'
+      ? `${issueContext.standardType ? `<p><b>检验标准类型：</b>${escapeHtml(issueContext.standardType)}</p>` : ''}${issueContext.inspectionRange ? `<p><b>检验要求及范围：</b>${escapeHtml(issueContext.inspectionRange)}</p>` : ''}${issueContext.inspectionStandard ? `<p><b>检查标准：</b>${escapeHtml(issueContext.inspectionStandard)}</p>` : ''}${issueContext.nonStandardContent ? `<p><b>描述检查项内容：</b>${escapeHtml(issueContext.nonStandardContent)}</p>` : ''}${issueContext.checkResult ? `<p><b>检查结果：</b>${escapeHtml(issueContext.checkResult)}</p>` : ''}`
+      : issue.sourceKind === 'matrix'
+        ? `${issueContext.primaryCategory ? `<p><b>一级大类：</b>${escapeHtml(issueContext.primaryCategory)}</p>` : ''}${issueContext.secondaryDetail ? `<p><b>二级细项/三级细项：</b>${escapeHtml(issueContext.secondaryDetail)}</p>` : ''}${issueContext.comparisonDimension ? `<p><b>对比维度：</b>${escapeHtml(issueContext.comparisonDimension)}</p>` : ''}`
+        : `${issueContext.object ? `<p><b>对象：</b>${escapeHtml(issueContext.object)}</p>` : ''}${issueContext.project ? `<p><b>项目：</b>${escapeHtml(issueContext.project)}</p>` : ''}${issueContext.item ? `<p><b>细项：</b>${escapeHtml(issueContext.item)}</p>` : ''}`;
+    const level = normalizeFrozenIssueLevel(issue.level);
+    const metadata = `<div class="issue-meta" data-print-issue-meta><span class="issue-chip issue-level" data-print-issue-level>${escapeHtml(level)}</span><span class="issue-chip issue-source" data-print-issue-source>${escapeHtml(source)}</span><span class="issue-description" data-print-issue-description>${escapeHtml(issue.title)}</span>${status ? `<span class="issue-chip issue-status" data-print-issue-status>${status}</span>` : ''}</div>`;
+    return `<article class="paper-row" data-print-issue-row>${metadata}${context}${original}${rectification}${retest}</article>`;
   }).join('')}</section>`;
 }
 
@@ -376,11 +508,18 @@ function renderFunctions(model: PrintReportViewModel) {
   if (model.functionEffects.length === 0) return '';
   return `<section><h2>功能效果</h2>${model.functionEffects.map((effect) => {
     const steps = effect.steps.map((step, index) => {
-      return `<div class="paper-step"><b>步骤 ${escapeHtml(step.stepNumber ?? index + 1)}</b> ${escapeHtml(step.operation)}${renderMedia(step.evidence)}</div>`;
+      const historicalProblems = step.problemPoints.length
+        ? `<p class="issues"><b>步骤问题点：</b>${escapeHtml(step.problemPoints.join('；'))}</p>`
+        : '';
+      return `<div class="function-step" data-function-step="${escapeHtml(step.id)}"><div class="function-step-copy"><b>步骤 ${escapeHtml(step.stepNumber ?? index + 1)}</b><span>${escapeHtml(step.operation)}</span>${historicalProblems}</div>${renderMedia(step.evidence, { compact: true })}</div>`;
     }).join('');
-    const issueCount = model.issues.filter((issue) => issue.recipe?.recipeId === effect.recipeId).length;
-    const score = effect.effectScore ? `　效果评分：${escapeHtml(effect.effectScore)}` : '';
-    return `<article class="paper-row"><h3>${escapeHtml(effect.name)} <span class="meta">步骤数：${effect.steps.length}${score}　问题点数量：${issueCount}</span></h3>${effect.formula ? `<p><b>食谱/食材：</b>${escapeHtml(effect.formula)}</p>` : ''}${effect.parameters ? `<p><b>食谱参数：</b>${escapeHtml(typeof effect.parameters === 'string' ? effect.parameters : Object.entries(effect.parameters).map(([key, value]) => `${key}：${String(value)}`).join('；'))}</p>` : ''}<p><b>效果评价：</b>${escapeHtml(effect.evaluation)}（${escapeHtml(evaluationStatusLabel(effect.evaluationStatus))}）</p>${renderMedia(effect.evidence)}${steps}</article>`;
+    const relatedIssueCount = model.issues.filter((issue) => issue.recipe?.recipeId === effect.recipeId).length;
+    const parameters = effect.parameters
+      ? typeof effect.parameters === 'string' ? effect.parameters : Object.entries(effect.parameters).map(([key, value]) => `${key}：${String(value)}`).join('；')
+      : '';
+    const ingredients = [effect.formula, parameters].filter(Boolean).join('；');
+    const scoreLabel = effect.effectScore ? `效果评分：${effect.effectScore}` : `判断：${evaluationStatusLabel(effect.evaluationStatus)}`;
+    return `<article class="function-card" data-function-effect="${escapeHtml(effect.recipeId)}"><header class="function-header"><h3><span class="function-kicker">食谱</span>${escapeHtml(effect.name)}</h3><div class="function-metrics"><span>步骤数：${effect.steps.length}</span><span>${escapeHtml(scoreLabel)}</span><span>问题点：${relatedIssueCount}</span></div></header>${ingredients ? `<p class="function-ingredients"><b>食谱/食材：</b>${escapeHtml(ingredients)}</p>` : ''}<div class="function-evaluation"><b>效果评价</b><p>${escapeHtml(effect.evaluation || '—')}</p>${renderMedia(effect.evidence, { compact: true })}</div>${effect.steps.length ? `<div class="function-steps"><h4>食谱步骤：${effect.steps.length}步</h4>${steps}</div>` : ''}</article>`;
   }).join('')}</section>`;
 }
 
@@ -403,19 +542,20 @@ function renderProductInfo(model: PrintReportViewModel) {
 
 export function renderPrintReportHtml(model: PrintReportViewModel, _generatedAt = new Date()) {
   void _generatedAt;
-  const matrix = model.matrix
-    ? model.matrix.kind === 'comparison' ? renderComparison(model.matrix) : renderDataMatrix(model.matrix)
-    : '';
+  const matrix = [model.matrix, model.dataMatrix].filter((item): item is PrintMatrix => Boolean(item)).map((item) => item.kind === 'comparison' ? renderComparison(item) : renderDataMatrix(item)).join('');
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8" /><style>
     @page { size: ${model.page.paper} ${model.page.orientation}; margin: 12mm; }
     * { box-sizing: border-box; } body { margin: 0; color: #111827; font-family: -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif; font-size: 11px; line-height: 1.55; }
-    h1 { margin: 0 0 4px; font-size: 22px; } h2 { margin: 18px 0 8px; padding-bottom: 4px; border-bottom: 2px solid #0f766e; color: #0f766e; font-size: 16px; break-after: avoid; } h3 { margin: 0 0 5px; font-size: 12px; break-after: avoid; }
-    section { break-inside: auto; } .cover,.paper-row { border: 1px solid #d1d5db; border-radius: 6px; padding: 9px; margin: 7px 0; background: #fff; break-inside: avoid; } .muted,.meta { color: #6b7280; }
+    h1 { margin: 0 0 4px; font-size: 22px; } h2 { margin: 18px 0 8px; padding-bottom: 4px; border-bottom: 2px solid ${PRINT_GOLDEN_YELLOW}; color: ${PRINT_GOLDEN_YELLOW_INK}; font-size: 16px; break-after: avoid; } h3 { margin: 0 0 5px; font-size: 12px; break-after: avoid; }
+    section { break-inside: auto; } .print-matrix-section { break-before:page; } .cover,.paper-row { border: 1px solid #d1d5db; border-radius: 6px; padding: 9px; margin: 7px 0; background: #fff; break-inside: avoid; } .muted,.meta { color: #6b7280; }
     .paper-fields,.task-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 5px; } .paper-field { border: 1px solid #e5e7eb; border-radius: 4px; padding: 5px; } .paper-field span,.paper-field b { display: block; overflow-wrap: anywhere; } .task-grid p { margin: 0; } .task-grid span { color: #6b7280; } .overview-grid { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 5px; } .overview-grid div { border: 1px solid #d1d5db; padding: 6px; text-align: center; } .overview-grid b,.overview-grid span { display:block; } .overview-grid span { color:#6b7280; }
     .paper-media { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; } figure { width: 72px; margin: 0; border: 1px solid #d1d5db; border-radius: 4px; padding: 3px; break-inside: avoid; } figure img { width: 64px; height: 48px; object-fit: cover; display: block; background: #e5e7eb; } .paper-video { position: relative; } .video-label { position: absolute; left: 3px; top: 35px; width: 64px; padding: 1px 0; background: rgba(17,24,39,.72); color: #fff; text-align: center; font-weight: 700; } figcaption { margin-top: 2px; color: #6b7280; font-size: 8px; overflow-wrap: anywhere; }
-    table { width: 100%; border-collapse: collapse; table-layout: fixed; } thead { display: table-header-group; } th,td { border: 1px solid #d1d5db; padding: 5px; vertical-align: top; overflow-wrap: anywhere; } th { background: #f0fdfa; color: #0f766e; } .issues { color: #991b1b; }
+    .paper-media-compact { display:flex; max-width:100%; overflow:hidden; flex-flow:row wrap; align-items:flex-start; gap:3px; margin-top:3px; } .paper-media-compact figure { width:38px; padding:2px; } .paper-media-compact figure img { width:32px; height:24px; } .paper-media-compact .video-label { left:2px; top:17px; width:32px; font-size:5px; } .matrix-media-cell { overflow:hidden; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; } thead { display: table-header-group; } th,td { border: 1px solid #d1d5db; padding: 5px; vertical-align: top; overflow-wrap: anywhere; } th { background: ${PRINT_GOLDEN_YELLOW_SOFT}; color: ${PRINT_GOLDEN_YELLOW_INK}; } .issues { color: #991b1b; } .issue-meta { display:flex; align-items:center; flex-wrap:wrap; gap:5px; margin-bottom:8px; padding-bottom:7px; border-bottom:1px solid #e5e7eb; } .issue-chip { display:inline-block; border:1px solid #d1d5db; border-radius:999px; padding:1px 6px; color:#374151; font-size:10px; line-height:1.35; } .issue-source { border-color:#d69700; background:#fff8dc; color:#7a5100; } .issue-description { flex:1 1 15ch; min-width:0; font-size:12px; font-weight:700; color:#111827; overflow-wrap:anywhere; } .issue-status { margin-left:auto; background:#f8fafc; }
+    .data-matrix-table { max-width:100%; font-size:7px; } .data-matrix-table tr { break-inside:avoid; } .data-matrix-table th,.data-matrix-table td { padding:2px; } .comparison-group-row th { background:#f1f5f9; color:#111827; text-align:left; font-size:12px; } .comparison-summary-row th,.comparison-summary-row td { background:#fffbeb; font-weight:700; }
+    .function-card { border:1px solid #cbd5e1; border-radius:6px; margin:8px 0; padding:10px; break-inside:avoid; } .function-header { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; padding-bottom:6px; border-bottom:1px solid #e2e8f0; } .function-header h3 { display:flex; align-items:center; gap:6px; } .function-kicker { color:${PRINT_GOLDEN_YELLOW_INK}; font-size:10px; } .function-metrics { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:4px; } .function-metrics span { border:1px solid #d1d5db; border-radius:999px; padding:1px 6px; color:#475569; font-size:9px; white-space:nowrap; } .function-ingredients { margin:7px 0; } .function-evaluation { border-top:2px solid ${PRINT_GOLDEN_YELLOW}; padding-top:6px; } .function-evaluation>p { margin:3px 0; } .function-steps h4 { margin:8px 0 4px; font-size:11px; } .function-step { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; padding:5px 0; border-top:1px solid #e5e7eb; } .function-step-copy { flex:1 1 auto; min-width:0; } .function-step-copy b,.function-step-copy span { display:block; } .function-step .paper-media { flex:0 0 auto; margin-top:0; max-width:48%; justify-content:flex-end; }
   </style></head><body data-print-report-id="${escapeHtml(model.sourceReportId)}">
-    <header class="cover"><h1>${escapeHtml(model.header.title)}</h1>${model.header.productModel ? `<p>${escapeHtml(model.header.productModel)}</p>` : ''}</header>
+    <header class="cover"><h1>${escapeHtml(model.header.title)}</h1></header>
     ${renderProductInfo(model)}${model.summary.text ? `<section><h2>总结</h2><p>${escapeHtml(model.summary.text)}</p></section>` : ''}
     ${renderIssues(model)}${renderFunctions(model)}${matrix}
   </body></html>`;

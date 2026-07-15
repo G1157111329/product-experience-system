@@ -6,6 +6,8 @@ import {
 } from '@/lib/report-frozen-view';
 import { buildReportDetailModel, type ReportDetailModel } from '@/lib/server/report-detail';
 import { loadAnchoredReportSnapshot } from '@/lib/server/report-snapshots';
+import { sortMaterialsByBinding } from '@/lib/stable-display-order';
+import { manageableIssueIdsForActor, type AuthUser } from '@/lib/server/auth';
 
 type Row = Record<string, unknown>;
 type Client = ReturnType<typeof getSupabaseClient>;
@@ -39,7 +41,25 @@ function toFrozenMedia(materials: Row[]): FrozenMedia[] {
   });
 }
 
-async function attachReEvaluations(client: Client, issues: Row[]) {
+export function linkedMaterialsForTarget(
+  materials: Row[], materialLinks: Row[], targetType: string, targetId: string,
+) {
+  const materialById = new Map(materials.map((material) => [text(material.id), material]));
+  return sortMaterialsByBinding(materialLinks
+    .filter((link) => text(link.target_type ?? link.targetType) === targetType && text(link.target_id ?? link.targetId) === targetId)
+    .map((link, index) => ({
+      link,
+      id: text(link.material_id ?? link.materialId) || text(link.id) || `link:${index}`,
+      bindingOrder: Number(link.binding_order ?? link.bindingOrder),
+      linkedAt: text(link.bound_at ?? link.boundAt ?? link.created_at ?? link.createdAt) || null,
+    })))
+    .flatMap(({ link }) => {
+      const material = materialById.get(text(link.material_id ?? link.materialId));
+      return material ? [material] : [];
+    });
+}
+
+async function attachReEvaluations(client: Client, issues: Row[]): Promise<Row[]> {
   const issueIds = issues.map((issue) => text(issue.id)).filter(Boolean);
   if (issueIds.length === 0) return issues;
   const reEvaluations = await selectRows(
@@ -51,6 +71,19 @@ async function attachReEvaluations(client: Client, issues: Row[]) {
     ? await selectRows(
       client.from('materials').select('*').in('re_evaluation_id', reEvaluationIds) as unknown as PromiseLike<{ data: Row[] | null; error?: { message?: string } | null }>,
       'Failed to load issue re-evaluation materials',
+    )
+    : [];
+  const reEvaluationLinks = reEvaluationIds.length
+    ? await selectRows(
+      client.from('material_links').select('id, material_id, target_id, binding_order, bound_at, created_at').eq('target_type', 're_evaluation').in('target_id', reEvaluationIds) as unknown as PromiseLike<{ data: Row[] | null; error?: { message?: string } | null }> ,
+      'Failed to load issue re-evaluation material links',
+    )
+    : [];
+  const linkedMaterialIds = [...new Set(reEvaluationLinks.map((link) => text(link.material_id)).filter(Boolean))];
+  const linkedReEvaluationMaterials = linkedMaterialIds.length
+    ? await selectRows(
+      client.from('materials').select('*').in('id', linkedMaterialIds) as unknown as PromiseLike<{ data: Row[] | null; error?: { message?: string } | null }> ,
+      'Failed to load linked issue re-evaluation materials',
     )
     : [];
   const materialsByReEvaluation = new Map<string, Row[]>();
@@ -72,10 +105,13 @@ async function attachReEvaluations(client: Client, issues: Row[]) {
     byIssue.set(key, [...(byIssue.get(key) ?? []), {
       ...item,
       created_by_name: creatorNameById.get(text(item.created_by)) || null,
-      materials: materialsByReEvaluation.get(text(item.id)) ?? [],
+      materials: [
+        ...(materialsByReEvaluation.get(text(item.id)) ?? []),
+        ...linkedMaterialsForTarget(linkedReEvaluationMaterials, reEvaluationLinks, 're_evaluation', text(item.id)),
+      ],
     }]);
   }
-  return issues.map((issue) => ({ ...issue, _reEvaluations: byIssue.get(text(issue.id)) ?? [] }));
+  return issues.map((issue): Row => ({ ...issue, _reEvaluations: byIssue.get(text(issue.id)) ?? [] }));
 }
 
 function firstCreatorName(creator: Row) {
@@ -87,7 +123,7 @@ function firstCreatorName(creator: Row) {
  * only material rows attached to this live issue qualify, and retest material is
  * supplied by attachReEvaluations as a separate typed record.
  */
-export function buildLiveIssueOverlayEvidence(issues: Row[], materials: Row[]) {
+export function buildLiveIssueOverlayEvidence(issues: Row[], materials: Row[], materialLinks: Row[] = []) {
   return Object.fromEntries(issues.map((issue) => {
     const issueId = text(issue.id);
     const ownedRectificationMedia = materials.filter((material) => (
@@ -95,14 +131,15 @@ export function buildLiveIssueOverlayEvidence(issues: Row[], materials: Row[]) {
       && text(material.issue_id) === issueId
       && text(material.re_evaluation_id) === ''
     ));
-    return [issueId, toFrozenMedia(ownedRectificationMedia)];
+    const linkedRectificationMedia = linkedMaterialsForTarget(materials, materialLinks, 'issue', issueId);
+    return [issueId, toFrozenMedia([...ownedRectificationMedia, ...linkedRectificationMedia])];
   }));
 }
 
 export async function buildFrozenReportResponse(
   client: Client,
   report: Row,
-  options: { audience: 'internal' | 'share' },
+  options: { audience: 'internal' | 'share'; actor?: AuthUser },
 ): Promise<{
   model: FrozenReportViewModel;
   detailModel: ReportDetailModel;
@@ -143,15 +180,33 @@ export async function buildFrozenReportResponse(
   ]);
   const issueMap = new Map([...sourceIssues, ...taskIssues].map((issue) => [text(issue.id), issue]));
   const issues = await attachReEvaluations(client, Array.from(issueMap.values()));
+  const issueIds = issues.map((issue) => text(issue.id)).filter(Boolean);
+  const issueMaterialLinks = issueIds.length
+    ? await selectRows(
+      client.from('material_links').select('id, material_id, target_id, binding_order, bound_at, created_at').eq('target_type', 'issue').in('target_id', issueIds) as unknown as PromiseLike<{ data: Row[] | null; error?: { message?: string } | null }> ,
+      'Failed to load issue material links',
+    )
+    : [];
+  const linkedIssueMaterialIds = [...new Set(issueMaterialLinks.map((link) => text(link.material_id)).filter(Boolean))];
+  const issueLinkedMaterials = linkedIssueMaterialIds.length
+    ? await selectRows(
+      client.from('materials').select('*').in('id', linkedIssueMaterialIds) as unknown as PromiseLike<{ data: Row[] | null; error?: { message?: string } | null }> ,
+      'Failed to load linked issue materials',
+    )
+    : [];
+  const allMaterials = [...materials, ...issueLinkedMaterials.filter((linked) => !materials.some((material) => text(material.id) === text(linked.id)))];
   const snapshot = snapshotResult.snapshot;
-  const detailModel = buildReportDetailModel({ report, snapshot, issues, materials, pdfJobs });
+  const detailModel = buildReportDetailModel({ report, snapshot, issues, materials: allMaterials, pdfJobs });
+  const manageableIssueIds = options.actor
+    ? await manageableIssueIdsForActor(client, options.actor, issues)
+    : new Set<string>();
   const model = buildFrozenReportViewModel({
     report,
     taskInfo,
     snapshot,
     snapshotResolution: snapshotResult.resolution,
     issues,
-    issueEvidence: buildLiveIssueOverlayEvidence(issues, materials),
-  }, options);
+    issueEvidence: buildLiveIssueOverlayEvidence(issues, allMaterials, issueMaterialLinks),
+  }, { audience: options.audience, manageableIssueIds });
   return { model, detailModel, snapshot, issues };
 }

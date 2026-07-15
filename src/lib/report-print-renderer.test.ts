@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import type { FrozenReportViewModel } from './report-frozen-view';
-import { buildPrintReportViewModel, pdfProfileForPrintModel, renderPrintReportHtml } from './server/report-print-renderer';
+import { buildPrintReportViewModel, pdfProfileForPrintModel, printReportMedia, renderPrintReportHtml } from './server/report-print-renderer';
 
 const pixel = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
 
@@ -20,22 +20,41 @@ function frozenModel(matrix: FrozenReportViewModel['matrix']): FrozenReportViewM
       stats: { issueCount: 1, sensoryIssueCount: 1, functionIssueCount: 0, comparisonIssueCount: 0, rectificationRate: 0 },
     },
     issues: [{
-      id: 'issue-1', title: 'Frozen issue', details: 'Frozen issue details', level: 'II', sourceType: 'record_fail', sourceKind: 'sensory',
+      id: 'issue-1', canManage: false, title: 'Frozen issue', details: 'Frozen issue details', level: 'II', sourceType: 'record_fail', sourceKind: 'sensory',
       context: { object: '', project: '', item: '' },
       evidence: [{ id: 'issue-image', name: 'issue.jpg', type: 'image', url: pixel }],
       liveOverlay: {
         status: 'rectifying', rectification: 'Replace seal', evidence: [],
         retest: {
-          count: 1,
-          latest: { id: 'reeval-1', result: 'qualified', description: 'Retest passed', createdAt: null, createdBy: null, evidence: [{ id: 'reeval-image', name: 'reeval.jpg', type: 'image', url: pixel }] },
+          count: 3,
+          latest: { id: 'reeval-1', result: 'qualified', description: 'Retest passed', createdAt: '2026-07-15T00:00:00.000Z', createdBy: null, evidence: [{ id: 'reeval-image', name: 'reeval.jpg', type: 'image', url: pixel }] },
+          history: [
+            { id: 'reeval-1', result: 'qualified', description: 'Retest passed', createdAt: '2026-07-15T00:00:00.000Z', createdBy: null, evidence: [{ id: 'reeval-image', name: 'reeval.jpg', type: 'image', url: pixel }] },
+            { id: 'reeval-middle', result: 'unqualified', description: 'Middle retest failed', createdAt: '2026-07-14T00:00:00.000Z', createdBy: 'Tester', evidence: [{ id: 'reeval-middle-image', name: 'reeval-middle.jpg', type: 'image', url: pixel }] },
+            { id: 'reeval-oldest', result: 'unqualified', description: 'Oldest retest failed', createdAt: '2026-07-13T00:00:00.000Z', createdBy: 'Tester', evidence: [{ id: 'reeval-oldest-image', name: 'reeval-oldest.jpg', type: 'image', url: pixel }] },
+          ],
         },
       },
+    }, {
+      id: 'recipe-issue-1', canManage: false, title: 'Juice effect recipe/function effect failed', details: 'Frozen recipe issue details', level: 'I', sourceType: 'recipe_problem', sourceKind: 'function',
+      context: { object: '', project: '', item: '' },
+      recipe: {
+        recipeId: 'effect-1', subjectName: 'Juice effect recipe/function', name: 'Juice effect', formula: 'Apple + water', parameters: null,
+        evaluationStatus: 'qualified', effectScore: '', evaluation: 'Clear and stable', evidence: [{ id: 'recipe-context-media', name: 'recipe-context.jpg', type: 'image', url: pixel }],
+        steps: [{ id: 'historic-step-1', stepNumber: 1, operation: 'Blend', problemPoints: ['Historic frozen step issue'], evidence: [{ id: 'step-image', name: 'step.jpg', type: 'image', url: pixel }] }],
+      },
+      evidence: [{ id: 'recipe-issue-media', name: 'recipe-issue.jpg', type: 'image', url: pixel }],
+      liveOverlay: { status: 'open', rectification: '', evidence: [], retest: { count: 0, latest: null, history: [] } },
     }],
     matrix,
     functionEffects: [{
       recipeId: 'effect-1', subjectName: 'Juice effect食谱', name: 'Juice effect', formula: '', parameters: null, evaluationStatus: 'qualified', effectScore: '', evaluation: 'Clear and stable',
-      evidence: [{ id: 'effect-video', name: 'effect.mp4', type: 'video', url: '/api/materials/file/videos/effect.mp4' }],
-      steps: [],
+      evidence: [
+        { id: 'recipe-context-media', name: 'recipe-context.jpg', type: 'image', url: pixel },
+        { id: 'recipe-issue-media', name: 'recipe-issue.jpg', type: 'image', url: pixel },
+        { id: 'effect-video', name: 'effect.mp4', type: 'video', url: '/api/materials/file/videos/effect.mp4' },
+      ],
+      steps: [{ id: 'historic-step-1', stepNumber: 1, operation: 'Blend', problemPoints: ['Historic frozen step issue'], evidence: [{ id: 'step-image', name: 'step.jpg', type: 'image', url: pixel }] }],
     }],
     capabilities: { canManageIssues: false, canShare: false, canExport: true },
   };
@@ -70,9 +89,20 @@ const v3 = frozenModel({
   },
 });
 
+const dataMatrixOnly = frozenModel(null);
+dataMatrixOnly.dataMatrix = v3.matrix;
+const dataMatrixOnlyPrint = buildPrintReportViewModel(dataMatrixOnly);
+assert.equal(dataMatrixOnlyPrint.matrix?.kind, 'data_v3', 'a frozen data matrix stored on dataMatrix must be printed');
+assert.equal(dataMatrixOnlyPrint.matrix?.kind === 'data_v3' ? dataMatrixOnlyPrint.matrix.rows.length : 0, 1);
+assert.equal(
+  dataMatrixOnlyPrint.matrix?.kind === 'data_v3' ? dataMatrixOnlyPrint.matrix.rows[0]?.media[0]?.posterUrl : undefined,
+  '/api/materials/poster/v3-video',
+  'data matrix videos must derive a printable poster before browser/PDF asset preparation',
+);
+
 for (const [model, expected] of [
-  [v2, ['V2 Juice Matrix', 'Apple group / Sample A', 'Yield', '0 %', 'v2.jpg']],
-  [v3, ['V3 Juice Matrix', 'Use effect / Juice output / Apple', 'Temperature', '0 C', 'Clear', 'v3.mp4']],
+  [v2, ['V2 Juice Matrix', 'Apple group', 'Sample A', 'Yield', '0 %', 'v2.jpg']],
+  [v3, ['V3 Juice Matrix', 'Use effect', 'Juice output', 'Apple', 'Temperature', '0 C', 'Clear', 'v3.mp4']],
 ] as const) {
   const before = JSON.stringify(model);
   const projected = buildPrintReportViewModel(model);
@@ -90,6 +120,28 @@ for (const [model, expected] of [
   assert.doesNotMatch(html, /\bcontrols\b/i);
 }
 
+const singleRecipeHtml = renderPrintReportHtml(buildPrintReportViewModel(v2));
+const latestRetestIndex = singleRecipeHtml.indexOf('Retest passed');
+const oldestRetestIndex = singleRecipeHtml.indexOf('Oldest retest failed');
+const middleRetestIndex = singleRecipeHtml.indexOf('Middle retest failed');
+assert.equal(latestRetestIndex >= 0 && latestRetestIndex < oldestRetestIndex, true, 'print/PDF pins the latest retest above history');
+assert.equal(oldestRetestIndex < middleRetestIndex, true, 'older print/PDF history is chronological from oldest to newest');
+assert.match(singleRecipeHtml, /2026-07-13T00:00:00\.000Z/, 'print/PDF keeps compact retest timestamps');
+const printMediaIds = printReportMedia(buildPrintReportViewModel(v2)).map((item) => item.id);
+assert.equal(printMediaIds.includes('reeval-oldest-image'), true, 'print asset preparation includes oldest retest evidence');
+assert.equal(printMediaIds.includes('reeval-middle-image'), true, 'print asset preparation includes intermediate retest evidence');
+for (const expectedText of ['判断：合格', '食谱效果评价', 'Historic frozen step issue', '问题点', 'recipe-issue.jpg']) {
+  assert.equal(singleRecipeHtml.includes(expectedText), true, `single recipe print list is missing ${expectedText}`);
+}
+assert.equal(printReportMedia(buildPrintReportViewModel(v2)).some((item) => item.id === 'recipe-context-media'), true, 'recipe issue context media must be included in print media preparation');
+assert.equal(printReportMedia(buildPrintReportViewModel(v2)).filter((item) => item.id === 'recipe-context-media').length, 1, 'recipe context media enters print preparation exactly once');
+assert.equal(printReportMedia(buildPrintReportViewModel(v2)).filter((item) => item.id === 'recipe-issue-media').length, 1, 'explicit issue media enters print preparation exactly once');
+assert.equal((singleRecipeHtml.match(/data-media-id="recipe-context-media"/g) ?? []).length, 1, 'recipe context media appears in print HTML exactly once across issue and function sections');
+assert.equal(singleRecipeHtml.includes('recipe-issue.jpg'), true, 'explicit issue evidence remains visible in print HTML');
+assert.match(singleRecipeHtml, /data-print-issue-meta/, 'print issue rows must keep level, source, description, and status as separate metadata units');
+assert.match(singleRecipeHtml, /data-print-issue-status/, 'print issue rows must expose a dedicated rectification-status unit');
+assert.doesNotMatch(singleRecipeHtml, /class="function-issues"/, 'function effect print must not repeat the issue list after the single recipe entry');
+
 const comparison = frozenModel({
   kind: 'comparison',
   snapshot: {
@@ -97,6 +149,7 @@ const comparison = frozenModel({
     item_nodes: [
       { id: 'parent-c', node_type: 'section', node_label: 'Effect' },
       { id: 'row-c', node_type: 'metric', node_label: 'Juice quality', parent_id: 'parent-c' },
+      { id: 'summary-c', node_type: 'summary', node_label: '本大类小结', parent_id: 'parent-c', config: { summary_text: '稳定性小结' } },
     ],
     cells: [
       {
@@ -112,15 +165,33 @@ const comparison = frozenModel({
     ],
   },
 });
-assert.equal(buildPrintReportViewModel(v2).page.orientation, 'portrait');
-assert.equal(buildPrintReportViewModel(v3).page.orientation, 'portrait');
-assert.deepEqual(buildPrintReportViewModel(comparison).page, { paper: 'A4', orientation: 'portrait' });
+comparison.issues.push({
+  ...comparison.issues[0]!,
+  id: 'comparison-source-issue',
+  title: 'Comparison matrix issue',
+  details: 'Foam comparison issue',
+  sourceType: 'recipe_problem',
+  sourceKind: 'comparison',
+});
+const comparisonWithDataMatrix = frozenModel(comparison.matrix);
+comparisonWithDataMatrix.dataMatrix = v3.matrix;
+assert.equal(
+  renderPrintReportHtml(buildPrintReportViewModel(comparisonWithDataMatrix)).includes('V3 Juice Matrix'),
+  true,
+  'a report with both frozen matrices must print the data matrix after its comparison matrix',
+);
+assert.deepEqual(buildPrintReportViewModel(v2).page, { paper: 'A4', orientation: 'landscape' });
+assert.deepEqual(buildPrintReportViewModel(v3).page, { paper: 'A4', orientation: 'landscape' });
+assert.deepEqual(buildPrintReportViewModel(comparison).page, { paper: 'A4', orientation: 'landscape' });
 const comparisonPrint = buildPrintReportViewModel(comparison);
-assert.equal(comparisonPrint.matrix?.kind === 'comparison' ? comparisonPrint.matrix.rows[0]?.cells.a.media.length : 0, 2, 'same id or URL deduplicates while different id/URL with the same name remains');
-assert.equal(comparisonPrint.matrix?.kind === 'comparison' ? comparisonPrint.matrix.rows[0]?.cells.a.value : '', '72.1%');
-assert.equal(comparisonPrint.matrix?.kind === 'comparison' ? (comparisonPrint.matrix.rows[0]?.cells.a as { score?: string }).score : '', '8');
+const comparisonItem = comparisonPrint.matrix?.kind === 'comparison' ? comparisonPrint.matrix.rows.find((row) => row.rowKind === 'item') : undefined;
+assert.equal(comparisonItem?.cells.a.media.length, 3, 'stable media identity uses id first; URL is the fallback only when id is absent');
+assert.equal(comparisonItem?.cells.a.value, '72.1%');
+assert.equal(comparisonItem?.cells.a.score, '8');
+assert.equal(comparisonPrint.matrix?.kind === 'comparison' ? comparisonPrint.matrix.rows.find((row) => row.rowKind === 'summary')?.summaryText : '', '稳定性小结');
 const comparisonHtml = renderPrintReportHtml(comparisonPrint);
-for (const expectedText of ['Comparison Matrix', 'Effect / Juice quality', '72.1%', '评分：</b>8', 'Fast cycle', 'Foam', 'comparison.mp4', '/api/materials/poster/videos/comparison.mp4']) {
+assert.match(comparisonHtml, /食谱\/功能-对比矩阵/);
+for (const expectedText of ['Comparison Matrix', 'Effect', 'Juice quality', '本大类小结', '稳定性小结', '72.1%', '评分：</b>8', 'Fast cycle', 'Foam', 'comparison.mp4', '/api/materials/poster/videos/comparison.mp4']) {
   assert.equal(comparisonHtml.includes(expectedText), true, `missing comparison ${expectedText}`);
 }
 assert.match(comparisonHtml, /<img[^>]+data-video-poster/);
@@ -137,8 +208,8 @@ const tallNarrowComparison = frozenModel({
   },
 });
 const tallNarrowPrint = buildPrintReportViewModel(tallNarrowComparison);
-assert.deepEqual(tallNarrowPrint.page, { paper: 'A4', orientation: 'portrait' });
-assert.equal(pdfProfileForPrintModel(tallNarrowPrint).id, 'comparison_a4_portrait');
+assert.deepEqual(tallNarrowPrint.page, { paper: 'A4', orientation: 'landscape' });
+assert.equal(pdfProfileForPrintModel(tallNarrowPrint).id, 'comparison_a4_landscape');
 
 const threeShortObjects = frozenModel({
   kind: 'comparison',
@@ -149,7 +220,7 @@ const threeShortObjects = frozenModel({
     cells: [],
   },
 });
-assert.deepEqual(buildPrintReportViewModel(threeShortObjects).page, { paper: 'A4', orientation: 'portrait' });
+assert.deepEqual(buildPrintReportViewModel(threeShortObjects).page, { paper: 'A4', orientation: 'landscape' });
 
 const wideComparison = frozenModel({
   kind: 'comparison',
@@ -161,8 +232,8 @@ const wideComparison = frozenModel({
   },
 });
 const widePrint = buildPrintReportViewModel(wideComparison);
-assert.deepEqual(widePrint.page, { paper: 'A3', orientation: 'landscape' });
-assert.equal(pdfProfileForPrintModel(widePrint).id, 'comparison_a3_landscape');
+assert.deepEqual(widePrint.page, { paper: 'A4', orientation: 'landscape' });
+assert.equal(pdfProfileForPrintModel(widePrint).id, 'comparison_a4_landscape');
 const anchoredComparison = frozenModel({
   kind: 'comparison',
   snapshot: {
@@ -175,11 +246,47 @@ const anchoredComparison = frozenModel({
 });
 assert.deepEqual(
   buildPrintReportViewModel(anchoredComparison).page,
-  { paper: 'A3', orientation: 'landscape' },
+  { paper: 'A4', orientation: 'landscape' },
   'an explicit frozen comparison layout remains authoritative for browser and server PDF output',
 );
 const v2Html = renderPrintReportHtml(buildPrintReportViewModel(v2));
 assert.equal(v2Html.includes('问题 2 个'), true);
 assert.equal(v2Html.includes('II'), true);
+assert.match(v2Html, /class="data-matrix-table"/, 'data matrix prints as one complete table rather than row cards');
+assert.doesNotMatch(v2Html, /class="paper-fields"/, 'data matrix print should not split fields into card grids');
+
+const mislabeledVideo = frozenModel(null);
+mislabeledVideo.functionEffects[0]!.evidence = [{
+  id: 'historical-mislabeled-video',
+  name: '2026071509465601.mp4',
+  type: 'image',
+  url: '/api/materials/file/materials/task-1/2026071509465601.mp4',
+}];
+const mislabeledVideoPrint = buildPrintReportViewModel(mislabeledVideo);
+const normalizedHistoricalVideo = printReportMedia(mislabeledVideoPrint).find((item) => item.id === 'historical-mislabeled-video')!;
+assert.equal(normalizedHistoricalVideo.type, 'video', 'a historical MP4 must be normalized as video even when its stored material_type says image');
+assert.equal(
+  normalizedHistoricalVideo.posterUrl,
+  '/api/materials/poster/materials/task-1/2026071509465601.mp4',
+  'a historical MP4 must use the poster derivative in print/PDF output',
+);
+assert.doesNotMatch(
+  renderPrintReportHtml(mislabeledVideoPrint),
+  /<img(?![^>]*data-video-poster)[^>]+src="[^"]*\.mp4/i,
+  'print/PDF must never render a video file URL as a regular image',
+);
+
+const absoluteVideo = frozenModel(null);
+absoluteVideo.functionEffects[0]!.evidence = [{
+  id: 'absolute-video',
+  name: 'absolute.mp4',
+  type: 'image',
+  url: 'http://localhost:5000/api/materials/file/materials/task-1/absolute.mp4?token=signed',
+}];
+assert.equal(
+  printReportMedia(buildPrintReportViewModel(absoluteVideo)).find((item) => item.id === 'absolute-video')!.posterUrl,
+  '/api/materials/poster/materials/task-1/absolute.mp4',
+  'an absolute application media URL must still resolve to the local poster derivative',
+);
 
 console.log('report print renderer tests passed');

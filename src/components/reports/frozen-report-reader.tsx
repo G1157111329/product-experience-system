@@ -2,7 +2,7 @@
 
 import React, { useEffect, useId, useMemo, useState } from 'react';
 import { evaluationStatusLabel } from '@/lib/evaluation-status';
-import type { FrozenMedia, FrozenRecipeContext, FrozenReportViewModel } from '@/lib/report-frozen-view';
+import { excludeClaimedRecipeMediaFromEffects, type FrozenIssue, type FrozenMedia, type FrozenRecipeContext, type FrozenReportViewModel } from '@/lib/report-frozen-view';
 import type { ReportFrozenTabKey } from '@/lib/report-frozen-tabs';
 import { ReportTabBar } from '@/app/(main)/reports/[id]/components/report-tab-bar';
 import { ReportMatrixTab, type MatrixData } from '@/app/(main)/reports/[id]/components/report-matrix-tab';
@@ -32,14 +32,22 @@ export function orderedFrozenModels(
   primary: FrozenReportViewModel,
   siblingReports: Array<{ id: string }> = [],
   siblingFrozenViewModels: Record<string, FrozenReportViewModel> = {},
+  mergedReportOrder: string[] = [],
 ) {
-  const seen = new Set([primary.header.id]);
-  return [primary, ...siblingReports.flatMap((report) => {
-    const model = siblingFrozenViewModels[report.id];
+  const byId = new Map<string, FrozenReportViewModel>([
+    [primary.header.id, primary],
+    ...Object.entries(siblingFrozenViewModels),
+  ]);
+  const orderedIds = mergedReportOrder.length > 0
+    ? mergedReportOrder
+    : [primary.header.id, ...siblingReports.map((report) => report.id)];
+  const seen = new Set<string>();
+  return orderedIds.flatMap((id) => {
+    const model = byId.get(id);
     if (!model || seen.has(model.header.id)) return [];
     seen.add(model.header.id);
     return [model];
-  })];
+  });
 }
 
 function stableHash(value: string) {
@@ -69,22 +77,46 @@ function MediaList({ items, role, label, carrierKey }: { items: FrozenMedia[]; r
 }
 
 function issueStatusLabel(status: string) {
-  return ({ open: '待整改', rectifying: '整改中', verified_closed: '整改完成', waived: '不整改' }[status] ?? status);
+  return ({ open: '\u5f85\u6574\u6539', rectifying: '\u6574\u6539\u4e2d', verified_closed: '\u5df2\u6574\u6539', waived: '\u4e0d\u6574\u6539' }[status] ?? status);
 }
-
 function issueSourceLabel(kind: FrozenReportViewModel['issues'][number]['sourceKind']) {
-  return ({ sensory: '五感体验', function: '食谱/功能', comparison: '对比项', matrix: '数据矩阵' }[kind]);
+  return ({ sensory: '\u4e94\u611f\u4f53\u9a8c', function: '\u98df\u8c31/\u529f\u80fd', comparison: '\u98df\u8c31/\u529f\u80fd-\u5bf9\u6bd4\u77e9\u9635', matrix: '\u6570\u636e\u77e9\u9635' }[kind]);
 }
 
 function IssueContextLines({ issue }: { issue: FrozenReportViewModel['issues'][number] }) {
-  const lines = [
-    ['对象', issue.context.object],
-    ['项目', issue.context.project],
-    ['细项', issue.context.item],
-  ].filter((line): line is [string, string] => Boolean(line[1]));
-  return lines.length > 0 ? <div className="space-y-1 text-sm text-muted-foreground">
-    {lines.map(([label, value]) => <p key={label}><span className="font-medium text-foreground">{label}：</span>{value}</p>)}
-  </div> : null;
+  const context = issue.context ?? { object: '', project: '', item: '' };
+  const lines = issue.sourceKind === 'sensory'
+    ? [
+      ['\u68c0\u9a8c\u6807\u51c6\u7c7b\u578b', context.standardType],
+      ['\u68c0\u9a8c\u8981\u6c42\u53ca\u8303\u56f4', context.inspectionRange],
+      ['\u68c0\u67e5\u6807\u51c6', context.inspectionStandard],
+      ['\u63cf\u8ff0\u68c0\u67e5\u9879\u5185\u5bb9', context.nonStandardContent],
+      ['\u68c0\u67e5\u7ed3\u679c', context.checkResult],
+    ]
+    : issue.sourceKind === 'matrix'
+      ? [
+        ['\u4e00\u7ea7\u5927\u7c7b', context.primaryCategory],
+        ['\u4e8c\u7ea7\u7ec6\u9879/\u4e09\u7ea7\u7ec6\u9879', context.secondaryDetail],
+        ['\u5bf9\u6bd4\u7ef4\u5ea6', context.comparisonDimension],
+        ['\u95ee\u9898', issue.details || issue.title],
+      ]
+      : issue.sourceKind === 'comparison' ? [
+        ['\u5bf9\u8c61', context.object],
+        ['\u9879\u76ee', context.project],
+        ['\u7ec6\u9879', context.item],
+        ['\u95ee\u9898', issue.details || issue.title],
+      ] : [];
+  const visible = lines.filter((line): line is [string, string] => Boolean(line[1]));
+  return visible.length > 0 ? (
+    <div className="space-y-1.5 border-l-2 border-primary/35 bg-muted/20 px-3 py-2 text-sm leading-6 text-muted-foreground">
+      {visible.map(([label, value]) => (
+        <p key={label}>
+          <span className="font-medium text-foreground">{label}：</span>
+          {value}
+        </p>
+      ))}
+    </div>
+  ) : null;
 }
 
 function RecipeIssueFacts({ recipe, carrierKey }: { recipe: FrozenRecipeContext; carrierKey: string }) {
@@ -112,12 +144,14 @@ function RecipeIssueFacts({ recipe, carrierKey }: { recipe: FrozenRecipeContext;
       <p className="font-medium">食谱效果评价</p>
       <p className="mt-1 text-muted-foreground">整体判断：{evaluationStatusLabel(recipe.evaluationStatus)}</p>
       {recipe.evaluation && <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{recipe.evaluation}</p>}
-      <div className="mt-2"><MediaList items={recipe.evidence} role="primary" label="素材" carrierKey={carrierKey} /></div>
+      <div className="mt-2"><MediaList items={recipe.evidence} role="evidence" label="素材" carrierKey={carrierKey} /></div>
     </div>
   </div>;
 }
 
-function FrozenPanel({ model, active }: { model: FrozenReportViewModel; active: ReportFrozenTabKey }) {
+function FrozenPanel({ model, active, onManageIssue }: { model: FrozenReportViewModel; active: ReportFrozenTabKey; onManageIssue?: (issue: FrozenIssue) => void }) {
+  const [expandedIssueIds, setExpandedIssueIds] = useState<Set<string>>(() => new Set());
+  const visibleFunctionEffects = excludeClaimedRecipeMediaFromEffects(model.functionEffects, model.issues);
   if (active === 'summary') {
     return <ReportSummaryTab data={{
       aiSummary: model.summary.aiSummary,
@@ -131,31 +165,56 @@ function FrozenPanel({ model, active }: { model: FrozenReportViewModel; active: 
       <div className="space-y-4">
         {model.issues.map((issue) => {
           const latest = issue.liveOverlay.retest.latest;
+          const olderRetests = issue.liveOverlay.retest.history.slice(1);
           const rectified = issue.liveOverlay.status === 'verified_closed';
-          return <details key={issue.id} data-content-id={`issue:${issue.id}`} className="rounded-lg border p-4">
-            <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 marker:hidden">
-              {issue.level && <span className="rounded border px-1.5 py-0.5 text-xs text-muted-foreground">{issue.level}</span>}
-              <span className="rounded border border-primary/30 bg-primary/5 px-1.5 py-0.5 text-xs text-primary">{issueSourceLabel(issue.sourceKind)}</span>
-              <span className="min-w-0 flex-1 font-medium">{issue.title}</span>
-              {issue.liveOverlay.status && <span className="text-sm text-muted-foreground">{issueStatusLabel(issue.liveOverlay.status)}</span>}
-            </summary>
-            <div className="mt-4 space-y-4">
+          const expanded = expandedIssueIds.has(issue.id);
+          const StatusElement = issue.canManage && issue.liveIssueId && onManageIssue ? 'button' : 'span';
+          const statusActionProps = issue.canManage && issue.liveIssueId && onManageIssue ? {
+            type: 'button' as const,
+            'data-testid': 'report-issue-status-action',
+            'aria-label': `打开问题整改：${issue.title}`,
+            onClick: () => onManageIssue(issue),
+          } : {};
+          return <article key={issue.id} data-content-id={`issue:${issue.id}`} data-expanded={expanded} className="rounded-lg border p-4">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                data-testid="report-issue-toggle"
+                data-issue-header="true"
+                aria-expanded={expanded}
+                aria-controls={`issue-detail-${issue.id}`}
+                className="grid min-w-0 flex-1 grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-2 text-left"
+                onClick={() => setExpandedIssueIds((current) => {
+                  const next = new Set(current);
+                  if (next.has(issue.id)) next.delete(issue.id); else next.add(issue.id);
+                  return next;
+                })}
+              >
+                <span data-issue-field="level" className="inline-flex shrink-0 items-center rounded border px-1.5 py-0.5 text-xs leading-5 text-muted-foreground">{issue.level || '—'}</span>
+                <span data-issue-field="source" className="inline-flex shrink-0 items-center rounded border border-primary/30 bg-primary/5 px-1.5 py-0.5 text-xs leading-5 text-primary">{issueSourceLabel(issue.sourceKind)}</span>
+                <span data-issue-field="description" className="min-w-0 break-words font-medium leading-6">{issue.title}</span>
+              </button>
+              <StatusElement
+                {...statusActionProps}
+                data-issue-field="status"
+                className="inline-flex min-h-11 shrink-0 items-center justify-center rounded px-3 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {issueStatusLabel(issue.liveOverlay.status || 'open')}
+              </StatusElement>
+            </div>
+            {expanded && <div id={`issue-detail-${issue.id}`} className="mt-4 space-y-4">
               <IssueContextLines issue={issue} />
               {issue.recipe ? <>
                 <RecipeIssueFacts recipe={issue.recipe} carrierKey={model.header.id} />
-                <div className="border-t pt-3 text-sm">
-                  <p className="whitespace-pre-wrap text-muted-foreground"><span className="font-medium text-foreground">问题：</span>{issue.details || issue.title}</p>
-                  <div className="mt-2"><MediaList items={issue.evidence} role="appendix" label="素材" carrierKey={model.header.id} /></div>
-                </div>
+                <MediaList items={issue.evidence} role="evidence" label="问题证据" carrierKey={model.header.id} />
               </> : <>
-                <p className="whitespace-pre-wrap text-sm text-muted-foreground"><span className="font-medium text-foreground">问题：</span>{issue.details || issue.title}</p>
-                <MediaList items={issue.evidence} role="appendix" label="素材" carrierKey={model.header.id} />
+                <MediaList items={issue.evidence} role="evidence" label="问题证据" carrierKey={model.header.id} />
               </>}
               {rectified && (issue.liveOverlay.rectification || issue.liveOverlay.evidence.length > 0) && (
                 <div className="rounded-md bg-muted/40 p-3 text-sm">
                   <p className="font-medium">整改效果评价</p>
                   {issue.liveOverlay.rectification && <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{issue.liveOverlay.rectification}</p>}
-                  <div className="mt-2"><MediaList items={issue.liveOverlay.evidence} role="appendix" label="整改素材" carrierKey={model.header.id} /></div>
+                  <div className="mt-2"><MediaList items={issue.liveOverlay.evidence} role="evidence" label="整改证据" carrierKey={model.header.id} /></div>
                 </div>
               )}
               {latest && (
@@ -165,29 +224,51 @@ function FrozenPanel({ model, active }: { model: FrozenReportViewModel; active: 
                     <p>结果：{evaluationStatusLabel(latest.result)}</p>
                     {latest.description && <p className="mt-1 whitespace-pre-wrap">{latest.description}</p>}
                     {(latest.createdAt || latest.createdBy) && <p className="mt-1 text-xs">{[latest.createdAt, latest.createdBy].filter(Boolean).join(' · ')}</p>}
-                    <div className="mt-2"><MediaList items={latest.evidence} role="appendix" label="复测素材" carrierKey={model.header.id} /></div>
+                    <div className="mt-2"><MediaList items={latest.evidence} role="evidence" label="复测证据" carrierKey={model.header.id} /></div>
                   </div>
+                  {olderRetests.length > 0 && (
+                    <details className="rounded-md border bg-background px-3 py-2">
+                      <summary className="cursor-pointer font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">历史复测（{olderRetests.length}）</summary>
+                      <ol className="mt-3 space-y-3 border-t pt-3">
+                        {olderRetests.map((retest) => (
+                          <li key={retest.id} data-content-id={`re-evaluation:${retest.id}`} className="rounded-md bg-muted/20 p-3 text-muted-foreground">
+                            <p>结果：{evaluationStatusLabel(retest.result)}</p>
+                            {retest.description && <p className="mt-1 whitespace-pre-wrap">{retest.description}</p>}
+                            {(retest.createdAt || retest.createdBy) && <p className="mt-1 text-xs">{[retest.createdAt, retest.createdBy].filter(Boolean).join(' · ')}</p>}
+                            <div className="mt-2"><MediaList items={retest.evidence} role="evidence" label="复测证据" carrierKey={model.header.id} /></div>
+                          </li>
+                        ))}
+                      </ol>
+                    </details>
+                  )}
                   {issue.liveOverlay.retest.count >= 2 && <p className="text-muted-foreground">整改复测记录数：{issue.liveOverlay.retest.count}</p>}
                 </div>
               )}
-            </div>
-          </details>;
+              {onManageIssue && !issue.liveIssueId && <p className="rounded-md bg-muted/40 p-3 text-sm text-muted-foreground">关联缺失，无法进入整改</p>}
+            </div>}
+          </article>;
         })}
       </div>
     ) : <p data-content-id="issues-empty" className="text-sm text-muted-foreground">暂无问题</p>;
   }
   if (active === 'function_effect') {
     return (
-      <div className="space-y-4">
-        {model.functionEffects.map((effect) => {
-          const relatedIssues = model.issues.filter((issue) => issue.recipe?.recipeId === effect.recipeId);
-          return <article key={effect.recipeId} data-content-id={`function:${effect.recipeId}`} className="space-y-3 rounded-lg border p-4">
-            <div className="flex flex-wrap items-center gap-2"><h3 className="font-medium">{effect.name}</h3><span className="rounded border px-1.5 py-0.5 text-xs text-muted-foreground">步骤数：{effect.steps.length}</span>{effect.effectScore && <span className="rounded border px-1.5 py-0.5 text-xs text-muted-foreground">效果评分：{effect.effectScore}</span>}<span className="rounded border px-1.5 py-0.5 text-xs text-muted-foreground">问题点数量：{relatedIssues.length}</span></div>
-            {effect.formula && <p className="text-sm text-muted-foreground"><span className="font-medium text-foreground">食谱/食材：</span>{effect.formula}</p>}
-            {effect.parameters && <p className="text-sm text-muted-foreground"><span className="font-medium text-foreground">食谱参数：</span>{typeof effect.parameters === 'string' ? effect.parameters : Object.entries(effect.parameters).map(([key, value]) => `${key}：${String(value)}`).join('；')}</p>}
-            <div className="border-t pt-3"><p className="font-medium text-sm">效果评价</p><p className="mt-1 text-sm text-muted-foreground">整体判断：{evaluationStatusLabel(effect.evaluationStatus)}</p>{effect.evaluation && <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{effect.evaluation}</p>}<div className="mt-2"><MediaList items={effect.evidence} role="primary" label="素材" carrierKey={model.header.id} /></div></div>
-            {effect.steps.length > 0 && <details className="rounded-md border px-3 py-2"><summary className="cursor-pointer font-medium text-sm">食谱步骤：{effect.steps.length}步</summary><ol className="mt-3 space-y-2 border-t pt-3">{effect.steps.map((item, index) => <li key={item.id} data-content-id={`function-step:${item.id}`} className="space-y-2 text-sm"><div><span className="font-medium">步骤 {String(item.stepNumber ?? index + 1)}</span>{item.operation && <span className="ml-2 text-muted-foreground">{item.operation}</span>}</div>{item.problemPoints.length > 0 && <p className="whitespace-pre-wrap text-muted-foreground">步骤问题点：{item.problemPoints.join('；')}</p>}<MediaList items={item.evidence} role="evidence" label="素材" carrierKey={model.header.id} /></li>)}</ol></details>}
-            {relatedIssues.length > 0 && <div className="border-t pt-3 text-sm"><p className="font-medium">问题点</p>{relatedIssues.map((issue) => <div key={issue.id} className="mt-2 rounded-md bg-muted/30 p-3"><p className="whitespace-pre-wrap text-muted-foreground">{issue.details || issue.title}</p><MediaList items={issue.evidence} role="appendix" label="素材" carrierKey={model.header.id} /></div>)}</div>}
+      <div className="space-y-3">
+        {visibleFunctionEffects.map((effect) => {
+          const problemCount = model.issues.filter((issue) => issue.recipe?.recipeId === effect.recipeId).length;
+          return <article key={effect.recipeId} data-content-id={`function:${effect.recipeId}`} className="overflow-hidden rounded-lg border bg-background shadow-sm">
+            <div data-testid="function-effect-preview" className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/25 px-4 py-3">
+              <h3 className="font-semibold text-foreground">{effect.name}</h3>
+              <div className="flex flex-wrap items-center gap-1.5"><span className="rounded border bg-background px-2 py-1 text-xs text-muted-foreground">步骤数：{effect.steps.length}</span><span className="rounded border bg-background px-2 py-1 text-xs text-muted-foreground">整体判断：{evaluationStatusLabel(effect.evaluationStatus)}</span><span className="rounded border bg-background px-2 py-1 text-xs text-muted-foreground">问题点数量：{problemCount}</span></div>
+            </div>
+            <div className="space-y-3 px-4 py-3">
+              {(effect.formula || effect.parameters) && <div className="grid gap-1.5 text-sm text-muted-foreground sm:grid-cols-2">
+                {effect.formula && <p><span className="font-medium text-foreground">食谱/食材：</span>{effect.formula}</p>}
+                {effect.parameters && <p><span className="font-medium text-foreground">食谱参数：</span>{typeof effect.parameters === 'string' ? effect.parameters : Object.entries(effect.parameters).map(([key, value]) => `${key}：${String(value)}`).join('；')}</p>}
+              </div>}
+              <div className="border-t pt-3"><p className="text-sm font-semibold">效果评价</p><p className="mt-1 text-sm text-muted-foreground">整体判断：{evaluationStatusLabel(effect.evaluationStatus)}</p>{effect.evaluation && <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{effect.evaluation}</p>}<div className="mt-2"><MediaList items={effect.evidence} role="evidence" label="素材" carrierKey={model.header.id} /></div></div>
+              {effect.steps.length > 0 && <details className="rounded-md border bg-muted/10 px-3 py-2"><summary className="cursor-pointer text-sm font-medium">食谱步骤：{effect.steps.length}步</summary><ol className="mt-3 space-y-3 border-t pt-3">{effect.steps.map((item, index) => <li key={item.id} data-content-id={`function-step:${item.id}`} className="space-y-2 text-sm"><div><span className="font-medium">步骤 {String(item.stepNumber ?? index + 1)}</span>{item.operation && <span className="ml-2 text-muted-foreground">{item.operation}</span>}</div>{item.problemPoints.length > 0 && <p className="whitespace-pre-wrap text-muted-foreground">步骤问题点：{item.problemPoints.join('；')}</p>}<MediaList items={item.evidence} role="evidence" label="素材" carrierKey={model.header.id} /></li>)}</ol></details>}
+            </div>
           </article>;
         })}
       </div>
@@ -201,7 +282,7 @@ function FrozenPanel({ model, active }: { model: FrozenReportViewModel; active: 
   return <div data-content-id={`matrix:${model.header.id}`}><ReportMatrixTab data={matrixData} /></div>;
 }
 
-export function FrozenReportReader({ model, instanceId }: { model: FrozenReportViewModel; instanceId?: string }) {
+export function FrozenReportReader({ model, instanceId, onManageIssue }: { model: FrozenReportViewModel; instanceId?: string; onManageIssue?: (issue: FrozenIssue) => void }) {
   const reactId = useId();
   const domPrefix = frozenReaderDomPrefix(model.header.id, instanceId ?? reactId);
   const tabSignature = model.tabs.join('|');
@@ -227,7 +308,7 @@ export function FrozenReportReader({ model, instanceId }: { model: FrozenReportV
           hidden={active !== key}
           className="min-h-[320px] p-4 sm:p-6"
         >
-          {active === key && <FrozenPanel model={model} active={key} />}
+          {active === key && <FrozenPanel model={model} active={key} onManageIssue={onManageIssue} />}
         </div>
       ))}
     </section>

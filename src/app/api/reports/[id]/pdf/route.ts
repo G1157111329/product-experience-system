@@ -12,6 +12,7 @@ import {
 } from '@/lib/server/report-print-renderer';
 import { buildReportFilename } from '@/lib/report-filename';
 import { posterStorageKey, signedPosterUrl } from '@/lib/print-assets';
+import { reportSnapshotErrorStatus } from '@/lib/server/report-snapshots';
 
 type Row = Record<string, unknown>;
 
@@ -108,7 +109,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const access = await resolveAuthorizedReport(request, client, reportId);
   if (access.response) return access.response;
   const report = access.report!;
-  const frozen = await buildFrozenReportResponse(client, report, { audience: access.user ? 'internal' : 'share' });
+  let frozen: Awaited<ReturnType<typeof buildFrozenReportResponse>>;
+  try {
+    frozen = await buildFrozenReportResponse(client, report, { audience: access.user ? 'internal' : 'share', actor: access.user ?? undefined });
+  } catch (snapshotError) {
+    return NextResponse.json({
+      code: 1,
+      message: snapshotError instanceof Error ? snapshotError.message : 'Report snapshot integrity error',
+    }, { status: reportSnapshotErrorStatus(snapshotError) });
+  }
   const printModel = buildPrintReportViewModel(frozen.model);
   const delivery = frozen.detailModel.printDelivery;
   const actualProfile = pdfProfileForPrintModel(printModel);

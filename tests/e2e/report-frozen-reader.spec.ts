@@ -2,12 +2,12 @@ import { test, expect } from '@playwright/test';
 import { loginForE2E } from './auth-session';
 
 async function openIssueDetails(page: import('@playwright/test').Page, issueId: string) {
-  const issue = page.locator(`details[data-content-id="issue:${issueId}"]`);
+  const issue = page.locator(`[data-content-id="issue:${issueId}"]`);
   await expect(issue).toBeVisible();
-  if (!await issue.evaluate((element: HTMLDetailsElement) => element.open)) {
-    await issue.locator('summary').click();
+  if (await issue.getAttribute('data-expanded') !== 'true') {
+    await issue.getByTestId('report-issue-toggle').click();
   }
-  await expect(issue).toHaveAttribute('open', '');
+  await expect(issue).toHaveAttribute('data-expanded', 'true');
   return issue;
 }
 
@@ -50,6 +50,104 @@ test('detail and anonymous share expose equivalent frozen reader content', async
   }
 });
 
+test('report issue status opens the rectification dialog without a tab divider', async ({ page }) => {
+  await loginForE2E(page, 'dockeradmin', 'DockerLocal2026');
+  const model = {
+    snapshotResolution: 'anchored',
+    header: { id: 'clickable-status', title: 'Clickable status report', reportType: 'single_report', status: 'published', productModel: null },
+    tabs: ['summary', 'issues'],
+    summary: { text: 'Summary', aiSummary: null },
+    issues: [{
+      id: 'frozen-issue',
+      liveIssueId: 'live-issue',
+      canManage: true,
+      sourceKind: 'sensory',
+      title: 'Status action issue',
+      details: 'Issue detail',
+      level: '二类',
+      sourceType: 'record_fail',
+      evidence: [],
+      liveOverlay: { status: 'open', rectification: '', evidence: [], retest: { count: 0, latest: null, history: [] } },
+    }],
+    matrix: null,
+    functionEffects: [],
+    capabilities: { canManageIssues: true, canShare: false, canExport: true },
+  };
+  await page.route('**/api/reports/clickable-status/detail', (route) => route.fulfill({ json: { code: 0, data: { frozenViewModel: model } } }));
+  await page.route('**/api/issues/live-issue', (route) => route.fulfill({ json: { code: 0, data: {
+    id: 'live-issue', title: 'Status action issue', description: 'Issue detail', level: '二类', status: 'open', source: 'record', source_type: 'record_fail', source_report_id: null, task_id: 'task-1', is_improve: true, improve_plan: null, no_improve_reason: null, responsible_person: null, plan_complete_date: null, actual_complete_date: null, verification_note: null, product_model: null,
+  } } }));
+  await page.route('**/api/issues/live-issue/rectifications', (route) => route.fulfill({ json: { code: 0, data: [] } }));
+
+  await page.goto('/reports/clickable-status');
+  const reader = page.getByTestId('frozen-report-reader');
+  const tabBar = reader.getByRole('tablist');
+  await expect(tabBar).not.toHaveClass(/border-b/);
+  await reader.getByRole('tab', { name: '问题' }).click();
+  await reader.getByTestId('report-issue-status-action').click();
+  await expect(page.getByRole('dialog')).toContainText('Status action issue');
+});
+
+test('an unlinked frozen issue stays read-only and never creates a live issue while opening the report', async ({ page }) => {
+  await loginForE2E(page, 'dockeradmin', 'DockerLocal2026');
+  let issueCreateRequests = 0;
+  await page.route('**/api/issues', async (route) => {
+    if (route.request().method() === 'POST') issueCreateRequests += 1;
+    await route.fulfill({ json: { code: 0, data: [] } });
+  });
+  await page.route('**/api/reports/unlinked-status/detail', (route) => route.fulfill({ json: { code: 0, data: { frozenViewModel: {
+    snapshotResolution: 'anchored',
+    header: { id: 'unlinked-status', title: 'Unlinked status report', reportType: 'single_report', status: 'published', productModel: null },
+    tabs: ['issues'], summary: { text: 'Summary', aiSummary: null }, matrix: null, functionEffects: [],
+    issues: [{
+      id: 'unlinked-frozen-issue', sourceKind: 'sensory', title: 'Unlinked issue', details: '', level: '二类', sourceType: 'record_fail', evidence: [],
+      liveOverlay: { status: 'open', rectification: '', evidence: [], retest: { count: 0, latest: null, history: [] } },
+    }],
+    capabilities: { canManageIssues: true, canShare: false, canExport: true },
+  } } } }));
+
+  await page.goto('/reports/unlinked-status');
+  const issueRow = page.locator('[data-content-id="issue:unlinked-frozen-issue"]');
+  const status = issueRow.locator('[data-issue-field="status"]');
+  await expect(status).toHaveText('待整改');
+  await expect(status).toHaveJSProperty('tagName', 'SPAN');
+  await issueRow.getByTestId('report-issue-toggle').click();
+  await expect(issueRow.getByText('关联缺失，无法进入整改', { exact: true })).toBeVisible();
+  expect(issueCreateRequests).toBe(0);
+});
+
+test('print page keeps all issue sources in a structured issue row', async ({ page }) => {
+  await loginForE2E(page, 'dockeradmin', 'DockerLocal2026');
+  const issue = (id: string, sourceKind: 'sensory' | 'function' | 'comparison' | 'matrix', title: string, status: string) => ({
+    id, title, details: `${title} detail`, level: '一类', sourceType: 'record_fail', sourceKind, evidence: [],
+    liveOverlay: { status, rectification: '', evidence: [], retest: { count: 0, latest: null, history: [] } },
+  });
+  const model = {
+    snapshotResolution: 'anchored',
+    header: { id: 'print-issue-layout', title: 'Print issue layout', reportType: 'single_report', status: 'published', productModel: null },
+    tabs: ['summary', 'issues'],
+    summary: { text: 'Summary', aiSummary: null, stats: { issueCount: 4, sensoryIssueCount: 1, functionIssueCount: 1, comparisonIssueCount: 1, rectificationRate: 0 } },
+    issues: [
+      issue('print-sensory', 'sensory', '触点安全性', 'open'),
+      issue('print-function', 'function', '面条模式食谱/功能给效果待定', 'rectifying'),
+      issue('print-comparison', 'comparison', '边缘粘附明显', 'verified_closed'),
+      issue('print-matrix', 'matrix', '成型不均匀', 'waived'),
+    ],
+    matrix: null,
+    functionEffects: [],
+    capabilities: { canManageIssues: false, canShare: false, canExport: true },
+  };
+  await page.route('**/api/reports/print-issue-layout/detail', (route) => route.fulfill({ json: { code: 0, data: { frozenViewModel: model } } }));
+
+  await page.goto('/reports/print?id=print-issue-layout&mode=text');
+  const rows = page.getByTestId('print-issue-row');
+  await expect(rows).toHaveCount(4);
+  await expect(rows.nth(0).getByTestId('print-issue-meta')).toContainText(['一类', '五感体验', '触点安全性', '待整改'].join(''));
+  await expect(rows.nth(1)).toContainText('面条模式食谱/功能给效果待定');
+  await expect(rows.nth(2)).toContainText('边缘粘附明显');
+  await expect(rows.nth(3)).toContainText('成型不均匀');
+});
+
 test('comparison reader renders frozen objects rows and cell values', async ({ browser }) => {
   const authenticated = await browser.newPage();
   await loginForE2E(authenticated, 'dockeradmin', 'DockerLocal2026');
@@ -90,7 +188,7 @@ test('anonymous reader presigns raw object keys without requesting them as page-
           header: { id: 'raw-report', title: 'Raw media report', reportType: 'single_report', status: 'published', productModel: null },
           tabs: ['summary', 'issues'],
           summary: { text: 'Raw summary', aiSummary: null },
-          issues: [{ id: 'raw-issue', title: 'Raw issue', details: '', level: '', sourceType: '', evidence: [{ id: 'raw-material', name: 'raw.jpg', type: 'image', url: 'garage/private/raw.jpg' }], liveOverlay: { status: '', rectification: '', retest: { count: 0, latest: null }, evidence: [] } }],
+          issues: [{ id: 'raw-issue', title: 'Raw issue', details: '', level: '', sourceType: '', evidence: [{ id: 'raw-material', name: 'raw.jpg', type: 'image', url: 'garage/private/raw.jpg' }], liveOverlay: { status: '', rectification: '', retest: { count: 0, latest: null, history: [] }, evidence: [] } }],
           matrix: null,
           functionEffects: [],
           capabilities: { canManageIssues: false, canShare: false, canExport: true },
@@ -135,7 +233,7 @@ test('anonymous reader preserves a successful local-public presign result', asyn
           snapshotResolution: 'anchored',
           header: { id: 'local-report', title: 'Local media report', reportType: 'single_report', status: 'published', productModel: null },
           tabs: ['summary', 'issues'], summary: { text: 'Summary', aiSummary: null },
-          issues: [{ id: 'local-issue', title: 'Local issue', details: '', level: '', sourceType: '', evidence: [{ id: 'local-material', name: 'local.jpg', type: 'image', url: 'garage/private/local.jpg' }], liveOverlay: { status: '', rectification: '', retest: { count: 0, latest: null }, evidence: [] } }],
+          issues: [{ id: 'local-issue', title: 'Local issue', details: '', level: '', sourceType: '', evidence: [{ id: 'local-material', name: 'local.jpg', type: 'image', url: 'garage/private/local.jpg' }], liveOverlay: { status: '', rectification: '', retest: { count: 0, latest: null, history: [] }, evidence: [] } }],
           matrix: null, functionEffects: [], capabilities: { canManageIssues: false, canShare: false, canExport: true },
         }, siblingReports: [], siblingFrozenViewModels: {},
       },
@@ -180,7 +278,7 @@ for (const failure of [{ name: 'empty result', status: 200 }, { name: 'server er
             snapshotResolution: 'anchored',
             header: { id: 'failed-report', title: 'Failed media report', reportType: 'single_report', status: 'published', productModel: null },
             tabs: ['summary', 'issues'], summary: { text: 'Summary', aiSummary: null },
-            issues: [{ id: 'failed-issue', title: 'Failed issue', details: '', level: '', sourceType: '', evidence: [{ id: 'failed-material', name: 'failed.jpg', type: 'image', url: 'garage/private/failed.jpg' }], liveOverlay: { status: '', rectification: '', retest: { count: 0, latest: null }, evidence: [] } }],
+            issues: [{ id: 'failed-issue', title: 'Failed issue', details: '', level: '', sourceType: '', evidence: [{ id: 'failed-material', name: 'failed.jpg', type: 'image', url: 'garage/private/failed.jpg' }], liveOverlay: { status: '', rectification: '', retest: { count: 0, latest: null, history: [] }, evidence: [] } }],
             matrix: null, functionEffects: [], capabilities: { canManageIssues: false, canShare: false, canExport: true },
           }, siblingReports: [], siblingFrozenViewModels: {},
         },
@@ -257,18 +355,21 @@ function responsiveMatrixModel(kind: 'data_v2' | 'data_v3') {
   };
 }
 
-async function assertNoScrollMatrixView(page: import('@playwright/test').Page, expectedText: string) {
+async function assertNoScrollMatrixView(page: import('@playwright/test').Page, expectedText: string | string[], usesFrozenV3Table = false) {
   await page.getByRole('tab', { name: '数据矩阵' }).click();
   const view = page.getByTestId('report-data-matrix-read-view');
   await expect(view).toBeVisible();
-  await expect(view.getByText(expectedText, { exact: false })).toBeVisible();
+  for (const text of Array.isArray(expectedText) ? expectedText : [expectedText]) {
+    expect(await view.getByText(text, { exact: false }).count()).toBeGreaterThan(0);
+  }
   expect(await view.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBeTruthy();
-  await expect(view.locator('table, input, textarea, [draggable="true"], .overflow-x-auto')).toHaveCount(0);
+  await expect(view.locator('input, textarea, [draggable="true"], .overflow-x-auto')).toHaveCount(0);
+  await expect(view.locator('table')).toHaveCount(usesFrozenV3Table ? 1 : 0);
 }
 
 for (const matrixCase of [
   { kind: 'data_v2' as const, expected: '苹果组 / 样品 A' },
-  { kind: 'data_v3' as const, expected: '使用效果 / 出汁表现 / 苹果' },
+  { kind: 'data_v3' as const, expected: ['使用效果', '出汁表现'] },
 ]) {
   test(`${matrixCase.kind} detail and share use the responsive no-scroll matrix reader`, async ({ browser }) => {
     const model = responsiveMatrixModel(matrixCase.kind);
@@ -284,8 +385,8 @@ for (const matrixCase of [
         await share.setViewportSize({ width, height: 900 });
         await detail.goto(`/reports/responsive-${matrixCase.kind}`);
         await share.goto(`/reports/share/responsive-${matrixCase.kind}`);
-        await assertNoScrollMatrixView(detail, matrixCase.expected);
-        await assertNoScrollMatrixView(share, matrixCase.expected);
+        await assertNoScrollMatrixView(detail, matrixCase.expected, matrixCase.kind === 'data_v3');
+        await assertNoScrollMatrixView(share, matrixCase.expected, matrixCase.kind === 'data_v3');
         await expect(detail.getByTestId('report-data-matrix-read-view')).toContainText(matrixCase.kind === 'data_v2' ? '0' : '清透');
         await expect(share.getByTestId('report-data-matrix-read-view')).toContainText(matrixCase.kind === 'data_v2' ? '0' : '清透');
       }
@@ -326,6 +427,10 @@ const semanticMediaModel = {
       retest: {
         count: 2,
         latest: { id: 'reevaluation', result: 'qualified', description: 'Re-evaluated', createdAt: '2026-07-13T00:00:00.000Z', createdBy: 'Engineer', evidence: semanticMedia('reevaluation', 5) },
+        history: [
+          { id: 'reevaluation', result: 'qualified', description: 'Re-evaluated', createdAt: '2026-07-13T00:00:00.000Z', createdBy: 'Engineer', evidence: semanticMedia('reevaluation', 5) },
+          { id: 'reevaluation-older', result: 'unqualified', description: 'Earlier retest', createdAt: '2026-07-12T00:00:00.000Z', createdBy: 'Engineer', evidence: [] },
+        ],
       },
     },
   }],
@@ -368,15 +473,21 @@ async function assertSemanticMedia(page: import('@playwright/test').Page) {
 
   await reader.getByRole('tab').nth(1).click();
   await reader.getByText('Semantic issue', { exact: true }).click();
-  const appendix = reader.getByTestId('report-media-grid-appendix');
-  await expect(appendix).toHaveCount(3);
-  await expect(reader.getByText('原始问题素材')).toBeVisible();
-  await expect(reader.getByText('整改素材')).toBeVisible();
+  const issueRow = reader.locator('[data-content-id="issue:semantic-issue"]');
+  const evidenceSlots = issueRow.getByTestId('report-media-grid-evidence');
+  const issueEvidenceSlot = evidenceSlots.filter({ hasText: '问题证据' });
+  const rectificationEvidenceSlot = evidenceSlots.filter({ hasText: '整改证据' });
+  const retestEvidenceSlot = evidenceSlots.filter({ hasText: '复测证据' });
+  await expect(evidenceSlots).toHaveCount(3);
+  await expect(issueEvidenceSlot).toHaveCount(1);
+  await expect(rectificationEvidenceSlot).toHaveCount(1);
+  await expect(retestEvidenceSlot).toHaveCount(1);
   await expect(reader.getByText('整改复测', { exact: true })).toBeVisible();
-  await expect(reader.getByText('复测素材')).toBeVisible();
   await expect(reader.getByText('整改复测记录数：2')).toBeVisible();
-  await expect(appendix.first().getByTestId('report-media-item')).toHaveCount(4);
-  await expect(appendix.first().getByTestId('report-media-more')).toHaveText('+1');
+  for (const slot of [issueEvidenceSlot, rectificationEvidenceSlot, retestEvidenceSlot]) {
+    await expect(slot.getByTestId('report-media-item')).toHaveCount(4);
+    await expect(slot.getByTestId('report-media-more')).toHaveText('+1');
+  }
 
   expect(await reader.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBeTruthy();
 }
@@ -409,7 +520,7 @@ test('frozen recipe issue reader keeps snapshot facts and renders four states wi
   const states = [
     { status: 'open', label: '待整改', count: 0 },
     { status: 'rectifying', label: '整改中', count: 1 },
-    { status: 'verified_closed', label: '整改完成', count: 2 },
+    { status: 'verified_closed', label: '已整改', count: 2 },
     { status: 'waived', label: '不整改', count: 3 },
   ] as const;
   await page.route('**/api/reports/share?token=retest-*', async (route) => {
@@ -420,15 +531,27 @@ test('frozen recipe issue reader keeps snapshot facts and renders four states wi
       result: state.status === 'verified_closed' ? 'qualified' : state.status === 'rectifying' ? 'unqualified' : 'pending',
       description: '最新复测记录', createdAt: '2026-07-13T00:00:00.000Z', createdBy: '体验工程师', evidence: [],
     };
+    const history = latest ? [latest, ...Array.from({ length: Math.max(0, state.count - 1) }, (_, index) => ({
+      id: `older-${state.status}-${index}`,
+      result: 'pending' as const,
+      description: `历史复测记录 ${index + 1}`,
+      createdAt: `2026-07-${String(12 - index).padStart(2, '0')}T00:00:00.000Z`,
+      createdBy: '体验工程师',
+      evidence: [],
+    }))] : [];
     await route.fulfill({ json: { code: 0, data: {
       frozenViewModel: {
         snapshotResolution: 'anchored',
         header: { id: `retest-${state.status}`, title: '复测冻结报告', reportType: 'single_report', status: 'published', productModel: null },
-        tabs: ['summary', 'issues'], summary: { text: '冻结总结', aiSummary: null }, matrix: null, functionEffects: [],
+        tabs: ['summary', 'issues', 'function_effect'], summary: { text: '冻结总结', aiSummary: null }, matrix: null,
+        functionEffects: [
+          { recipeId: 'recipe-frozen', name: '冻结食谱', subjectName: '冻结食谱', formula: '冻结配方', parameters: null, evaluationStatus: 'unqualified', effectScore: '', evaluation: '冻结原始评价', evidence: [{ id: 'recipe-context-media', name: 'recipe-context.jpg', type: 'image', url: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==' }, { id: 'explicit-issue-media', name: 'explicit-issue.jpg', type: 'image', url: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==' }], steps: [] },
+          { recipeId: 'recipe-qualified-extra', name: '合格功能', subjectName: '合格功能', formula: '', parameters: null, evaluationStatus: 'qualified', effectScore: '', evaluation: '合格素材保留', evidence: [{ id: 'qualified-extra-media', name: 'qualified-extra.jpg', type: 'image', url: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==' }], steps: [] },
+        ],
         issues: [{
-          id: `issue-${state.status}`, title: '冻结食谱效果不合格', details: '', level: '二类', sourceType: 'recipe_problem', evidence: [],
-          recipe: { recipeId: 'recipe-frozen', name: '冻结食谱', subjectName: '冻结食谱', formula: '冻结配方', parameters: { 温度: '80℃' }, evaluationStatus: 'unqualified', evaluation: '冻结原始评价', evidence: [], steps: [] },
-          liveOverlay: { status: state.status, rectification: '实时整改评价', evidence: [], retest: { count: state.count, latest } },
+          id: `issue-${state.status}`, title: '冻结食谱效果不合格', details: '', level: '二类', sourceType: 'recipe_problem', evidence: [{ id: 'explicit-issue-media', name: 'explicit-issue.jpg', type: 'image', url: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==' }],
+          recipe: { recipeId: 'recipe-frozen', name: '冻结食谱', subjectName: '冻结食谱', formula: '冻结配方', parameters: { 温度: '80℃' }, evaluationStatus: 'unqualified', evaluation: '冻结原始评价', evidence: [{ id: 'recipe-context-media', name: 'recipe-context.jpg', type: 'image', url: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==' }], steps: [] },
+          liveOverlay: { status: state.status, rectification: '实时整改评价', evidence: [], retest: { count: state.count, latest, history } },
         }],
         capabilities: { canManageIssues: false, canShare: false, canExport: true },
       }, siblingReports: [], siblingFrozenViewModels: {},
@@ -442,13 +565,25 @@ test('frozen recipe issue reader keeps snapshot facts and renders four states wi
     await expect(reader.getByText(state.label, { exact: true })).toBeVisible();
     await expect(reader.getByText('冻结配方')).toBeVisible();
     await expect(reader.getByText('冻结原始评价')).toBeVisible();
+    await expect(reader.getByAltText('recipe-context.jpg')).toHaveCount(1);
+    await expect(reader.getByAltText('explicit-issue.jpg')).toHaveCount(1);
     if (state.count === 0) await expect(reader.getByText('整改复测')).toHaveCount(0);
     else {
       await expect(reader.getByText('整改复测', { exact: true })).toBeVisible();
       await expect(reader.getByText('最新复测记录', { exact: true })).toBeVisible();
     }
-    if (state.count >= 2) await expect(reader.getByText(`整改复测记录数：${state.count}`)).toBeVisible();
+    if (state.count >= 2) {
+      await expect(reader.getByText(`整改复测记录数：${state.count}`)).toBeVisible();
+      const historyDisclosure = reader.getByText(`历史复测（${state.count - 1}）`, { exact: true });
+      await historyDisclosure.focus();
+      await page.keyboard.press('Enter');
+      await expect(reader.getByText('历史复测记录 1', { exact: true })).toBeVisible();
+    }
     else await expect(reader.getByText(/整改复测记录数：/)).toHaveCount(0);
+    await reader.getByRole('tab', { name: '功能效果' }).click();
+    await expect(reader.getByAltText('recipe-context.jpg')).toHaveCount(0);
+    await expect(reader.getByAltText('explicit-issue.jpg')).toHaveCount(0);
+    await expect(reader.getByAltText('qualified-extra.jpg')).toHaveCount(1);
   }
 });
 

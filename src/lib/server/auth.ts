@@ -31,6 +31,7 @@ export type ClientLike = {
   from: (table: string) => {
     select: (fields?: string, options?: { count?: string }) => {
       eq: (field: string, value: unknown) => QueryResultLike;
+      in: (field: string, values: unknown[]) => QueryResultLike;
       order: (field: string, options?: { ascending?: boolean }) => QueryResultLike;
       maybeSingle: () => Promise<{ data: Record<string, unknown> | null; error?: { message?: string } | null }>;
       single: () => Promise<{ data: Record<string, unknown> | null; error?: { message?: string } | null }>;
@@ -53,6 +54,7 @@ export type ClientLike = {
 // 查询链式构建器：当被 await 时返回列表结果
 export type QueryResultLike = PromiseLike<{ data: Record<string, unknown>[] | null; error?: { message?: string } | null }> & {
   eq: (field: string, value: unknown) => QueryResultLike;
+  in: (field: string, values: unknown[]) => QueryResultLike;
   order: (field: string, options?: { ascending?: boolean }) => QueryResultLike;
   maybeSingle: () => Promise<{ data: Record<string, unknown> | null; error?: { message?: string } | null }>;
   single: () => Promise<{ data: Record<string, unknown> | null; error?: { message?: string } | null }>;
@@ -415,13 +417,7 @@ export async function canAccessReport(client: ClientLike, user: AuthUser, report
 }
 
 export async function canReadReport(client: ClientLike, user: AuthUser, reportId: string) {
-  if (user.role === 'admin') return true;
-  const { data: report } = await client
-    .from('reports')
-    .select('id, task_id')
-    .eq('id', reportId)
-    .maybeSingle();
-  return Boolean(report?.id);
+  return canAccessReport(client, user, reportId);
 }
 
 export async function canAccessMaterial(client: ClientLike, user: AuthUser, materialId: string) {
@@ -497,6 +493,9 @@ export async function canAccessIssue(client: ClientLike, user: AuthUser, issueId
 
 export async function canReadIssue(client: ClientLike, user: AuthUser, issueId: string) {
   if (await canAccessIssue(client, user, issueId)) return true;
+  // A responsible rectification owner may not own the task, but mutation
+  // permission necessarily implies the ability to read the issue being fixed.
+  if (await canMutateIssueRetest(client, user, issueId)) return true;
   const { data: issue } = await client
     .from('issues')
     .select('id, source_report_id')
@@ -542,6 +541,48 @@ export async function canMutateIssueRetest(client: ClientLike, user: AuthUser, i
 
   if (user.role === 'rectification_owner') return isIssueOwner(client, user, issueId);
   return isTaskOwner(client, user, String(issue.task_id));
+}
+
+/** Full issue editing/deletion is reserved for administrators or the owning task editor. */
+export async function canManageIssue(client: ClientLike, user: AuthUser, issueId: string) {
+  if (user.role === 'admin' || hasPermission(user.role, Permission.TASK_EDIT_ALL)) return true;
+  if (!hasPermission(user.role, Permission.TASK_EDIT)) return false;
+  const { data: issue } = await client
+    .from('issues')
+    .select('id, task_id')
+    .eq('id', issueId)
+    .maybeSingle();
+  if (!issue?.task_id) return false;
+  return isTaskOwner(client, user, String(issue.task_id));
+}
+
+/**
+ * Batch equivalent of canManageIssue for callers that already loaded issues.
+ * The number of database reads depends on unique task ids, not issue count.
+ */
+export async function manageableIssueIdsForActor(
+  client: ClientLike,
+  user: AuthUser,
+  issues: Array<{ id?: unknown; task_id?: unknown }>,
+) {
+  const issueIds = issues.map((issue) => String(issue.id ?? '').trim()).filter(Boolean);
+  if (user.role === 'admin' || hasPermission(user.role, Permission.TASK_EDIT_ALL)) return new Set(issueIds);
+  if (!hasPermission(user.role, Permission.TASK_EDIT)) return new Set<string>();
+  const taskIds = [...new Set(issues.map((issue) => String(issue.task_id ?? '').trim()).filter(Boolean))];
+  if (taskIds.length === 0) return new Set<string>();
+  const { data: tasks, error } = await client
+    .from('experience_tasks')
+    .select('id, owner_id, created_by')
+    .in('id', taskIds);
+  if (error) return new Set<string>();
+  const ownedTaskIds = new Set((tasks ?? []).flatMap((task) => (
+    task.owner_id === user.id || task.created_by === user.id ? [String(task.id)] : []
+  )));
+  return new Set(issues.flatMap((issue) => {
+    const issueId = String(issue.id ?? '').trim();
+    const taskId = String(issue.task_id ?? '').trim();
+    return issueId && ownedTaskIds.has(taskId) ? [issueId] : [];
+  }));
 }
 
 export async function canMutateIssueReEvaluation(client: ClientLike, user: AuthUser, reEvaluationId: string) {
