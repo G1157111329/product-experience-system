@@ -67,6 +67,7 @@ export const REQUIRED_MIGRATIONS = [
   ['0021_recipe_material_reuse', 1784217601000, 'f0100aeacb10f51c4e32b23c10e640cb91a0c566247c79ffa8eb69e3984299d1'],
   ['0022_report_snapshot_anchor_integrity', 1784217602000, '3fe16f4d1621c5cf20665304bf552a32d3fb398e1222e225dfc4f8c192a4ec68'],
   ['0023_security_schema_probe_rpc', 1784217603000, '6c22403e51c7c903a0bb359814f59f565593de25c524528c208dd9013a3fa451'],
+  ['0024_material_owner_and_wecom_replay', 1784217604000, '8a9bb3153598f2306d161f426a792e68c10eb8d6b5b7bc63f476aef05e03bc43'],
 ] as const;
 
 const fk = (name: string, table: string, columns: string[], targetTable: string, targetColumns = ['id']): RequiredForeignKey => ({ name, table, columns, targetTable, targetColumns });
@@ -77,7 +78,7 @@ export const REQUIRED_SCHEMA_MANIFEST: RequiredSchemaObject[] = [
   { migrationTag: '0000_dict_tables_v3_1_1', table: 'experience_tasks', columns: ['id', 'created_by', 'owner_id', 'status'], indexes: [idx('experience_tasks_status_idx', 'experience_tasks', ['status'])] },
   { migrationTag: '0001_v3_contract_tables', table: 'reports', columns: ['id', 'task_id', 'snapshot_id', 'status'], foreignKeys: [fk('reports_task_id_fkey', 'reports', ['task_id'], 'experience_tasks'), fk('reports_snapshot_id_report_snapshots_id_fkey', 'reports', ['snapshot_id'], 'report_snapshots')], indexes: [idx('reports_task_id_idx', 'reports', ['task_id'])] },
   { migrationTag: '0014_idempotent_report_snapshot_rpc', table: 'report_snapshots', columns: ['id', 'report_id', 'snapshot_json', 'idempotency_key', 'idempotency_fingerprint'], foreignKeys: [fk('report_snapshots_report_id_fkey', 'report_snapshots', ['report_id'], 'reports')], indexes: [idx('report_snapshots_report_id_idx', 'report_snapshots', ['report_id']), idx('report_snapshots_report_idempotency_key', 'report_snapshots', ['report_id', 'idempotency_key'], true)] },
-  { migrationTag: '0005_material_asset_and_matrix_issues', table: 'materials', columns: ['id', 'file_path', 'status', 'project_id'], indexes: [idx('materials_status_idx', 'materials', ['status'])] },
+  { migrationTag: '0024_material_owner_and_wecom_replay', table: 'materials', columns: ['id', 'file_path', 'status', 'project_id', 'created_by'], foreignKeys: [fk('materials_created_by_fkey', 'materials', ['created_by'], 'platform_users')], indexes: [idx('materials_status_idx', 'materials', ['status']), idx('materials_created_by_idx', 'materials', ['created_by'])] },
   { migrationTag: '0005_material_asset_and_matrix_issues', table: 'material_links', columns: ['id', 'material_id', 'target_type', 'target_id', 'binding_order'], foreignKeys: [fk('ml_material_id_fkey', 'material_links', ['material_id'], 'materials')], indexes: [idx('ml_material_id_idx', 'material_links', ['material_id']), idx('ml_target_idx', 'material_links', ['target_type', 'target_id'])] },
 
   { migrationTag: '0003_task_matrix_model', table: 'task_matrices', columns: ['id', 'task_id', 'status', 'created_by'], foreignKeys: [fk('task_matrices_task_id_fkey', 'task_matrices', ['task_id'], 'experience_tasks')], indexes: [idx('task_matrices_task_id_idx', 'task_matrices', ['task_id'])] },
@@ -112,7 +113,12 @@ export const REQUIRED_SCHEMA_MANIFEST: RequiredSchemaObject[] = [
   { migrationTag: '0006_hermes_agent_tables', table: 'agent_runs', columns: ['id', 'agent_instance_id', 'conversation_id', 'status', 'trace_id'], foreignKeys: [fk('ar_instance_fkey', 'agent_runs', ['agent_instance_id'], 'agent_instances')], indexes: [idx('ar_trace_idx', 'agent_runs', ['trace_id'])] },
   { migrationTag: '0006_hermes_agent_tables', table: 'agent_suggestion_blocks', columns: ['id', 'agent_run_id', 'status', 'target_entity_type', 'target_entity_id'], foreignKeys: [fk('asb_run_fkey', 'agent_suggestion_blocks', ['agent_run_id'], 'agent_runs')], indexes: [idx('asb_target_idx', 'agent_suggestion_blocks', ['target_entity_type', 'target_entity_id'])] },
   { migrationTag: '0011_agent_qr_binding', table: 'wecom_bindings', columns: ['id', 'platform_user_id', 'wecom_user_id', 'agent_instance_id'], foreignKeys: [fk('wb_platform_user_fkey', 'wecom_bindings', ['platform_user_id'], 'platform_users')], indexes: [idx('wb_wecom_user_idx', 'wecom_bindings', ['wecom_user_id'])] },
-  { migrationTag: '0006_hermes_agent_tables', table: 'wecom_media_ingest_jobs', columns: ['id', 'wecom_binding_id', 'media_id', 'download_status'], indexes: [idx('wmij_status_idx', 'wecom_media_ingest_jobs', ['download_status'])] },
+  { migrationTag: '0006_hermes_agent_tables', table: 'wecom_media_ingest_jobs', columns: ['id', 'wecom_binding_id', 'wecom_media_id', 'download_status'], indexes: [idx('wmij_status_idx', 'wecom_media_ingest_jobs', ['download_status'])] },
+  { migrationTag: '0024_material_owner_and_wecom_replay', table: 'wecom_callback_replays', columns: ['id', 'message_id', 'nonce', 'corp_id', 'message_timestamp', 'received_at'], indexes: [
+    { name: 'wecom_callback_replays.message_id unique', table: 'wecom_callback_replays', columns: ['message_id'], unique: true, matchName: false },
+    { name: 'wecom_callback_replays.corp_nonce_timestamp unique', table: 'wecom_callback_replays', columns: ['corp_id', 'nonce', 'message_timestamp'], unique: true, matchName: false },
+    idx('wecom_callback_replays_received_at_idx', 'wecom_callback_replays', ['received_at']),
+  ] },
   { migrationTag: '0023_security_schema_probe_rpc', table: 'security_audit_logs', columns: ['id', 'action', 'outcome', 'metadata', 'created_at'], indexes: [idx('security_audit_logs_action_idx', 'security_audit_logs', ['action'])] },
 ];
 

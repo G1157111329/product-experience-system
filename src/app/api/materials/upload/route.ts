@@ -6,6 +6,8 @@ import { canAccessAssembly, canAccessTask, forbidden, isAuthResponse, requireUse
 import { checkSharedRateLimit } from '@/lib/server/rate-limit';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
 import { allocateEditedCopyFileName, allocateMaterialFileName } from '@/lib/material-naming';
+import { detectUploadMediaType } from '@/lib/media-upload-type';
+import { generatePresignedUrl, uploadFile } from '@/lib/server/storage';
 import path from 'path';
 
 export const maxDuration = 120;
@@ -13,19 +15,9 @@ export const dynamic = 'force-dynamic';
 
 const MAX_INLINE_MEDIA = 5;
 
-const ALLOWED_UPLOAD_TYPES: Record<string, { materialType: 'image' | 'video'; mimeTypes: string[] }> = {
-  jpg: { materialType: 'image', mimeTypes: ['image/jpeg', 'image/jpg'] },
-  jpeg: { materialType: 'image', mimeTypes: ['image/jpeg', 'image/jpg'] },
-  png: { materialType: 'image', mimeTypes: ['image/png'] },
-  gif: { materialType: 'image', mimeTypes: ['image/gif'] },
-  webp: { materialType: 'image', mimeTypes: ['image/webp'] },
-  heic: { materialType: 'image', mimeTypes: ['image/heic', 'image/heif'] },
-  heif: { materialType: 'image', mimeTypes: ['image/heic', 'image/heif'] },
-  mp4: { materialType: 'video', mimeTypes: ['video/mp4'] },
-  m4v: { materialType: 'video', mimeTypes: ['video/mp4', 'video/x-m4v'] },
-  mov: { materialType: 'video', mimeTypes: ['video/quicktime', 'video/mp4'] },
-  webm: { materialType: 'video', mimeTypes: ['video/webm'] },
-};
+// Legacy helpers below remain for backward-compatible route parsing; upload
+// validation itself now uses signature-first detectUploadMediaType.
+const ALLOWED_UPLOAD_TYPES: Record<string, { materialType: 'image' | 'video'; mimeTypes: string[] }> = {};
 
 async function getRelatedTaskIds(client: ReturnType<typeof getSupabaseClient>, ids: {
   task_id?: string | null;
@@ -228,7 +220,7 @@ export async function POST(request: NextRequest) {
     }
 
     const declaredMime = (file.type || '').toLowerCase();
-    if (!declaredMime.startsWith('image/') && !declaredMime.startsWith('video/')) {
+    if (declaredMime && declaredMime !== 'application/octet-stream' && !declaredMime.startsWith('image/') && !declaredMime.startsWith('video/')) {
       return NextResponse.json({ code: 1, message: '仅支持图片和视频文件' }, { status: 400 });
     }
 
@@ -241,9 +233,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ code: 1, message: `文件读取失败(${(file.size / 1024 / 1024).toFixed(1)}MB)，请重试` }, { status: 500 });
     }
 
-    const uploadType = validateUploadType(file, filePrefix);
-    if (!uploadType.ok) {
-      return NextResponse.json({ code: 1, message: uploadType.message }, { status: 400 });
+    let uploadType;
+    try {
+      uploadType = detectUploadMediaType({ fileName: file.name, declaredMime: file.type || '', prefix: filePrefix });
+    } catch (error) {
+      return NextResponse.json({
+        code: 1,
+        message: error instanceof Error ? error.message : '不支持的图片或视频文件',
+      }, { status: 400 });
     }
     const materialType = uploadType.materialType;
 
@@ -266,9 +263,9 @@ export async function POST(request: NextRequest) {
         existingFileNames,
       });
     const folderId = task_id || recipe_library_step_id || issue_id || comparison_cell_id || 'unknown';
-    // Store materials locally under public/uploads/materials/[taskId]/ so the
-    // GET /api/materials endpoint can serve them directly from the filesystem.
-    const localDir = path.join(process.cwd(), 'public', 'uploads', 'materials', folderId);
+    // Browser normalisation needs a local working file. Final persistence uses
+    // the storage abstraction so NEW_UPLOAD_DRIVER=s3 is honoured as well.
+    const localDir = path.join(process.cwd(), 'public', 'uploads', '.upload-work', folderId);
     fs.mkdirSync(localDir, { recursive: true });
     let storageFileName = path.join(localDir, generatedFileName);
 
@@ -278,7 +275,6 @@ export async function POST(request: NextRequest) {
       try {
         const buffer = Buffer.from(await file.arrayBuffer());
         fs.writeFileSync(storageFileName, buffer);
-        fileKey = `materials/${folderId}/${generatedFileName}`;
         break;
       } catch (uploadErr) {
         console.error(`[upload] local upload attempt ${attempt + 1} failed:`, uploadErr);
@@ -292,6 +288,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    fileKey = `materials/${folderId}/${generatedFileName}`;
     if (!fileKey) {
       return NextResponse.json({ code: 1, message: '文件上传失败' }, { status: 500 });
     }
@@ -307,7 +304,24 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    fileKey = `materials/${folderId}/${generatedFileName}`;
+    try {
+      await uploadFile({
+        fileContent: fs.readFileSync(storageFileName),
+        fileName: fileKey,
+        contentType: materialType === 'video' && generatedFileName.toLowerCase().endsWith('.mp4')
+          ? 'video/mp4'
+          : uploadType.mimeType,
+      });
+    } catch (uploadErr) {
+      console.error('[upload] storage upload failed:', uploadErr);
+      return NextResponse.json({ code: 1, message: '素材存储失败，请重试' }, { status: 500 });
+    } finally {
+      fs.unlinkSync(storageFileName);
+    }
+
     const { data, error } = await client.from('materials').insert({
+      created_by: user.id,
       record_id: record_id || null,
       task_id: task_id || relatedTaskIds[0] || null,
       recipe_step_id: recipe_step_id || null,
@@ -343,7 +357,7 @@ export async function POST(request: NextRequest) {
 
     // Local materials are exposed directly from /uploads/materials/...; no
     // presigned URL needed.
-    const accessibleUrl = `/uploads/${fileKey}`;
+    const accessibleUrl = await generatePresignedUrl({ key: fileKey });
 
     return NextResponse.json({ code: 0, message: '上传成功', data: { ...data, file_url: accessibleUrl } });
   } catch (err) {

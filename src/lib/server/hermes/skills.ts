@@ -11,11 +11,15 @@ import { getDb } from '@/storage/database/pg-db';
 import {
   agentInstances,
   agentSuggestionBlocks,
+  conversations,
+  taskMatrices,
 } from '@/storage/database/shared/schema';
 import { getV3MatrixProjection } from '@/lib/matrix/projection-v3';
 import { cellKey } from '@/lib/matrix/v3-types';
 import type { V3MatrixProjection, V3HierarchyNode, V3CellValue } from '@/lib/matrix/v3-types';
 import { executeHermesRun } from './runtime';
+import { assertMatrixSkillAccess } from '../agent-resource-access';
+import type { AuthUser } from '../auth';
 
 export interface MatrixSummarySuggestion {
   blockType: string;
@@ -28,7 +32,7 @@ export interface MatrixSummaryInput {
   matrixId: string;
   /** Currently only 'by_level_1_group' is supported. */
   scope: 'by_level_1_group';
-  userId: string;
+  user: AuthUser;
   /** Optional tenant override (defaults to 'default'). */
   tenantId?: string;
 }
@@ -97,6 +101,34 @@ async function resolveSkillAgentInstance(
     .limit(1)
     .execute();
   return allRows.length > 0 ? (allRows[0].id as string) : null;
+}
+
+async function resolveUserMatrixConversation(
+  db: DbClient,
+  input: { tenantId: string; agentInstanceId: string; userId: string; matrixId: string },
+): Promise<string> {
+  const matrixRows = await db.select({ taskId: taskMatrices.taskId }).from(taskMatrices)
+    .where(eq(taskMatrices.id, input.matrixId)).limit(1).execute();
+  const taskId = matrixRows[0]?.taskId;
+  if (!taskId) throw new Error('matrix_not_found');
+  const existing = await db.select({ id: conversations.id }).from(conversations).where(and(
+    eq(conversations.tenantId, input.tenantId),
+    eq(conversations.agentInstanceId, input.agentInstanceId),
+    eq(conversations.platformUserId, input.userId),
+    eq(conversations.taskId, taskId),
+    eq(conversations.status, 'active'),
+  )).limit(1).execute();
+  if (existing[0]) return existing[0].id;
+  const [created] = await db.insert(conversations).values({
+    tenantId: input.tenantId,
+    agentInstanceId: input.agentInstanceId,
+    platformUserId: input.userId,
+    taskId,
+    title: '矩阵 AI 总结',
+    status: 'active',
+  }).returning({ id: conversations.id }).execute();
+  if (!created) throw new Error('conversation_create_failed');
+  return created.id;
 }
 
 /**
@@ -275,6 +307,10 @@ export async function runMatrixSummarySkill(
 ): Promise<MatrixSummaryResult> {
   const tenantId = input.tenantId ?? 'default';
 
+  // Defence in depth: callers cannot bypass resource authorization by invoking
+  // the skill layer directly. This runs before projection, model, or run writes.
+  await assertMatrixSkillAccess({ user: input.user, matrixId: input.matrixId });
+
   const projection = await getV3MatrixProjection(input.matrixId);
   if (!projection) {
     return {
@@ -287,7 +323,7 @@ export async function runMatrixSummarySkill(
   }
 
   const db = await getDb();
-  const agentInstanceId = await resolveSkillAgentInstance(db, tenantId, input.userId);
+  const agentInstanceId = await resolveSkillAgentInstance(db, tenantId, input.user.id);
   if (!agentInstanceId) {
     return {
       runId: '',
@@ -297,6 +333,12 @@ export async function runMatrixSummarySkill(
       suggestions: [],
     };
   }
+  const conversationId = await resolveUserMatrixConversation(db, {
+    tenantId,
+    agentInstanceId,
+    userId: input.user.id,
+    matrixId: input.matrixId,
+  });
 
   const matrixContext = renderMatrixContext(projection);
 
@@ -325,10 +367,11 @@ ${matrixContext}`;
 
   const runResult = await executeHermesRun({
     agentInstanceId,
+    conversationId,
     trigger: 'matrix_summary',
     systemPrompt,
     userPrompt,
-    userId: input.userId,
+    userId: input.user.id,
     tenantId,
   });
 

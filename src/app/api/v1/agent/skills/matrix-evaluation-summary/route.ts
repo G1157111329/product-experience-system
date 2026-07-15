@@ -15,6 +15,8 @@ import { ok, fail, unauthorized, withTrace } from '@/lib/server/api-v1/response'
 import { runMatrixSummarySkill } from '@/lib/server/hermes/skills';
 import { getV3FeatureFlags } from '@/lib/feature-flags-v3';
 import { agentInstances, aiModelConfigs } from '@/storage/database/shared/schema';
+import { authorizeMatrixSkillAccess, AgentResourceAccessError } from '@/lib/server/agent-resource-access';
+import { writeSecurityAudit } from '@/lib/server/security-audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -77,6 +79,24 @@ export const POST = withTrace<[NextRequest]>(async (traceId, req) => {
   const scope = body.scope === 'by_level_1_group' ? 'by_level_1_group' : 'by_level_1_group';
 
   try {
+    await authorizeMatrixSkillAccess(
+      { user, matrixId: body.matrixId },
+      async (denial) => writeSecurityAudit(client, {
+        action: 'agent.matrix_summary_access',
+        outcome: 'denied',
+        request: req,
+        actor: user,
+        targetType: denial.resourceType,
+        targetId: denial.resourceId,
+        metadata: { reason: denial.reason, traceId },
+      }),
+    );
+  } catch (error) {
+    const status = error instanceof AgentResourceAccessError && error.code === 'not_found' ? 404 : 403;
+    return fail(traceId, { message: status === 404 ? '矩阵不存在' : '无权访问该矩阵', status });
+  }
+
+  try {
     await ensureDefaultAgentInstance(user.id);
   } catch {
     // Non-fatal — skill will still report no_agent_instance if insert failed.
@@ -85,7 +105,7 @@ export const POST = withTrace<[NextRequest]>(async (traceId, req) => {
   const result = await runMatrixSummarySkill({
     matrixId: body.matrixId,
     scope,
-    userId: user.id,
+    user,
   });
 
   if (result.status === 'failed') {

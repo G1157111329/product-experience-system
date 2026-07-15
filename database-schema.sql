@@ -463,6 +463,67 @@ CREATE TABLE IF NOT EXISTS security_rate_limits (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Exposes only boolean structural checks to the Supabase service role at startup.
+-- Public execution is revoked so the RPC cannot disclose schema state to anonymous users.
+DROP FUNCTION IF EXISTS public.verify_security_schema_probe();
+CREATE OR REPLACE FUNCTION public.verify_security_schema_probe()
+RETURNS TABLE (
+  audit_logs_present BOOLEAN,
+  rate_limits_present BOOLEAN,
+  audit_logs_id_column BOOLEAN,
+  audit_logs_action_column BOOLEAN,
+  audit_logs_outcome_column BOOLEAN,
+  audit_logs_metadata_column BOOLEAN,
+  audit_logs_created_at_column BOOLEAN,
+  audit_logs_primary_key BOOLEAN,
+  audit_logs_action_index BOOLEAN,
+  audit_logs_actor_index BOOLEAN,
+  audit_logs_target_index BOOLEAN,
+  audit_logs_created_at_index BOOLEAN,
+  rate_limits_rate_key_column BOOLEAN,
+  rate_limits_count_column BOOLEAN,
+  rate_limits_reset_at_column BOOLEAN,
+  rate_limits_updated_at_column BOOLEAN,
+  rate_limits_primary_key BOOLEAN,
+  insecure_policy_present BOOLEAN
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+  SELECT
+    to_regclass('public.security_audit_logs') IS NOT NULL,
+    to_regclass('public.security_rate_limits') IS NOT NULL,
+    EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'security_audit_logs' AND column_name = 'id'),
+    EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'security_audit_logs' AND column_name = 'action'),
+    EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'security_audit_logs' AND column_name = 'outcome'),
+    EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'security_audit_logs' AND column_name = 'metadata'),
+    EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'security_audit_logs' AND column_name = 'created_at'),
+    EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = to_regclass('public.security_audit_logs') AND contype = 'p'),
+    EXISTS (SELECT 1 FROM pg_index WHERE indexrelid = to_regclass('public.security_audit_logs_action_idx') AND pg_get_indexdef(indexrelid) LIKE '%(action)%'),
+    EXISTS (SELECT 1 FROM pg_index WHERE indexrelid = to_regclass('public.security_audit_logs_actor_user_id_idx') AND pg_get_indexdef(indexrelid) LIKE '%(actor_user_id)%'),
+    EXISTS (SELECT 1 FROM pg_index WHERE indexrelid = to_regclass('public.security_audit_logs_target_idx') AND pg_get_indexdef(indexrelid) LIKE '%(target_type, target_id)%'),
+    EXISTS (SELECT 1 FROM pg_index WHERE indexrelid = to_regclass('public.security_audit_logs_created_at_idx') AND pg_get_indexdef(indexrelid) LIKE '%(created_at)%'),
+    EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'security_rate_limits' AND column_name = 'rate_key'),
+    EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'security_rate_limits' AND column_name = 'count'),
+    EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'security_rate_limits' AND column_name = 'reset_at'),
+    EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'security_rate_limits' AND column_name = 'updated_at'),
+    EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = to_regclass('public.security_rate_limits') AND contype = 'p'),
+    EXISTS (
+      SELECT 1 FROM pg_policies
+      WHERE schemaname = 'public' AND policyname = 'allow_all'
+    );
+$$;
+REVOKE ALL ON FUNCTION public.verify_security_schema_probe() FROM PUBLIC;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT EXECUTE ON FUNCTION public.verify_security_schema_probe() TO service_role;
+  END IF;
+END;
+$$;
+
 -- ============================================================
 -- 23. AI模型配置表
 -- ============================================================
@@ -1368,6 +1429,27 @@ CREATE TABLE IF NOT EXISTS pdf_generation_jobs (
 CREATE INDEX IF NOT EXISTS pdf_generation_jobs_report_id_idx ON pdf_generation_jobs(report_id);
 CREATE INDEX IF NOT EXISTS pdf_generation_jobs_status_idx ON pdf_generation_jobs(status);
 
+-- Frozen report anchors are immutable. This is deferred to permit the
+-- existing reports -> report_snapshots cascade when a whole report is deleted,
+-- while still rejecting deletion of an anchored snapshot by itself.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'reports_snapshot_id_report_snapshots_id_fkey'
+  ) THEN
+    ALTER TABLE reports
+      ADD CONSTRAINT reports_snapshot_id_report_snapshots_id_fkey
+      FOREIGN KEY (snapshot_id) REFERENCES report_snapshots(id)
+      ON DELETE NO ACTION
+      DEFERRABLE INITIALLY DEFERRED
+      NOT VALID;
+  END IF;
+END;
+$$;
+
+ALTER TABLE reports
+  VALIDATE CONSTRAINT reports_snapshot_id_report_snapshots_id_fkey;
+
 -- Excel 导入任务
 CREATE TABLE IF NOT EXISTS excel_import_jobs (
   id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1639,14 +1721,36 @@ CREATE INDEX IF NOT EXISTS matrix_field_definitions_section_idx ON matrix_field_
 CREATE TABLE IF NOT EXISTS matrix_groups (
   id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
   matrix_id VARCHAR(36) NOT NULL REFERENCES task_matrices(id) ON DELETE CASCADE,
-  name VARCHAR(200) NOT NULL,
+  group_label VARCHAR(200) NOT NULL,
+  description TEXT,
   sort_order INTEGER DEFAULT 0 NOT NULL,
-  completion_status VARCHAR(20) DEFAULT 'pending'
-    CHECK (completion_status IN ('pending','in_progress','completed','skipped')),
+  is_archived BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
-  updated_at TIMESTAMPTZ DEFAULT now() NOT NULL
+  updated_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+  UNIQUE (matrix_id, group_label)
 );
 CREATE INDEX IF NOT EXISTS matrix_groups_matrix_id_idx ON matrix_groups(matrix_id);
+
+-- Bootstrap databases created by the pre-0003 consolidated schema used `name`.
+-- Preserve the existing values while aligning the physical column contract with
+-- migration 0003 and the Drizzle runtime model. This block is intentionally
+-- additive/idempotent and never drops matrix data.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'matrix_groups' AND column_name = 'name'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'matrix_groups' AND column_name = 'group_label'
+  ) THEN
+    ALTER TABLE matrix_groups RENAME COLUMN name TO group_label;
+  END IF;
+END $$;
+ALTER TABLE matrix_groups ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE matrix_groups ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT FALSE;
+CREATE UNIQUE INDEX IF NOT EXISTS matrix_groups_matrix_label_key
+  ON matrix_groups(matrix_id, group_label);
 
 CREATE TABLE IF NOT EXISTS matrix_rows (
   id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1855,7 +1959,7 @@ CREATE TABLE IF NOT EXISTS matrix_cell_styles (
   id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
   matrix_id VARCHAR(36) NOT NULL REFERENCES task_matrices(id) ON DELETE CASCADE,
   target_type VARCHAR(30) NOT NULL CHECK (target_type IN ('column_header','cell','narrative_block')),
-  target_id VARCHAR(36) NOT NULL,
+  target_id VARCHAR(160) NOT NULL,
   font_color_token VARCHAR(30),
   font_size_token VARCHAR(10) CHECK (font_size_token IS NULL OR font_size_token IN ('xs','sm','md','lg','xl')),
   bold BOOLEAN NOT NULL DEFAULT false,
@@ -2078,7 +2182,9 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   completed_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS ar_instance_idx ON agent_runs(agent_instance_id);
+CREATE INDEX IF NOT EXISTS ar_conv_idx ON agent_runs(conversation_id);
 CREATE INDEX IF NOT EXISTS ar_status_idx ON agent_runs(status);
+CREATE INDEX IF NOT EXISTS ar_trace_idx ON agent_runs(trace_id);
 
 CREATE TABLE IF NOT EXISTS agent_suggestion_blocks (
   id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -2098,6 +2204,7 @@ CREATE TABLE IF NOT EXISTS agent_suggestion_blocks (
 );
 CREATE INDEX IF NOT EXISTS asb_run_idx ON agent_suggestion_blocks(agent_run_id);
 CREATE INDEX IF NOT EXISTS asb_status_idx ON agent_suggestion_blocks(status);
+CREATE INDEX IF NOT EXISTS asb_target_idx ON agent_suggestion_blocks(target_entity_type, target_entity_id);
 
 CREATE TABLE IF NOT EXISTS wecom_bindings (
   id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -2114,6 +2221,7 @@ CREATE TABLE IF NOT EXISTS wecom_bindings (
   UNIQUE (wecom_user_id, wecom_corp_id)
 );
 CREATE INDEX IF NOT EXISTS wb_platform_user_idx ON wecom_bindings(platform_user_id);
+CREATE INDEX IF NOT EXISTS wb_wecom_user_idx ON wecom_bindings(wecom_user_id);
 
 ALTER TABLE wecom_bindings ADD COLUMN IF NOT EXISTS provider VARCHAR(20) NOT NULL DEFAULT 'wecom';
 
@@ -2250,7 +2358,7 @@ BEGIN
 
   PERFORM m.id
   FROM materials m
-  WHERE m.recipe_id = v_recipe_id OR m.id = ANY(v_material_ids)
+  WHERE m.id = ANY(v_material_ids)
   ORDER BY m.id
   FOR UPDATE;
 
@@ -2262,27 +2370,9 @@ BEGIN
     SELECT 1
     FROM materials m
     WHERE m.id = ANY(v_material_ids)
-      AND (
-        m.task_id IS DISTINCT FROM v_task_id
-        OR (m.recipe_id IS NOT NULL AND m.recipe_id <> v_recipe_id)
-        OR m.record_id IS NOT NULL
-        OR m.recipe_step_id IS NOT NULL
-        OR m.recipe_library_step_id IS NOT NULL
-        OR m.issue_id IS NOT NULL
-        OR m.re_evaluation_id IS NOT NULL
-        OR m.comparison_cell_id IS NOT NULL
-        OR m.comparison_assembly_id IS NOT NULL
-        OR EXISTS (
-          SELECT 1 FROM material_links ml
-          WHERE ml.material_id = m.id
-            AND NOT (
-              ml.target_id = v_recipe_id
-              AND ml.target_type IN ('recipe', 'recipe_effect')
-            )
-        )
-      )
+      AND m.task_id IS DISTINCT FROM v_task_id
   ) THEN
-    RAISE EXCEPTION 'invalid or occupied recipe material';
+    RAISE EXCEPTION 'invalid recipe material';
   END IF;
   END IF;
 
@@ -2302,21 +2392,37 @@ BEGIN
   END IF;
 
   IF v_has_materials THEN
-    UPDATE materials
-    SET recipe_id = NULL
-    WHERE recipe_id = v_recipe_id
-      AND NOT (id = ANY(v_material_ids));
+    -- Binding uniqueness is the (material_id, target_type, target_id) tuple:
+    -- an asset remains available to every other record, step, matrix cell,
+    -- issue and recipe in the same task.
+    UPDATE materials SET recipe_id = NULL WHERE recipe_id = v_recipe_id;
 
-    UPDATE materials
-    SET recipe_id = v_recipe_id
-    WHERE id = ANY(v_material_ids);
+    DELETE FROM material_links
+    WHERE target_type = 'recipe'
+      AND target_id = v_recipe_id
+      AND NOT (material_id = ANY(v_material_ids));
+
+    INSERT INTO material_links (material_id, target_type, target_id, binding_method, binding_order)
+    SELECT material_id, 'recipe', v_recipe_id, 'click_select', binding_order
+    FROM unnest(v_material_ids) WITH ORDINALITY AS selected(material_id, binding_order)
+    ON CONFLICT (material_id, target_type, target_id)
+    DO UPDATE SET binding_order = EXCLUDED.binding_order,
+                  binding_method = EXCLUDED.binding_method,
+                  bound_at = NOW(),
+                  version = material_links.version + 1;
   END IF;
 
   SELECT to_jsonb(r) INTO v_recipe FROM recipes r WHERE r.id = v_recipe_id;
   SELECT COALESCE(jsonb_agg(to_jsonb(m) ORDER BY m.created_at, m.id), '[]'::jsonb)
   INTO v_materials
   FROM materials m
-  WHERE m.recipe_id = v_recipe_id;
+  WHERE m.recipe_id = v_recipe_id
+     OR EXISTS (
+       SELECT 1 FROM material_links ml
+       WHERE ml.material_id = m.id
+         AND ml.target_type = 'recipe'
+         AND ml.target_id = v_recipe_id
+     );
 
   RETURN jsonb_build_object('recipe', v_recipe, 'materials', v_materials);
 END;
@@ -2324,6 +2430,63 @@ $$;
 
 REVOKE ALL ON FUNCTION public.save_recipe_evaluation(JSONB) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.apply_issue_retest(JSONB) FROM PUBLIC;
+
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS created_by VARCHAR(36);
+WITH owner_candidates AS (
+  SELECT audit.target_id AS material_id, audit.actor_user_id AS user_id, 1 AS priority
+  FROM security_audit_logs audit
+  WHERE audit.action = 'material.upload' AND audit.outcome = 'success' AND audit.actor_user_id IS NOT NULL
+  UNION ALL SELECT material.id, COALESCE(task.owner_id, task.created_by), 10 FROM materials material JOIN experience_tasks task ON task.id = material.task_id
+  UNION ALL SELECT material.id, COALESCE(task.owner_id, task.created_by), 20 FROM materials material JOIN check_records record ON record.id = material.record_id JOIN experience_tasks task ON task.id = record.task_id
+  UNION ALL SELECT material.id, COALESCE(task.owner_id, task.created_by), 30 FROM materials material JOIN recipes recipe ON recipe.id = material.recipe_id JOIN experience_tasks task ON task.id = recipe.task_id
+  UNION ALL SELECT material.id, COALESCE(task.owner_id, task.created_by), 31 FROM materials material JOIN recipe_steps step ON step.id = material.recipe_step_id JOIN recipes recipe ON recipe.id = step.recipe_id JOIN experience_tasks task ON task.id = recipe.task_id
+  UNION ALL SELECT material.id, COALESCE(task.owner_id, task.created_by), 40 FROM materials material JOIN issues issue ON issue.id = material.issue_id JOIN experience_tasks task ON task.id = issue.task_id
+  UNION ALL SELECT material.id, COALESCE(task.owner_id, task.created_by), 41 FROM materials material JOIN issue_re_evaluations retest ON retest.id = material.re_evaluation_id JOIN issues issue ON issue.id = retest.issue_id JOIN experience_tasks task ON task.id = issue.task_id
+  UNION ALL SELECT material.id, assembly.created_by, 50 FROM materials material JOIN comparison_assemblies assembly ON assembly.id = material.comparison_assembly_id
+  UNION ALL SELECT material.id, assembly.created_by, 51 FROM materials material JOIN comparison_matrix_cells cell ON cell.id = material.comparison_cell_id JOIN comparison_assemblies assembly ON assembly.id = cell.assembly_id
+  UNION ALL SELECT link.material_id, COALESCE(task.owner_id, task.created_by), 60 FROM material_links link JOIN check_records record ON link.target_type='record' AND record.id=link.target_id JOIN experience_tasks task ON task.id=record.task_id
+  UNION ALL SELECT link.material_id, COALESCE(task.owner_id, task.created_by), 61 FROM material_links link JOIN recipes recipe ON link.target_type='recipe' AND recipe.id=link.target_id JOIN experience_tasks task ON task.id=recipe.task_id
+  UNION ALL SELECT link.material_id, COALESCE(task.owner_id, task.created_by), 62 FROM material_links link JOIN recipe_steps step ON link.target_type='recipe_step' AND step.id=link.target_id JOIN recipes recipe ON recipe.id=step.recipe_id JOIN experience_tasks task ON task.id=recipe.task_id
+  UNION ALL SELECT link.material_id, COALESCE(task.owner_id, task.created_by), 63 FROM material_links link JOIN issues issue ON link.target_type='issue' AND issue.id=link.target_id JOIN experience_tasks task ON task.id=issue.task_id
+  UNION ALL SELECT link.material_id, COALESCE(task.owner_id, task.created_by), 64 FROM material_links link JOIN issue_re_evaluations retest ON link.target_type='re_evaluation' AND retest.id=link.target_id JOIN issues issue ON issue.id=retest.issue_id JOIN experience_tasks task ON task.id=issue.task_id
+  UNION ALL SELECT link.material_id, assembly.created_by, 65 FROM material_links link JOIN comparison_matrix_cells cell ON link.target_type='comparison_cell' AND cell.id=link.target_id JOIN comparison_assemblies assembly ON assembly.id=cell.assembly_id
+  UNION ALL SELECT link.material_id, COALESCE(task.owner_id, task.created_by), 66 FROM material_links link JOIN matrix_cell_values cell ON link.target_type='dynamic_matrix_cell_value' AND cell.id=link.target_id JOIN task_matrices matrix ON matrix.id=cell.matrix_id JOIN experience_tasks task ON task.id=matrix.task_id
+), best_priority AS (
+  SELECT material_id, MIN(priority) AS priority
+  FROM owner_candidates
+  WHERE user_id IS NOT NULL
+  GROUP BY material_id
+), resolved_owner AS (
+  SELECT candidate.material_id, MIN(candidate.user_id) AS user_id
+  FROM owner_candidates candidate
+  JOIN best_priority best
+    ON candidate.material_id = best.material_id
+   AND candidate.priority = best.priority
+  WHERE candidate.user_id IS NOT NULL
+  GROUP BY candidate.material_id
+  HAVING COUNT(DISTINCT candidate.user_id) = 1
+)
+UPDATE materials material SET created_by = owner.user_id
+FROM resolved_owner owner
+WHERE material.id = owner.material_id AND material.created_by IS NULL;
+CREATE INDEX IF NOT EXISTS materials_created_by_idx ON materials(created_by);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'materials_created_by_fkey' AND conrelid = 'materials'::regclass) THEN
+    ALTER TABLE materials ADD CONSTRAINT materials_created_by_fkey FOREIGN KEY (created_by) REFERENCES platform_users(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS wecom_callback_replays (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  message_id VARCHAR(100) NOT NULL,
+  nonce VARCHAR(100) NOT NULL,
+  corp_id VARCHAR(100) NOT NULL,
+  message_timestamp TIMESTAMPTZ NOT NULL,
+  received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT wecom_callback_replays_message_id_key UNIQUE(message_id),
+  CONSTRAINT wecom_callback_replays_corp_nonce_timestamp_key UNIQUE(corp_id, nonce, message_timestamp)
+);
+CREATE INDEX IF NOT EXISTS wecom_callback_replays_received_at_idx ON wecom_callback_replays(received_at);
 
 DO $$
 BEGIN

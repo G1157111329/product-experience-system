@@ -19,6 +19,13 @@
     { "idx": 14, "version": "7", "when": 1783951000000, "tag": "0014_idempotent_report_snapshot_rpc", "breakpoints": true },
     { "idx": 15, "version": "7", "when": 1783952000000, "tag": "0015_validate_snapshot_idempotency_replays", "breakpoints": true },
     { "idx": 16, "version": "7", "when": 1783953000000, "tag": "0016_recipe_evaluation_retest", "breakpoints": true },
-    { "idx": 17, "version": "7", "when": 1783954000000, "tag": "0017_atomic_recipe_evaluation", "breakpoints": true }
+    { "idx": 17, "version": "7", "when": 1783954000000, "tag": "0017_atomic_recipe_evaluation", "breakpoints": true },
+    { "idx": 18, "version": "7", "when": 1783955000000, "tag": "0018_matrix_cell_style_target_id", "breakpoints": true },
+    { "idx": 19, "version": "7", "when": 1783956000000, "tag": "0019_backfill_matrix_issue_points", "breakpoints": true },
+    { "idx": 20, "version": "7", "when": 1784217600000, "tag": "0020_ai_model_request_options", "breakpoints": true },
+    { "idx": 21, "version": "7", "when": 1784217601000, "tag": "0021_recipe_material_reuse", "breakpoints": true },
+    { "idx": 22, "version": "7", "when": 1784217602000, "tag": "0022_report_snapshot_anchor_integrity", "breakpoints": true },
+    { "idx": 23, "version": "7", "when": 1784217603000, "tag": "0023_security_schema_probe_rpc", "breakpoints": true },
+    { "idx": 24, "version": "7", "when": 1784217604000, "tag": "0024_material_owner_and_wecom_replay", "breakpoints": true }
   ]
 }

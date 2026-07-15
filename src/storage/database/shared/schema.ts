@@ -2,6 +2,11 @@ import { pgTable, serial, timestamp, varchar, jsonb, boolean, index, uniqueIndex
 import { sql } from "drizzle-orm"
 import type { AnyPgColumn } from "drizzle-orm/pg-core"
 
+// This is intentionally lazy: reports is declared before reportSnapshots, but
+// the database constraint is maintained by migration 0022 with deferred
+// semantics so an anchored snapshot cannot be deleted independently.
+const reportSnapshotAnchorReference = (): AnyPgColumn => reportSnapshots.id;
+
 // V3.1.1 §27.2.6 / §16.3 — server-side dictionaries.
 export {
   projectPhaseDict,
@@ -47,6 +52,7 @@ export const reportTemplates = pgTable("report_templates", {
 	content: jsonb(),
 	isDefault: boolean("is_default").default(false),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	createdBy: varchar("created_by", { length: 36 }),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 }, () => [
 ]);
@@ -67,7 +73,7 @@ export const reports = pgTable("reports", {
 	sourceTaskIds: jsonb("source_task_ids").default([]),
 	sourceReportIds: jsonb("source_report_ids").default([]),
 	assemblyId: varchar("assembly_id", { length: 36 }),
-	snapshotId: varchar("snapshot_id", { length: 36 }),
+	snapshotId: varchar("snapshot_id", { length: 36 }).references(reportSnapshotAnchorReference, { onDelete: 'no action' }),
 	layoutProfile: varchar("layout_profile", { length: 80 }),
 	aiConfirmationStatus: varchar("ai_confirmation_status", { length: 20 }).default('pending'),
 	// V3.1 §16.2 — report-level fields for the contract layer. Nullable for
@@ -454,6 +460,7 @@ export const materials = pgTable("materials", {
 	thumbnailUrl: text("thumbnail_url"),
 	aiAnalysisStatus: varchar("ai_analysis_status", { length: 20 }).default('pending'),
 	aiResult: jsonb("ai_result"),
+	createdBy: varchar("created_by", { length: 36 }),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	recipeStepId: varchar("recipe_step_id", { length: 36 }),
 	recipeLibraryStepId: varchar("recipe_library_step_id", { length: 36 }),
@@ -481,6 +488,8 @@ export const materials = pgTable("materials", {
 		index("materials_re_evaluation_id_idx").using("btree", table.reEvaluationId.asc().nullsLast().op("text_ops")),
 	index("materials_comparison_cell_id_idx").using("btree", table.comparisonCellId.asc().nullsLast().op("text_ops")),
 	index("materials_comparison_assembly_id_idx").using("btree", table.comparisonAssemblyId.asc().nullsLast().op("text_ops")),
+	index("materials_created_by_idx").using("btree", table.createdBy.asc().nullsLast().op("text_ops")),
+	foreignKey({ columns: [table.createdBy], foreignColumns: [platformUsers.id], name: "materials_created_by_fkey" }).onDelete("set null"),
 	foreignKey({
 			columns: [table.recordId],
 			foreignColumns: [checkRecords.id],
@@ -568,6 +577,7 @@ export const aiModelConfigs = pgTable("ai_model_configs", {
 	supportsVision: boolean("supports_vision").default(false).notNull(),
 	customApiUrl: text("custom_api_url"),
 	customApiKeyEncrypted: text("custom_api_key_encrypted"),
+	requestOptions: jsonb("request_options").$type<Record<string, unknown>>().default({}),
 	isActive: boolean("is_active").default(false).notNull(),
 	createdBy: varchar("created_by", { length: 36 }),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
@@ -1534,7 +1544,7 @@ export const matrixCellStyles = pgTable("matrix_cell_styles", {
   id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
   matrixId: varchar("matrix_id", { length: 36 }).notNull(),
   targetType: varchar("target_type", { length: 30 }).notNull(),
-  targetId: varchar("target_id", { length: 36 }).notNull(),
+  targetId: varchar("target_id", { length: 160 }).notNull(),
   fontColorToken: varchar("font_color_token", { length: 30 }),
   fontSizeToken: varchar("font_size_token", { length: 10 }),
   bold: boolean("bold").default(false).notNull(),
@@ -1790,6 +1800,19 @@ export const wecomMediaIngestJobs = pgTable("wecom_media_ingest_jobs", {
   index("wmij_status_idx").using("btree", table.downloadStatus.asc().nullsLast().op("text_ops")),
   index("wmij_expires_idx").using("btree", table.expiresAt.asc().nullsLast().op("text_ops")),
   index("wmij_binding_idx").using("btree", table.wecomBindingId.asc().nullsLast().op("text_ops")),
+]);
+
+export const wecomCallbackReplays = pgTable("wecom_callback_replays", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  messageId: varchar("message_id", { length: 100 }).notNull(),
+  nonce: varchar({ length: 100 }).notNull(),
+  corpId: varchar("corp_id", { length: 100 }).notNull(),
+  messageTimestamp: timestamp("message_timestamp", { withTimezone: true, mode: 'string' }).notNull(),
+  receivedAt: timestamp("received_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  unique("wecom_callback_replays_message_id_key").on(table.messageId),
+  unique("wecom_callback_replays_corp_nonce_timestamp_key").on(table.corpId, table.nonce, table.messageTimestamp),
+  index("wecom_callback_replays_received_at_idx").using("btree", table.receivedAt.asc().nullsLast().op("timestamptz_ops")),
 ]);
 
 export const agentBindingSessions = pgTable("agent_binding_sessions", {

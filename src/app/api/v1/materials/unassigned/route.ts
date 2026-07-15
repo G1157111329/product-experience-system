@@ -9,7 +9,7 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { requireUser, isAuthResponse } from '@/lib/server/auth';
 import { ok, fail } from '@/lib/server/api-v1/response';
 import { resolveTraceId } from '@/lib/server/api-v1/trace';
-import { getUnassignedMaterials } from '@/lib/server/material-asset-service';
+import { getUnassignedMaterials, resolveUnassignedMaterialScope } from '@/lib/server/material-asset-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +21,11 @@ export async function GET(req: NextRequest) {
   if (isAuthResponse(user)) return fail(traceId, { message: '未认证', status: 401 });
 
   try {
-    const items = await getUnassignedMaterials(user.id);
+    const globalRequested = new URL(req.url).searchParams.get('scope') === 'global';
+    let scope;
+    try { scope = resolveUnassignedMaterialScope({ userId: user.id, isAdmin: user.role === 'admin', globalRequested }); }
+    catch { return fail(traceId, { message: '无权访问全局待归属素材池', status: 403 }); }
+    const items = await getUnassignedMaterials({ userId: user.id, isAdmin: user.role === 'admin', globalRequested: scope.includeGlobal });
     return ok({ items }, traceId);
   } catch (err) {
     const message = err instanceof Error ? err.message : '查询失败';

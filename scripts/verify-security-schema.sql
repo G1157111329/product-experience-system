@@ -16,7 +16,7 @@ BEGIN
     'matrix_view_definitions','matrix_hierarchy_nodes','matrix_leaf_rows','matrix_column_definitions','matrix_cell_values','matrix_cell_styles',
     'matrix_formula_definitions_v3','matrix_formula_runs_v3','matrix_narrative_blocks','matrix_issue_points',
     'issues','issue_re_evaluations','rectification_actions','verifications',
-    'agent_instances','agent_memory_namespaces','conversations','conversation_messages','agent_runs','agent_suggestion_blocks','wecom_bindings','wecom_media_ingest_jobs'
+    'agent_instances','agent_memory_namespaces','conversations','conversation_messages','agent_runs','agent_suggestion_blocks','wecom_bindings','wecom_media_ingest_jobs','wecom_callback_replays'
   ]) required(name) WHERE to_regclass('public.' || required.name) IS NULL LIMIT 1;
   IF missing_name IS NOT NULL THEN RAISE EXCEPTION 'startup schema manifest missing table: %', missing_name; END IF;
 
@@ -29,7 +29,8 @@ BEGIN
     'matrix_narrative_blocks.scope','matrix_issue_points.linked_issue_id','issues.status','issue_re_evaluations.issue_id',
     'rectification_actions.issue_id','verifications.rectification_action_id','agent_instances.bound_user_id','agent_memory_namespaces.namespace_key',
     'conversations.platform_user_id','conversation_messages.event_seq','agent_runs.trace_id','agent_suggestion_blocks.target_entity_id',
-    'wecom_bindings.wecom_user_id','wecom_media_ingest_jobs.download_status'
+    'wecom_bindings.wecom_user_id','wecom_media_ingest_jobs.wecom_media_id','wecom_media_ingest_jobs.download_status','materials.created_by',
+    'wecom_callback_replays.message_id','wecom_callback_replays.nonce','wecom_callback_replays.corp_id','wecom_callback_replays.message_timestamp','wecom_callback_replays.received_at'
   ]) required(name)
   WHERE NOT EXISTS (SELECT 1 FROM information_schema.columns columns WHERE columns.table_schema='public' AND columns.table_name=split_part(required.name,'.',1) AND columns.column_name=split_part(required.name,'.',2)) LIMIT 1;
   IF missing_name IS NOT NULL THEN RAISE EXCEPTION 'startup schema manifest missing column: %', missing_name; END IF;
@@ -38,6 +39,7 @@ BEGIN
     ('reports_snapshot_id_report_snapshots_id_fkey','reports','snapshot_id','report_snapshots','id'),
     ('report_snapshots_report_id_fkey','report_snapshots','report_id','reports','id'),
     ('ml_material_id_fkey','material_links','material_id','materials','id'),
+    ('materials_created_by_fkey','materials','created_by','platform_users','id'),
     ('task_matrices_task_id_fkey','task_matrices','task_id','experience_tasks','id'),
     ('matrix_sections_design_version_id_fkey','matrix_sections','design_version_id','matrix_design_versions','id'),
     ('mvd_matrix_id_fkey','matrix_view_definitions','matrix_id','task_matrices','id'),
@@ -80,7 +82,9 @@ BEGIN
     ('rectification_actions_issue_idx','rectification_actions','issue_id, created_at'),('verifications_action_idx','verifications','rectification_action_id, verified_at'),
     ('ai_tenant_status_idx','agent_instances','tenant_id, status'),('conv_user_idx','conversations','platform_user_id'),
     ('cm_conv_seq_idx','conversation_messages','conversation_id, event_seq'),('ar_trace_idx','agent_runs','trace_id'),
-    ('asb_target_idx','agent_suggestion_blocks','target_entity_type, target_entity_id')
+    ('asb_target_idx','agent_suggestion_blocks','target_entity_type, target_entity_id'),
+    ('materials_created_by_idx','materials','created_by'),
+    ('wecom_callback_replays_received_at_idx','wecom_callback_replays','received_at')
   ) required(name, owner_table, ordered_columns)
   WHERE NOT EXISTS (
     SELECT 1 FROM pg_index index_row JOIN pg_class index_class ON index_class.oid=index_row.indexrelid
@@ -92,6 +96,28 @@ BEGIN
            WHERE key.attnum>0)=required.ordered_columns
   ) LIMIT 1;
   IF missing_name IS NOT NULL THEN RAISE EXCEPTION 'startup schema manifest missing or invalid index: %', missing_name; END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_index index_row JOIN pg_class owner ON owner.oid=index_row.indrelid
+    JOIN pg_namespace namespace ON namespace.oid=owner.relnamespace
+    WHERE namespace.nspname='public' AND owner.relname='wecom_callback_replays'
+      AND index_row.indisunique AND index_row.indisvalid AND index_row.indisready AND index_row.indpred IS NULL
+      AND (SELECT string_agg(attribute.attname, ', ' ORDER BY key.ord)
+           FROM unnest(index_row.indkey::smallint[]) WITH ORDINALITY key(attnum,ord)
+           JOIN pg_attribute attribute ON attribute.attrelid=index_row.indrelid AND attribute.attnum=key.attnum
+           WHERE key.attnum>0)='message_id'
+  ) THEN RAISE EXCEPTION 'startup schema manifest missing replay uniqueness: wecom_callback_replays.message_id'; END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_index index_row JOIN pg_class owner ON owner.oid=index_row.indrelid
+    JOIN pg_namespace namespace ON namespace.oid=owner.relnamespace
+    WHERE namespace.nspname='public' AND owner.relname='wecom_callback_replays'
+      AND index_row.indisunique AND index_row.indisvalid AND index_row.indisready AND index_row.indpred IS NULL
+      AND (SELECT string_agg(attribute.attname, ', ' ORDER BY key.ord)
+           FROM unnest(index_row.indkey::smallint[]) WITH ORDINALITY key(attnum,ord)
+           JOIN pg_attribute attribute ON attribute.attrelid=index_row.indrelid AND attribute.attnum=key.attnum
+           WHERE key.attnum>0)='corp_id, nonce, message_timestamp'
+  ) THEN RAISE EXCEPTION 'startup schema manifest missing replay uniqueness: wecom_callback_replays.corp_nonce_timestamp'; END IF;
 
   IF NOT EXISTS (
     SELECT 1 FROM pg_index index_row JOIN pg_class owner ON owner.oid=index_row.indrelid
@@ -137,10 +163,11 @@ BEGIN
       ('0020_ai_model_request_options',1784217600000::bigint,'63a0a9248d8a62f85952a2b648427c4747db8a4512e0dfa7c0096beb88855103'),
       ('0021_recipe_material_reuse',1784217601000::bigint,'f0100aeacb10f51c4e32b23c10e640cb91a0c566247c79ffa8eb69e3984299d1'),
       ('0022_report_snapshot_anchor_integrity',1784217602000::bigint,'3fe16f4d1621c5cf20665304bf552a32d3fb398e1222e225dfc4f8c192a4ec68'),
-      ('0023_security_schema_probe_rpc',1784217603000::bigint,'6c22403e51c7c903a0bb359814f59f565593de25c524528c208dd9013a3fa451')
+      ('0023_security_schema_probe_rpc',1784217603000::bigint,'6c22403e51c7c903a0bb359814f59f565593de25c524528c208dd9013a3fa451'),
+      ('0024_material_owner_and_wecom_replay',1784217604000::bigint,'8a9bb3153598f2306d161f426a792e68c10eb8d6b5b7bc63f476aef05e03bc43')
     ) required(tag,applied_at,expected_hash)
     WHERE NOT EXISTS (SELECT 1 FROM drizzle.__drizzle_migrations migrations WHERE migrations.created_at=required.applied_at AND migrations.hash=required.expected_hash) LIMIT 1;
     IF missing_tag IS NOT NULL THEN RAISE EXCEPTION 'startup schema manifest missing or mismatched migration tag/hash: %', missing_tag; END IF;
-    RAISE NOTICE 'startup schema provenance: drizzle-journal head=0023_security_schema_probe_rpc';
+    RAISE NOTICE 'startup schema provenance: drizzle-journal head=0024_material_owner_and_wecom_replay';
   END IF;
 END $$;
