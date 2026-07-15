@@ -40,6 +40,10 @@ import { type IngredientDraftItem } from './components/recipe-ingredient-editor'
 import type { EvidenceBindingTarget } from './types';
 import { hasMeaningfulActiveComparison, hasMeaningfulActiveMatrix } from '@/lib/matrix/task-header-status';
 import { sortCreatedAscending } from '@/lib/stable-display-order';
+import { DeletionImpactDialog } from '@/components/deletion-impact-dialog';
+import { loadDeletionImpact } from '@/lib/deletion-impact-ui';
+import { useDeletionFlowController } from '@/hooks/use-deletion-flow-controller';
+import { assertSuccessfulSortResponse, persistOptimisticSort } from '@/lib/persisted-sort';
 
 /* ─── Types ─── */
 interface RecipeLibRef {
@@ -469,7 +473,7 @@ export default function TaskDetailPage() {
       )}
       {activeTab === 'materials' && <MaterialsTab taskId={id} />}
         {activeTab === 'comparison' && (
-          <ComparisonWorkspace taskId={id} taskName={task.task_name} initialLayoutType={task.comparison_layout_type} onMeaningfulContentChange={setHasComparisonInstance} />
+          <ComparisonWorkspace taskId={id} taskName={task.task_name} initialLayoutType={task.comparison_layout_type} onMeaningfulContentChange={setHasComparisonInstance} attemptNavigation={attemptNavigation} />
         )}
         {activeTab === 'matrix' && (
           <MatrixTab taskId={id} taskName={task.task_name} attemptNavigation={attemptNavigation} onMeaningfulContentChange={refreshMatrixHeaderStatus} />
@@ -1935,12 +1939,16 @@ function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, task
   };
 
   const handleDeleteRecord = async (record: CheckRecord) => {
-    const res = await fetch(`/api/records/${record.id}`, { method: 'DELETE' });
-    const data = await res.json();
-    if (data.code === 0) {
+    try {
+      const res = await fetch(`/api/records/${record.id}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.code !== 0) {
+        throw new Error(data.message || '删除失败，当前检查记录已保留');
+      }
       if (editRecordId === record.id) setEditRecordId(null);
-      onRefresh();
-      toast.success('问题点已删除');
+      toast.success('检查记录已删除');
+    } catch (error) {
+      throw error instanceof Error ? error : new Error('删除失败，当前检查记录已保留');
     }
   };
 
@@ -2159,6 +2167,19 @@ function FunctionsTab({
       setLoading(false);
     }
   }, [taskId, onRecipesChange]);
+
+  const recipeDeletion = useDeletionFlowController({
+    load: (target) => loadDeletionImpact(target.kind, target.id),
+    remove: async (target) => {
+      const response = await fetch(`/api/recipes/${target.id}`, { method: 'DELETE' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.code !== 0) throw new Error(data.message || '删除失败，当前内容已保留');
+      if (selectedRecipe?.id === target.id) setSelectedRecipe(null);
+      toast.success('食谱/功能已删除');
+    },
+    refresh: fetchRecipes,
+    onError: (error) => toast.error(error instanceof Error ? error.message : '删除失败，请稍后重试'),
+  });
 
   useEffect(() => { fetchRecipes(); }, [fetchRecipes]);
 
@@ -2429,23 +2450,17 @@ function FunctionsTab({
     }
   };
 
-  const handleDeleteRecipe = async (recipe: Recipe) => {
-    if (!confirm(`确定删除"${recipe.name}"？该操作不可恢复。`)) return;
-    const res = await fetch(`/api/recipes/${recipe.id}`, { method: 'DELETE' });
-    const data = await res.json();
-    if (res.ok && data.code === 0) {
-      if (selectedRecipe?.id === recipe.id) setSelectedRecipe(null);
-      fetchRecipes();
-      toast.success('食谱/功能已删除');
-    } else {
-      toast.error(data.message || '删除失败，当前内容已保留');
-    }
+  const handleDeleteRecipe = (recipe: Recipe) => {
+    void attemptNavigation(async () => {
+      await recipeDeletion.request({ kind: 'recipe', id: recipe.id, label: recipe.name });
+    });
   };
 
   return (
     <div className="space-y-4">
       <PreviewComponent />
 
+      <div aria-busy={recipeDeletion.state.phase === 'loading'} aria-disabled={recipeDeletion.state.phase === 'loading'} className={cn(recipeDeletion.state.phase === 'loading' && 'pointer-events-none opacity-70')}>
       <FunctionsInputWorkspace
         recipes={recipes}
         focusedRecipeId={focusedRecipeId}
@@ -2454,26 +2469,47 @@ function FunctionsTab({
         onCreateRecipe={() => setAddDialogOpen(true)}
         onEditRecipe={handleEditRecipe}
         onDeleteRecipe={handleDeleteRecipe}
+        deletionBusy={recipeDeletion.state.phase === 'loading' || recipeDeletion.state.phase === 'deleting'}
         onReorderRecipes={async (newRecipes) => {
-          setRecipes(newRecipes);
-          await fetch('/api/recipes', {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ recipes: newRecipes.map((r, i) => ({ id: r.id, sort_order: i })) }),
+          await persistOptimisticSort({
+            key: `task:${taskId}:recipe-order`,
+            previous: recipes,
+            next: newRecipes,
+            apply: (items) => {
+              const ordered = [...items];
+              setRecipes(ordered);
+              onRecipesChange?.(ordered);
+            },
+            persist: async (items) => {
+              const response = await fetch('/api/recipes', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ recipes: items.map((recipe, index) => ({ id: recipe.id, sort_order: index })) }),
+              });
+              await assertSuccessfulSortResponse(response);
+            },
           });
         }}
         onAddStep={(recipe) => { setSelectedRecipe(recipe); setAddStepDialogOpen(true); }}
         onEditStep={(step) => handleEditStep(step)}
         onDeleteStep={(step) => handleDeleteStep(step)}
         onReorderSteps={async (recipe, newSteps) => {
-          const updatedRecipes = recipes.map(r => {
-            if (r.id !== recipe.id) return r;
-            return { ...r, recipe_steps: newSteps };
-          });
-          setRecipes(updatedRecipes);
-          const reorderData = newSteps.map((s, i) => ({ id: s.id, step_number: i + 1 }));
-          await fetch('/api/recipe-steps', {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ steps: reorderData }),
+          await persistOptimisticSort({
+            key: `task:${taskId}:recipe-step-order:${recipe.id}`,
+            previous: recipe.recipe_steps || [],
+            next: newSteps,
+            apply: (items) => {
+              const orderedSteps = [...items];
+              setRecipes((current) => current.map((item) => (
+                item.id === recipe.id ? { ...item, recipe_steps: orderedSteps } : item
+              )));
+            },
+            persist: async (items) => {
+              const response = await fetch('/api/recipe-steps', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ steps: items.map((step, index) => ({ id: step.id, step_number: index + 1 })) }),
+              });
+              await assertSuccessfulSortResponse(response);
+            },
           });
         }}
         onBindingTargetChange={(target) => onBindingTargetChange?.(target)}
@@ -2507,6 +2543,17 @@ function FunctionsTab({
             }}
           />
         )}
+      />
+      </div>
+      {recipeDeletion.state.phase === 'loading' && <p role="status" className="text-sm text-muted-foreground">正在读取删除影响…</p>}
+
+      <DeletionImpactDialog
+        open={recipeDeletion.state.phase === 'confirming' || recipeDeletion.state.phase === 'deleting'}
+        targetLabel={recipeDeletion.state.pending?.label ?? ''}
+        impact={recipeDeletion.state.impact}
+        deleting={recipeDeletion.state.phase === 'deleting'}
+        onCancel={recipeDeletion.cancel}
+        onConfirm={recipeDeletion.confirm}
       />
 
       {/* Add recipe dialog */}

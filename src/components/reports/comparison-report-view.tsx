@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { MediaGallery } from '@/components/app/media-gallery';
 import { cn } from '@/lib/utils';
+import { buildMobileComparisonSections } from '@/lib/report-mobile-matrix-layout';
 
 type Row = Record<string, unknown>;
 
@@ -107,9 +108,9 @@ function CellBody({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-1.5">
-        {score && <Badge variant="secondary" className="text-[10px]">{score}</Badge>}
-        {Boolean(cell.conclusion_tag) && <Badge variant="outline" className="text-[10px]">{text(cell.conclusion_tag)}</Badge>}
-        {Boolean(cell.ai_status) && <span className="text-[10px] text-muted-foreground">结论: {text(cell.ai_status)}</span>}
+        {score && <Badge variant="secondary" className="text-xs">{score}</Badge>}
+        {Boolean(cell.conclusion_tag) && <Badge variant="outline" className="text-xs">{text(cell.conclusion_tag)}</Badge>}
+        {Boolean(cell.ai_status) && <span className="text-xs text-muted-foreground">结论: {text(cell.ai_status)}</span>}
       </div>
       {Boolean(cell.effect_summary) && (
         <p className="whitespace-pre-wrap break-words text-xs leading-5 text-foreground">
@@ -118,10 +119,10 @@ function CellBody({
       )}
       {processNotes.length > 0 && (
         <div className="rounded-md bg-muted/30 p-2">
-          <p className="mb-1 text-[10px] font-medium text-muted-foreground">过程记录</p>
+          <p className="mb-1 text-xs font-medium text-muted-foreground">过程记录</p>
           <ul className="space-y-1">
             {processNotes.map((item, index) => (
-              <li key={`${item}-${index}`} className="text-[11px] leading-5 text-muted-foreground">
+              <li key={`${item}-${index}`} className="text-xs leading-5 text-muted-foreground">
                 {index + 1}. {item}
               </li>
             ))}
@@ -130,10 +131,10 @@ function CellBody({
       )}
       {problems.length > 0 && (
         <div className="rounded-md border border-amber-200 bg-amber-50/70 p-2">
-          <p className="mb-1 text-[10px] font-medium text-amber-800">问题点</p>
+          <p className="mb-1 text-xs font-medium text-amber-800">问题点</p>
           <ul className="space-y-1">
             {problems.map((item, index) => (
-              <li key={`${item}-${index}`} className="text-[11px] leading-5 text-amber-900">
+              <li key={`${item}-${index}`} className="text-xs leading-5 text-amber-900">
                 {item}
               </li>
             ))}
@@ -149,7 +150,7 @@ function CellBody({
       />
       {appendixMedia.length > 0 && (
         <div className="rounded-md border bg-muted/20 p-2">
-          <p className="mb-2 text-[10px] text-muted-foreground">附录素材 {appendixMedia.length} 个</p>
+          <p className="mb-2 text-xs text-muted-foreground">附录素材 {appendixMedia.length} 个</p>
           <MediaGallery
             materials={appendixMedia}
             responsive
@@ -186,6 +187,7 @@ export function ComparisonReportView({
     ['单元格', cells.length],
     ['已确认结论', confirmedAi.length],
   ];
+  const mobileSections = buildMobileComparisonSections(snapshot);
 
   return (
     <div className={cn('space-y-4', compact && 'space-y-3')}>
@@ -201,9 +203,9 @@ export function ComparisonReportView({
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Badge variant="secondary" className="text-[10px]">comparison_report</Badge>
-              <Badge variant="outline" className="text-[10px]">{text(snapshot.layout_profile, 'image_matrix')}</Badge>
-              <Badge variant="outline" className="text-[10px]">主体最多 {maxInline}</Badge>
+              <Badge variant="secondary" className="text-xs">comparison_report</Badge>
+              <Badge variant="outline" className="text-xs">{text(snapshot.layout_profile, 'image_matrix')}</Badge>
+              <Badge variant="outline" className="text-xs">主体最多 {maxInline}</Badge>
             </div>
           </div>
         </CardHeader>
@@ -227,7 +229,7 @@ export function ComparisonReportView({
               <div key={text(object.id, String(index))} className="rounded-md border p-3">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <p className="break-words text-sm font-medium">{text(object.object_name, `对象 ${index + 1}`)}</p>
-                  {Boolean(object.is_competitor) && <Badge variant="outline" className="text-[10px]">竞品</Badge>}
+                  {Boolean(object.is_competitor) && <Badge variant="outline" className="text-xs">竞品</Badge>}
                 </div>
                 <div className="space-y-1 text-xs text-muted-foreground">
                   {Boolean(object.brand) && <p>品牌：{text(object.brand)}</p>}
@@ -237,7 +239,7 @@ export function ComparisonReportView({
               </div>
             ))}
           </div>
-          <p className="text-[11px] text-muted-foreground">快照生成：{formatTime(snapshot.generated_at)}</p>
+          <p className="text-xs text-muted-foreground">快照生成：{formatTime(snapshot.generated_at)}</p>
         </CardContent>
       </Card>
 
@@ -246,7 +248,24 @@ export function ComparisonReportView({
           <CardTitle className="text-sm">对比矩阵</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
+          <div className="space-y-3 p-3 md:hidden" data-testid="comparison-mobile-reader">
+            {mobileSections.map((section) => (
+              <section key={section.id} className="space-y-2 rounded-lg border bg-background p-3">
+                <div>
+                  <p className="break-words text-sm font-semibold">{section.label}</p>
+                  <p className="text-xs text-muted-foreground">{section.nodeType}</p>
+                </div>
+                {section.objects.map((object) => (
+                  <article key={object.id} className="space-y-2 rounded-md bg-muted/20 p-3">
+                    <p className="break-words text-xs font-medium text-muted-foreground">{object.label}</p>
+                    <CellBody cell={object.cell as ComparisonCell | undefined} onPreview={onPreview} />
+                  </article>
+                ))}
+              </section>
+            ))}
+            {mobileSections.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">暂无对比节点</p>}
+          </div>
+          <div className="hidden overflow-x-auto md:block" data-testid="comparison-desktop-table">
             <table className="min-w-full border-collapse text-left">
               <thead>
                 <tr className="border-b bg-muted/30">
@@ -266,7 +285,7 @@ export function ComparisonReportView({
                     <th className="sticky left-0 z-[1] min-w-40 border-r bg-background px-3 py-3 text-xs font-medium">
                       <div className="space-y-1">
                         <p className="break-words">{text(node.node_label, `节点 ${rowIndex + 1}`)}</p>
-                        <p className="text-[10px] text-muted-foreground">{text(node.node_type, 'item')}</p>
+                        <p className="text-xs text-muted-foreground">{text(node.node_type, 'item')}</p>
                       </div>
                     </th>
                     {objects.map((object, columnIndex) => {
@@ -274,7 +293,7 @@ export function ComparisonReportView({
                       const objectName = text(objectMap.get(String(object.id))?.object_name, `对象 ${columnIndex + 1}`);
                       return (
                         <td key={`${text(node.id)}-${text(object.id)}`} className="min-w-64 border-r px-3 py-3 align-top">
-                          <div className="mb-2 text-[10px] text-muted-foreground">{objectName}</div>
+                          <div className="mb-2 text-xs text-muted-foreground">{objectName}</div>
                           <CellBody cell={cell} onPreview={onPreview} />
                         </td>
                       );

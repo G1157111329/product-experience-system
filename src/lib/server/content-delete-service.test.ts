@@ -13,7 +13,7 @@ import {
 } from './content-delete-service';
 
 type State = {
-  records: string[];
+  records: Array<{ id: string; recipeId?: string | null; stepId?: string | null }>;
   recipes: string[];
   steps: Array<{ id: string; recipeId: string }>;
   issues: Array<{ id: string; recordId?: string; recipeId?: string; stepId?: string }>;
@@ -28,7 +28,11 @@ type State = {
 };
 
 const initial = (): State => ({
-  records: ['record-1'],
+  records: [
+    { id: 'record-1' },
+    { id: 'record-recipe', recipeId: 'recipe-1' },
+    { id: 'record-step', stepId: 'step-1' },
+  ],
   recipes: ['recipe-1'],
   steps: [{ id: 'step-1', recipeId: 'recipe-1' }, { id: 'step-2', recipeId: 'recipe-1' }],
   issues: [
@@ -64,7 +68,7 @@ const initial = (): State => ({
 });
 
 function graphFor(state: State, kind: ContentDeleteKind, id: string): DeleteGraph | null {
-  if (kind === 'record' && !state.records.includes(id)) return null;
+  if (kind === 'record' && !state.records.some((record) => record.id === id)) return null;
   if (kind === 'recipe_step' && !state.steps.some((step) => step.id === id)) return null;
   if (kind === 'recipe' && !state.recipes.includes(id)) return null;
   if (kind === 'issue' && !state.issues.some((issue) => issue.id === id)) return null;
@@ -78,6 +82,11 @@ function graphFor(state: State, kind: ContentDeleteKind, id: string): DeleteGrap
     || (kind === 'recipe' && (issue.recipeId === id || Boolean(issue.stepId && stepIds.includes(issue.stepId))))
     || (kind === 'recipe_step' && issue.stepId === id)
   )).map((issue) => issue.id);
+  const affectedRecordIds = state.records.filter((record) => (
+    (kind === 'record' && record.id === id)
+    || (kind === 'recipe' && (record.recipeId === id || Boolean(record.stepId && stepIds.includes(record.stepId))))
+    || (kind === 'recipe_step' && record.stepId === id)
+  )).map((record) => record.id);
   const reEvaluationIds = state.reEvaluations.filter((item) => issueIds.includes(item.issueId)).map((item) => item.id);
   const targets = [
     ...(kind === 'issue' ? [] : [{ type: kind, id }]),
@@ -96,7 +105,7 @@ function graphFor(state: State, kind: ContentDeleteKind, id: string): DeleteGrap
       || Boolean(item.reEvaluationId && reEvaluationIds.includes(item.reEvaluationId))
     )).map((item) => item.materialId),
   ])];
-  return { kind, id, actorId: 'actor-1', stepIds, issueIds, reEvaluationIds, targets, materialIds };
+  return { kind, id, actorId: 'actor-1', stepIds, affectedRecordIds, issueIds, reEvaluationIds, targets, materialIds };
 }
 
 type FailAt = 'authorize' | 'legacy' | 'links' | 'issue_children' | 'issues' | 'children' | 'root' | 'statuses' | 'audit';
@@ -121,6 +130,10 @@ function fakeStore(state: State, failAt?: FailAt): ContentDeleteStore {
               if (item.issueId && graph.issueIds.includes(item.issueId)) item.issueId = null;
               if (item.reEvaluationId && graph.reEvaluationIds.includes(item.reEvaluationId)) item.reEvaluationId = null;
             }
+            for (const record of state.records) {
+              if (graph.kind === 'recipe' && record.recipeId === graph.id) record.recipeId = null;
+              if (record.stepId && graph.stepIds.includes(record.stepId)) record.stepId = null;
+            }
           },
           async deleteIssueChildren(graph) {
             if (failAt === 'issue_children') throw new Error('injected issue_children failure');
@@ -143,7 +156,7 @@ function fakeStore(state: State, failAt?: FailAt): ContentDeleteStore {
           },
           async deleteRoot(graph) {
             if (failAt === 'root') throw new Error('injected root failure');
-            if (graph.kind === 'record') state.records = state.records.filter((id) => id !== graph.id);
+            if (graph.kind === 'record') state.records = state.records.filter((record) => record.id !== graph.id);
             if (graph.kind === 'recipe_step') state.steps = state.steps.filter((step) => step.id !== graph.id);
             if (graph.kind === 'recipe') state.recipes = state.recipes.filter((id) => id !== graph.id);
           },
@@ -182,6 +195,10 @@ void (async () => {
   assert.equal(canDeleteTaskContent({ rawRole: 'admin', actorId: 'admin-1', ownerId: null, createdBy: null }), true);
 
   const source = readFileSync('src/lib/server/content-delete-service.ts', 'utf8');
+  const graphSource = readFileSync('src/lib/server/content-delete-graph.ts', 'utf8');
+  assert.match(graphSource, /affectedRecordIds:\s*string\[\]/, 'delete graph must carry the locked check-record dependents');
+  assert.match(source, /affectedRecordIds[\s\S]*from\(checkRecords\)[\s\S]*for\('update'\)/, 'dependent check records must be locked into the delete graph');
+  assert.match(source, /tx\.update\(checkRecords\)[\s\S]*recipeId:\s*null[\s\S]*recipeStepId:\s*null/, 'runtime deletion must explicitly detach check records');
   assert.ok(
     (source.match(/inArray\(materials\.reEvaluationId, reEvaluationIds\)/g) || []).length >= 3,
     'record, recipe-step and recipe graph discovery must all include legacy re-evaluation materials',
@@ -207,6 +224,11 @@ void (async () => {
   assert.equal(await deleteRecipeAtomically({ recipeId: 'recipe-1', actorId: 'actor-1' }, fakeStore(recipeState)), true);
   assert.deepEqual(recipeState.recipes, []);
   assert.deepEqual(recipeState.steps, []);
+  assert.deepEqual(recipeState.records, [
+    { id: 'record-1' },
+    { id: 'record-recipe', recipeId: null },
+    { id: 'record-step', stepId: null },
+  ], 'recipe deletion explicitly clears every affected check-record reference');
   assert.deepEqual(recipeState.issues, [{ id: 'issue-record', recordId: 'record-1' }]);
   assert.deepEqual(recipeState.reEvaluations, []);
   assert.deepEqual(recipeState.rectifications, []);
@@ -224,10 +246,11 @@ void (async () => {
   assert.equal(stepState.steps.some((step) => step.id === 'step-1'), false);
   assert.equal(stepState.steps.some((step) => step.id === 'step-2'), true);
   assert.equal(stepState.recipes.includes('recipe-1'), true);
+  assert.equal(stepState.records.find((record) => record.id === 'record-step')?.stepId, null);
 
   const recordState = initial();
   assert.equal(await deleteRecordAtomically({ recordId: 'record-1', actorId: 'actor-1' }, fakeStore(recordState)), true);
-  assert.deepEqual(recordState.records, []);
+  assert.equal(recordState.records.some((record) => record.id === 'record-1'), false);
   assert.equal(recordState.recipes.includes('recipe-1'), true);
 
   console.log('atomic content deletion tests passed');

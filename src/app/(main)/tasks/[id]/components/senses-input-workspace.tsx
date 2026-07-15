@@ -8,6 +8,9 @@ import { MediaGallery } from '@/components/app/media-gallery';
 import { InlineEditable } from '@/components/inline-editable';
 import { patchInlineValue } from '@/lib/inline-save-helpers';
 import { cn } from '@/lib/utils';
+import { DeletionImpactDialog } from '@/components/deletion-impact-dialog';
+import { loadDeletionImpact } from '@/lib/deletion-impact-ui';
+import { useDeletionFlowController } from '@/hooks/use-deletion-flow-controller';
 import type { CheckRecord, EvidenceBindingTarget, Material } from '../types';
 import { toast } from 'sonner';
 
@@ -17,7 +20,7 @@ type SensesInputWorkspaceProps = {
   recordMaterials: Record<string, Material[]>;
   onCreateRecord: () => void;
   onEditRecord: (record: CheckRecord) => void;
-  onDeleteRecord: (record: CheckRecord) => void;
+  onDeleteRecord: (record: CheckRecord) => Promise<void>;
   onPreview: (url: string) => void;
   onBindingTargetChange: (target: EvidenceBindingTarget | null) => void;
   onMaterialsChange?: () => void;
@@ -58,11 +61,27 @@ export function SensesInputWorkspace({
   );
 
   const failedRecords = records.filter(isFailed);
+  const deletion = useDeletionFlowController({
+    load: (target) => loadDeletionImpact(target.kind, target.id),
+    remove: async (target) => {
+      const record = records.find((item) => item.id === target.id);
+      if (!record) throw new Error('删除目标不存在，请刷新后重试');
+      await onDeleteRecord(record);
+    },
+    refresh: async () => { await onMaterialsChange?.(); },
+    onError: (error) => toast.error(error instanceof Error ? error.message : '删除失败，请稍后重试'),
+  });
 
   const selectRecord = (record: CheckRecord) => {
     void attemptNavigation(() => {
       setSelectedId(record.id);
       onBindingTargetChange({ type: 'record', id: record.id, label: '当前五感记录' });
+    });
+  };
+
+  const requestRecordDelete = (record: CheckRecord) => {
+    void attemptNavigation(async () => {
+      await deletion.request({ kind: 'record', id: record.id, label: getRecordTitle(record) });
     });
   };
 
@@ -107,6 +126,7 @@ export function SensesInputWorkspace({
 
   return (
     <section className="grid gap-4 xl:grid-cols-[minmax(280px,0.95fr)_minmax(0,1.35fr)]">
+      {deletion.state.phase === 'loading' && <p role="status" aria-busy="true" className="col-span-full text-sm text-muted-foreground">正在读取删除影响…</p>}
       <div className="rounded-lg border bg-card p-3 shadow-sm">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -179,7 +199,14 @@ export function SensesInputWorkspace({
               </div>
               <div className="flex shrink-0 gap-2">
                 <Button variant="outline" size="sm" onClick={() => onEditRecord(selectedRecord)}>完整编辑</Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onDeleteRecord(selectedRecord)}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  disabled={deletion.state.phase === 'loading' || deletion.state.phase === 'deleting'}
+                  onClick={() => requestRecordDelete(selectedRecord)}
+                  aria-label={`删除检查记录 ${getRecordTitle(selectedRecord)}`}
+                >
                   <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
                 </Button>
               </div>
@@ -233,6 +260,14 @@ export function SensesInputWorkspace({
           </div>
         )}
       </div>
+      <DeletionImpactDialog
+        open={deletion.state.phase === 'confirming' || deletion.state.phase === 'deleting'}
+        targetLabel={deletion.state.pending?.label ?? ''}
+        impact={deletion.state.impact}
+        deleting={deletion.state.phase === 'deleting'}
+        onCancel={deletion.cancel}
+        onConfirm={deletion.confirm}
+      />
     </section>
   );
 }

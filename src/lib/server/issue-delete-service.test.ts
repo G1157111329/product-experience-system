@@ -14,7 +14,7 @@ function storeFor(state: State, failStatus = false): IssueDeletionStore {
             assert.equal(actorId, 'actor-1');
             if (!state.issue) return null;
             return {
-              kind: 'issue', id, actorId, stepIds: [], issueIds: [id], reEvaluationIds: ['retest-1'],
+              kind: 'issue', id, actorId, stepIds: [], affectedRecordIds: [], issueIds: [id], reEvaluationIds: ['retest-1'],
               targets: [{ type: 'issue', id }, { type: 're_evaluation', id: 'retest-1' }], materialIds: ['material-1'],
             };
           },

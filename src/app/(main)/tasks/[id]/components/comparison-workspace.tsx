@@ -4,6 +4,16 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { ChevronDown, ChevronRight, GitCompareArrows, Loader2, Plus, Sparkles, Table2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { MaterialPicker, type Material } from '@/components/material-picker';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,6 +23,11 @@ import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { InlineEditable } from '@/components/inline-editable';
 import { patchInlineValue } from '@/lib/inline-save-helpers';
+import { hasMeaningfulActiveComparison } from '@/lib/matrix/task-header-status';
+import { cn } from '@/lib/utils';
+import { DeletionImpactDialog } from '@/components/deletion-impact-dialog';
+import { loadDeletionImpact, type DeletionImpactKind } from '@/lib/deletion-impact-ui';
+import { useDeletionFlowController } from '@/hooks/use-deletion-flow-controller';
 
 type ComparisonAssembly = {
   id: string;
@@ -122,10 +137,14 @@ function summaryTextOf(node: ComparisonItemNode) {
 export function ComparisonWorkspace({
   taskId,
   taskName,
+  onMeaningfulContentChange,
+  attemptNavigation,
 }: {
   taskId: string;
   taskName: string;
   initialLayoutType?: string | null;
+  onMeaningfulContentChange?: (meaningful: boolean) => void;
+  attemptNavigation: (next: () => void) => Promise<void>;
 }) {
   const [assembly, setAssembly] = useState<ComparisonAssembly | null>(null);
   const [matrix, setMatrix] = useState<MatrixData | null>(null);
@@ -134,6 +153,7 @@ export function ComparisonWorkspace({
   const [newObjectName, setNewObjectName] = useState('');
   const [editingObjectId, setEditingObjectId] = useState('');
   const [editingObjectName, setEditingObjectName] = useState('');
+  const [pendingObjectDelete, setPendingObjectDelete] = useState<ComparisonObject | null>(null);
   const [editingNodeId, setEditingNodeId] = useState('');
   const [editingNodeLabel, setEditingNodeLabel] = useState('');
   const [summaryDrafts, setSummaryDrafts] = useState<Record<string, string>>({});
@@ -142,6 +162,7 @@ export function ComparisonWorkspace({
   const [cellMediaSavingId, setCellMediaSavingId] = useState('');
   const [collapsedSectionIds, setCollapsedSectionIds] = useState<Set<string>>(new Set());
   const [collapsedItemIds, setCollapsedItemIds] = useState<Set<string>>(new Set());
+  const [mobileObjectId, setMobileObjectId] = useState('');
   const collapseInitialized = useRef(false);
 
   const cellsByKey = useMemo(() => {
@@ -191,11 +212,23 @@ export function ComparisonWorkspace({
 
   const tableMinWidth = Math.max(720, LEFT_COLUMN_WIDTH + Math.max(1, matrix?.objects.length || 1) * OBJECT_COLUMN_WIDTH);
 
+  useEffect(() => {
+    const objects = matrix?.objects || [];
+    if (objects.length === 0) {
+      setMobileObjectId('');
+      return;
+    }
+    if (!objects.some((object) => object.id === mobileObjectId)) {
+      setMobileObjectId(objects[0]?.id || '');
+    }
+  }, [matrix?.objects, mobileObjectId]);
+
   const loadMatrix = useCallback(async (assemblyId: string) => {
     const res = await fetch(`/api/comparison-matrix?assembly_id=${assemblyId}`);
     const data = await res.json() as ApiResponse<MatrixData>;
     if (data.code === 0 && data.data) {
       setMatrix(data.data);
+      onMeaningfulContentChange?.(hasMeaningfulActiveComparison(data.data));
       if (!collapseInitialized.current) {
         setCollapsedSectionIds(new Set(data.data.item_nodes.filter(isSectionNode).map((node) => node.id)));
         setCollapsedItemIds(new Set(data.data.item_nodes.filter(isMatrixCellNode).map((node) => node.id)));
@@ -223,7 +256,7 @@ export function ComparisonWorkspace({
     } else {
       toast.error(data.message || '加载对比矩阵失败');
     }
-  }, []);
+  }, [onMeaningfulContentChange]);
 
   const loadAssembly = useCallback(async () => {
     setLoading(true);
@@ -233,11 +266,13 @@ export function ComparisonWorkspace({
       if (data.code === 0 && data.data) {
         setAssembly(data.data);
         await loadMatrix(data.data.id);
+      } else {
+        onMeaningfulContentChange?.(false);
       }
     } finally {
       setLoading(false);
     }
-  }, [loadMatrix, taskId]);
+  }, [loadMatrix, onMeaningfulContentChange, taskId]);
 
   useEffect(() => {
     void loadAssembly();
@@ -267,6 +302,18 @@ export function ComparisonWorkspace({
   const refreshMatrix = async () => {
     if (assembly?.id) await loadMatrix(assembly.id);
   };
+
+  const nodeDeletion = useDeletionFlowController({
+    load: (target) => loadDeletionImpact(target.kind, target.id),
+    remove: async (target) => {
+      const response = await fetch(`/api/comparison-item-nodes/${target.id}`, { method: 'DELETE' });
+      const data = await response.json().catch(() => ({})) as ApiResponse<unknown>;
+      if (!response.ok || data.code !== 0) throw new Error(data.message || '删除失败，当前对比内容已保留');
+      toast.success('对比项目已删除');
+    },
+    refresh: refreshMatrix,
+    onError: (error) => toast.error(error instanceof Error ? error.message : '删除失败，请稍后重试'),
+  });
 
   const deactivateAssembly = async () => {
     if (!assembly?.id) return;
@@ -435,11 +482,13 @@ export function ComparisonWorkspace({
     }
   };
 
-  const deleteNode = async (nodeId: string) => {
-    const res = await fetch(`/api/comparison-item-nodes/${nodeId}`, { method: 'DELETE' });
-    const data = await res.json() as ApiResponse<unknown>;
-    if (data.code === 0) await refreshMatrix();
-    else toast.error(data.message || '删除项目失败');
+  const deleteNode = (nodeId: string) => {
+    const node = matrix?.item_nodes.find((item) => item.id === nodeId);
+    if (!node) return;
+    const kind: DeletionImpactKind = isSectionNode(node) ? 'comparison_section' : 'comparison_item';
+    void attemptNavigation(async () => {
+      await nodeDeletion.request({ kind, id: node.id, label: node.node_label });
+    });
   };
 
   const syncCellMedia = async (cellId: string, ids: string[], optimisticMaterials?: Material[]) => {
@@ -501,14 +550,14 @@ export function ComparisonWorkspace({
 
     return (
       <div
-        className="min-h-[320px] space-y-3 rounded-md border bg-card p-3"
+        className="min-h-[352px] space-y-3 rounded-md border bg-card p-3"
         onDragOver={(event) => { if (getDroppedMaterialId(event)) event.preventDefault(); }}
         onDrop={(event) => void dropMaterialToCell(event, cell)}
       >
-        <div className="rounded-md border border-dashed bg-muted/20 p-2">
+        <div className="min-h-[84px] rounded-md border border-dashed bg-muted/20 p-2">
           <div className="mb-2 flex items-center justify-between gap-2">
             <Label className="text-xs">图片/视频</Label>
-            {mediaSaving && <span className="text-[10px] text-muted-foreground">保存中...</span>}
+            {mediaSaving && <span className="text-xs text-muted-foreground">保存中...</span>}
           </div>
           <MaterialPicker
             taskId={taskId}
@@ -517,12 +566,13 @@ export function ComparisonWorkspace({
             initialMaterials={cellMedia}
             onSelectionChange={(ids, materials) => void syncCellMedia(cell.id, ids, materials)}
             selectedPreviewSize="sm"
+            compact
           />
         </div>
 
         <div className="space-y-2">
           <div className="space-y-1">
-            <Label className="text-[10px] text-muted-foreground">效果结论</Label>
+            <Label className="text-xs text-muted-foreground">效果结论</Label>
             <InlineEditable.Textarea
               value={cell.effect_summary ?? ''}
               placeholder="输入效果结论"
@@ -539,6 +589,7 @@ export function ComparisonWorkspace({
                       ),
                     };
                   });
+                  void refreshMatrix();
                 }
                 return result;
               }}
@@ -546,7 +597,7 @@ export function ComparisonWorkspace({
             />
           </div>
           <div className="space-y-1">
-            <Label className="text-[10px] text-muted-foreground">过程记录（一行一条）</Label>
+            <Label className="text-xs text-muted-foreground">过程记录（一行一条）</Label>
             <InlineEditable.Textarea
               value={listToTextarea(cell.process_notes)}
               placeholder="过程记录，一行一条"
@@ -564,6 +615,7 @@ export function ComparisonWorkspace({
                       ),
                     };
                   });
+                  void refreshMatrix();
                 }
                 return result;
               }}
@@ -571,7 +623,7 @@ export function ComparisonWorkspace({
             />
           </div>
           <div className="space-y-1">
-            <Label className="text-[10px] text-muted-foreground">问题点（一行一条）</Label>
+            <Label className="text-xs text-muted-foreground">问题点（一行一条）</Label>
             <InlineEditable.Textarea
               value={listToTextarea(cell.problem_points)}
               placeholder="问题点，一行一条"
@@ -589,6 +641,7 @@ export function ComparisonWorkspace({
                       ),
                     };
                   });
+                  void refreshMatrix();
                 }
                 return result;
               }}
@@ -628,6 +681,7 @@ export function ComparisonWorkspace({
               size="sm"
               variant="outline"
               className="h-7 gap-1 px-2 text-destructive"
+              disabled={nodeDeletion.state.phase === 'loading' || nodeDeletion.state.phase === 'deleting'}
               onClick={() => void deleteNode(node.id)}
               aria-label={`删除小结 ${node.node_label}`}
               title={`删除小结 ${node.node_label}`}
@@ -636,7 +690,7 @@ export function ComparisonWorkspace({
               删除
             </Button>
           </div>
-          <p className="text-[11px] leading-4 text-amber-900/80">报告中横跨全部对比对象展示</p>
+          <p className="text-xs leading-4 text-amber-900/80">报告中横跨全部对比对象展示</p>
         </div>
       </TableCell>
       <TableCell colSpan={matrix?.objects.length || 1} className="p-2 align-top">
@@ -713,7 +767,8 @@ export function ComparisonWorkspace({
   }
 
   return (
-    <div className="space-y-4">
+    <div aria-busy={nodeDeletion.state.phase === 'loading'} aria-disabled={nodeDeletion.state.phase === 'loading'} className={cn('space-y-4', nodeDeletion.state.phase === 'loading' && 'pointer-events-none opacity-70')}>
+      {nodeDeletion.state.phase === 'loading' && <p role="status" className="text-sm text-muted-foreground">正在读取删除影响…</p>}
       <Card>
         <CardHeader className="space-y-3">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -755,6 +810,68 @@ export function ComparisonWorkspace({
               先新增对比对象，再在矩阵第一行新增大类和细项。
             </div>
           ) : (
+            <>
+            <div className="space-y-3 md:hidden">
+              <div data-testid="comparison-mobile-overview" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {matrix.objects.map((object) => {
+                  const itemNodes = orderedItemNodes.filter(isMatrixCellNode);
+                  const completed = itemNodes.filter((node) => {
+                    const cell = cellsByKey.get(cellKey(node.id, object.id));
+                    return Boolean(
+                      cell?.effect_summary?.trim()
+                      || listToTextarea(cell?.process_notes).trim()
+                      || listToTextarea(cell?.problem_points).trim()
+                      || (cell && (cellMediaById[cell.id]?.length || 0) > 0),
+                    );
+                  }).length;
+                  const active = mobileObjectId === object.id;
+                  return (
+                    <button
+                      key={object.id}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => setMobileObjectId(object.id)}
+                      className={cn(
+                        'min-h-11 rounded-lg border px-3 py-2 text-left transition-colors',
+                        active ? 'border-primary bg-primary/10' : 'bg-background hover:border-primary/40',
+                      )}
+                    >
+                      <span className="block truncate text-sm font-semibold">{object.object_name}</span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">已录入 {completed}/{itemNodes.length} 项</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div data-testid="comparison-mobile-focus" className="space-y-3">
+                <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/20 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">当前录入对象</p>
+                    <p className="truncate text-sm font-semibold">
+                      {matrix.objects.find((object) => object.id === mobileObjectId)?.object_name || '请选择对象'}
+                    </p>
+                  </div>
+                  <Badge variant="outline">单列录入</Badge>
+                </div>
+
+                {orderedItemNodes.filter(isMatrixCellNode).map((node) => {
+                  const object = matrix.objects.find((candidate) => candidate.id === mobileObjectId);
+                  const cell = object ? cellsByKey.get(cellKey(node.id, object.id)) || null : null;
+                  const section = matrix.item_nodes.find((candidate) => candidate.id === node.parent_id);
+                  return (
+                    <section key={node.id} className="space-y-2 rounded-lg border bg-background p-3">
+                      <div className="min-w-0">
+                        {section && <p className="truncate text-xs text-muted-foreground">{section.node_label}</p>}
+                        <h3 className="break-words text-sm font-semibold">{node.node_label}</h3>
+                      </div>
+                      {renderCellEditor(cell)}
+                    </section>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="hidden md:block">
             <ScrollArea className="w-full">
               <Table className="table-fixed" style={{ minWidth: tableMinWidth }}>
                 <TableHeader>
@@ -788,15 +905,14 @@ export function ComparisonWorkspace({
                               </button>
                             </div>
                             <Button
-                              size="sm"
-                              variant="outline"
-                              className="absolute right-1 top-1 h-7 gap-1 px-2 text-destructive"
-                              onClick={() => void deleteObject(object.id)}
+                              size="icon"
+                              variant="ghost"
+                              className="absolute right-1 top-1 h-7 w-7 text-muted-foreground hover:text-destructive"
+                              onClick={() => setPendingObjectDelete(object)}
                               aria-label={`删除对象 ${object.object_name}`}
                               title={`删除对象 ${object.object_name}`}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
-                              删除
                             </Button>
                           </>
                         )}
@@ -882,15 +998,15 @@ export function ComparisonWorkspace({
                                     小结
                                   </Button>
                                   <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-8 gap-1 px-2 text-destructive"
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                    disabled={nodeDeletion.state.phase === 'loading' || nodeDeletion.state.phase === 'deleting'}
                                     onClick={() => void deleteNode(node.id)}
                                     aria-label={`删除大类 ${node.node_label}`}
                                     title={`删除大类 ${node.node_label}`}
                                   >
                                     <Trash2 className="h-3.5 w-3.5" />
-                                    删除
                                   </Button>
                                 </div>
                               </div>
@@ -946,6 +1062,7 @@ export function ComparisonWorkspace({
                                 size="sm"
                                 variant="outline"
                                 className="absolute right-1 top-1 h-6 gap-1 px-1.5 text-destructive"
+                                disabled={nodeDeletion.state.phase === 'loading' || nodeDeletion.state.phase === 'deleting'}
                                 onClick={() => void deleteNode(node.id)}
                                 aria-label={`删除细项 ${node.node_label}`}
                                 title={`删除细项 ${node.node_label}`}
@@ -983,9 +1100,46 @@ export function ComparisonWorkspace({
               </Table>
               <ScrollBar orientation="horizontal" />
             </ScrollArea>
+            </div>
+            </>
           )}
         </CardContent>
       </Card>
+      <DeletionImpactDialog
+        open={nodeDeletion.state.phase === 'confirming' || nodeDeletion.state.phase === 'deleting'}
+        targetLabel={nodeDeletion.state.pending?.label ?? ''}
+        impact={nodeDeletion.state.impact}
+        deleting={nodeDeletion.state.phase === 'deleting'}
+        onCancel={nodeDeletion.cancel}
+        onConfirm={nodeDeletion.confirm}
+      />
+      <AlertDialog
+        open={pendingObjectDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingObjectDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除对比对象？</AlertDialogTitle>
+            <AlertDialogDescription>
+              将删除“{pendingObjectDelete?.object_name}”及其当前对比单元格内容，此操作无法撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (pendingObjectDelete) void deleteObject(pendingObjectDelete.id);
+                setPendingObjectDelete(null);
+              }}
+            >
+              确认删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

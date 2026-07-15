@@ -22,19 +22,13 @@ import {
   securityAuditLogs,
   verifications,
 } from '@/storage/database/shared/schema';
+import type {
+  ContentDeleteKind,
+  DeleteGraph,
+  DeleteTarget,
+} from '@/lib/server/content-delete-graph';
 
-export type ContentDeleteKind = 'record' | 'recipe_step' | 'recipe' | 'issue';
-export type DeleteTarget = { type: ContentDeleteKind | 'issue' | 're_evaluation'; id: string };
-export type DeleteGraph = {
-  kind: ContentDeleteKind;
-  id: string;
-  actorId: string;
-  stepIds: string[];
-  issueIds: string[];
-  reEvaluationIds: string[];
-  targets: DeleteTarget[];
-  materialIds: string[];
-};
+export type { ContentDeleteKind, DeleteGraph, DeleteTarget } from '@/lib/server/content-delete-graph';
 
 export interface ContentDeleteTransaction {
   loadAndAuthorize(kind: ContentDeleteKind, id: string, actorId: string): Promise<DeleteGraph | null>;
@@ -133,6 +127,17 @@ async function loadDeleteGraph(tx: DatabaseTransaction, kind: ContentDeleteKind,
     ? (await tx.select({ id: recipeSteps.id }).from(recipeSteps).where(eq(recipeSteps.recipeId, id)).orderBy(recipeSteps.id).for('update').execute()).map((row) => row.id)
     : kind === 'recipe_step' ? [id] : [];
   await lockDeleteTargets(tx, stepIds.map((stepId) => ({ targetType: 'recipe_step', targetId: stepId })));
+  const affectedRecordIds = kind === 'issue'
+    ? []
+    : (await tx.select({ id: checkRecords.id }).from(checkRecords).where(
+      kind === 'record'
+        ? eq(checkRecords.id, id)
+        : kind === 'recipe_step'
+          ? eq(checkRecords.recipeStepId, id)
+          : stepIds.length > 0
+            ? or(eq(checkRecords.recipeId, id), inArray(checkRecords.recipeStepId, stepIds))
+            : eq(checkRecords.recipeId, id),
+    ).orderBy(checkRecords.id).for('update').execute()).map((row) => row.id);
   const issuePredicate = kind === 'issue'
     ? eq(issues.id, id)
     : kind === 'record'
@@ -185,7 +190,7 @@ async function loadDeleteGraph(tx: DatabaseTransaction, kind: ContentDeleteKind,
       );
   const legacyRows = await tx.select({ materialId: materials.id }).from(materials).where(legacyPredicate).execute();
   return {
-    kind, id, actorId, stepIds, issueIds, reEvaluationIds, targets,
+    kind, id, actorId, stepIds, affectedRecordIds, issueIds, reEvaluationIds, targets,
     materialIds: [...new Set([...linkedMaterialRows.map((row) => row.materialId), ...legacyRows.map((row) => row.materialId)])],
   };
 }
@@ -241,6 +246,14 @@ function createDatabaseStore(): ContentDeleteStore {
     transaction: (work) => db.transaction(async (tx) => work({
       loadAndAuthorize: (kind, id, actorId) => loadDeleteGraph(tx, kind, id, actorId),
       async clearLegacyReferences(graph) {
+        if (graph.kind === 'recipe_step' && graph.affectedRecordIds.length > 0) {
+          await tx.update(checkRecords).set({ recipeStepId: null })
+            .where(inArray(checkRecords.id, graph.affectedRecordIds)).execute();
+        }
+        if (graph.kind === 'recipe' && graph.affectedRecordIds.length > 0) {
+          await tx.update(checkRecords).set({ recipeId: null, recipeStepId: null })
+            .where(inArray(checkRecords.id, graph.affectedRecordIds)).execute();
+        }
         if (graph.kind === 'record') await tx.update(materials).set({ recordId: null }).where(eq(materials.recordId, graph.id)).execute();
         if (graph.kind === 'recipe_step') await tx.update(materials).set({ recipeStepId: null }).where(eq(materials.recipeStepId, graph.id)).execute();
         if (graph.kind === 'recipe') {
