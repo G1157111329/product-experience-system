@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { canAccessAssembly, canAccessTask, isAuthResponse, requireUser, type AuthUser } from '@/lib/server/auth';
+import { replaceComparisonCellMaterialSelection } from '@/lib/server/material-asset-service';
+import { roleForIndex } from '@/lib/comparison-media-role';
 import { generatePresignedUrl } from '@/lib/server/storage';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 
@@ -11,6 +13,11 @@ type MaterialRow = Record<string, unknown> & {
   file_url?: string | null;
   task_id?: string | null;
   comparison_assembly_id?: string | null;
+};
+
+type MaterialLinkRow = {
+  material_id: string;
+  binding_order: number | null;
 };
 
 type AccessibleMediaTarget = {
@@ -78,12 +85,6 @@ async function getAccessibleCell(
   };
 }
 
-function roleForIndex(index: number) {
-  if (index === 0) return 'cell_primary';
-  if (index < MAX_INLINE_MEDIA) return 'cell_secondary';
-  return 'appendix';
-}
-
 async function materialWithUrl(material: MaterialRow): Promise<MaterialRow> {
   const fileKey = material.file_path || material.file_url;
   if (!fileKey || fileKey.startsWith('http') || fileKey.startsWith('data:')) return material;
@@ -126,7 +127,32 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     .order('media_display_order', { ascending: true });
   if (error) return NextResponse.json({ code: 1, message: error.message || '查询失败' }, { status: 500 });
 
-  const materialRows = (data || []) as MaterialRow[];
+  const { data: linkRows, error: linkError } = await client
+    .from('material_links')
+    .select('material_id, binding_order')
+    .eq('target_type', 'comparison_cell')
+    .eq('target_id', cellId)
+    .order('binding_order', { ascending: true });
+  if (linkError) return NextResponse.json({ code: 1, message: linkError.message || '查询素材绑定失败' }, { status: 500 });
+  const links = (linkRows || []) as MaterialLinkRow[];
+  const linkedIds = links.map((link) => link.material_id);
+  const { data: linkedData, error: linkedError } = linkedIds.length > 0
+    ? await client.from('materials').select('*').in('id', linkedIds)
+    : { data: [], error: null };
+  if (linkedError) return NextResponse.json({ code: 1, message: linkedError.message || '查询关联素材失败' }, { status: 500 });
+
+  const rowsById = new Map<string, MaterialRow>();
+  for (const material of data || []) rowsById.set(String(material.id), material as MaterialRow);
+  for (const material of linkedData || []) rowsById.set(String(material.id), material as MaterialRow);
+  const linkedOrder = new Map<string, number>(links.map((link) => [link.material_id, link.binding_order ?? 0]));
+  const materialRows = [...rowsById.values()].sort((left, right) => {
+    const leftOrder = linkedOrder.get(String(left.id));
+    const rightOrder = linkedOrder.get(String(right.id));
+    if (leftOrder !== undefined && rightOrder !== undefined) return leftOrder - rightOrder;
+    if (leftOrder !== undefined) return -1;
+    if (rightOrder !== undefined) return 1;
+    return Number(left.media_display_order ?? 0) - Number(right.media_display_order ?? 0);
+  });
   const materials = await Promise.all(materialRows.map((material) => materialWithUrl(material)));
   return NextResponse.json({
     code: 0,
@@ -162,38 +188,24 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     materials.push(material as MaterialRow);
   }
 
-  const { data: oldMaterials } = await client
-    .from('materials')
-    .select('id')
-    .eq('comparison_cell_id', cellId);
-  for (const material of oldMaterials || []) {
-    await client
-      .from('materials')
-      .update({
-        comparison_cell_id: null,
-        comparison_assembly_id: null,
-        media_display_order: 0,
-        media_role: null,
-      })
-      .eq('id', material.id);
-  }
-
   const updatedMaterials: MaterialRow[] = [];
   for (let index = 0; index < materials.length; index += 1) {
     const material = materials[index];
-    const { data, error } = await client
-      .from('materials')
-      .update({
-        comparison_cell_id: cellId,
-        comparison_assembly_id: access.assemblyId || null,
-        media_display_order: index,
-        media_role: roleForIndex(index),
-      })
-      .eq('id', material.id)
-      .select()
-      .single();
-    if (error) return NextResponse.json({ code: 1, message: error.message || '素材关联失败' }, { status: 500 });
-    if (data) updatedMaterials.push(data as MaterialRow);
+    updatedMaterials.push({
+      ...material,
+      media_display_order: index,
+      media_role: roleForIndex(index),
+    });
+  }
+  try {
+    await replaceComparisonCellMaterialSelection({
+      cellId,
+      actorId: access.user.id,
+      assemblyId: access.assemblyId || null,
+      materialIds,
+    });
+  } catch (error) {
+    return NextResponse.json({ code: 1, message: error instanceof Error ? error.message : '素材更新失败' }, { status: 500 });
   }
 
   const materialsWithUrls = await Promise.all(updatedMaterials.map(materialWithUrl));

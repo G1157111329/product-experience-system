@@ -5,6 +5,10 @@ import { createHash } from 'node:crypto';
 import {
   REQUIRED_SCHEMA_MANIFEST,
   REQUIRED_MIGRATIONS,
+  REQUIRED_FROZEN_GUARD_BODY,
+  REQUIRED_FROZEN_GUARD_BODY_HASH,
+  REQUIRED_FROZEN_CAPTURE_BODY,
+  REQUIRED_FROZEN_CAPTURE_BODY_HASH,
   SchemaManifestStartupError,
   verifyRequiredSchemaManifest,
   type SchemaManifestProbeResult,
@@ -38,6 +42,15 @@ function healthyProbe(): SchemaManifestProbeResult {
     migrationJournalPresent: true,
     migrationTags: REQUIRED_MIGRATIONS.map(([tag]) => tag),
     migrationHashes: Object.fromEntries(REQUIRED_MIGRATIONS.map(([tag, , hash]) => [tag, hash])),
+    functions: ['public.guard_frozen_material_delete', 'public.capture_frozen_material_references'],
+    functionBodies: {
+      'public.guard_frozen_material_delete': REQUIRED_FROZEN_GUARD_BODY,
+      'public.capture_frozen_material_references': REQUIRED_FROZEN_CAPTURE_BODY,
+    },
+    triggers: [
+      { name: 'materials_frozen_delete_guard', table: 'materials', function: 'guard_frozen_material_delete', enabled: 'O' },
+      { name: 'report_snapshots_material_reference_capture', table: 'report_snapshots', function: 'capture_frozen_material_references', enabled: 'O' },
+    ],
   };
 }
 
@@ -143,9 +156,9 @@ test('rejects a same-named FK attached to the wrong table and columns', async ()
 
 test('rejects a same-named constraint attached to the wrong table or definition', async () => {
   const probe = healthyProbe();
-  probe.constraintDetails = [{
-    name: 'issues_status_check', table: 'other_table', definition: 'CHECK (true)',
-  }];
+  probe.constraintDetails = probe.constraintDetails.map((constraint) => constraint.name === 'issues_status_check'
+    ? { name: 'issues_status_check', table: 'other_table', definition: 'CHECK (true)' }
+    : constraint);
   await expectNamedFailure(probe, 'constraint', 'issues_status_check');
 });
 
@@ -335,6 +348,100 @@ test('0023 database is stale after the 0024 security migration', async () => {
   const probe = healthyProbe();
   probe.migrationTags = without(probe.migrationTags, '0024_material_owner_and_wecom_replay');
   await expectNamedFailure(probe, 'migration tag', '0024_material_owner_and_wecom_replay');
+});
+
+test('0024 database is stale after the frozen-media retention migration', async () => {
+  const probe = healthyProbe();
+  probe.migrationTags = without(probe.migrationTags, '0025_frozen_media_reference_guard');
+  await expectNamedFailure(probe, 'migration tag', '0025_frozen_media_reference_guard');
+});
+
+test('0025 SQL hash, journal timestamp, cleanup manifest and frozen guard stay aligned', () => {
+  const migration = readFileSync('src/storage/database/shared/migrations/0025_frozen_media_reference_guard.sql', 'utf8');
+  const required = REQUIRED_MIGRATIONS.find(([tag]) => tag === '0025_frozen_media_reference_guard');
+  assert.ok(required);
+  assert.equal(createHash('sha256').update(migration).digest('hex'), required[2]);
+  const guardBody = migration.match(/CREATE OR REPLACE FUNCTION guard_frozen_material_delete\(\)[\s\S]*?AS \$\$([\s\S]*?)\$\$;/)?.[1];
+  assert.ok(guardBody);
+  assert.equal(createHash('sha256').update(guardBody.toLowerCase().replace(/\s+/g, '')).digest('hex'), REQUIRED_FROZEN_GUARD_BODY_HASH);
+  const captureBody = migration.match(/CREATE OR REPLACE FUNCTION capture_frozen_material_references\(\)[\s\S]*?AS \$\$([\s\S]*?)\$\$;/)?.[1];
+  assert.ok(captureBody);
+  const normalizedCaptureBody = captureBody.toLowerCase().replace(/\s+/g, '');
+  assert.equal(createHash('sha256').update(normalizedCaptureBody).digest('hex'), REQUIRED_FROZEN_CAPTURE_BODY_HASH);
+  assert.ok(readFileSync('scripts/verify-security-schema.sql', 'utf8').includes(`'${normalizedCaptureBody.replaceAll("'", "''")}'`));
+  assert.match(migration, /BEFORE DELETE ON materials/);
+  assert.match(migration, /report_snapshots[\s\S]*snapshot_json::text LIKE/);
+  assert.ok(REQUIRED_SCHEMA_MANIFEST.some((item) => item.table === 'material_cleanup_jobs'));
+  assert.ok(REQUIRED_SCHEMA_MANIFEST.some((item) => item.table === 'frozen_material_references'));
+  assert.match(migration, /CREATE TRIGGER report_snapshots_material_reference_capture AFTER INSERT ON report_snapshots/);
+  assert.match(migration, /INSERT INTO frozen_material_references\(snapshot_id, material_id\)[\s\S]*FROM report_snapshots snapshot/);
+  assert.match(migration, /requested_by varchar\(36\),[\s\S]*actor_snapshot varchar\(100\) NOT NULL/);
+  assert.match(migration, /material_cleanup_jobs_requested_by_fkey[\s\S]*ON DELETE SET NULL/);
+  assert.match(migration, /lease_token uuid/);
+  assert.match(readFileSync('scripts/verify-security-schema.sql', 'utf8'), /lease_token' AND udt_name='uuid'/);
+});
+
+test('journal-less bootstrap fails closed without the 0025 function or enabled materials trigger', async () => {
+  const missingFunction = healthyProbe();
+  missingFunction.migrationJournalPresent = false;
+  missingFunction.functions = [];
+  await expectNamedFailure(missingFunction, 'function', 'guard_frozen_material_delete');
+  const disabledTrigger = healthyProbe();
+  disabledTrigger.migrationJournalPresent = false;
+  disabledTrigger.triggers = [{ name: 'materials_frozen_delete_guard', table: 'materials', function: 'guard_frozen_material_delete', enabled: 'D' }];
+  await expectNamedFailure(disabledTrigger, 'trigger', 'materials_frozen_delete_guard');
+});
+
+test('replica-only frozen media trigger fails closed while origin and always modes pass', async () => {
+  const replica = healthyProbe();
+  replica.triggers[0].enabled = 'R';
+  await expectNamedFailure(replica, 'trigger', 'materials_frozen_delete_guard');
+  for (const enabled of ['O', 'A']) {
+    const probe = healthyProbe();
+    probe.triggers[0].enabled = enabled;
+    await verifyRequiredSchemaManifest(async () => probe);
+  }
+  const verifier = readFileSync('scripts/verify-security-schema.sql', 'utf8');
+  assert.match(verifier, /tgenabled IN \('O','A'\)/);
+  assert.doesNotMatch(verifier, /tgenabled\s*<>\s*'D'/);
+});
+
+test('empty RETURN OLD guard body fails closed and frozen reference table is startup critical', async () => {
+  const emptyGuard = healthyProbe();
+  emptyGuard.functionBodies['public.guard_frozen_material_delete'] = 'BEGIN RETURN OLD; END';
+  await expectNamedFailure(emptyGuard, 'function body', 'guard_frozen_material_delete');
+  const missingReferences = healthyProbe();
+  missingReferences.tables = without(missingReferences.tables, 'frozen_material_references');
+  await expectNamedFailure(missingReferences, 'table', 'frozen_material_references');
+});
+
+test('empty or semantically wrong frozen capture function fails closed', async () => {
+  for (const body of ['BEGIN RETURN NEW; END', 'BEGIN DELETE FROM frozen_material_references; RETURN NEW; END']) {
+    const probe = healthyProbe();
+    probe.functionBodies['public.capture_frozen_material_references'] = body;
+    await expectNamedFailure(probe, 'function body', 'capture_frozen_material_references');
+  }
+});
+
+test('0025 upgrades a legacy cleanup queue and reconstructs the requester FK semantically', async () => {
+  const migration = readFileSync('src/storage/database/shared/migrations/0025_frozen_media_reference_guard.sql', 'utf8');
+  assert.match(migration, /ALTER TABLE material_cleanup_jobs ADD COLUMN IF NOT EXISTS lease_token uuid/);
+  assert.match(migration, /owner_namespace\.nspname = 'public'[\s\S]*owner\.relname = 'material_cleanup_jobs'[\s\S]*attname = 'requested_by'/);
+  assert.match(migration, /DROP CONSTRAINT %I/);
+  assert.match(migration, /REFERENCES public\.platform_users\(id\) ON DELETE SET NULL/);
+  const wrongDeleteAction = healthyProbe();
+  wrongDeleteAction.foreignKeyDetails = wrongDeleteAction.foreignKeyDetails.map((foreignKey) =>
+    foreignKey.name === 'material_cleanup_jobs_requested_by_fkey' ? { ...foreignKey, onDelete: 'RESTRICT' } : foreignKey,
+  );
+  await expectNamedFailure(wrongDeleteAction, 'foreign key', 'material_cleanup_jobs_requested_by_fkey');
+});
+
+test('cleanup uniqueness is structural and rejects the same name on wrong columns', async () => {
+  const probe = healthyProbe();
+  probe.constraintDetails = probe.constraintDetails.map((constraint) => constraint.name === 'material_cleanup_jobs_material_key'
+    ? { ...constraint, definition: 'UNIQUE (material_id)' }
+    : constraint);
+  await expectNamedFailure(probe, 'constraint', 'material_cleanup_jobs_material_key');
 });
 
 test('callback replay uniqueness is semantic, valid, ready, exact and non-partial', async () => {

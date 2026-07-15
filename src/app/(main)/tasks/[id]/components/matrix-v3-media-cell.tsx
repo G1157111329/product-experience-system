@@ -2,11 +2,11 @@
 
 /**
  * MatrixV3MediaCell — D (primary_media) / O (effect_media) slot UI.
- * Binds via POST /api/v1/matrices/{id}/cells/{leaf}/{col}/media and
- * unbinds via DELETE /api/v1/material-links/{linkId}.
+ * Every existing-asset selection, drop, and removal replaces the complete
+ * cell selection through one atomic material-links command.
  */
 import { useMemo, useState } from 'react';
-import { ImagePlus, Loader2, X } from 'lucide-react';
+import { Loader2, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { MaterialPicker, type Material } from '@/components/material-picker';
 import { MediaThumbnail, useImagePreview } from '@/components/image-preview';
@@ -14,13 +14,17 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import type { V3CellMedia, V3Column } from '@/lib/matrix/v3-types';
 
+export function nextMaterialIdsForMatrixSelection(current: readonly string[], action: { add: string } | { remove: string }) {
+  if ('add' in action) return [...new Set([...current, action.add])];
+  return current.filter((materialId) => materialId !== action.remove);
+}
+
 interface MatrixV3MediaCellProps {
   matrixId: string;
   taskId: string;
   leafRowId: string;
   column: V3Column;
   media: V3CellMedia[];
-  targetLabel: string;
   onChanged: () => void;
 }
 
@@ -45,41 +49,23 @@ export function MatrixV3MediaCell({
   leafRowId,
   column,
   media,
-  targetLabel,
   onChanged,
 }: MatrixV3MediaCellProps) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [lastBoundLinkIds, setLastBoundLinkIds] = useState<string[]>([]);
   const preview = useImagePreview();
   const maxCount = column.maxMediaCount ?? (column.columnZone === 'primary_media' ? 3 : 12);
   const imagesOnly = column.dataType === 'image_slot' || column.columnZone === 'primary_media';
 
   const initialMaterials = useMemo(() => media.map(toPickerMaterial), [media]);
   const selectedIds = useMemo(() => media.map((m) => m.materialId), [media]);
-  const linkByMaterialId = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const m of media) map.set(m.materialId, m.linkId);
-    return map;
-  }, [media]);
-
-  const mediaUrl = `/api/v1/matrices/${matrixId}/cells/${leafRowId}/${column.id}/media`;
-
-  const bindMaterial = async (materialId: string) => {
-    const res = await fetch(mediaUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ materialId }),
+  const replaceSelection = async (materialIds: string[]) => {
+    const replacement = await fetch('/api/v1/material-links', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ matrixCell: { matrixId, leafRowId, columnId: column.id, materialIds } }),
     });
-    const json = await res.json();
-    if (json.code !== 0) throw new Error(json.message || '绑定失败');
-    return String(json.data.linkId);
-  };
-
-  const unbindLink = async (linkId: string) => {
-    const res = await fetch(`/api/v1/material-links/${linkId}`, { method: 'DELETE' });
-    const json = await res.json().catch(() => ({ code: res.ok ? 0 : 1 }));
-    if (json.code !== 0 && !res.ok) throw new Error(json.message || '解绑失败');
+    const result = await replacement.json().catch(() => null) as { code?: number; message?: string } | null;
+    if (!replacement.ok || result?.code !== 0) throw new Error(result?.message || '素材替换失败');
   };
 
   const handleSelectionChange = async (ids: string[]) => {
@@ -93,13 +79,7 @@ export function MatrixV3MediaCell({
 
     setSaving(true);
     try {
-      for (const id of toRemove) {
-        const linkId = linkByMaterialId.get(id);
-        if (linkId) await unbindLink(linkId);
-      }
-      const addedLinks: string[] = [];
-      for (const id of toAdd) addedLinks.push(await bindMaterial(id));
-      setLastBoundLinkIds(addedLinks);
+      await replaceSelection(nextIds);
       if (ids.length > maxCount) {
         toast.message(`最多 ${maxCount} 个素材，已截断`);
       }
@@ -113,9 +93,11 @@ export function MatrixV3MediaCell({
   };
 
   const handleRemove = async (linkId: string) => {
+    const target = media.find((item) => item.linkId === linkId);
+    if (!target) return;
     setSaving(true);
     try {
-      await unbindLink(linkId);
+      await replaceSelection(nextMaterialIdsForMatrixSelection(selectedIds, { remove: target.materialId }));
       onChanged();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '移除失败');
@@ -139,8 +121,7 @@ export function MatrixV3MediaCell({
     }
     setSaving(true);
     try {
-      const linkId = await bindMaterial(materialId);
-      setLastBoundLinkIds([linkId]);
+      await replaceSelection(nextMaterialIdsForMatrixSelection(selectedIds, { add: materialId }));
       onChanged();
       toast.success('已绑定素材');
     } catch (err) {
@@ -153,7 +134,8 @@ export function MatrixV3MediaCell({
   return (
     <>
     <div
-      className="px-1 py-1 min-h-[36px] space-y-1"
+      data-testid="matrix-media-slot"
+      className="h-9 overflow-hidden px-1 py-1"
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes('application/x-material-id')) {
           e.preventDefault();
@@ -162,14 +144,21 @@ export function MatrixV3MediaCell({
       }}
       onDrop={(e) => void handleDrop(e)}
     >
-      <div className="flex flex-wrap gap-1 items-center">
+      <div className="flex h-7 flex-nowrap items-center gap-1 overflow-hidden">
         {media.slice(0, maxCount).map((m) => (
-          <div key={m.linkId} className="relative group">
+          <div key={m.linkId} className="relative shrink-0 group">
+            <button
+              type="button"
+              className="block rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={`查看素材 ${m.fileName || ''}`}
+              onClick={() => preview.open(m.fileUrl || m.thumbnailUrl || '')}
+            >
             <MediaThumbnail
               url={m.fileUrl || m.thumbnailUrl || ''}
               type={m.materialType === 'video' ? 'video' : 'image'}
               size="xs"
             />
+            </button>
             <button
               type="button"
               className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-destructive text-destructive-foreground opacity-0 group-hover:opacity-100 flex items-center justify-center"
@@ -188,13 +177,13 @@ export function MatrixV3MediaCell({
           type="button"
           size="sm"
           variant="outline"
-          className={cn('h-7 gap-1 text-[10px] px-1.5', saving && 'opacity-70')}
+          className={cn('h-7 w-7 shrink-0 p-0', saving && 'opacity-70')}
           disabled={saving}
           onClick={() => setOpen(true)}
+          aria-label="添加素材"
           title={imagesOnly ? '选择/上传图片' : '选择/上传素材'}
         >
-          {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <ImagePlus className="h-3 w-3" />}
-          {media.length}/{maxCount}
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
         </Button>
       </div>
 
@@ -216,36 +205,6 @@ export function MatrixV3MediaCell({
           void handleSelectionChange(filtered);
         }}
       />
-      {lastBoundLinkIds.length > 0 && (
-        <div className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[11px] text-emerald-900">
-          <p className="truncate">已绑定到：{targetLabel}</p>
-          <div className="mt-1 flex items-center gap-3">
-            <button
-              type="button"
-              className="font-medium hover:underline"
-              disabled={saving}
-              onClick={() => {
-                void (async () => {
-                  setSaving(true);
-                  try {
-                    for (const linkId of lastBoundLinkIds) await unbindLink(linkId);
-                    setLastBoundLinkIds([]);
-                    onChanged();
-                  } catch (error) {
-                    toast.error(error instanceof Error ? error.message : '撤销失败');
-                  } finally {
-                    setSaving(false);
-                  }
-                })();
-              }}
-            >撤销</button>
-            <button type="button" className="font-medium hover:underline" onClick={() => setOpen(true)}>改绑</button>
-            {media[0]?.fileUrl && (
-              <button type="button" className="font-medium hover:underline" onClick={() => preview.open(media[0].fileUrl || '')}>查看素材</button>
-            )}
-          </div>
-        </div>
-      )}
     </div>
     <preview.PreviewComponent />
     </>

@@ -5,6 +5,7 @@ import { parse } from 'url';
 import next from 'next';
 import { applyNoStorePageHeaders, isHtmlPageRequest } from './lib/server/page-cache';
 import { validateProductionStartupSecurity } from './lib/server/startup-security';
+import { startMaterialCleanupWorker } from './lib/server/material-cleanup-worker';
 import {
   createLocalFileReadStream,
   getLocalContentType,
@@ -192,6 +193,7 @@ async function startServer() {
     await validateLocalUploadDirectoryWritable();
   }
   await app.prepare();
+  const stopCleanupWorker = !dev ? startMaterialCleanupWorker() : async () => undefined;
   const server = createServer(async (req, res) => {
     try {
       if (await tryServeNextStatic(req, res)) return;
@@ -223,6 +225,9 @@ async function startServer() {
       }`,
     );
   });
+  const shutdown = () => { void stopCleanupWorker().finally(() => server.close()); };
+  process.once('SIGTERM', shutdown);
+  process.once('SIGINT', shutdown);
 }
 
 void startServer().catch((error) => {

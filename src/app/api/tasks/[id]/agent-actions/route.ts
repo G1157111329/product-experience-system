@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { and, eq, sql } from 'drizzle-orm';
 import {
   normalizeAgentActions,
   type AgentAction,
@@ -12,8 +13,21 @@ import {
 import { createAssemblyFromComparisonTask, findAssemblyForTask } from '@/lib/server/comparison-assembly';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { getDb } from '@/storage/database/pg-db';
+import {
+  conversations,
+  conversationMessages,
+  matrixCellValues,
+  matrixColumnDefinitions,
+  matrixLeafRows,
+  taskMatrices,
+} from '@/storage/database/shared/schema';
 import { isAgentActionAllowed } from '@/lib/agent-action-policy';
 import { toStoredIssueStatus } from '@/lib/server/issue-state-machine';
+import { canAccessConversationRow } from '@/lib/server/agent-access';
+import { bindMaterial } from '@/lib/server/material-asset-service';
+import { buildContextMaterialFileName, materialFileExtension } from '@/lib/material-context-naming';
+import { roleForIndex } from '@/lib/comparison-media-role';
 
 type Row = Record<string, unknown>;
 type Client = ReturnType<typeof getSupabaseClient>;
@@ -29,10 +43,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ code: 1, message: '无权执行该任务的 AI 动作' }, { status: 403 });
   }
 
-  const body = await request.json().catch(() => ({}));
-  const actions = normalizeAgentActions((body as Record<string, unknown>).actions);
+  const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+  const actions = normalizeAgentActions(body.actions);
+  const actionPlanMessageId = typeof body.actionPlanMessageId === 'string' ? body.actionPlanMessageId : null;
   if (actions.length === 0) {
     return NextResponse.json({ code: 1, message: '没有可执行动作' }, { status: 400 });
+  }
+
+  if (actionPlanMessageId && !(await reserveActionPlan(taskId, actionPlanMessageId, actions, user))) {
+    return NextResponse.json({ code: 1, message: '该操作计划已执行、正在执行，或不属于当前任务' }, { status: 409 });
   }
 
   const results: AgentActionResult[] = [];
@@ -54,6 +73,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   const hasFailure = results.some((result) => result.status === 'failed');
+  const actionPlanStatus = hasFailure ? 'task_action_plan_partial' : 'task_action_plan_applied';
+  if (actionPlanMessageId) {
+    await persistActionPlanOutcome(actionPlanMessageId, taskId, actions, results, actionPlanStatus);
+  }
   await writeSecurityAudit(client, {
     request,
     actor: user,
@@ -71,8 +94,54 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   return NextResponse.json({
     code: hasFailure ? 1 : 0,
     message: hasFailure ? '部分 AI 动作执行失败' : 'AI 动作已执行',
-    data: { results },
+    data: { results, actionPlanStatus: actionPlanMessageId ? actionPlanStatus : null },
   }, { status: hasFailure ? 207 : 200 });
+}
+
+async function reserveActionPlan(
+  taskId: string,
+  messageId: string,
+  actions: AgentAction[],
+  user: { id: string; role: string },
+) {
+  const db = await getDb();
+  const rows = await db
+    .select({ content: conversationMessages.content, taskId: conversations.taskId, platformUserId: conversations.platformUserId })
+    .from(conversationMessages)
+    .innerJoin(conversations, eq(conversationMessages.conversationId, conversations.id))
+    .where(eq(conversationMessages.id, messageId))
+    .limit(1)
+    .execute();
+  const plan = rows[0];
+  if (!plan || plan.taskId !== taskId || !canAccessConversationRow(user, plan)) return false;
+  try {
+    const stored = JSON.parse(plan.content || '{}') as { actions?: unknown };
+    if (JSON.stringify(normalizeAgentActions(stored.actions)) !== JSON.stringify(actions)) return false;
+  } catch {
+    return false;
+  }
+  const claimed = await db
+    .update(conversationMessages)
+    .set({ toolName: 'task_action_plan_applying' })
+    .where(and(eq(conversationMessages.id, messageId), eq(conversationMessages.toolName, 'task_action_plan')))
+    .returning({ id: conversationMessages.id })
+    .execute();
+  return claimed.length === 1;
+}
+
+async function persistActionPlanOutcome(
+  messageId: string,
+  taskId: string,
+  actions: AgentAction[],
+  results: AgentActionResult[],
+  toolName: 'task_action_plan_applied' | 'task_action_plan_partial',
+) {
+  const db = await getDb();
+  await db
+    .update(conversationMessages)
+    .set({ toolName, content: JSON.stringify({ taskId, actions, results }) })
+    .where(and(eq(conversationMessages.id, messageId), eq(conversationMessages.toolName, 'task_action_plan_applying')))
+    .execute();
 }
 
 async function applyAction(
@@ -82,8 +151,12 @@ async function applyAction(
   actor: { id: string; role: string },
 ): Promise<AgentActionResult> {
   switch (action.type) {
+    case 'record_create':
+      return applyRecordCreate(client, taskId, action);
     case 'recipe_create':
       return applyRecipeCreate(client, taskId, action);
+    case 'recipe_update':
+      return applyRecipeUpdate(client, taskId, action);
     case 'recipe_step_create':
       return applyRecipeStepCreate(client, taskId, action);
     case 'recipe_step_update':
@@ -98,6 +171,10 @@ async function applyAction(
       return applyMaterialRename(client, taskId, action);
     case 'material_bind':
       return applyMaterialBind(client, taskId, action);
+    case 'comparison_cell_material_bind':
+      return applyComparisonCellMaterialBind(client, taskId, action);
+    case 'data_matrix_cell_material_bind':
+      return applyDataMatrixCellMaterialBind(client, taskId, action, actor.id);
     case 'issue_create':
       return applyIssueCreate(client, taskId, action);
     case 'issue_update':
@@ -186,6 +263,19 @@ async function applyRecipeCreate(client: Client, taskId: string, action: AgentAc
   }).select().single();
   if (error) throw new Error(error.message || '新建食谱失败');
   return successResult(action, '已新建食谱', data);
+}
+
+async function applyRecipeUpdate(client: Client, taskId: string, action: AgentAction): Promise<AgentActionResult> {
+  const recipeId = requiredString(action.payload.recipe_id, '缺少食谱ID');
+  await assertRecipeInTask(client, recipeId, taskId);
+  const update: Row = { updated_at: new Date().toISOString() };
+  for (const key of ['name', 'ingredients', 'recipe_type', 'effect_description', 'effect_status'] as const) {
+    if (action.payload[key] !== undefined) update[key] = optionalString(action.payload[key]);
+  }
+  if (Object.keys(update).length === 1) throw new Error('没有可更新的食谱字段');
+  const { data, error } = await client.from('recipes').update(update).eq('id', recipeId).select().single();
+  if (error) throw new Error(error.message || '修改食谱失败');
+  return successResult(action, '已修改食谱/功能', data);
 }
 
 async function applyRecipeStepCreate(client: Client, taskId: string, action: AgentAction): Promise<AgentActionResult> {
@@ -290,10 +380,109 @@ async function applyMaterialAiResultUpdate(client: Client, taskId: string, actio
   return successResult(action, '已写入素材 AI 整理结果', data);
 }
 
+function textValue(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function nextContextSequence(existingNames: unknown[], baseName: string, extension: string) {
+  const escapedBase = baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedExtension = extension.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`^${escapedBase}(\\d+)\\.${escapedExtension}$`, 'i');
+  return existingNames.reduce<number>((max, value) => {
+    const sequence = textValue(value).match(pattern)?.[1];
+    return sequence ? Math.max(max, Number(sequence)) : max;
+  }, 0) + 1;
+}
+
+async function resolveContextMaterialBase(client: Client, material: Row): Promise<string> {
+  if (textValue(material.record_id)) {
+    const { data } = await client.from('check_records')
+      .select('check_item, touch_point, experience_standard, check_standard')
+      .eq('id', material.record_id).maybeSingle();
+    return textValue(data?.check_item) || textValue(data?.touch_point) || textValue(data?.experience_standard) || textValue(data?.check_standard) || '五感体验';
+  }
+
+  const recipeId = textValue(material.recipe_id);
+  if (recipeId) {
+    const { data } = await client.from('recipes').select('name').eq('id', recipeId).maybeSingle();
+    return textValue(data?.name) || '食谱功能';
+  }
+  if (textValue(material.recipe_step_id)) {
+    const { data: step } = await client.from('recipe_steps').select('recipe_id').eq('id', material.recipe_step_id).maybeSingle();
+    if (step?.recipe_id) {
+      const { data } = await client.from('recipes').select('name').eq('id', step.recipe_id).maybeSingle();
+      return textValue(data?.name) || '食谱功能';
+    }
+  }
+
+  if (textValue(material.comparison_cell_id)) {
+    const { data: cell } = await client.from('comparison_matrix_cells')
+      .select('assembly_id, object_id, item_node_id').eq('id', material.comparison_cell_id).maybeSingle();
+    if (cell) {
+      const [{ data: object }, { data: nodes }] = await Promise.all([
+        client.from('comparison_objects').select('object_name').eq('id', cell.object_id).maybeSingle(),
+        client.from('comparison_item_nodes').select('id, parent_id, node_label').eq('assembly_id', cell.assembly_id),
+      ]);
+      const nodeRows = (nodes || []) as Row[];
+      const byId = new Map<string, Row>(nodeRows.map((node) => [String(node.id), node]));
+      const detail = byId.get(String(cell.item_node_id));
+      let top = detail;
+      while (top?.parent_id && byId.get(String(top.parent_id))) top = byId.get(String(top.parent_id));
+      const labels = [textValue(object?.object_name), textValue(top?.node_label), textValue(detail?.node_label)]
+        .filter((value, index, values) => Boolean(value) && values.indexOf(value) === index);
+      if (labels.length) return labels.join('*');
+    }
+    return '对比矩阵素材';
+  }
+
+  const { data: link } = await client.from('material_links')
+    .select('target_id').eq('material_id', material.id).eq('target_type', 'dynamic_matrix_cell_value').limit(1).maybeSingle();
+  if (link?.target_id) {
+    const { data: cell } = await client.from('matrix_cell_values')
+      .select('matrix_id, leaf_row_id').eq('id', link.target_id).maybeSingle();
+    if (cell) {
+      const { data: leaf } = await client.from('matrix_leaf_rows')
+        .select('level_1_node_id, level_2_node_id').eq('id', cell.leaf_row_id).maybeSingle();
+      if (leaf?.level_1_node_id) {
+        const leafRow = leaf as Row;
+        const level1NodeId = textValue(leafRow.level_1_node_id);
+        const level2NodeId = textValue(leafRow.level_2_node_id);
+        const nodeIds = [level1NodeId, level2NodeId].filter(Boolean);
+        const { data: nodes } = await client.from('matrix_hierarchy_nodes').select('id, node_label').in('id', nodeIds);
+        const labels = new Map<string, string>(((nodes || []) as Row[]).map((node) => [String(node.id), textValue(node.node_label)]));
+        const level1 = labels.get(level1NodeId) || '一级大类';
+        const level2 = level2NodeId ? labels.get(level2NodeId) : '';
+        return level2 ? `${level1}_${level2}` : level1;
+      }
+    }
+    return '数据矩阵素材';
+  }
+
+  return '素材';
+}
+
 async function applyMaterialRename(client: Client, taskId: string, action: AgentAction): Promise<AgentActionResult> {
   const materialId = requiredString(action.payload.material_id, '缺少素材ID');
   await assertMaterialInTask(client, materialId, taskId);
-  const fileName = requiredString(action.payload.file_name, '缺少新素材名称').slice(0, 180);
+  const { data: material } = await client.from('materials')
+    .select('id, task_id, record_id, recipe_id, recipe_step_id, comparison_cell_id, material_type, file_name, file_path')
+    .eq('id', materialId).maybeSingle();
+  if (!material) throw new Error('素材不存在');
+
+  const useContextName = action.payload.naming_mode === 'context';
+  let fileName = useContextName
+    ? ''
+    : requiredString(action.payload.file_name, '缺少新素材名称').slice(0, 180);
+  if (useContextName) {
+    const baseName = await resolveContextMaterialBase(client, material as Row);
+    const { data: taskMaterials } = await client.from('materials').select('file_name').eq('task_id', taskId).limit(5000);
+    const extension = materialFileExtension(textValue(material.file_name) || textValue(material.file_path), material.material_type === 'video' ? 'video' : 'image');
+    fileName = buildContextMaterialFileName({
+      baseName,
+      extension,
+      sequence: nextContextSequence(((taskMaterials || []) as Row[]).map((item) => item.file_name), baseName, extension),
+    });
+  }
 
   const { data, error } = await client
     .from('materials')
@@ -302,7 +491,7 @@ async function applyMaterialRename(client: Client, taskId: string, action: Agent
     .select()
     .single();
   if (error) throw new Error(error.message || '重命名素材失败');
-  return successResult(action, '已重命名素材', data);
+  return successResult(action, useContextName ? '已按所属场景与顺序重命名素材' : '已重命名素材', data);
 }
 
 async function applyMaterialBind(client: Client, taskId: string, action: AgentAction): Promise<AgentActionResult> {
@@ -327,6 +516,123 @@ async function applyMaterialBind(client: Client, taskId: string, action: AgentAc
   const { data, error } = await client.from('materials').update(update).eq('id', materialId).select().single();
   if (error) throw new Error(error.message || '绑定素材失败');
   return successResult(action, '已绑定素材', data);
+}
+
+/**
+ * Add one task material to an existing comparison cell without replacing the
+ * cell's other attachments. The interactive cell API supports bulk replacement;
+ * Hermes needs additive and idempotent binding semantics instead.
+ */
+async function applyComparisonCellMaterialBind(client: Client, taskId: string, action: AgentAction): Promise<AgentActionResult> {
+  const materialId = requiredString(action.payload.material_id, '缺少素材ID');
+  const cellId = requiredString(action.payload.comparison_cell_id, '缺少对比矩阵单元格ID');
+  await assertMaterialInTask(client, materialId, taskId);
+
+  const assembly = await findAssemblyForTask(client, taskId);
+  if (!assembly) throw new Error('当前任务没有可用的对比矩阵');
+  const { data: cell } = await client
+    .from('comparison_matrix_cells')
+    .select('id, assembly_id')
+    .eq('id', cellId)
+    .maybeSingle();
+  if (!cell || cell.assembly_id !== assembly.id) throw new Error('对比矩阵单元格不属于当前任务');
+
+  const { data: existing } = await client
+    .from('materials')
+    .select('comparison_cell_id, media_display_order')
+    .eq('id', materialId)
+    .maybeSingle();
+  if (existing?.comparison_cell_id === cellId) {
+    return successResult(action, '素材已关联到该对比矩阵单元格', { material_id: materialId, comparison_cell_id: cellId, already_bound: true });
+  }
+
+  const { data: latest } = await client
+    .from('materials')
+    .select('media_display_order')
+    .eq('comparison_cell_id', cellId)
+    .order('media_display_order', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const displayOrder = Number(latest?.media_display_order ?? -1) + 1;
+  const mediaRole = roleForIndex(displayOrder);
+  const { data, error } = await client
+    .from('materials')
+    .update({
+      comparison_cell_id: cellId,
+      comparison_assembly_id: assembly.id,
+      media_display_order: displayOrder,
+      media_role: mediaRole,
+      status: 'bound',
+    })
+    .eq('id', materialId)
+    .select()
+    .single();
+  if (error) throw new Error(error.message || '关联对比矩阵单元格素材失败');
+  return successResult(action, '已关联对比矩阵单元格素材', data);
+}
+
+/** Bind a task material to a V3 data-matrix media column via material_links. */
+async function applyDataMatrixCellMaterialBind(
+  client: Client,
+  taskId: string,
+  action: AgentAction,
+  actorId: string,
+): Promise<AgentActionResult> {
+  const materialId = requiredString(action.payload.material_id, '缺少素材ID');
+  const matrixId = requiredString(action.payload.matrix_id, '缺少数据矩阵ID');
+  const leafRowId = requiredString(action.payload.leaf_row_id, '缺少数据矩阵行ID');
+  const columnId = requiredString(action.payload.column_id, '缺少数据矩阵列ID');
+  await assertMaterialInTask(client, materialId, taskId);
+
+  const db = await getDb();
+  const [matrixRows, leafRows, columnRows] = await Promise.all([
+    db.select({ id: taskMatrices.id, taskId: taskMatrices.taskId }).from(taskMatrices)
+      .where(eq(taskMatrices.id, matrixId)).limit(1).execute(),
+    db.select({ id: matrixLeafRows.id }).from(matrixLeafRows)
+      .where(sql`${matrixLeafRows.id} = ${leafRowId} AND ${matrixLeafRows.matrixId} = ${matrixId}`).limit(1).execute(),
+    db.select({ id: matrixColumnDefinitions.id, dataType: matrixColumnDefinitions.dataType }).from(matrixColumnDefinitions)
+      .where(sql`${matrixColumnDefinitions.id} = ${columnId} AND ${matrixColumnDefinitions.matrixId} = ${matrixId}`).limit(1).execute(),
+  ]);
+  if (matrixRows[0]?.taskId !== taskId || leafRows.length === 0 || columnRows.length === 0) {
+    throw new Error('数据矩阵、行或列不属于当前任务');
+  }
+  if (!['image_slot', 'media_slot'].includes(columnRows[0].dataType)) {
+    throw new Error('该数据矩阵列不支持素材关联');
+  }
+
+  const [cell] = await db
+    .insert(matrixCellValues)
+    .values({
+      matrixId,
+      leafRowId,
+      columnId,
+      valueState: 'empty',
+      version: 1,
+      updatedBy: actorId,
+    })
+    .onConflictDoUpdate({
+      target: [matrixCellValues.matrixId, matrixCellValues.leafRowId, matrixCellValues.columnId],
+      set: { updatedAt: sql`NOW()` },
+    })
+    .returning({ id: matrixCellValues.id })
+    .execute();
+  if (!cell?.id) throw new Error('无法创建数据矩阵单元格');
+
+  const { linkId } = await bindMaterial({
+    materialId,
+    targetType: 'dynamic_matrix_cell_value',
+    targetId: cell.id,
+    bindingMethod: 'agent_suggested',
+    boundBy: actorId,
+  });
+  return successResult(action, '已关联数据矩阵单元格素材', {
+    material_id: materialId,
+    matrix_id: matrixId,
+    leaf_row_id: leafRowId,
+    column_id: columnId,
+    cell_id: cell.id,
+    link_id: linkId,
+  });
 }
 
 async function applyIssueCreate(client: Client, taskId: string, action: AgentAction): Promise<AgentActionResult> {
@@ -373,6 +679,23 @@ async function applyRecordUpdate(client: Client, taskId: string, action: AgentAc
   const { data, error } = await client.from('check_records').update(update).eq('id', recordId).select().single();
   if (error) throw new Error(error.message || '修改五感体验记录失败');
   return successResult(action, '已修改五感体验记录', data);
+}
+
+async function applyRecordCreate(client: Client, taskId: string, action: AgentAction): Promise<AgentActionResult> {
+  const checkItem = requiredString(action.payload.check_item, '缺少检查项');
+  const insert: Row = {
+    task_id: taskId,
+    check_item: checkItem,
+    evaluation_result: optionalString(action.payload.evaluation_result) || '待定',
+  };
+  for (const key of ['standard_item_id', 'standard_category', 'sensory_dimension', 'test_phase', 'experience_flow', 'touch_point', 'check_dimension', 'sub_check_dimension', 'check_requirement', 'check_standard', 'experience_standard', 'actual_result', 'problem_description', 'measurement_position', 'measurement_value', 'tester', 'recipe_id', 'recipe_step_id'] as const) {
+    if (action.payload[key] !== undefined) insert[key] = optionalString(action.payload[key]);
+  }
+  if (typeof insert.recipe_id === 'string') await assertRecipeInTask(client, insert.recipe_id, taskId);
+  if (typeof insert.recipe_step_id === 'string') await assertRecipeStepInTask(client, insert.recipe_step_id, taskId);
+  const { data, error } = await client.from('check_records').insert(insert).select().single();
+  if (error) throw new Error(error.message || '新增五感体验记录失败');
+  return successResult(action, '已新增五感体验记录', data);
 }
 
 async function assertRecipeInTask(client: Client, recipeId: string, taskId: string) {

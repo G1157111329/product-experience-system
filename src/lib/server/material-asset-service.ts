@@ -22,9 +22,16 @@ import {
   materials,
   materialLinks,
   matrixCellValues,
+  matrixColumnDefinitions,
+  matrixLeafRows,
+  platformUsers,
   recipes,
   recipeSteps,
+  taskMatrices,
+  comparisonAssemblies,
+  experienceTasks,
 } from '@/storage/database/shared/schema';
+import { roleForIndex } from '@/lib/comparison-media-role';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 export type MaterialStatus =
@@ -527,4 +534,366 @@ export async function transitionStatus(
       ),
     )
     .execute();
+}
+
+export type MaterialReplacementTarget = {
+  targetType: MaterialLinkTargetType;
+  targetId: string;
+  bindingMethod?: BindingMethod;
+};
+
+export function nextMaterialIdsForMatrixSelection(
+  current: readonly string[],
+  action: { add: string } | { remove: string },
+): string[] {
+  if ('add' in action) return [...new Set([...current, action.add])];
+  return current.filter((materialId) => materialId !== action.remove);
+}
+
+export type MaterialReplacementLink = MaterialReplacementTarget & { id: string };
+
+export interface MaterialReplacementRepository {
+  transaction<T>(work: (tx: MaterialReplacementRepository) => Promise<T>): Promise<T>;
+  assertMaterialAccess(materialId: string, actorId: string): Promise<void>;
+  lockMaterials(materialIds: readonly string[]): Promise<void>;
+  assertTargetAccess(target: MaterialReplacementTarget, actorId: string): Promise<void>;
+  addLinks(materialId: string, targets: readonly MaterialReplacementTarget[], actorId: string): Promise<void>;
+  removeLinks(materialId: string, targets: readonly MaterialReplacementTarget[]): Promise<void>;
+  syncLegacyTargets(materialId: string, targetTypes: readonly MaterialLinkTargetType[]): Promise<void>;
+  listLinks(materialId: string): Promise<MaterialReplacementLink[]>;
+  updateDerivedStatus(materialId: string, status: 'bound' | 'unassigned'): Promise<void>;
+  patchMaterial?(materialId: string, patch: MaterialReplacementPatch): Promise<void>;
+}
+
+export interface ComparisonTargetReplacementRepository extends MaterialReplacementRepository {
+  lockComparisonCell(cellId: string): Promise<void>;
+  listComparisonCellMaterialIds(cellId: string): Promise<string[]>;
+}
+
+export type MaterialReplacementPatch = {
+  fileName?: string | null;
+  comparisonAssemblyId?: string | null;
+  mediaDisplayOrder?: number;
+  mediaRole?: string | null;
+};
+
+export type ReplaceMaterialTargetsInput = {
+  materialId: string;
+  actorId: string;
+  add: MaterialReplacementTarget[];
+  remove: MaterialReplacementTarget[];
+  patch?: MaterialReplacementPatch;
+};
+
+function uniqueReplacementTargets(targets: readonly MaterialReplacementTarget[]) {
+  const uniqueTargets = new Map<string, MaterialReplacementTarget>();
+  for (const target of targets) {
+    if (!isMaterialLinkTargetType(target.targetType) || !target.targetId) {
+      throw new Error('invalid_material_replacement_target');
+    }
+    uniqueTargets.set(`${target.targetType}:${target.targetId}`, target);
+  }
+  return [...uniqueTargets.values()];
+}
+
+/**
+ * Transaction boundary shared by API routes and failure-injection tests.
+ * Every authorization/existence check happens before the first write; links
+ * are inserted before obsolete links are removed so a failed replacement can
+ * never temporarily orphan a reusable asset outside the transaction.
+ */
+async function applyMaterialReplacement(
+  input: ReplaceMaterialTargetsInput,
+  tx: MaterialReplacementRepository,
+): Promise<{ links: MaterialReplacementLink[]; status: 'bound' | 'unassigned' }> {
+  const add = uniqueReplacementTargets(input.add);
+  const remove = uniqueReplacementTargets(input.remove);
+  await tx.assertMaterialAccess(input.materialId, input.actorId);
+  for (const target of [...add, ...remove]) await tx.assertTargetAccess(target, input.actorId);
+  await tx.addLinks(input.materialId, add, input.actorId);
+  await tx.removeLinks(input.materialId, remove);
+  await tx.syncLegacyTargets(input.materialId, [...new Set([...add, ...remove].map((target) => target.targetType))]);
+  if (input.patch && tx.patchMaterial) await tx.patchMaterial(input.materialId, input.patch);
+  const links = await tx.listLinks(input.materialId);
+  const status = links.length > 0 ? 'bound' : 'unassigned';
+  await tx.updateDerivedStatus(input.materialId, status);
+  return { links, status };
+}
+
+export async function replaceMaterialTargetsWithRepository(input: ReplaceMaterialTargetsInput, repository: MaterialReplacementRepository) {
+  return (await replaceMaterialTargetsBatchWithRepository([input], repository))[0];
+}
+
+export async function replaceMaterialTargetsBatchWithRepository(inputs: ReplaceMaterialTargetsInput[], repository: MaterialReplacementRepository) {
+  return repository.transaction(async (tx) => {
+    const ordered = [...inputs].sort((left, right) => left.materialId.localeCompare(right.materialId));
+    await tx.lockMaterials([...new Set(ordered.map((input) => input.materialId))]);
+    const results = [];
+    for (const input of ordered) results.push(await applyMaterialReplacement(input, tx));
+    return results;
+  });
+}
+
+export async function replaceComparisonCellMaterialSelectionWithRepository(input: {
+  cellId: string;
+  actorId: string;
+  assemblyId: string | null;
+  materialIds: string[];
+}, repository: ComparisonTargetReplacementRepository) {
+  return repository.transaction(async (rawTx) => {
+    const tx = rawTx as ComparisonTargetReplacementRepository;
+    await tx.lockComparisonCell(input.cellId);
+    await tx.assertTargetAccess({ targetType: 'comparison_cell', targetId: input.cellId }, input.actorId);
+    const previousIds = await tx.listComparisonCellMaterialIds(input.cellId);
+    const nextIds = [...new Set(input.materialIds)];
+    const allIds = [...new Set([...previousIds, ...nextIds])].sort((left, right) => left.localeCompare(right));
+    await tx.lockMaterials(allIds);
+    const nextSet = new Set(nextIds);
+    const commands: ReplaceMaterialTargetsInput[] = nextIds.map((materialId, index) => ({
+      materialId,
+      actorId: input.actorId,
+      add: [{ targetType: 'comparison_cell', targetId: input.cellId, bindingMethod: 'click_select' }],
+      remove: [],
+      patch: {
+        comparisonAssemblyId: input.assemblyId,
+        mediaDisplayOrder: index,
+        mediaRole: roleForIndex(index),
+      },
+    }));
+    for (const materialId of previousIds) {
+      if (!nextSet.has(materialId)) commands.push({
+        materialId,
+        actorId: input.actorId,
+        add: [],
+        remove: [{ targetType: 'comparison_cell', targetId: input.cellId }],
+        patch: { comparisonAssemblyId: null, mediaDisplayOrder: 0, mediaRole: null },
+      });
+    }
+    const byId = [...commands].sort((left, right) => left.materialId.localeCompare(right.materialId));
+    const results = [];
+    for (const command of byId) results.push(await applyMaterialReplacement(command, tx));
+    return results;
+  });
+}
+
+type Db = Awaited<ReturnType<typeof getDb>>;
+type DbTransaction = Parameters<Parameters<Db['transaction']>[0]>[0];
+
+async function actorIsAdmin(tx: DbTransaction, actorId: string) {
+  const rows = await tx.select({ role: platformUsers.role }).from(platformUsers).where(eq(platformUsers.id, actorId)).limit(1).execute();
+  return rows[0]?.role === 'admin';
+}
+
+async function assertActorOwnsResource(tx: DbTransaction, actorId: string, resource: MaterialLinkTargetResource) {
+  if (await actorIsAdmin(tx, actorId)) return;
+  if (resource.kind === 'task') {
+    const rows = await tx.select({ ownerId: experienceTasks.ownerId, createdBy: experienceTasks.createdBy })
+      .from(experienceTasks).where(eq(experienceTasks.id, resource.id)).limit(1).execute();
+    if (rows[0] && (rows[0].ownerId === actorId || rows[0].createdBy === actorId)) return;
+  } else if (resource.kind === 'assembly') {
+    const rows = await tx.select({ createdBy: comparisonAssemblies.createdBy }).from(comparisonAssemblies)
+      .where(eq(comparisonAssemblies.id, resource.id)).limit(1).execute();
+    if (rows[0]?.createdBy === actorId) return;
+  } else {
+    const rows = await tx.select({ createdBy: taskMatrices.createdBy, taskId: taskMatrices.taskId }).from(taskMatrices)
+      .where(eq(taskMatrices.id, resource.id)).limit(1).execute();
+    if (rows[0]?.createdBy === actorId) return;
+    if (rows[0]?.taskId) return assertActorOwnsResource(tx, actorId, { kind: 'task', id: rows[0].taskId });
+  }
+  throw new Error('material_target_forbidden');
+}
+
+async function resolveTargetWithTransaction(
+  tx: DbTransaction,
+  targetType: MaterialLinkTargetType,
+  targetId: string,
+): Promise<MaterialLinkTargetResource | null> {
+  if (targetType === 'record') {
+    const rows = await tx.select({ taskId: checkRecords.taskId }).from(checkRecords).where(eq(checkRecords.id, targetId)).limit(1).execute();
+    return rows[0]?.taskId ? { kind: 'task', id: rows[0].taskId } : null;
+  }
+  if (targetType === 'recipe') {
+    const rows = await tx.select({ taskId: recipes.taskId }).from(recipes).where(eq(recipes.id, targetId)).limit(1).execute();
+    return rows[0]?.taskId ? { kind: 'task', id: rows[0].taskId } : null;
+  }
+  if (targetType === 'recipe_step') {
+    const rows = await tx.select({ taskId: recipes.taskId }).from(recipeSteps).innerJoin(recipes, eq(recipes.id, recipeSteps.recipeId))
+      .where(eq(recipeSteps.id, targetId)).limit(1).execute();
+    return rows[0]?.taskId ? { kind: 'task', id: rows[0].taskId } : null;
+  }
+  if (targetType === 'issue') {
+    const rows = await tx.select({ taskId: issues.taskId }).from(issues).where(eq(issues.id, targetId)).limit(1).execute();
+    return rows[0]?.taskId ? { kind: 'task', id: rows[0].taskId } : null;
+  }
+  if (targetType === 're_evaluation') {
+    const rows = await tx.select({ taskId: issues.taskId }).from(issueReEvaluations).innerJoin(issues, eq(issues.id, issueReEvaluations.issueId))
+      .where(eq(issueReEvaluations.id, targetId)).limit(1).execute();
+    return rows[0]?.taskId ? { kind: 'task', id: rows[0].taskId } : null;
+  }
+  if (targetType === 'comparison_cell') {
+    const rows = await tx.select({ assemblyId: comparisonMatrixCells.assemblyId }).from(comparisonMatrixCells)
+      .where(eq(comparisonMatrixCells.id, targetId)).limit(1).execute();
+    return rows[0]?.assemblyId ? { kind: 'assembly', id: rows[0].assemblyId } : null;
+  }
+  const rows = await tx.select({ matrixId: matrixCellValues.matrixId }).from(matrixCellValues)
+    .where(eq(matrixCellValues.id, targetId)).limit(1).execute();
+  return rows[0]?.matrixId ? { kind: 'matrix', id: rows[0].matrixId } : null;
+}
+
+function legacyColumn(targetType: MaterialLinkTargetType) {
+  switch (targetType) {
+    case 'record': return materials.recordId;
+    case 'recipe': return materials.recipeId;
+    case 'recipe_step': return materials.recipeStepId;
+    case 'issue': return materials.issueId;
+    case 're_evaluation': return materials.reEvaluationId;
+    case 'comparison_cell': return materials.comparisonCellId;
+    default: return null;
+  }
+}
+
+function createDatabaseReplacementRepository(tx: DbTransaction): ComparisonTargetReplacementRepository {
+  return {
+    transaction: async (work) => work(createDatabaseReplacementRepository(tx)),
+    async lockComparisonCell(cellId) {
+      const rows = await tx.select({ id: comparisonMatrixCells.id }).from(comparisonMatrixCells)
+        .where(eq(comparisonMatrixCells.id, cellId)).for('update').execute();
+      if (!rows[0]) throw new Error('material_target_not_found');
+    },
+    async listComparisonCellMaterialIds(cellId) {
+      const [legacyRows, linkRows] = await Promise.all([
+        tx.select({ id: materials.id }).from(materials).where(eq(materials.comparisonCellId, cellId)).execute(),
+        tx.select({ id: materialLinks.materialId }).from(materialLinks)
+          .where(and(eq(materialLinks.targetType, 'comparison_cell'), eq(materialLinks.targetId, cellId))).execute(),
+      ]);
+      return [...new Set([...legacyRows.map((row) => row.id), ...linkRows.map((row) => row.id)])];
+    },
+    async lockMaterials(materialIds) {
+      if (materialIds.length === 0) return;
+      await tx.select({ id: materials.id }).from(materials).where(inArray(materials.id, [...materialIds])).orderBy(materials.id).for('update').execute();
+    },
+    async assertMaterialAccess(materialId, actorId) {
+      const rows = await tx.select({ createdBy: materials.createdBy }).from(materials).where(eq(materials.id, materialId)).limit(1).execute();
+      if (!rows[0]) throw new Error('material_not_found');
+      if (rows[0].createdBy !== actorId && !(await actorIsAdmin(tx, actorId))) throw new Error('material_forbidden');
+    },
+    async assertTargetAccess(target, actorId) {
+      const resource = await resolveTargetWithTransaction(tx, target.targetType, target.targetId);
+      if (!resource) throw new Error('material_target_not_found');
+      await assertActorOwnsResource(tx, actorId, resource);
+    },
+    async addLinks(materialId, targets, actorId) {
+      for (const target of targets) {
+        const orderRows = await tx.select({ nextOrder: sql<number>`COALESCE(MAX(${materialLinks.bindingOrder}), 0) + 1` })
+          .from(materialLinks).where(and(eq(materialLinks.targetType, target.targetType), eq(materialLinks.targetId, target.targetId))).execute();
+        await tx.insert(materialLinks).values({
+          materialId, targetType: target.targetType, targetId: target.targetId,
+          bindingMethod: target.bindingMethod ?? 'click_select', bindingOrder: orderRows[0]?.nextOrder ?? 1, boundBy: actorId,
+        }).onConflictDoUpdate({
+          target: [materialLinks.materialId, materialLinks.targetType, materialLinks.targetId],
+          set: { bindingMethod: target.bindingMethod ?? 'click_select', boundBy: actorId, boundAt: sql`NOW()`, version: sql`${materialLinks.version} + 1` },
+        }).execute();
+      }
+    },
+    async removeLinks(materialId, targets) {
+      for (const target of targets) {
+        await tx.delete(materialLinks).where(and(eq(materialLinks.materialId, materialId), eq(materialLinks.targetType, target.targetType), eq(materialLinks.targetId, target.targetId))).execute();
+      }
+    },
+    async syncLegacyTargets(materialId, targetTypes) {
+      for (const targetType of targetTypes) {
+        const column = legacyColumn(targetType);
+        if (!column) continue;
+        const rows = await tx.select({ targetId: materialLinks.targetId }).from(materialLinks)
+          .where(and(eq(materialLinks.materialId, materialId), eq(materialLinks.targetType, targetType)))
+          .orderBy(materialLinks.bindingOrder, materialLinks.boundAt, materialLinks.id).limit(1).execute();
+        await tx.update(materials).set({ [column.name]: rows[0]?.targetId ?? null }).where(eq(materials.id, materialId)).execute();
+      }
+    },
+    async listLinks(materialId) {
+      const rows = await tx.select({ id: materialLinks.id, targetType: materialLinks.targetType, targetId: materialLinks.targetId, bindingMethod: materialLinks.bindingMethod })
+        .from(materialLinks).where(eq(materialLinks.materialId, materialId)).orderBy(materialLinks.bindingOrder, materialLinks.boundAt, materialLinks.id).execute();
+      return rows.flatMap((row) => isMaterialLinkTargetType(row.targetType) ? [{ ...row, targetType: row.targetType, bindingMethod: row.bindingMethod as BindingMethod }] : []);
+    },
+    async updateDerivedStatus(materialId, status) {
+      await tx.update(materials).set({ status }).where(and(eq(materials.id, materialId), sql`${materials.status} <> 'archived'`)).execute();
+    },
+    async patchMaterial(materialId, patch) {
+      await tx.update(materials).set({
+        ...(patch.fileName !== undefined ? { fileName: patch.fileName } : {}),
+        ...(patch.comparisonAssemblyId !== undefined ? { comparisonAssemblyId: patch.comparisonAssemblyId } : {}),
+        ...(patch.mediaDisplayOrder !== undefined ? { mediaDisplayOrder: patch.mediaDisplayOrder } : {}),
+        ...(patch.mediaRole !== undefined ? { mediaRole: patch.mediaRole } : {}),
+      }).where(eq(materials.id, materialId)).execute();
+    },
+  };
+}
+
+export async function replaceMaterialTargets(input: ReplaceMaterialTargetsInput) {
+  return (await replaceMaterialTargetsBatch([input]))[0];
+}
+
+export async function replaceMaterialTargetsBatch(inputs: ReplaceMaterialTargetsInput[]) {
+  const db = await getDb();
+  return db.transaction(async (tx) => {
+    const repository = createDatabaseReplacementRepository(tx);
+    const ordered = [...inputs].sort((left, right) => left.materialId.localeCompare(right.materialId));
+    await repository.lockMaterials([...new Set(ordered.map((input) => input.materialId))]);
+    const results = [];
+    for (const input of ordered) results.push(await applyMaterialReplacement(input, repository));
+    return results;
+  });
+}
+
+export async function replaceComparisonCellMaterialSelection(input: {
+  cellId: string;
+  actorId: string;
+  assemblyId: string | null;
+  materialIds: string[];
+}) {
+  const db = await getDb();
+  return db.transaction(async (tx) => replaceComparisonCellMaterialSelectionWithRepository(
+    input,
+    createDatabaseReplacementRepository(tx),
+  ));
+}
+
+export async function replaceMatrixCellMaterialSelection(input: {
+  matrixId: string; leafRowId: string; columnId: string; actorId: string; materialIds: string[];
+}) {
+  const db = await getDb();
+  return db.transaction(async (tx) => {
+    await assertActorOwnsResource(tx, input.actorId, { kind: 'matrix', id: input.matrixId });
+    const [rows, columns] = await Promise.all([
+      tx.select({ id: matrixLeafRows.id }).from(matrixLeafRows).where(and(eq(matrixLeafRows.id, input.leafRowId), eq(matrixLeafRows.matrixId, input.matrixId))).limit(1).execute(),
+      tx.select({ id: matrixColumnDefinitions.id, dataType: matrixColumnDefinitions.dataType, maxMediaCount: matrixColumnDefinitions.maxMediaCount })
+        .from(matrixColumnDefinitions).where(and(eq(matrixColumnDefinitions.id, input.columnId), eq(matrixColumnDefinitions.matrixId, input.matrixId))).limit(1).execute(),
+    ]);
+    if (!rows[0] || !columns[0]) throw new Error('matrix_cell_target_not_found');
+    if (!['image_slot', 'media_slot'].includes(columns[0].dataType)) throw new Error('matrix_column_not_media');
+    const materialIds = [...new Set(input.materialIds)];
+    if (materialIds.length > (columns[0].maxMediaCount ?? 10)) throw new Error('matrix_media_limit_exceeded');
+    const inserted = await tx.insert(matrixCellValues).values({
+      matrixId: input.matrixId, leafRowId: input.leafRowId, columnId: input.columnId,
+      valueState: 'empty', version: 1, updatedBy: input.actorId,
+    }).onConflictDoUpdate({
+      target: [matrixCellValues.matrixId, matrixCellValues.leafRowId, matrixCellValues.columnId],
+      set: { updatedAt: sql`NOW()` },
+    }).returning({ id: matrixCellValues.id }).execute();
+    const cellId = inserted[0]?.id;
+    if (!cellId) throw new Error('matrix_cell_target_not_found');
+    const existing = await tx.select({ materialId: materialLinks.materialId }).from(materialLinks)
+      .where(and(eq(materialLinks.targetType, 'dynamic_matrix_cell_value'), eq(materialLinks.targetId, cellId))).execute();
+    const current = new Set(existing.map((row) => row.materialId));
+    const next = new Set(materialIds);
+    const commands: ReplaceMaterialTargetsInput[] = [
+      ...materialIds.filter((id) => !current.has(id)).map((materialId) => ({ materialId, actorId: input.actorId, add: [{ targetType: 'dynamic_matrix_cell_value' as const, targetId: cellId }], remove: [] })),
+      ...[...current].filter((id) => !next.has(id)).map((materialId) => ({ materialId, actorId: input.actorId, add: [], remove: [{ targetType: 'dynamic_matrix_cell_value' as const, targetId: cellId }] })),
+    ];
+    const repository = createDatabaseReplacementRepository(tx);
+    await repository.lockMaterials([...new Set(commands.map((command) => command.materialId))].sort());
+    const results = [];
+    for (const command of commands) results.push(await applyMaterialReplacement(command, repository));
+    return { cellId, results };
+  });
 }

@@ -8,14 +8,29 @@
 import { NextRequest } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { getDb } from '@/storage/database/pg-db';
-import { materialLinks, matrixCellValues } from '@/storage/database/shared/schema';
+import { materialLinks } from '@/storage/database/shared/schema';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { canAccessMaterial, canAccessMatrix, requireUser, isAuthResponse } from '@/lib/server/auth';
+import { canAccessAssembly, canAccessMaterial, canAccessMatrix, canAccessTask, requireUser, isAuthResponse } from '@/lib/server/auth';
 import { ok, fail } from '@/lib/server/api-v1/response';
 import { resolveTraceId } from '@/lib/server/api-v1/trace';
-import { unbindMaterial } from '@/lib/server/material-asset-service';
+import {
+  isMaterialLinkTargetType,
+  resolveMaterialLinkTarget,
+  replaceMaterialTargets,
+  type MaterialLinkTargetResource,
+} from '@/lib/server/material-asset-service';
 
 export const dynamic = 'force-dynamic';
+
+async function canAccessTarget(
+  resource: MaterialLinkTargetResource,
+  client: ReturnType<typeof getSupabaseClient>,
+  user: Awaited<ReturnType<typeof requireUser>>,
+) {
+  if (resource.kind === 'task') return !isAuthResponse(user) && canAccessTask(client, user, resource.id);
+  if (resource.kind === 'assembly') return !isAuthResponse(user) && canAccessAssembly(client, user, resource.id);
+  return !isAuthResponse(user) && canAccessMatrix(client, user, resource.id);
+}
 
 export async function DELETE(
   req: NextRequest,
@@ -36,17 +51,19 @@ export async function DELETE(
     if (!(await canAccessMaterial(client, user, link.materialId))) {
       return fail(traceId, { message: '无权解绑该素材', status: 403 });
     }
-    if (link.targetType === 'dynamic_matrix_cell_value') {
-      const cells = await db.select({ matrixId: matrixCellValues.matrixId })
-        .from(matrixCellValues)
-        .where(eq(matrixCellValues.id, link.targetId))
-        .limit(1)
-        .execute();
-      if (!cells[0] || !(await canAccessMatrix(client, user, cells[0].matrixId))) {
-        return fail(traceId, { message: '无权修改该矩阵素材', status: 403 });
-      }
+    if (!isMaterialLinkTargetType(link.targetType)) {
+      return fail(traceId, { message: '不支持解除历史素材绑定，请迁移后重试', status: 409 });
     }
-    await unbindMaterial(linkId);
+    const target = await resolveMaterialLinkTarget(link.targetType, link.targetId);
+    if (!target || !(await canAccessTarget(target, client, user))) {
+      return fail(traceId, { message: '无权修改该目标素材', status: 403 });
+    }
+    await replaceMaterialTargets({
+      materialId: link.materialId,
+      actorId: user.id,
+      add: [],
+      remove: [{ targetType: link.targetType, targetId: link.targetId }],
+    });
     return ok({ linkId }, traceId, 'deleted');
   } catch (err) {
     const message = err instanceof Error ? err.message : '解绑失败';

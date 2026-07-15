@@ -9,11 +9,10 @@ import { allocateEditedCopyFileName, allocateMaterialFileName } from '@/lib/mate
 import { detectUploadMediaType } from '@/lib/media-upload-type';
 import { generatePresignedUrl, uploadFile } from '@/lib/server/storage';
 import path from 'path';
+import { roleForIndex } from '@/lib/comparison-media-role';
 
 export const maxDuration = 120;
 export const dynamic = 'force-dynamic';
-
-const MAX_INLINE_MEDIA = 5;
 
 // Legacy helpers below remain for backward-compatible route parsing; upload
 // validation itself now uses signature-first detectUploadMediaType.
@@ -67,12 +66,6 @@ async function getAssemblyIdForComparisonCell(client: ReturnType<typeof getSupab
     .eq('id', comparisonCellId)
     .maybeSingle();
   return data?.assembly_id ? String(data.assembly_id) : null;
-}
-
-function roleForIndex(index: number) {
-  if (index === 0) return 'cell_primary';
-  if (index < MAX_INLINE_MEDIA) return 'cell_secondary';
-  return 'appendix';
 }
 
 function getFileExtension(fileName: string) {

@@ -1,4 +1,4 @@
-import { pgTable, serial, timestamp, varchar, jsonb, boolean, index, uniqueIndex, foreignKey, integer, text, unique, date, bigint, numeric, smallint } from "drizzle-orm/pg-core"
+import { pgTable, serial, timestamp, varchar, jsonb, boolean, index, uniqueIndex, foreignKey, integer, text, unique, date, bigint, numeric, smallint, primaryKey, uuid } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 import type { AnyPgColumn } from "drizzle-orm/pg-core"
 
@@ -1800,6 +1800,38 @@ export const wecomMediaIngestJobs = pgTable("wecom_media_ingest_jobs", {
   index("wmij_status_idx").using("btree", table.downloadStatus.asc().nullsLast().op("text_ops")),
   index("wmij_expires_idx").using("btree", table.expiresAt.asc().nullsLast().op("text_ops")),
   index("wmij_binding_idx").using("btree", table.wecomBindingId.asc().nullsLast().op("text_ops")),
+]);
+
+/** Durable, auditable retries for storage objects whose DB asset row is gone. */
+export const materialCleanupJobs = pgTable("material_cleanup_jobs", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  materialId: varchar("material_id", { length: 36 }).notNull(),
+  fileKey: text("file_key").notNull(),
+  requestedBy: varchar("requested_by", { length: 36 }),
+  actorSnapshot: varchar("actor_snapshot", { length: 100 }).notNull(),
+  status: varchar({ length: 20 }).default('pending').notNull(),
+  attempts: integer().default(0).notNull(),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  leaseToken: uuid("lease_token"),
+  leaseUntil: timestamp("lease_until", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+  unique("material_cleanup_jobs_material_key").on(table.materialId, table.fileKey),
+  index("material_cleanup_jobs_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops"), table.createdAt.asc().nullsLast().op("timestamptz_ops")),
+  foreignKey({ columns: [table.requestedBy], foreignColumns: [platformUsers.id], name: "material_cleanup_jobs_requested_by_fkey" }).onDelete("set null"),
+]);
+
+export const frozenMaterialReferences = pgTable("frozen_material_references", {
+  snapshotId: varchar("snapshot_id", { length: 36 }).notNull(),
+  materialId: varchar("material_id", { length: 36 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.snapshotId, table.materialId], name: "frozen_material_references_pkey" }),
+  index("frozen_material_references_material_idx").using("btree", table.materialId.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.snapshotId], foreignColumns: [reportSnapshots.id], name: "frozen_material_references_snapshot_id_fkey" }).onDelete("cascade"),
+  foreignKey({ columns: [table.materialId], foreignColumns: [materials.id], name: "frozen_material_references_material_id_fkey" }).onDelete("restrict"),
 ]);
 
 export const wecomCallbackReplays = pgTable("wecom_callback_replays", {

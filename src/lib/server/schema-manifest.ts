@@ -1,9 +1,12 @@
+import { createHash } from 'node:crypto';
+
 export interface RequiredForeignKey {
   name: string;
   table: string;
   columns: string[];
   targetTable: string;
   targetColumns: string[];
+  onDelete?: 'SET NULL' | 'CASCADE' | 'RESTRICT' | 'NO ACTION';
 }
 
 export interface RequiredConstraint {
@@ -38,7 +41,43 @@ export interface SchemaManifestProbeResult {
   migrationJournalPresent: boolean;
   migrationTags: string[];
   migrationHashes: Record<string, string>;
+  functions: string[];
+  functionBodies: Record<string, string>;
+  triggers: Array<{ name: string; table: string; function: string; enabled: string }>;
 }
+
+export const REQUIRED_FROZEN_GUARD_BODY = `BEGIN
+  IF EXISTS (SELECT 1 FROM material_links WHERE material_id = OLD.id) THEN
+    RAISE EXCEPTION 'material_has_active_links' USING ERRCODE = '23503';
+  END IF;
+  IF OLD.record_id IS NOT NULL OR OLD.recipe_id IS NOT NULL OR OLD.recipe_step_id IS NOT NULL
+     OR OLD.issue_id IS NOT NULL OR OLD.re_evaluation_id IS NOT NULL OR OLD.comparison_cell_id IS NOT NULL THEN
+    RAISE EXCEPTION 'material_has_legacy_reference' USING ERRCODE = '23503';
+  END IF;
+  IF EXISTS (SELECT 1 FROM frozen_material_references WHERE material_id = OLD.id) THEN
+    RAISE EXCEPTION 'material_has_frozen_snapshot_reference' USING ERRCODE = '23503';
+  END IF;
+  IF EXISTS (SELECT 1 FROM report_snapshots WHERE snapshot_json::text LIKE ('%' || OLD.id || '%')) THEN
+    RAISE EXCEPTION 'material_has_frozen_snapshot_reference' USING ERRCODE = '23503';
+  END IF;
+  RETURN OLD;
+END;`;
+
+const normalizeFunctionBody = (body: string) => body.toLowerCase().replace(/\s+/g, '');
+export const REQUIRED_FROZEN_GUARD_BODY_HASH = createHash('sha256')
+  .update(normalizeFunctionBody(REQUIRED_FROZEN_GUARD_BODY))
+  .digest('hex');
+
+export const REQUIRED_FROZEN_CAPTURE_BODY = `BEGIN
+  INSERT INTO frozen_material_references(snapshot_id, material_id)
+  SELECT NEW.id, material.id FROM materials material
+  WHERE NEW.snapshot_json::text LIKE ('%' || material.id || '%')
+  ON CONFLICT DO NOTHING;
+  RETURN NEW;
+END;`;
+export const REQUIRED_FROZEN_CAPTURE_BODY_HASH = createHash('sha256')
+  .update(normalizeFunctionBody(REQUIRED_FROZEN_CAPTURE_BODY))
+  .digest('hex');
 
 type SchemaManifestProbe = () => Promise<SchemaManifestProbeResult>;
 
@@ -68,9 +107,10 @@ export const REQUIRED_MIGRATIONS = [
   ['0022_report_snapshot_anchor_integrity', 1784217602000, '3fe16f4d1621c5cf20665304bf552a32d3fb398e1222e225dfc4f8c192a4ec68'],
   ['0023_security_schema_probe_rpc', 1784217603000, '6c22403e51c7c903a0bb359814f59f565593de25c524528c208dd9013a3fa451'],
   ['0024_material_owner_and_wecom_replay', 1784217604000, '8a9bb3153598f2306d161f426a792e68c10eb8d6b5b7bc63f476aef05e03bc43'],
+  ['0025_frozen_media_reference_guard', 1784217605000, '93430b992f24e3526b79a72aa2ef0a36c1a499ba265e9170ffe692010bd89365'],
 ] as const;
 
-const fk = (name: string, table: string, columns: string[], targetTable: string, targetColumns = ['id']): RequiredForeignKey => ({ name, table, columns, targetTable, targetColumns });
+const fk = (name: string, table: string, columns: string[], targetTable: string, targetColumns = ['id'], onDelete?: RequiredForeignKey['onDelete']): RequiredForeignKey => ({ name, table, columns, targetTable, targetColumns, onDelete });
 const idx = (name: string, table: string, columns: string[], unique = false): RequiredIndex => ({ name, table, columns, unique });
 
 export const REQUIRED_SCHEMA_MANIFEST: RequiredSchemaObject[] = [
@@ -80,6 +120,8 @@ export const REQUIRED_SCHEMA_MANIFEST: RequiredSchemaObject[] = [
   { migrationTag: '0014_idempotent_report_snapshot_rpc', table: 'report_snapshots', columns: ['id', 'report_id', 'snapshot_json', 'idempotency_key', 'idempotency_fingerprint'], foreignKeys: [fk('report_snapshots_report_id_fkey', 'report_snapshots', ['report_id'], 'reports')], indexes: [idx('report_snapshots_report_id_idx', 'report_snapshots', ['report_id']), idx('report_snapshots_report_idempotency_key', 'report_snapshots', ['report_id', 'idempotency_key'], true)] },
   { migrationTag: '0024_material_owner_and_wecom_replay', table: 'materials', columns: ['id', 'file_path', 'status', 'project_id', 'created_by'], foreignKeys: [fk('materials_created_by_fkey', 'materials', ['created_by'], 'platform_users')], indexes: [idx('materials_status_idx', 'materials', ['status']), idx('materials_created_by_idx', 'materials', ['created_by'])] },
   { migrationTag: '0005_material_asset_and_matrix_issues', table: 'material_links', columns: ['id', 'material_id', 'target_type', 'target_id', 'binding_order'], foreignKeys: [fk('ml_material_id_fkey', 'material_links', ['material_id'], 'materials')], indexes: [idx('ml_material_id_idx', 'material_links', ['material_id']), idx('ml_target_idx', 'material_links', ['target_type', 'target_id'])] },
+  { migrationTag: '0025_frozen_media_reference_guard', table: 'material_cleanup_jobs', columns: ['id', 'material_id', 'file_key', 'requested_by', 'actor_snapshot', 'status', 'attempts', 'last_error', 'next_attempt_at', 'lease_token', 'lease_until'], foreignKeys: [fk('material_cleanup_jobs_requested_by_fkey', 'material_cleanup_jobs', ['requested_by'], 'platform_users', ['id'], 'SET NULL')], constraints: [{ name: 'material_cleanup_jobs_material_key', table: 'material_cleanup_jobs', definitionIncludes: ['UNIQUE', 'material_id', 'file_key'] }], indexes: [idx('material_cleanup_jobs_status_idx', 'material_cleanup_jobs', ['status', 'created_at'])] },
+  { migrationTag: '0025_frozen_media_reference_guard', table: 'frozen_material_references', columns: ['snapshot_id', 'material_id', 'created_at'], foreignKeys: [fk('frozen_material_references_snapshot_id_fkey', 'frozen_material_references', ['snapshot_id'], 'report_snapshots'), fk('frozen_material_references_material_id_fkey', 'frozen_material_references', ['material_id'], 'materials')], indexes: [idx('frozen_material_references_material_idx', 'frozen_material_references', ['material_id'])] },
 
   { migrationTag: '0003_task_matrix_model', table: 'task_matrices', columns: ['id', 'task_id', 'status', 'created_by'], foreignKeys: [fk('task_matrices_task_id_fkey', 'task_matrices', ['task_id'], 'experience_tasks')], indexes: [idx('task_matrices_task_id_idx', 'task_matrices', ['task_id'])] },
   { migrationTag: '0003_task_matrix_model', table: 'matrix_design_versions', columns: ['id', 'matrix_id', 'status', 'design_hash'], foreignKeys: [fk('matrix_design_versions_matrix_id_fkey', 'matrix_design_versions', ['matrix_id'], 'task_matrices')], indexes: [idx('matrix_design_versions_matrix_id_idx', 'matrix_design_versions', ['matrix_id'])] },
@@ -142,7 +184,7 @@ function assertManifest(result: SchemaManifestProbeResult) {
       if (!columns.has(qualified)) throw new SchemaManifestStartupError('column', qualified, item.migrationTag);
     }
     for (const required of item.foreignKeys ?? []) {
-      const found = result.foreignKeyDetails.some((actual) => actual.table === required.table && same(actual.columns, required.columns) && actual.targetTable === required.targetTable && same(actual.targetColumns, required.targetColumns));
+      const found = result.foreignKeyDetails.some((actual) => actual.table === required.table && same(actual.columns, required.columns) && actual.targetTable === required.targetTable && same(actual.targetColumns, required.targetColumns) && (!required.onDelete || actual.onDelete === required.onDelete));
       if (!found) throw new SchemaManifestStartupError('foreign key', required.name, item.migrationTag);
     }
     for (const required of item.constraints ?? []) {
@@ -159,6 +201,28 @@ function assertManifest(result: SchemaManifestProbeResult) {
       );
       if (!found) throw new SchemaManifestStartupError('index', required.name, item.migrationTag);
     }
+  }
+
+  if (!result.functions.includes('public.guard_frozen_material_delete')) {
+    throw new SchemaManifestStartupError('function', 'guard_frozen_material_delete', '0025_frozen_media_reference_guard');
+  }
+  const guardBody = result.functionBodies['public.guard_frozen_material_delete'] ?? '';
+  const guardBodyHash = createHash('sha256').update(normalizeFunctionBody(guardBody)).digest('hex');
+  if (guardBodyHash !== REQUIRED_FROZEN_GUARD_BODY_HASH) {
+    throw new SchemaManifestStartupError('function body', 'guard_frozen_material_delete', '0025_frozen_media_reference_guard');
+  }
+  const retentionTrigger = result.triggers.find((trigger) => trigger.name === 'materials_frozen_delete_guard');
+  if (!retentionTrigger || retentionTrigger.table !== 'materials' || retentionTrigger.function !== 'guard_frozen_material_delete' || !['O', 'A'].includes(retentionTrigger.enabled)) {
+    throw new SchemaManifestStartupError('trigger', 'materials_frozen_delete_guard', '0025_frozen_media_reference_guard');
+  }
+  const captureTrigger = result.triggers.find((trigger) => trigger.name === 'report_snapshots_material_reference_capture');
+  const captureBody = result.functionBodies['public.capture_frozen_material_references'] ?? '';
+  const captureBodyHash = createHash('sha256').update(normalizeFunctionBody(captureBody)).digest('hex');
+  if (captureBodyHash !== REQUIRED_FROZEN_CAPTURE_BODY_HASH) {
+    throw new SchemaManifestStartupError('function body', 'capture_frozen_material_references', '0025_frozen_media_reference_guard');
+  }
+  if (!result.functions.includes('public.capture_frozen_material_references') || !captureTrigger || captureTrigger.table !== 'report_snapshots' || captureTrigger.function !== 'capture_frozen_material_references' || !['O', 'A'].includes(captureTrigger.enabled)) {
+    throw new SchemaManifestStartupError('trigger', 'report_snapshots_material_reference_capture', '0025_frozen_media_reference_guard');
   }
 
   if (!result.migrationJournalPresent) {
@@ -183,7 +247,8 @@ async function probeLiveSchemaManifest(): Promise<SchemaManifestProbeResult> {
         'name', constraint_row.conname, 'table', source.relname,
         'columns', ARRAY(SELECT attribute.attname FROM unnest(constraint_row.conkey) WITH ORDINALITY key(attnum, ord) JOIN pg_attribute attribute ON attribute.attrelid = constraint_row.conrelid AND attribute.attnum = key.attnum ORDER BY key.ord),
         'targetTable', target.relname,
-        'targetColumns', ARRAY(SELECT attribute.attname FROM unnest(constraint_row.confkey) WITH ORDINALITY key(attnum, ord) JOIN pg_attribute attribute ON attribute.attrelid = constraint_row.confrelid AND attribute.attnum = key.attnum ORDER BY key.ord)
+        'targetColumns', ARRAY(SELECT attribute.attname FROM unnest(constraint_row.confkey) WITH ORDINALITY key(attnum, ord) JOIN pg_attribute attribute ON attribute.attrelid = constraint_row.confrelid AND attribute.attnum = key.attnum ORDER BY key.ord),
+        'onDelete', CASE constraint_row.confdeltype WHEN 'n' THEN 'SET NULL' WHEN 'c' THEN 'CASCADE' WHEN 'r' THEN 'RESTRICT' ELSE 'NO ACTION' END
       )) FROM pg_constraint constraint_row JOIN pg_class source ON source.oid = constraint_row.conrelid JOIN pg_namespace source_namespace ON source_namespace.oid = source.relnamespace JOIN pg_class target ON target.oid = constraint_row.confrelid JOIN pg_namespace target_namespace ON target_namespace.oid = target.relnamespace WHERE constraint_row.contype = 'f' AND source_namespace.nspname = 'public' AND target_namespace.nspname = 'public'), '[]'::json) AS foreign_key_details,
       COALESCE((SELECT json_agg(json_build_object('name', constraint_row.conname, 'table', source.relname, 'definition', pg_get_constraintdef(constraint_row.oid))) FROM pg_constraint constraint_row JOIN pg_class source ON source.oid = constraint_row.conrelid WHERE constraint_row.connamespace = 'public'::regnamespace), '[]'::json) AS constraint_details,
       COALESCE((SELECT json_agg(json_build_object(
@@ -192,6 +257,9 @@ async function probeLiveSchemaManifest(): Promise<SchemaManifestProbeResult> {
         'columns', ARRAY(SELECT attribute.attname FROM unnest(index_row.indkey::smallint[]) WITH ORDINALITY key(attnum, ord) JOIN pg_attribute attribute ON attribute.attrelid = index_row.indrelid AND attribute.attnum = key.attnum WHERE key.attnum > 0 ORDER BY key.ord)
       )) FROM pg_index index_row JOIN pg_class index_class ON index_class.oid = index_row.indexrelid JOIN pg_class table_class ON table_class.oid = index_row.indrelid JOIN pg_namespace namespace ON namespace.oid = table_class.relnamespace WHERE namespace.nspname = 'public'), '[]'::json) AS index_details,
       to_regclass('drizzle.__drizzle_migrations') IS NOT NULL AS migration_journal_present
+      , COALESCE((SELECT json_agg(namespace.nspname || '.' || procedure.proname) FROM pg_proc procedure JOIN pg_namespace namespace ON namespace.oid = procedure.pronamespace WHERE namespace.nspname = 'public'), '[]'::json) AS functions
+      , COALESCE((SELECT json_object_agg(namespace.nspname || '.' || procedure.proname, procedure.prosrc) FROM pg_proc procedure JOIN pg_namespace namespace ON namespace.oid = procedure.pronamespace WHERE namespace.nspname = 'public'), '{}'::json) AS function_bodies
+      , COALESCE((SELECT json_agg(json_build_object('name', trigger.tgname, 'table', owner.relname, 'function', procedure.proname, 'enabled', trigger.tgenabled)) FROM pg_trigger trigger JOIN pg_class owner ON owner.oid = trigger.tgrelid JOIN pg_namespace namespace ON namespace.oid = owner.relnamespace JOIN pg_proc procedure ON procedure.oid = trigger.tgfoid WHERE namespace.nspname = 'public' AND NOT trigger.tgisinternal), '[]'::json) AS triggers
   `);
   const row = result.rows[0] ?? {};
   const migrationTags: string[] = [];
@@ -209,6 +277,7 @@ async function probeLiveSchemaManifest(): Promise<SchemaManifestProbeResult> {
     tables: row.tables ?? [], columns: row.columns ?? [],
     foreignKeyDetails: row.foreign_key_details ?? [], constraintDetails: row.constraint_details ?? [], indexDetails: row.index_details ?? [],
     migrationJournalPresent: row.migration_journal_present === true, migrationTags, migrationHashes,
+    functions: row.functions ?? [], functionBodies: row.function_bodies ?? {}, triggers: row.triggers ?? [],
   };
 }
 

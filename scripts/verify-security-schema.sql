@@ -11,7 +11,7 @@ DO $$
 DECLARE missing_name TEXT;
 BEGIN
   SELECT required.name INTO missing_name FROM unnest(ARRAY[
-    'platform_users','experience_tasks','reports','report_snapshots','materials','material_links',
+    'platform_users','experience_tasks','reports','report_snapshots','materials','material_links','material_cleanup_jobs','frozen_material_references',
     'task_matrices','matrix_design_versions','matrix_sections','matrix_field_definitions','matrix_groups','matrix_rows','matrix_field_values','matrix_narratives',
     'matrix_view_definitions','matrix_hierarchy_nodes','matrix_leaf_rows','matrix_column_definitions','matrix_cell_values','matrix_cell_styles',
     'matrix_formula_definitions_v3','matrix_formula_runs_v3','matrix_narrative_blocks','matrix_issue_points',
@@ -22,7 +22,7 @@ BEGIN
 
   SELECT required.name INTO missing_name FROM unnest(ARRAY[
     'platform_users.role','experience_tasks.owner_id','reports.snapshot_id','report_snapshots.snapshot_json','report_snapshots.idempotency_fingerprint',
-    'materials.status','material_links.target_type','material_links.target_id','task_matrices.task_id','matrix_design_versions.design_hash',
+    'materials.status','material_links.target_type','material_links.target_id','material_cleanup_jobs.file_key','material_cleanup_jobs.requested_by','material_cleanup_jobs.actor_snapshot','material_cleanup_jobs.next_attempt_at','material_cleanup_jobs.lease_token','material_cleanup_jobs.lease_until','frozen_material_references.snapshot_id','frozen_material_references.material_id','task_matrices.task_id','matrix_design_versions.design_hash',
     'matrix_sections.design_version_id','matrix_field_definitions.field_kind','matrix_groups.matrix_id','matrix_rows.version','matrix_field_values.field_definition_id','matrix_narratives.content',
     'matrix_view_definitions.matrix_id','matrix_hierarchy_nodes.parent_id','matrix_leaf_rows.visible_row_index','matrix_column_definitions.column_zone',
     'matrix_cell_values.value_state','matrix_cell_styles.target_id','matrix_formula_definitions_v3.expression_display','matrix_formula_runs_v3.formula_id',
@@ -35,10 +35,17 @@ BEGIN
   WHERE NOT EXISTS (SELECT 1 FROM information_schema.columns columns WHERE columns.table_schema='public' AND columns.table_name=split_part(required.name,'.',1) AND columns.column_name=split_part(required.name,'.',2)) LIMIT 1;
   IF missing_name IS NOT NULL THEN RAISE EXCEPTION 'startup schema manifest missing column: %', missing_name; END IF;
 
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='material_cleanup_jobs' AND column_name='lease_token' AND udt_name='uuid') THEN
+    RAISE EXCEPTION 'startup schema manifest invalid column type: material_cleanup_jobs.lease_token must be uuid';
+  END IF;
+
   SELECT required.name INTO missing_name FROM (VALUES
     ('reports_snapshot_id_report_snapshots_id_fkey','reports','snapshot_id','report_snapshots','id'),
     ('report_snapshots_report_id_fkey','report_snapshots','report_id','reports','id'),
     ('ml_material_id_fkey','material_links','material_id','materials','id'),
+    ('material_cleanup_jobs_requested_by_fkey','material_cleanup_jobs','requested_by','platform_users','id'),
+    ('frozen_material_references_snapshot_id_fkey','frozen_material_references','snapshot_id','report_snapshots','id'),
+    ('frozen_material_references_material_id_fkey','frozen_material_references','material_id','materials','id'),
     ('materials_created_by_fkey','materials','created_by','platform_users','id'),
     ('task_matrices_task_id_fkey','task_matrices','task_id','experience_tasks','id'),
     ('matrix_sections_design_version_id_fkey','matrix_sections','design_version_id','matrix_design_versions','id'),
@@ -64,6 +71,15 @@ BEGIN
   ) LIMIT 1;
   IF missing_name IS NOT NULL THEN RAISE EXCEPTION 'startup schema manifest missing or invalid foreign key: %', missing_name; END IF;
 
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint constraint_row
+    JOIN pg_class owner ON owner.oid=constraint_row.conrelid
+    JOIN pg_namespace owner_namespace ON owner_namespace.oid=owner.relnamespace
+    WHERE owner_namespace.nspname='public' AND owner.relname='material_cleanup_jobs'
+      AND constraint_row.conname='material_cleanup_jobs_requested_by_fkey'
+      AND constraint_row.contype='f' AND constraint_row.confdeltype='n'
+  ) THEN RAISE EXCEPTION 'startup schema manifest cleanup requester FK must use ON DELETE SET NULL'; END IF;
+
   IF NOT EXISTS (SELECT 1 FROM pg_constraint constraint_row JOIN pg_class owner ON owner.oid=constraint_row.conrelid
     JOIN pg_namespace owner_namespace ON owner_namespace.oid=owner.relnamespace
     WHERE constraint_row.conname='issues_status_check' AND owner_namespace.nspname='public' AND owner.relname='issues'
@@ -72,10 +88,64 @@ BEGIN
     RAISE EXCEPTION 'startup schema manifest missing or invalid constraint: issues_status_check';
   END IF;
 
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint constraint_row
+    JOIN pg_class owner ON owner.oid=constraint_row.conrelid
+    JOIN pg_namespace owner_namespace ON owner_namespace.oid=owner.relnamespace
+    WHERE constraint_row.contype='u' AND owner_namespace.nspname='public' AND owner.relname='material_cleanup_jobs'
+      AND constraint_row.conkey=ARRAY[
+        (SELECT attnum FROM pg_attribute WHERE attrelid=owner.oid AND attname='material_id'),
+        (SELECT attnum FROM pg_attribute WHERE attrelid=owner.oid AND attname='file_key')
+      ]::smallint[]
+  ) THEN RAISE EXCEPTION 'startup schema manifest missing cleanup uniqueness: material_id,file_key'; END IF;
+
+  IF to_regprocedure('public.guard_frozen_material_delete()') IS NULL THEN
+    RAISE EXCEPTION 'startup schema manifest missing function: guard_frozen_material_delete';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc procedure JOIN pg_namespace namespace ON namespace.oid=procedure.pronamespace
+    WHERE namespace.nspname='public' AND procedure.proname='guard_frozen_material_delete'
+      AND lower(procedure.prosrc) LIKE '%from material_links%'
+      AND lower(procedure.prosrc) LIKE '%old.record_id is not null%'
+      AND lower(procedure.prosrc) LIKE '%old.recipe_id is not null%'
+      AND lower(procedure.prosrc) LIKE '%old.recipe_step_id is not null%'
+      AND lower(procedure.prosrc) LIKE '%old.issue_id is not null%'
+      AND lower(procedure.prosrc) LIKE '%old.re_evaluation_id is not null%'
+      AND lower(procedure.prosrc) LIKE '%old.comparison_cell_id is not null%'
+      AND lower(procedure.prosrc) LIKE '%from frozen_material_references%'
+      AND lower(procedure.prosrc) LIKE '%from report_snapshots%'
+      AND lower(procedure.prosrc) LIKE '%raise exception%'
+  ) THEN RAISE EXCEPTION 'startup schema manifest invalid function body: guard_frozen_material_delete'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger trigger_row
+    JOIN pg_class owner ON owner.oid=trigger_row.tgrelid
+    JOIN pg_namespace owner_namespace ON owner_namespace.oid=owner.relnamespace
+    JOIN pg_proc procedure ON procedure.oid=trigger_row.tgfoid
+    JOIN pg_namespace procedure_namespace ON procedure_namespace.oid=procedure.pronamespace
+    WHERE trigger_row.tgname='materials_frozen_delete_guard' AND NOT trigger_row.tgisinternal
+      AND trigger_row.tgenabled IN ('O','A') AND owner_namespace.nspname='public' AND owner.relname='materials'
+      AND procedure_namespace.nspname='public' AND procedure.proname='guard_frozen_material_delete'
+  ) THEN RAISE EXCEPTION 'startup schema manifest missing or disabled trigger: materials_frozen_delete_guard'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger trigger_row
+    JOIN pg_class owner ON owner.oid=trigger_row.tgrelid
+    JOIN pg_namespace owner_namespace ON owner_namespace.oid=owner.relnamespace
+    JOIN pg_proc procedure ON procedure.oid=trigger_row.tgfoid
+    WHERE trigger_row.tgname='report_snapshots_material_reference_capture' AND NOT trigger_row.tgisinternal
+      AND trigger_row.tgenabled IN ('O','A') AND owner_namespace.nspname='public' AND owner.relname='report_snapshots'
+      AND procedure.proname='capture_frozen_material_references'
+  ) THEN RAISE EXCEPTION 'startup schema manifest missing or disabled trigger: report_snapshots_material_reference_capture'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc procedure JOIN pg_namespace namespace ON namespace.oid=procedure.pronamespace
+    WHERE namespace.nspname='public' AND procedure.proname='capture_frozen_material_references'
+      AND regexp_replace(lower(procedure.prosrc), '\s+', '', 'g') =
+        'begininsertintofrozen_material_references(snapshot_id,material_id)selectnew.id,material.idfrommaterialsmaterialwherenew.snapshot_json::textlike(''%''||material.id||''%'')onconflictdonothing;returnnew;end;'
+  ) THEN RAISE EXCEPTION 'startup schema manifest invalid function body: capture_frozen_material_references'; END IF;
+
   SELECT required.name INTO missing_name FROM (VALUES
     ('reports_task_id_idx','reports','task_id'),
     ('report_snapshots_report_id_idx','report_snapshots','report_id'),('materials_status_idx','materials','status'),
-    ('ml_target_idx','material_links','target_type, target_id'),('task_matrices_task_id_idx','task_matrices','task_id'),
+    ('ml_target_idx','material_links','target_type, target_id'),('material_cleanup_jobs_status_idx','material_cleanup_jobs','status, created_at'),('frozen_material_references_material_idx','frozen_material_references','material_id'),('task_matrices_task_id_idx','task_matrices','task_id'),
     ('matrix_sections_design_version_id_idx','matrix_sections','design_version_id'),('matrix_groups_matrix_id_idx','matrix_groups','matrix_id'),
     ('mcv_matrix_row_idx','matrix_cell_values','matrix_id, leaf_row_id'),('mip_matrix_id_idx','matrix_issue_points','matrix_id'),
     ('issues_status_idx','issues','status'),('issue_re_evaluations_issue_id_idx','issue_re_evaluations','issue_id'),
@@ -164,10 +234,11 @@ BEGIN
       ('0021_recipe_material_reuse',1784217601000::bigint,'f0100aeacb10f51c4e32b23c10e640cb91a0c566247c79ffa8eb69e3984299d1'),
       ('0022_report_snapshot_anchor_integrity',1784217602000::bigint,'3fe16f4d1621c5cf20665304bf552a32d3fb398e1222e225dfc4f8c192a4ec68'),
       ('0023_security_schema_probe_rpc',1784217603000::bigint,'6c22403e51c7c903a0bb359814f59f565593de25c524528c208dd9013a3fa451'),
-      ('0024_material_owner_and_wecom_replay',1784217604000::bigint,'8a9bb3153598f2306d161f426a792e68c10eb8d6b5b7bc63f476aef05e03bc43')
+      ('0024_material_owner_and_wecom_replay',1784217604000::bigint,'8a9bb3153598f2306d161f426a792e68c10eb8d6b5b7bc63f476aef05e03bc43'),
+      ('0025_frozen_media_reference_guard',1784217605000::bigint,'93430b992f24e3526b79a72aa2ef0a36c1a499ba265e9170ffe692010bd89365')
     ) required(tag,applied_at,expected_hash)
     WHERE NOT EXISTS (SELECT 1 FROM drizzle.__drizzle_migrations migrations WHERE migrations.created_at=required.applied_at AND migrations.hash=required.expected_hash) LIMIT 1;
     IF missing_tag IS NOT NULL THEN RAISE EXCEPTION 'startup schema manifest missing or mismatched migration tag/hash: %', missing_tag; END IF;
-    RAISE NOTICE 'startup schema provenance: drizzle-journal head=0024_material_owner_and_wecom_replay';
+    RAISE NOTICE 'startup schema provenance: drizzle-journal head=0025_frozen_media_reference_guard';
   END IF;
 END $$;
