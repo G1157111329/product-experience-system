@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canReadReport, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
-import { loadMergedFrozenReportMembers } from '@/lib/server/report-merge-read';
+import { loadMergedFrozenReportMembers, runAuthorizedReportMerge } from '@/lib/server/report-merge-read';
 import { reportSnapshotErrorStatus } from '@/lib/server/report-snapshots';
 
 type Row = Record<string, unknown>;
@@ -11,15 +11,21 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const client = getSupabaseClient();
   const user = await requireUser(request, client);
   if (isAuthResponse(user)) return user;
-  if (!(await canReadReport(client, user, id))) return forbidden();
-
-  const { data: report, error } = await client.from('reports').select('*').eq('id', id).single();
-  if (error || !report) {
-    return NextResponse.json({ code: 1, message: '报告不存在' }, { status: 404 });
-  }
 
   try {
-    const members = await loadMergedFrozenReportMembers(client, report as Row, 'internal', user);
+    const authorized = await runAuthorizedReportMerge(
+      () => canReadReport(client, user, id),
+      async () => {
+        const { data: report, error } = await client.from('reports').select('*').eq('id', id).single();
+        if (error || !report) return null;
+        return loadMergedFrozenReportMembers(client, report as Row, 'internal', user);
+      },
+    );
+    if (!authorized.allowed) return forbidden();
+    const members = authorized.value;
+    if (!members) {
+      return NextResponse.json({ code: 1, message: '报告不存在' }, { status: 404 });
+    }
     const primary = members.find((member) => String(member.report.id || '') === id) ?? members[0];
     if (!primary) throw new Error('冻结报告不存在');
     const siblings = members.filter((member) => member !== primary);

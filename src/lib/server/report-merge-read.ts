@@ -7,7 +7,7 @@ import {
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { attachLatestSnapshotForComparisonReport } from './report-snapshots';
 import { buildFrozenReportResponse } from './report-frozen-view';
-import type { AuthUser } from './auth';
+import { canReadReport, type AuthUser } from './auth';
 
 type Row = Record<string, unknown>;
 type Audience = 'internal' | 'share';
@@ -18,6 +18,26 @@ export type MergedFrozenReportMember = {
   detailModel: Awaited<ReturnType<typeof buildFrozenReportResponse>>['detailModel'];
   issues: Row[];
 };
+
+export async function filterAuthorizedMergeCandidates<T extends { id?: unknown }>(
+  candidates: T[],
+  primaryReportId: string,
+  canRead: (reportId: string) => Promise<boolean>,
+): Promise<T[]> {
+  const decisions = await Promise.all(candidates.map(async (report) => {
+    const reportId = String(report.id || '');
+    return reportId === primaryReportId || (reportId !== '' && await canRead(reportId));
+  }));
+  return candidates.filter((_, index) => decisions[index]);
+}
+
+export async function runAuthorizedReportMerge<T>(
+  canReadPrimary: () => Promise<boolean>,
+  load: () => Promise<T>,
+): Promise<{ allowed: false } | { allowed: true; value: T }> {
+  if (!(await canReadPrimary())) return { allowed: false };
+  return { allowed: true, value: await load() };
+}
 
 /**
  * Reads a report's frozen merge set without rebuilding any member from live
@@ -57,6 +77,15 @@ export async function loadMergedFrozenReportMembers(
     if (primaryIndex >= 0) latestByTask[primaryIndex] = primaryReport;
     else latestByTask.push(primaryReport);
     candidates = sortReportsByCreatedAtAsc(latestByTask);
+  }
+
+  if (audience === 'internal') {
+    if (!actor) throw new Error('authenticated actor required for internal report merge');
+    candidates = await filterAuthorizedMergeCandidates(
+      candidates,
+      String(primaryReport.id || ''),
+      (reportId) => canReadReport(client, actor, reportId),
+    );
   }
 
   return Promise.all(candidates.map(async (report) => {

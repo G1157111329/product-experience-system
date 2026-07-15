@@ -280,7 +280,7 @@ function useDebouncedSave(save: (value: string) => void, delay = 800): Debounced
     }
   }, []);
 
-  useEffect(() => () => cancel(), [cancel]);
+  useEffect(() => () => flush(), [flush]);
 
   return { schedule, flush, cancel };
 }

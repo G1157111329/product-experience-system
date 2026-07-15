@@ -537,12 +537,15 @@ CREATE TABLE IF NOT EXISTS ai_model_configs (
   supports_vision BOOLEAN NOT NULL DEFAULT false,
   custom_api_url TEXT,
   custom_api_key_encrypted TEXT,
+  request_options JSONB DEFAULT '{}'::jsonb,
   is_active BOOLEAN NOT NULL DEFAULT false,
   created_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS ai_model_configs_active_idx ON ai_model_configs(is_active);
+ALTER TABLE ai_model_configs
+  ADD COLUMN IF NOT EXISTS request_options JSONB DEFAULT '{}'::jsonb;
 
 -- ============================================================
 -- 22. AI Agent Prompt模板表
@@ -2088,6 +2091,35 @@ CREATE TABLE IF NOT EXISTS matrix_issue_points (
 );
 CREATE INDEX IF NOT EXISTS mip_matrix_id_idx ON matrix_issue_points(matrix_id);
 CREATE INDEX IF NOT EXISTS mip_leaf_row_idx ON matrix_issue_points(leaf_row_id);
+
+-- ---- 0019: Backfill existing matrix issue points into the issue register ----
+INSERT INTO issues (task_id, title, description, level, status, source_type, source, source_report_id)
+SELECT
+  tm.task_id,
+  left(trim(mip.issue_text), 200),
+  trim(mip.issue_text),
+  '二类',
+  'open',
+  'matrix_issue',
+  '数据矩阵',
+  mip.id
+FROM matrix_issue_points mip
+JOIN task_matrices tm ON tm.id = mip.matrix_id
+WHERE mip.linked_issue_id IS NULL
+  AND nullif(trim(mip.issue_text), '') IS NOT NULL;
+
+UPDATE matrix_issue_points mip
+SET
+  linked_issue_id = issue_row.id,
+  status = 'converted',
+  updated_at = NOW()
+FROM task_matrices tm, issues issue_row
+WHERE tm.id = mip.matrix_id
+  AND issue_row.task_id = tm.task_id
+  AND issue_row.source_type = 'matrix_issue'
+  AND issue_row.source_report_id = mip.id
+  AND mip.linked_issue_id IS NULL
+  AND nullif(trim(mip.issue_text), '') IS NOT NULL;
 
 -- ---- 0006: Hermes Agent + WeCom tables ----
 CREATE TABLE IF NOT EXISTS agent_instances (

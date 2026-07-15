@@ -315,6 +315,8 @@ BEGIN
           ai_result = CASE WHEN p_command ? 'ai_result' THEN v_ai_result ELSE ai_result END
       WHERE id = v_retest_id;
     ELSE
+      DELETE FROM material_links
+      WHERE target_type = 're_evaluation' AND target_id = v_retest_id;
       UPDATE materials SET re_evaluation_id = NULL WHERE re_evaluation_id = v_retest_id;
       DELETE FROM issue_re_evaluations WHERE id = v_retest_id;
     END IF;
@@ -329,13 +331,31 @@ BEGIN
     SELECT count(*) INTO v_valid_material_count
     FROM materials material
     WHERE material.id IN (SELECT DISTINCT value FROM jsonb_array_elements_text(p_command->'material_ids'))
-      AND material.task_id = v_issue_task_id
-      AND (material.re_evaluation_id IS NULL OR material.re_evaluation_id = v_retest_id);
-    IF v_valid_material_count <> v_requested_material_count THEN RAISE EXCEPTION 'invalid or occupied retest material'; END IF;
-    UPDATE materials SET re_evaluation_id = NULL WHERE re_evaluation_id = v_retest_id;
-    UPDATE materials
-    SET re_evaluation_id = v_retest_id
-    WHERE id IN (SELECT jsonb_array_elements_text(COALESCE(p_command->'material_ids', '[]'::jsonb)));
+      AND material.task_id = v_issue_task_id;
+    IF v_valid_material_count <> v_requested_material_count THEN RAISE EXCEPTION 'invalid retest material'; END IF;
+
+    -- Replace only this retest's links. Legacy re_evaluation_id values remain
+    -- readable for old rows and never make the asset unavailable elsewhere.
+    DELETE FROM material_links
+    WHERE target_type = 're_evaluation'
+      AND target_id = v_retest_id
+      AND material_id NOT IN (
+        SELECT DISTINCT value FROM jsonb_array_elements_text(p_command->'material_ids')
+      );
+
+    INSERT INTO material_links (material_id, target_type, target_id, binding_method, binding_order, bound_by)
+    SELECT selected.material_id, 're_evaluation', v_retest_id, 'click_select', selected.binding_order, v_created_by
+    FROM (
+      SELECT value AS material_id, min(ordinality)::INTEGER AS binding_order
+      FROM jsonb_array_elements_text(p_command->'material_ids') WITH ORDINALITY
+      GROUP BY value
+    ) selected
+    ON CONFLICT (material_id, target_type, target_id)
+    DO UPDATE SET binding_order = EXCLUDED.binding_order,
+                  binding_method = EXCLUDED.binding_method,
+                  bound_by = EXCLUDED.bound_by,
+                  bound_at = NOW(),
+                  version = material_links.version + 1;
   END IF;
 
   SELECT result INTO v_latest_result

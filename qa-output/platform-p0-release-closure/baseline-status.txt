@@ -1,0 +1,19 @@
+# Platform P0 release closure worktree protection baseline
+
+capture_kind=post-implementation-residual-baseline
+capture_date=2026-07-15
+plan_commit=8dee4b8c572ca02e730ded22b5e0db39efa053a0
+last_integrated_commit=b86075b0c815b847bbcd23af779d8831928a2f36
+residual_status_entry_count_before_task9_fixes=212
+
+The original Task 0 raw `git status --short` artifact was not written before
+implementation. The repository was already heavily dirty, so this file must not
+be represented as a historical clean baseline. It establishes the protection
+boundary for Task 9 onward:
+
+- Do not reset, restore, delete, stage, or deploy unrelated residual paths.
+- Release files must be selected from the documented task allowlists.
+- Deployment packages must be built from the verified working tree, while the
+  committed implementation range remains independently reproducible.
+- The acceptance report must include the final `git status --short`, staged
+  allowlist, and commit range so this limitation remains auditable.
