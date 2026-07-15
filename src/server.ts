@@ -11,16 +11,16 @@ import {
   isLocalUploadPublicAccess,
   isNginxAccelRedirect,
   LOCAL_PUBLIC_BASE_PATH,
+  NEW_UPLOAD_DRIVER,
   NGINX_UPLOADS_INTERNAL,
   statLocalFile,
   STORAGE_DRIVER,
+  validateLocalUploadDirectoryWritable,
 } from './lib/server/storage';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOSTNAME || 'localhost';
 const port = parseInt(process.env.PORT || '5000', 10);
-
-validateProductionStartupSecurity();
 
 // Create Next.js app
 const app = next({ dev, hostname, port });
@@ -186,7 +186,12 @@ async function tryServeLocalUpload(req: IncomingMessage, res: ServerResponse) {
   }
 }
 
-app.prepare().then(() => {
+async function startServer() {
+  await validateProductionStartupSecurity();
+  if (STORAGE_DRIVER === 'local' || NEW_UPLOAD_DRIVER === 'local') {
+    await validateLocalUploadDirectoryWritable();
+  }
+  await app.prepare();
   const server = createServer(async (req, res) => {
     try {
       if (await tryServeNextStatic(req, res)) return;
@@ -218,4 +223,10 @@ app.prepare().then(() => {
       }`,
     );
   });
+}
+
+void startServer().catch((error) => {
+  const message = error instanceof Error ? error.message : 'unknown startup validation error';
+  console.error(`Startup validation failed: ${message}`);
+  process.exit(1);
 });
