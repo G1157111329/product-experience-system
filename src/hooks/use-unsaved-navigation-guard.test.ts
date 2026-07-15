@@ -10,10 +10,9 @@ async function main() {
   assert.match(source, /if \(!isDirty\) return;[\s\S]*addEventListener\('beforeunload'/, 'beforeunload is registered only while dirty');
   assert.match(source, /document\.addEventListener\('click',[\s\S]*true\)/, 'dirty in-app anchor navigation must be captured before Next handles it');
   assert.match(source, /event\.preventDefault\(\);\s*event\.stopImmediatePropagation\(\)/, 'captured dirty links must not reach nested Next Link handlers');
-  assert.match(source, /history\.replaceState/, 'dirty browser history uses a recoverable marker on the current entry');
+  assert.match(source, /history\.pushState/, 'dirty browser history uses a same-URL sentinel entry');
   assert.match(source, /history\.forward\(\)/, 'a dirty Back must restore the guarded current entry before flushing');
-  assert.match(source, /history\.back\(\)/, 'successful save or discard performs exactly one real Back');
-  assert.doesNotMatch(source, /history\.pushState/, 'the Back guard must not pollute history with extra entries');
+  assert.match(source, /history\.go\(delta\)/, 'successful save or discard skips the sentinel and guarded entry');
 
   let flushAttempts = 0;
   let continuationCalls = 0;
@@ -95,17 +94,20 @@ async function main() {
   const historyGuard = createHistoryBackController({
     getState: () => state,
     replaceState: (next) => { state = next as Record<string, unknown>; actions.push('replace'); },
+    pushState: (next) => { state = next as Record<string, unknown>; actions.push('push'); },
     forward: () => { actions.push('forward'); },
     back: () => { actions.push('back'); },
+    go: (delta) => { actions.push(`go:${delta}`); },
     attemptNavigation: async (next) => { historyAttempts += 1; await next(); },
   });
   historyGuard.activate('marker');
+  assert.deepEqual(actions.slice(-1), ['push']);
   assert.equal(state.__NA, true, 'Next history fields are preserved when adding a marker');
   historyGuard.handlePopState({ __NA: true, idx: 6 });
   assert.deepEqual(actions.slice(-1), ['forward']);
   await historyGuard.handlePopState(state);
   assert.equal(historyAttempts, 1);
-  assert.equal(actions.filter((action) => action === 'back').length, 1, 'restored Back continues exactly once');
+  assert.equal(actions.filter((action) => action === 'go:-2').length, 1, 'restored Back skips the sentinel exactly once');
   assert.equal(state.__NA, true);
   assert.equal('__productExperienceUnsavedGuard' in state, false, 'continuation removes only its marker');
   await historyGuard.handlePopState({ __NA: true, idx: 6 });
@@ -114,7 +116,7 @@ async function main() {
   historyGuard.handlePopState({ __NA: true, idx: 6 });
   await historyGuard.handlePopState(state);
   historyGuard.cancelRestore();
-  assert.equal(actions.filter((action) => action === 'back').length, 2, 'a new gesture performs no duplicate Back');
+  assert.equal(actions.filter((action) => action === 'go:-2').length, 2, 'a new gesture performs no duplicate Back');
 
   console.log('unsaved navigation guard tests passed');
 }

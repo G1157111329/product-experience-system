@@ -27,6 +27,7 @@ import { AuditLogSettings } from '@/components/settings/audit-log-settings';
 import { MatrixSchemaSettings } from '@/components/settings/matrix-schema-settings';
 import { WecomBindingsSettings } from '@/components/wecom-bindings-settings';
 import { toast } from 'sonner';
+import { GUARDED_APP_NAVIGATION_EVENT } from '@/hooks/use-unsaved-navigation-guard';
 
 const themeOptions = [
   { value: 'light', label: '明亮', icon: Sun },
@@ -82,6 +83,16 @@ function NavContent({
         event.shiftKey ||
         event.altKey
       ) {
+        return;
+      }
+
+      const guardRequest = new CustomEvent(GUARDED_APP_NAVIGATION_EVENT, {
+        cancelable: true,
+        detail: { href: new URL(href, window.location.href).href },
+      });
+      if (!window.dispatchEvent(guardRequest)) {
+        event.preventDefault();
+        event.stopPropagation();
         return;
       }
 

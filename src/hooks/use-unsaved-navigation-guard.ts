@@ -95,6 +95,7 @@ export function createUnsavedNavigationCoordinator(dependencies: {
 
 const HISTORY_MARKER_KEY = '__productExperienceUnsavedGuard';
 const HISTORY_ORIGINAL_KEY = '__productExperienceOriginalState';
+export const GUARDED_APP_NAVIGATION_EVENT = 'app-navigation:request';
 
 function addHistoryMarker(state: unknown, marker: string): Record<string, unknown> {
   if (state && typeof state === 'object' && !Array.isArray(state)) {
@@ -116,8 +117,10 @@ function removeHistoryMarker(state: unknown, marker: string): unknown {
 export function createHistoryBackController(dependencies: {
   getState: () => unknown;
   replaceState: (state: unknown) => void;
+  pushState: (state: unknown) => void;
   forward: () => void;
   back: () => void;
+  go: (delta: number) => void;
   attemptNavigation: (next: NavigationContinuation) => Promise<void>;
 }) {
   let marker: string | null = null;
@@ -127,15 +130,22 @@ export function createHistoryBackController(dependencies: {
     if (!marker) return;
     allowNextPop = true;
     dependencies.replaceState(removeHistoryMarker(dependencies.getState(), marker));
-    dependencies.back();
+    // The current entry is the same-URL sentinel. Skip it and the underlying
+    // guarded task entry to reach the user's real previous page exactly once.
+    dependencies.go(-2);
   };
   return {
     activate(nextMarker: string) {
       marker = nextMarker;
-      dependencies.replaceState(addHistoryMarker(dependencies.getState(), nextMarker));
+      dependencies.pushState(addHistoryMarker(dependencies.getState(), nextMarker));
     },
     deactivate() {
-      if (marker) dependencies.replaceState(removeHistoryMarker(dependencies.getState(), marker));
+      if (marker && (dependencies.getState() as Record<string, unknown> | null)?.[HISTORY_MARKER_KEY] === marker) {
+        dependencies.replaceState(removeHistoryMarker(dependencies.getState(), marker));
+        // The listener is removed before deactivate runs. Collapse back onto
+        // the identical underlying task URL when autosave makes the page clean.
+        dependencies.back();
+      }
       marker = null;
       restoring = false;
     },
@@ -174,8 +184,10 @@ export function useUnsavedNavigationGuard(): UnsavedNavigationGuard {
     historyControllerRef.current = createHistoryBackController({
       getState: () => window.history.state,
       replaceState: (state) => window.history.replaceState(state, '', window.location.href),
+      pushState: (state) => window.history.pushState(state, '', window.location.href),
       forward: () => window.history.forward(),
       back: () => window.history.back(),
+      go: (delta) => window.history.go(delta),
       attemptNavigation: (next) => coordinator.attemptNavigation(next),
     });
   }
@@ -189,9 +201,25 @@ export function useUnsavedNavigationGuard(): UnsavedNavigationGuard {
   }, [isDirty]);
 
   useEffect(() => {
-    if (!isDirty) return;
+    const handleAppNavigationRequest = (event: Event) => {
+      if (!getInlineSaveRegistrySnapshot()) return;
+      const navigationEvent = event as CustomEvent<{ href?: string }>;
+      const href = navigationEvent.detail?.href;
+      if (!href) return;
+      navigationEvent.preventDefault();
+      void coordinator.attemptNavigation(() => window.location.assign(href));
+    };
+    window.addEventListener(GUARDED_APP_NAVIGATION_EVENT, handleAppNavigationRequest);
+    return () => window.removeEventListener(GUARDED_APP_NAVIGATION_EVENT, handleAppNavigationRequest);
+  }, [coordinator]);
+
+  useEffect(() => {
     const handleDocumentClick = (event: MouseEvent) => {
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      // React may not have committed the external-store snapshot yet when a
+      // user types and immediately clicks global navigation. Read the registry
+      // synchronously so that first click cannot escape the save gate.
+      if (!getInlineSaveRegistrySnapshot()) return;
       const target = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[href]') : null;
       if (!target || target.target === '_blank' || target.hasAttribute('download')) return;
       const destination = new URL(target.href, window.location.href);
@@ -203,7 +231,7 @@ export function useUnsavedNavigationGuard(): UnsavedNavigationGuard {
     };
     document.addEventListener('click', handleDocumentClick, true);
     return () => document.removeEventListener('click', handleDocumentClick, true);
-  }, [coordinator, isDirty]);
+  }, [coordinator]);
 
   useEffect(() => {
     if (!isDirty) return;
