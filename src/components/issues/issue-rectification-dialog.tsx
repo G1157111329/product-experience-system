@@ -117,9 +117,8 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
       });
       const data = await res.json();
       if (data.code === 0) {
-        const next = { ...current, [field]: value };
-        setCurrent(next);
-        onSaved?.(next);
+        setCurrent(data.data);
+        onSaved?.(data.data);
       } else {
         toast.error(data.message || '保存失败');
       }
@@ -128,7 +127,7 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
     }
   };
 
-  const updateIssueFields = async (fields: Record<string, unknown>, successMessage?: string) => {
+  const runCommand = async (fields: Record<string, unknown>, successMessage?: string) => {
     if (!current) return;
     try {
       const res = await fetch(`/api/issues/${current.id}`, {
@@ -138,9 +137,9 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
       });
       const data = await res.json();
       if (data.code === 0) {
-        const next = { ...current, ...fields };
-        setCurrent(next);
-        onSaved?.(next);
+        setCurrent(data.data);
+        onSaved?.(data.data);
+        await fetchRectificationHistory(current.id);
         if (successMessage) toast.success(successMessage);
       } else {
         toast.error(data.message || '保存失败');
@@ -154,13 +153,21 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
     if (!current) return;
     const currentStatus = normalizeIssueStatus(current.status);
     if (willImprove) {
-      await updateIssueFields({
-        status: currentStatus === 'verified_closed' ? 'verified_closed' : 'rectifying',
+      if (currentStatus === 'waived' || currentStatus === 'rectifying') return;
+      const command = currentStatus === 'verified_closed'
+        ? { transition: 'return_to_rectifying', status: 'rectifying' }
+        : { transition: 'start_rectify', status: 'rectifying' };
+      await runCommand({
+        ...command,
         is_improve: true,
+        improve_plan: current.improve_plan || '开始整改',
+        responsible_person: current.responsible_person,
+        plan_complete_date: current.plan_complete_date,
       });
     } else {
       if (currentStatus !== 'waived') {
-        await updateIssueFields({
+        await runCommand({
+          transition: 'waive',
           status: 'waived',
           is_improve: false,
           no_improve_reason: current.no_improve_reason || '标记为不整改',
@@ -171,15 +178,25 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
 
   const markAsPending = async () => {
     if (!current) return;
-    await updateIssueFields({ status: 'open', is_improve: true }, '已标记为待整改');
+    if (normalizeIssueStatus(current.status) !== 'open') {
+      toast.error('当前状态不能直接返回待整改');
+      return;
+    }
+    await runCommand({ transition: 'triage', status: 'open' }, '已保持为待整改');
   };
 
   // 直接标记为整改完成（verified_closed），用户手动确认。
   const markAsRectified = async () => {
     if (!current) return;
     const currentStatus = normalizeIssueStatus(current.status);
-    if (currentStatus === 'verified_closed') return;
-    await updateIssueFields({ status: 'verified_closed', is_improve: true }, '已标记为整改完成');
+    if (currentStatus !== 'rectifying') return;
+    await runCommand({
+      transition: 'verify',
+      status: 'verified_closed',
+      is_improve: true,
+      verification_note: current.verification_note || '整改验证通过',
+      actual_complete_date: current.actual_complete_date || new Date().toISOString().slice(0, 10),
+    }, '已标记为整改完成');
   };
 
   const currentStatus = normalizeIssueStatus(current?.status || 'open');
@@ -217,6 +234,7 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
                 <div className="grid grid-cols-2 gap-1 sm:grid-cols-4">
                   <button
                     type="button"
+                    disabled={currentStatus !== 'open'}
                     onClick={() => void markAsPending()}
                     className={cn(
                       'min-h-9 rounded border px-2 py-1.5 text-xs font-medium transition-colors',
@@ -227,6 +245,7 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
                   </button>
                   <button
                     type="button"
+                    disabled={currentStatus === 'waived' || currentStatus === 'rectifying'}
                     onClick={() => void updateImproveFlag(true)}
                     className={cn(
                       'min-h-9 rounded border px-2 py-1.5 text-xs font-medium transition-colors',
@@ -237,6 +256,7 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
                   </button>
                   <button
                     type="button"
+                    disabled={currentStatus !== 'rectifying'}
                     onClick={() => void markAsRectified()}
                     className={cn(
                       'min-h-9 rounded border px-2 py-1.5 text-xs font-medium transition-colors',
@@ -258,12 +278,6 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
                 </div>
               </div>
             </div>
-
-            {current.source && (
-              <div className="text-xs text-muted-foreground bg-muted/30 p-2 rounded break-all">
-                来源: {current.source}
-              </div>
-            )}
 
             {current.description && current.description !== current.title && (
               <div className="space-y-1.5">
@@ -332,7 +346,7 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
             <div className="border-t pt-3 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">整改历史</span>
-                <Badge variant="secondary" className="text-[10px]">{rectificationHistory.length} 次</Badge>
+                <Badge variant="secondary" className="text-xs">{rectificationHistory.length} 次</Badge>
               </div>
 
               {rectificationHistory.length === 0 ? (
@@ -345,7 +359,7 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
                         <span className="text-xs font-medium text-muted-foreground">
                           {idx === 0 ? '最新整改' : `第${rectificationHistory.length - idx}次整改`}
                         </span>
-                        <span className="text-[10px] text-muted-foreground">
+                        <span className="text-xs text-muted-foreground">
                           {new Date(action.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
                         </span>
                       </div>
@@ -357,7 +371,7 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
                         <div className="space-y-1">
                           {action.verifications.map((v) => (
                             <div key={v.id} className="text-xs flex items-center gap-2">
-                              <Badge className={cn('text-[10px]', v.result === 'passed' ? 'bg-emerald-100 text-emerald-700' : v.result === 'failed' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700')}>
+                              <Badge className={cn('text-xs', v.result === 'passed' ? 'bg-emerald-100 text-emerald-700' : v.result === 'failed' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700')}>
                                 {v.result === 'passed' ? '通过' : v.result === 'failed' ? '不通过' : '部分通过'}
                               </Badge>
                               <span className="text-muted-foreground">{v.note || '无验证说明'}</span>

@@ -4,6 +4,7 @@ import { canAccessRecipe, isAuthResponse, requireUser } from '@/lib/server/auth'
 import { normalizeIngredientItems } from '@/lib/task-context-contract';
 import { normalizeEvaluationStatus } from '@/lib/evaluation-status';
 import { classifyRecipeEvaluationSaveError, saveRecipeEvaluation } from '@/lib/server/recipe-evaluation-save';
+import { deleteRecipeAtomically, isContentDeletionForbidden } from '@/lib/server/content-delete-service';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -95,14 +96,12 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     return NextResponse.json({ code: 1, message: '无权删除该食谱' }, { status: 403 });
   }
 
-  await client.from('materials').update({ recipe_id: null }).eq('recipe_id', id);
-  const { data: steps } = await client.from('recipe_steps').select('id').eq('recipe_id', id);
-  const stepIds = ((steps || []) as Array<{ id: string }>).map((step) => step.id);
-  if (stepIds.length > 0) {
-    await client.from('materials').update({ recipe_step_id: null }).in('recipe_step_id', stepIds);
+  try {
+    const deleted = await deleteRecipeAtomically({ recipeId: id, actorId: user.id });
+    if (!deleted) return NextResponse.json({ code: 1, message: '食谱不存在' }, { status: 404 });
+  } catch (error) {
+    if (isContentDeletionForbidden(error)) return NextResponse.json({ code: 1, message: error.message }, { status: 403 });
+    return NextResponse.json({ code: 1, message: error instanceof Error ? error.message : '食谱删除事务失败' }, { status: 500 });
   }
-
-  const { error } = await client.from('recipes').delete().eq('id', id);
-  if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
   return NextResponse.json({ code: 0, message: '删除成功' });
 }

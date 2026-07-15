@@ -240,3 +240,12 @@ test('removing one target preserves other target uses and demotes only after the
   assert.deepEqual(memory.snapshot().links, [{ targetType: 'issue', targetId: 'issue-1' }]);
   assert.equal(memory.snapshot().status, 'bound');
 });
+
+test('binding and deletion share the same transaction-scoped target lock', () => {
+  const materialSource = readFileSync('src/lib/server/material-asset-service.ts', 'utf8');
+  const deleteSource = readFileSync('src/lib/server/content-delete-service.ts', 'utf8');
+  assert.match(materialSource, /pg_advisory_xact_lock/);
+  assert.match(materialSource, /lockMaterialTargetsForTransaction/);
+  assert.match(deleteSource, /lockMaterialTargetsForTransaction/);
+  assert.match(deleteSource, /\.sort\(\(left, right\) =>[\s\S]*?targetType/, 'delete locks targets in a stable order');
+});

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessTask, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
+import { deleteRecordAtomically, isContentDeletionForbidden } from '@/lib/server/content-delete-service';
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -45,10 +46,12 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const { data: existingRecord } = await client.from('check_records').select('task_id').eq('id', id).maybeSingle();
   if (!existingRecord?.task_id || !(await canAccessTask(client, user, String(existingRecord.task_id)))) return forbidden();
 
-  // Unlink materials associated with this record (don't delete them, just remove the association)
-  await client.from('materials').update({ record_id: null }).eq('record_id', id);
-
-  const { error } = await client.from('check_records').delete().eq('id', id);
-  if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
+  try {
+    const deleted = await deleteRecordAtomically({ recordId: id, actorId: user.id });
+    if (!deleted) return NextResponse.json({ code: 1, message: '记录不存在' }, { status: 404 });
+  } catch (error) {
+    if (isContentDeletionForbidden(error)) return NextResponse.json({ code: 1, message: error.message }, { status: 403 });
+    return NextResponse.json({ code: 1, message: error instanceof Error ? error.message : '记录删除事务失败' }, { status: 500 });
+  }
   return NextResponse.json({ code: 0, message: '删除成功' });
 }

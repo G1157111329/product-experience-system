@@ -65,7 +65,7 @@ const TRANSITIONS: Record<IssueTransition, TransitionRule> = {
     allowedRoles: ['rectification_owner', 'task_owner', 'reviewer', 'admin'],
   },
   verify: {
-    from: ['open', 'rectifying'],
+    from: ['rectifying'],
     to: 'verified_closed',
     allowedRoles: ['reviewer', 'task_owner', 'product_manager', 'admin'],
   },
@@ -186,6 +186,52 @@ export function applyTransition(
     throw new Error(`Invalid transition ${transition} from ${currentStatus}`);
   }
   return rule.to;
+}
+
+export class IssueStatusTransitionError extends Error {}
+
+interface ResolveIssueStatusChangeInput {
+  currentStatus: string | null | undefined;
+  requestedStatus?: IssueStatus;
+  transition?: string;
+  role: AuthRole;
+  fields?: Record<string, unknown>;
+}
+
+/** A status change must be the result of an explicit, authorized command. */
+export function resolveIssueStatusChange({
+  currentStatus,
+  requestedStatus,
+  transition,
+  role,
+  fields = {},
+}: ResolveIssueStatusChangeInput): IssueStatus {
+  const current = normalizeIssueStatus(currentStatus);
+  if (!transition) {
+    if (!requestedStatus || requestedStatus === current) return current;
+    throw new IssueStatusTransitionError('An explicit transition command is required to change issue status');
+  }
+  if (!(transition in TRANSITIONS)) {
+    throw new IssueStatusTransitionError(`Unknown issue transition: ${transition}`);
+  }
+
+  const command = transition as IssueTransition;
+  if (!canTransition(current, command, role)) {
+    throw new IssueStatusTransitionError(`Transition ${command} is not allowed from ${current}`);
+  }
+  const missing = getTransitionRequiredFields(command).filter((field) => {
+    const value = fields[field];
+    return value === undefined || value === null || String(value).trim() === '';
+  });
+  if (missing.length > 0) {
+    throw new IssueStatusTransitionError(`Transition ${command} requires: ${missing.join(', ')}`);
+  }
+
+  const next = applyTransition(current, command);
+  if (requestedStatus && requestedStatus !== next) {
+    throw new IssueStatusTransitionError(`Transition ${command} does not produce requested status ${requestedStatus}`);
+  }
+  return next;
 }
 
 export function getTransitionRequiredFields(transition: IssueTransition): string[] {

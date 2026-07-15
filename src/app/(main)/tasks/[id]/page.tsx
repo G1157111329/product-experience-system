@@ -27,8 +27,6 @@ import { buildReportReadiness } from '@/lib/report-readiness';
 import { formatAiSummaryText, parseAiSummaryText } from '@/lib/report-content-rules';
 import { waitForPendingInlineSaves } from '@/lib/inline-save-registry';
 import { RecipeEvaluationPanel } from '@/components/recipes/recipe-evaluation-panel';
-import { AgentPresetPanel } from './components/agent-preset-panel';
-import { AgentAssistPanel } from './components/agent-assist-panel';
 import { MaterialEvidenceRail } from './components/material-evidence-rail';
 import { ReportAuthoringShell } from './components/report-authoring-shell';
 import { SensesInputWorkspace } from './components/senses-input-workspace';
@@ -39,6 +37,8 @@ import { BasicInfoTab as BasicInfoTabView } from './components/basic-info-tab';
 import { TaskAuthoringHeader, type TaskAuthoringSection } from './components/task-authoring-header';
 import { type IngredientDraftItem } from './components/recipe-ingredient-editor';
 import type { EvidenceBindingTarget } from './types';
+import { hasMeaningfulActiveComparison, hasMeaningfulActiveMatrix } from '@/lib/matrix/task-header-status';
+import { sortCreatedAscending } from '@/lib/stable-display-order';
 
 /* ─── Types ─── */
 interface RecipeLibRef {
@@ -134,11 +134,14 @@ export default function TaskDetailPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const focusedRecordId = searchParams.get('record_id') || undefined;
+  const focusedRecipeId = searchParams.get('recipe_id') || undefined;
+  const focusedRecipeStepId = searchParams.get('recipe_step_id') || undefined;
   const { isAdmin } = useAuth();
   const id = params.id as string;
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'agent' | 'info' | 'materials' | 'senses' | 'functions' | 'comparison' | 'matrix'>('agent');
+  const [activeTab, setActiveTab] = useState<'info' | 'materials' | 'senses' | 'functions' | 'comparison' | 'matrix'>('info');
   const [evidenceBindingTarget, setEvidenceBindingTarget] = useState<EvidenceBindingTarget | null>(null);
   const [generateConfirmOpen, setGenerateConfirmOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
@@ -177,12 +180,6 @@ export default function TaskDetailPage() {
     recipesLoadedRef.current = true;
   }, [id]);
 
-  const handleAgentAccepted = useCallback((mode: 'senses' | 'recipes') => {
-    fetchTask();
-    fetchReportRecipes();
-    setActiveTab(mode === 'recipes' ? 'functions' : 'senses');
-  }, [fetchReportRecipes, fetchTask]);
-
   const handleMaterialsChanged = useCallback(() => {
     fetchTask();
     fetchReportRecipes();
@@ -194,34 +191,60 @@ export default function TaskDetailPage() {
   useEffect(() => {
     // Only auto-fetch when entering the functions tab if recipes haven't been
     // loaded yet. Subsequent tab switches reuse cached data; explicit refreshes
-    // (handleMaterialsChanged / handleAgentAccepted) invalidate via re-fetch.
+    // (handleMaterialsChanged) invalidates via re-fetch.
     if (activeTab === 'functions' && !recipesLoadedRef.current) fetchReportRecipes();
   }, [activeTab, fetchReportRecipes]);
   useEffect(() => {
     const tab = searchParams.get('tab');
-    if (tab === 'agent' || tab === 'info' || tab === 'materials' || tab === 'senses' || tab === 'functions' || tab === 'comparison' || tab === 'matrix') {
+    if (tab === 'info' || tab === 'materials' || tab === 'senses' || tab === 'functions' || tab === 'comparison' || tab === 'matrix') {
       setActiveTab(tab);
     }
   }, [searchParams]);
   const [hasMatrixInstance, setHasMatrixInstance] = useState(false);
   const [hasComparisonInstance, setHasComparisonInstance] = useState(false);
+  const refreshMatrixHeaderStatus = useCallback(async () => {
+    try {
+      const matrixResponse = await fetch(`/api/v1/tasks/${id}/matrix-tab-state`, { cache: 'no-store' });
+      const matrixJson = await matrixResponse.json();
+      const matrixData = matrixJson.data ?? matrixJson;
+      setHasMatrixInstance(hasMeaningfulActiveMatrix(Array.isArray(matrixData.matrices) ? matrixData.matrices : []));
+    } catch {
+      setHasMatrixInstance(false);
+    }
+
+    try {
+      const assemblyResponse = await fetch(`/api/tasks/${id}/comparison/init`, { cache: 'no-store' });
+      const assemblyJson = await assemblyResponse.json();
+      const assemblyId = assemblyJson.code === 0 ? assemblyJson.data?.id : null;
+      if (!assemblyId) {
+        setHasComparisonInstance(false);
+        return;
+      }
+      const comparisonResponse = await fetch(`/api/comparison-matrix?assembly_id=${encodeURIComponent(assemblyId)}`, { cache: 'no-store' });
+      const comparisonJson = await comparisonResponse.json();
+      setHasComparisonInstance(comparisonJson.code === 0 && hasMeaningfulActiveComparison(comparisonJson.data));
+    } catch {
+      setHasComparisonInstance(false);
+    }
+  }, [id]);
   useEffect(() => {
     (async () => {
       try {
         const res = await fetch(`/api/tasks/${id}/matrices`, { cache: 'no-store' });
         const json = await res.json();
-        if (json.code === 0 && Array.isArray(json.data) && json.data.length > 0) {
-          setHasMatrixInstance(true);
-        }
+        void json;
       } catch { /* ignore — tab just won't show */ }
     })();
   }, [id]);
+  useEffect(() => {
+    void refreshMatrixHeaderStatus();
+  }, [refreshMatrixHeaderStatus]);
   useEffect(() => {
     (async () => {
       try {
         const res = await fetch(`/api/tasks/${id}/comparison/init`, { cache: 'no-store' });
         const json = await res.json();
-        setHasComparisonInstance(json.code === 0 && Boolean(json.data));
+        void json;
       } catch { /* ignore — card remains in its actual unavailable state */ }
     })();
   }, [id]);
@@ -425,12 +448,6 @@ export default function TaskDetailPage() {
       >
 
       {/* Tab Content */}
-      {activeTab === 'agent' && (
-        <div className="space-y-4">
-          <AgentPresetPanel taskId={id} onAccepted={handleAgentAccepted} />
-          <AgentAssistPanel taskId={id} embedded onClose={() => undefined} />
-        </div>
-      )}
       {activeTab === 'info' && (
         <div className="space-y-4">
           <BasicInfoTabView task={task} onRefresh={fetchTask} />
@@ -439,13 +456,13 @@ export default function TaskDetailPage() {
       )}
       {activeTab === 'materials' && <MaterialsTab taskId={id} />}
         {activeTab === 'comparison' && (
-          <ComparisonWorkspace taskId={id} taskName={task.task_name} initialLayoutType={task.comparison_layout_type} />
+          <ComparisonWorkspace taskId={id} taskName={task.task_name} initialLayoutType={task.comparison_layout_type} onMeaningfulContentChange={setHasComparisonInstance} />
         )}
         {activeTab === 'matrix' && (
-          <MatrixTab taskId={id} taskName={task.task_name} />
+          <MatrixTab taskId={id} taskName={task.task_name} onMeaningfulContentChange={refreshMatrixHeaderStatus} />
         )}
-        {activeTab === 'senses' && <SensesTab taskId={id} records={task.records || []} taskProductCategory={task.product_category} taskProduct={task.product} onRefresh={fetchTask} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onBindingTargetChange={setEvidenceBindingTarget} />}
-        {activeTab === 'functions' && <FunctionsTab taskId={id} initialRecipes={reportRecipes} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onRecipesChange={setReportRecipes} onBindingTargetChange={setEvidenceBindingTarget} />}
+        {activeTab === 'senses' && <SensesTab taskId={id} records={task.records || []} focusedRecordId={focusedRecordId} taskProductCategory={task.product_category} taskProduct={task.product} onRefresh={fetchTask} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onBindingTargetChange={setEvidenceBindingTarget} />}
+        {activeTab === 'functions' && <FunctionsTab taskId={id} initialRecipes={reportRecipes} focusedRecipeId={focusedRecipeId} focusedRecipeStepId={focusedRecipeStepId} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onRecipesChange={setReportRecipes} onBindingTargetChange={setEvidenceBindingTarget} />}
       </ReportAuthoringShell>
 
       {/* Transfer Dialog */}
@@ -587,7 +604,7 @@ function AiSummaryContent({
             className="w-full rounded-lg border bg-muted/20 p-3 text-left transition-colors hover:bg-muted/40"
           >
             <div className="flex flex-wrap items-center gap-2">
-              <Badge className="text-[10px]">{aiSummary.tag || 'AI总结'}</Badge>
+              <Badge className="text-xs">{aiSummary.tag || 'AI总结'}</Badge>
               <span className="text-sm font-medium">{aiSummary.satisfaction_score}/10</span>
               <span className="basis-full text-xs text-muted-foreground line-clamp-2 sm:basis-auto sm:flex-1">
                 {aiSummary.summary || '点击查看和编辑AI总结'}
@@ -784,7 +801,7 @@ function MaterialsTab({ taskId }: { taskId: string }) {
                         </div>
                       ) : (
                         <div className="flex items-center justify-between">
-                          <p className="text-[10px] text-white truncate flex-1">{mat.file_name}</p>
+                          <p className="text-xs text-white truncate flex-1">{mat.file_name}</p>
                           <div className="flex gap-0.5 opacity-70 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                             <button onClick={() => { setEditingImage({ id: mat.id, url: mat.file_url, name: mat.file_name }); }} className="p-0.5 text-white/70 hover:text-white">
                               <Crop className="h-3 w-3" />
@@ -882,7 +899,7 @@ const defaultFlowByPhase: Record<string, string[]> = {
 };
 const standardCategoryOptions = ['通用标准', '品类标准', '感官评价标准', '非标准'];
 
-function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefresh, onStatusUpdate, onBindingTargetChange }: { taskId: string; records: CheckRecord[]; taskProductCategory?: string; taskProduct?: string | null; onRefresh: () => void; onStatusUpdate: () => void; onBindingTargetChange?: (target: EvidenceBindingTarget | null) => void }) {
+function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, taskProduct, onRefresh, onStatusUpdate, onBindingTargetChange }: { taskId: string; records: CheckRecord[]; focusedRecordId?: string; taskProductCategory?: string; taskProduct?: string | null; onRefresh: () => void; onStatusUpdate: () => void; onBindingTargetChange?: (target: EvidenceBindingTarget | null) => void }) {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [savingRecord, setSavingRecord] = useState(false);
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
@@ -893,7 +910,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
   const { open, PreviewComponent } = useImagePreview();
 
   const displayRecords = useMemo(
-    () => records.map((record) => ({ ...record, ...(recordPatches[record.id] || {}) })),
+    () => sortCreatedAscending(records.map((record) => ({ ...record, ...(recordPatches[record.id] || {}) }))),
     [records, recordPatches],
   );
   // ── Edit mode ──
@@ -1258,7 +1275,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
           for (const matId of removedIds) {
             await fetch('/api/materials', {
               method: 'PUT', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id: matId, record_id: null }),
+              body: JSON.stringify({ id: matId, record_id: null, unlink_target_id: editRecordId }),
             });
           }
           setAddDialogOpen(false);
@@ -1411,7 +1428,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
       <Label className="text-xs text-muted-foreground">描述结果快速匹配</Label>
       <Input placeholder="输入关键词搜索标准库..." value={fuzzyKeyword}
         onChange={(e) => setFuzzyKeyword(e.target.value)} />
-      {fuzzyLoading && <p className="text-[11px] text-muted-foreground animate-pulse">搜索中...</p>}
+      {fuzzyLoading && <p className="text-xs text-muted-foreground animate-pulse">搜索中...</p>}
       {fuzzyResults.length > 0 && (
         <div className="max-h-48 overflow-y-auto space-y-1 border rounded-lg p-2">
           {fuzzyResults.slice(0, 20).map((item) => {
@@ -1425,7 +1442,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
                   <span className="font-medium truncate">{item.touch_point || item.check_item}</span>
                 </div>
                 {item.check_requirement && <p className="text-muted-foreground mt-0.5 line-clamp-1">{item.check_requirement}</p>}
-                <div className="flex gap-2 mt-0.5 text-[10px] text-muted-foreground">
+                <div className="flex gap-2 mt-0.5 text-xs text-muted-foreground">
                   {(() => { const it = item as unknown as Record<string, unknown>; return (<>
                     {it.test_phase && <span>阶段: {it.test_phase as string}</span>}
                     {it.experience_flow && <span>流程: {it.experience_flow as string}</span>}
@@ -1438,7 +1455,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
         </div>
       )}
       {fuzzyKeyword.trim() && !fuzzyLoading && fuzzyResults.length === 0 && (
-        <p className="text-[11px] text-muted-foreground">未找到匹配的标准项</p>
+        <p className="text-xs text-muted-foreground">未找到匹配的标准项</p>
       )}
     </div>
   );
@@ -1557,7 +1574,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
                   </div>
                   {item.check_requirement && <p className="text-muted-foreground mt-0.5 line-clamp-2">{item.check_requirement}</p>}
                   {item.experience_standard && <p className="text-primary/70 mt-0.5">标准: {item.experience_standard}</p>}
-                  {item.check_tool && <p className="text-muted-foreground mt-0.5 text-[10px]">工具: {item.check_tool}</p>}
+                  {item.check_tool && <p className="text-muted-foreground mt-0.5 text-xs">工具: {item.check_tool}</p>}
                 </div>
               ))}
             </div>
@@ -1589,7 +1606,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
               <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-24 shrink-0">问题等级</span><Badge variant="secondary" className="text-[9px] h-4">{selectedGeneralItem.problem_level}</Badge></div>
             )}
             {!selectedGeneralItem && editRecordData && (
-              <p className="text-[10px] text-muted-foreground mt-1">选择标准库检查项可更新引用，或直接保存保持原值</p>
+              <p className="text-xs text-muted-foreground mt-1">选择标准库检查项可更新引用，或直接保存保持原值</p>
             )}
           </div>
         )}
@@ -1708,7 +1725,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
               <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-24 shrink-0">检查标准</span><span>{selectedCategoryItem?.check_standard || editRecordData?.check_standard}</span></div>
             )}
             {!selectedCategoryItem && editRecordData && (
-              <p className="text-[10px] text-muted-foreground mt-1">选择标准库检查项可更新引用，或直接保存保持原值</p>
+              <p className="text-xs text-muted-foreground mt-1">选择标准库检查项可更新引用，或直接保存保持原值</p>
             )}
           </div>
         )}
@@ -1775,7 +1792,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
                 {editRecordData.experience_standard && (
                   <div className="flex gap-2 text-xs"><span className="text-muted-foreground w-24 shrink-0">体验标准</span><span>{editRecordData.experience_standard}</span></div>
                 )}
-                <p className="text-[10px] text-muted-foreground mt-1">选择感官维度可更新引用，或直接保存保持原值</p>
+                <p className="text-xs text-muted-foreground mt-1">选择感官维度可更新引用，或直接保存保持原值</p>
               </>
             )}
           </div>
@@ -1901,6 +1918,7 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
 
       <SensesInputWorkspace
         records={displayRecords}
+        focusedRecordId={focusedRecordId}
         recordMaterials={recordMaterials}
         onCreateRecord={openCreateRecordDialog}
         onEditRecord={handleEditRecord}
@@ -1932,8 +1950,8 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
                   const [cat, dim] = group.split(' · ');
                   return (
                     <>
-                      <Badge variant="secondary" className="text-[10px]">{cat}</Badge>
-                      <Badge className={cn('text-[10px]', sensoryColors[dim] || 'bg-muted')}>{dim}</Badge>
+                      <Badge variant="secondary" className="text-xs">{cat}</Badge>
+                      <Badge className={cn('text-xs', sensoryColors[dim] || 'bg-muted')}>{dim}</Badge>
                       <span className="text-muted-foreground text-xs">{items.length} 项</span>
                     </>
                   );
@@ -1957,19 +1975,19 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
                       )} />
                       <span className="text-sm flex-1 truncate">{record.check_item}</span>
                       {record.check_dimension && (
-                        <span className="text-[10px] text-muted-foreground bg-background px-1.5 py-0.5 rounded">{record.check_dimension}</span>
+                        <span className="text-xs text-muted-foreground bg-background px-1.5 py-0.5 rounded">{record.check_dimension}</span>
                       )}
                       {record.sub_check_dimension && (
-                        <span className="text-[10px] text-muted-foreground bg-background px-1.5 py-0.5 rounded">{record.sub_check_dimension}</span>
+                        <span className="text-xs text-muted-foreground bg-background px-1.5 py-0.5 rounded">{record.sub_check_dimension}</span>
                       )}
                       {record.test_phase && (
-                        <span className="text-[10px] text-muted-foreground bg-background px-1.5 py-0.5 rounded">{record.test_phase}</span>
+                        <span className="text-xs text-muted-foreground bg-background px-1.5 py-0.5 rounded">{record.test_phase}</span>
                       )}
                       {record.experience_flow && (
-                        <span className="text-[10px] text-muted-foreground bg-background px-1.5 py-0.5 rounded">{record.experience_flow}</span>
+                        <span className="text-xs text-muted-foreground bg-background px-1.5 py-0.5 rounded">{record.experience_flow}</span>
                       )}
                       {record.touch_point && (
-                        <span className="text-[10px] text-muted-foreground bg-background px-1.5 py-0.5 rounded">{record.touch_point}</span>
+                        <span className="text-xs text-muted-foreground bg-background px-1.5 py-0.5 rounded">{record.touch_point}</span>
                       )}
                       <span className={cn('text-xs font-medium shrink-0',
                         record.evaluation_result === '合格' ? 'text-emerald-600' :
@@ -2035,12 +2053,16 @@ function SensesTab({ taskId, records, taskProductCategory, taskProduct, onRefres
 function FunctionsTab({
   taskId,
   initialRecipes,
+  focusedRecipeId,
+  focusedRecipeStepId,
   onStatusUpdate,
   onRecipesChange,
   onBindingTargetChange,
 }: {
   taskId: string;
   initialRecipes?: Recipe[];
+  focusedRecipeId?: string;
+  focusedRecipeStepId?: string;
   onStatusUpdate: () => void;
   onRecipesChange?: (recipes: Recipe[]) => void;
   onBindingTargetChange?: (target: EvidenceBindingTarget | null) => void;
@@ -2345,7 +2367,7 @@ function FunctionsTab({
           if (!allSelectedIds.has(matId)) {
             await fetch('/api/materials', {
               method: 'PUT', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id: matId, recipe_step_id: null }),
+              body: JSON.stringify({ id: matId, recipe_step_id: null, unlink_target_id: editingStep.id }),
             });
           }
         }
@@ -2373,16 +2395,14 @@ function FunctionsTab({
 
   const handleDeleteRecipe = async (recipe: Recipe) => {
     if (!confirm(`确定删除"${recipe.name}"？该操作不可恢复。`)) return;
-    // Delete all steps first (only disassociate materials)
-    for (const step of (recipe.recipe_steps || [])) {
-      await fetch(`/api/recipe-steps/${step.id}`, { method: 'DELETE' });
-    }
     const res = await fetch(`/api/recipes/${recipe.id}`, { method: 'DELETE' });
     const data = await res.json();
-    if (data.code === 0) {
+    if (res.ok && data.code === 0) {
       if (selectedRecipe?.id === recipe.id) setSelectedRecipe(null);
       fetchRecipes();
       toast.success('食谱/功能已删除');
+    } else {
+      toast.error(data.message || '删除失败，当前内容已保留');
     }
   };
 
@@ -2392,6 +2412,8 @@ function FunctionsTab({
 
       <FunctionsInputWorkspace
         recipes={recipes}
+        focusedRecipeId={focusedRecipeId}
+        focusedRecipeStepId={focusedRecipeStepId}
         loading={loading}
         onCreateRecipe={() => setAddDialogOpen(true)}
         onEditRecipe={handleEditRecipe}
@@ -2472,7 +2494,7 @@ function FunctionsTab({
               <Label className="text-xs text-muted-foreground">从食谱库引用</Label>
               <Input placeholder="搜索已有食谱名称..." value={recipeSearch}
                 onChange={(e) => setRecipeSearch(e.target.value)} />
-              {recipeSearchLoading && <p className="text-[11px] text-muted-foreground animate-pulse">搜索中...</p>}
+              {recipeSearchLoading && <p className="text-xs text-muted-foreground animate-pulse">搜索中...</p>}
               {recipeSearchResults.length > 0 && (
                 <div className="max-h-40 overflow-y-auto space-y-1 border rounded-lg p-2">
                   {recipeSearchResults.map((refRecipe) => (
@@ -2484,7 +2506,7 @@ function FunctionsTab({
                         <span className="text-muted-foreground">{refRecipe.recipe_library_steps?.length || 0}步</span>
                       </div>
                       <div className="text-muted-foreground mt-0.5">
-                        <span className="text-[10px]">{refRecipe.product_category || '通用'}{refRecipe.product ? ` - ${refRecipe.product}` : ''}</span>
+                        <span className="text-xs">{refRecipe.product_category || '通用'}{refRecipe.product ? ` - ${refRecipe.product}` : ''}</span>
                         {refRecipe.ingredients && <span className="line-clamp-1 ml-1">{refRecipe.ingredients}</span>}
                       </div>
                     </div>
@@ -2492,7 +2514,7 @@ function FunctionsTab({
                 </div>
               )}
               {recipeSearch.trim() && !recipeSearchLoading && recipeSearchResults.length === 0 && (
-                <p className="text-[11px] text-muted-foreground">未找到匹配的食谱</p>
+                <p className="text-xs text-muted-foreground">未找到匹配的食谱</p>
               )}
             </div>
 
@@ -2537,7 +2559,7 @@ function FunctionsTab({
               <Label className="text-xs text-muted-foreground">引用已有步骤</Label>
               <Input placeholder="搜索食谱名称以引用步骤..." value={stepRefSearch}
                 onChange={(e) => setStepRefSearch(e.target.value)} />
-              {stepRefLoading && <p className="text-[11px] text-muted-foreground animate-pulse">搜索中...</p>}
+              {stepRefLoading && <p className="text-xs text-muted-foreground animate-pulse">搜索中...</p>}
               {stepRefResults.length > 0 && (
                 <div className="max-h-40 overflow-y-auto space-y-1 border rounded-lg p-2">
                   {stepRefResults.map((refRecipe) => (
@@ -2554,7 +2576,7 @@ function FunctionsTab({
                 </div>
               )}
               {stepRefSearch.trim() && !stepRefLoading && stepRefResults.length === 0 && (
-                <p className="text-[11px] text-muted-foreground">未找到匹配的食谱</p>
+                <p className="text-xs text-muted-foreground">未找到匹配的食谱</p>
               )}
             </div>
 
@@ -2567,7 +2589,7 @@ function FunctionsTab({
             </div>
             <div className="space-y-1.5">
               <Label>步骤素材</Label>
-              <p className="text-[11px] text-muted-foreground">附录该步骤的效果图片或视频（如食物成品效果）</p>
+              <p className="text-xs text-muted-foreground">附录该步骤的效果图片或视频（如食物成品效果）</p>
               <MaterialPicker
                 taskId={taskId}
                 selectedIds={newStep.step_material_ids || []}
@@ -2595,7 +2617,7 @@ function FunctionsTab({
             </div>
             <div className="space-y-1.5">
               <Label>步骤素材</Label>
-              <p className="text-[11px] text-muted-foreground">附录该步骤的效果图片或视频（如食物成品效果）</p>
+              <p className="text-xs text-muted-foreground">附录该步骤的效果图片或视频（如食物成品效果）</p>
               <MaterialPicker
                 taskId={taskId}
                 selectedIds={editStepForm.step_material_ids || []}

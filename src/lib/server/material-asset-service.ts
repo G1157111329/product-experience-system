@@ -349,8 +349,9 @@ export async function bindMaterial(input: {
 }): Promise<{ linkId: string }> {
   const [write] = createMaterialLinkWritePlan([input]);
   const db = await getDb();
-
-  const orderRows = await db
+  return db.transaction(async (tx) => {
+  await lockMaterialTargetsForTransaction(tx, [{ targetType: write.targetType, targetId: write.targetId }]);
+  const orderRows = await tx
     .select({ nextOrder: sql<number>`COALESCE(MAX(${materialLinks.bindingOrder}), 0) + 1` })
     .from(materialLinks)
     .where(and(
@@ -363,7 +364,7 @@ export async function bindMaterial(input: {
   // Insert the link; on conflict (same material+target), do nothing and return
   // the existing row id. Returning the id in both branches keeps the contract
   // uniform for callers.
-  const inserted = await db
+  const inserted = await tx
     .insert(materialLinks)
     .values({
       materialId: write.materialId,
@@ -393,13 +394,14 @@ export async function bindMaterial(input: {
   // Transition the material to 'bound'. We update unconditionally; the state
   // machine layer (transitionStatus) could enforce legality, but binding always
   // moves a material into 'bound'.
-  await db
+  await tx
     .update(materials)
     .set({ status: 'bound' })
     .where(eq(materials.id, write.materialId))
     .execute();
 
   return { linkId };
+  });
 }
 
 /** Remove exactly one target relation, preserving every other use of the asset. */
@@ -609,7 +611,9 @@ async function applyMaterialReplacement(
   const add = uniqueReplacementTargets(input.add);
   const remove = uniqueReplacementTargets(input.remove);
   await tx.assertMaterialAccess(input.materialId, input.actorId);
-  for (const target of [...add, ...remove]) await tx.assertTargetAccess(target, input.actorId);
+  const orderedTargets = [...add, ...remove].sort((left, right) =>
+    `${left.targetType}:${left.targetId}`.localeCompare(`${right.targetType}:${right.targetId}`));
+  for (const target of orderedTargets) await tx.assertTargetAccess(target, input.actorId);
   await tx.addLinks(input.materialId, add, input.actorId);
   await tx.removeLinks(input.materialId, remove);
   await tx.syncLegacyTargets(input.materialId, [...new Set([...add, ...remove].map((target) => target.targetType))]);
@@ -678,6 +682,17 @@ export async function replaceComparisonCellMaterialSelectionWithRepository(input
 
 type Db = Awaited<ReturnType<typeof getDb>>;
 type DbTransaction = Parameters<Parameters<Db['transaction']>[0]>[0];
+
+/** Serialize bind/unbind/delete for a polymorphic target without requiring a target FK. */
+export async function lockMaterialTargetsForTransaction(
+  tx: DbTransaction,
+  targets: readonly MaterialReplacementTarget[],
+): Promise<void> {
+  const keys = [...new Set(targets.map((target) => `${target.targetType}:${target.targetId}`))].sort();
+  for (const key of keys) {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
+  }
+}
 
 async function actorIsAdmin(tx: DbTransaction, actorId: string) {
   const rows = await tx.select({ role: platformUsers.role }).from(platformUsers).where(eq(platformUsers.id, actorId)).limit(1).execute();
@@ -778,6 +793,7 @@ function createDatabaseReplacementRepository(tx: DbTransaction): ComparisonTarge
       if (rows[0].createdBy !== actorId && !(await actorIsAdmin(tx, actorId))) throw new Error('material_forbidden');
     },
     async assertTargetAccess(target, actorId) {
+      await lockMaterialTargetsForTransaction(tx, [target]);
       const resource = await resolveTargetWithTransaction(tx, target.targetType, target.targetId);
       if (!resource) throw new Error('material_target_not_found');
       await assertActorOwnsResource(tx, actorId, resource);
