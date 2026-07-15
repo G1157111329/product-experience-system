@@ -46,11 +46,28 @@ async function main() {
       import('./deletion-impact'),
       import('./content-delete-graph'),
     ]);
+    const affectedIssueRows = await pool.query<{ id: string }>(
+      `SELECT id FROM issues
+       WHERE recipe_id = $1 OR recipe_step_id = $2
+       ORDER BY id`,
+      [recipeId, stepId],
+    );
+    const affectedIssueIds = affectedIssueRows.rows.map((row) => row.id);
+    const affectedReEvaluationRows = affectedIssueIds.length > 0
+      ? await pool.query<{ id: string }>(
+        `SELECT id FROM issue_re_evaluations
+         WHERE issue_id = ANY($1::varchar[])
+         ORDER BY id`,
+        [affectedIssueIds],
+      )
+      : { rows: [] as Array<{ id: string }> };
     assert.deepEqual(
       await getDeletionImpact({ kind: 'recipe', id: recipeId, actorId }),
       projectDeleteGraphImpact({
         kind: 'recipe', id: recipeId, actorId, stepIds: [stepId],
-        affectedRecordIds: [recipeRecordId, stepRecordId], issueIds: [], reEvaluationIds: [],
+        affectedRecordIds: [recipeRecordId, stepRecordId],
+        issueIds: affectedIssueIds,
+        reEvaluationIds: affectedReEvaluationRows.rows.map((row) => row.id),
         targets: [], materialIds: [],
       }),
       'real PostgreSQL impact SQL matches the shared execution graph projector',

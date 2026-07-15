@@ -4,13 +4,8 @@ import { randomBytes } from 'crypto';
 import { canAccessReport, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
 import {
-  getReportMergeModel,
-  isMergeableReportProjectType,
-  pickLatestReportPerTask,
-  sortReportsByCreatedAtAsc,
-} from '@/lib/report-merge';
-import {
   attachLatestSnapshotForComparisonReport,
+  reportSnapshotErrorStatus,
 } from '@/lib/server/report-snapshots';
 import { buildFrozenReportResponse } from '@/lib/server/report-frozen-view';
 
@@ -118,40 +113,9 @@ export async function GET(request: NextRequest) {
   const siblingReports: ReportRow[] = [];
   const siblingIssuesMap: Record<string, IssueRow[]> = {};
   const siblingReEvaluationsMap: Record<string, unknown[]> = {};
-  const mergeModel = getReportMergeModel(report.product_model);
-  const currentProjectType = report.content?.task?.project_type;
-  if (mergeModel && isMergeableReportProjectType(currentProjectType)) {
-    const { data: sameModelReports } = await client
-      .from('reports')
-      .select('*')
-      .eq('product_model', report.product_model)
-      .neq('status', 'archived');
-    const candidates = ((sameModelReports || []) as ReportRow[]).filter((candidate) => (
-      getReportMergeModel(candidate.product_model) === mergeModel
-    ));
-    const taskIds = [...new Set(candidates.map((candidate) => String(candidate.task_id || '')).filter(Boolean))];
-    const { data: tasks } = taskIds.length > 0
-      ? await client.from('experience_tasks').select('*').in('id', taskIds)
-      : { data: [] };
-    const taskMap = new Map<string, Record<string, unknown>>(
-      (tasks || []).map((task: Record<string, unknown>) => [String(task.id), task]),
-    );
-    for (const candidate of candidates) {
-      const task = taskMap.get(String(candidate.task_id || ''));
-      if (task && candidate.content) candidate.content.task = task;
-    }
-    const mergeableCandidates = candidates.filter((candidate) => (
-      isMergeableReportProjectType(
-        taskMap.get(String(candidate.task_id || ''))?.project_type || candidate.content?.task?.project_type,
-      )
-    ));
-    const latestByTask = pickLatestReportPerTask(mergeableCandidates);
-    const currentIndex = latestByTask.findIndex((candidate) => candidate.task_id === report.task_id);
-    if (currentIndex >= 0) latestByTask[currentIndex] = report as ReportRow;
-    else latestByTask.push(report as ReportRow);
-    siblingReports.push(...sortReportsByCreatedAtAsc(latestByTask).filter((candidate) => candidate.id !== report.id));
-
-  }
+  // A public token authorizes exactly the report recorded in report_shares.
+  // Same-model reports can belong to a different task owner and must never be
+  // inferred into the public response without an explicit share grant.
 
   await writeSecurityAudit(client, {
     request,
@@ -162,6 +126,7 @@ export async function GET(request: NextRequest) {
     metadata: { shareId: share.id },
   });
 
+  try {
   const reportWithSnapshot = await attachLatestSnapshotForComparisonReport(client, report as Record<string, unknown>);
   const primaryFrozenResponse = await buildPublicDetailModel(client, reportWithSnapshot as ReportRow);
   const detailModel = primaryFrozenResponse.detailModel;
@@ -193,6 +158,7 @@ export async function GET(request: NextRequest) {
       liveIssues,
       reEvaluationsMap,
       siblingReports,
+      mergedReportOrder: [String(report.id)],
       siblingDetailModels,
       siblingFrozenViewModels,
       siblingIssuesMap,
@@ -203,4 +169,10 @@ export async function GET(request: NextRequest) {
       },
     },
   });
+  } catch (detailError) {
+    return NextResponse.json({
+      code: 1,
+      message: detailError instanceof Error ? detailError.message : 'Report detail failed to load',
+    }, { status: reportSnapshotErrorStatus(detailError) });
+  }
 }

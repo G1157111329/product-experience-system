@@ -120,21 +120,22 @@ function IssueContextLines({ issue }: { issue: FrozenReportViewModel['issues'][n
 }
 
 function RecipeIssueFacts({ recipe, carrierKey }: { recipe: FrozenRecipeContext; carrierKey: string }) {
+  const steps = recipe.steps ?? [];
   return <div className="space-y-3 text-sm">
     <div>
       <p><span className="text-muted-foreground">食谱名称：</span>{recipe.name}</p>
       {recipe.formula && <p className="mt-1 whitespace-pre-wrap"><span className="text-muted-foreground">食谱配方：</span>{recipe.formula}</p>}
       {recipe.parameters && <p className="mt-1 whitespace-pre-wrap"><span className="text-muted-foreground">食谱参数：</span>{typeof recipe.parameters === 'string' ? recipe.parameters : Object.entries(recipe.parameters).map(([key, value]) => `${key}：${String(value)}`).join('；')}</p>}
     </div>
-    {recipe.steps.length > 0 && (
+    {steps.length > 0 && (
       <details className="rounded-md border px-3 py-2">
-        <summary className="cursor-pointer font-medium">食谱步骤：{recipe.steps.length}步</summary>
+        <summary className="cursor-pointer font-medium">食谱步骤：{steps.length}步</summary>
         <ol className="mt-3 space-y-3 border-t pt-3">
-          {recipe.steps.map((step, index) => (
+          {steps.map((step, index) => (
             <li key={step.id} data-content-id={`function-step:${step.id}`}>
               <p><span className="font-medium">步骤 {step.stepNumber ?? index + 1}</span>{step.operation && <span className="ml-2 text-muted-foreground">{step.operation}</span>}</p>
-              {step.problemPoints.length > 0 && <p className="mt-1 whitespace-pre-wrap text-muted-foreground">步骤问题点：{step.problemPoints.join('；')}</p>}
-              <div className="mt-2"><MediaList items={step.evidence} role="evidence" label="素材" carrierKey={carrierKey} /></div>
+              {(step.problemPoints ?? []).length > 0 && <p className="mt-1 whitespace-pre-wrap text-muted-foreground">步骤问题点：{(step.problemPoints ?? []).join('；')}</p>}
+              <div className="mt-2"><MediaList items={step.evidence ?? []} role="evidence" label="素材" carrierKey={carrierKey} /></div>
             </li>
           ))}
         </ol>
@@ -256,18 +257,19 @@ function FrozenPanel({ model, active, onManageIssue }: { model: FrozenReportView
       <div className="space-y-3">
         {visibleFunctionEffects.map((effect) => {
           const problemCount = model.issues.filter((issue) => issue.recipe?.recipeId === effect.recipeId).length;
+          const steps = effect.steps ?? [];
           return <article key={effect.recipeId} data-content-id={`function:${effect.recipeId}`} className="overflow-hidden rounded-lg border bg-background shadow-sm">
             <div data-testid="function-effect-preview" className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/25 px-4 py-3">
               <h3 className="font-semibold text-foreground">{effect.name}</h3>
-              <div className="flex flex-wrap items-center gap-1.5"><span className="rounded border bg-background px-2 py-1 text-xs text-muted-foreground">步骤数：{effect.steps.length}</span><span className="rounded border bg-background px-2 py-1 text-xs text-muted-foreground">整体判断：{evaluationStatusLabel(effect.evaluationStatus)}</span><span className="rounded border bg-background px-2 py-1 text-xs text-muted-foreground">问题点数量：{problemCount}</span></div>
+              <div className="flex flex-wrap items-center gap-1.5"><span className="rounded border bg-background px-2 py-1 text-xs text-muted-foreground">步骤数：{steps.length}</span><span className="rounded border bg-background px-2 py-1 text-xs text-muted-foreground">整体判断：{evaluationStatusLabel(effect.evaluationStatus)}</span><span className="rounded border bg-background px-2 py-1 text-xs text-muted-foreground">问题点数量：{problemCount}</span></div>
             </div>
             <div className="space-y-3 px-4 py-3">
               {(effect.formula || effect.parameters) && <div className="grid gap-1.5 text-sm text-muted-foreground sm:grid-cols-2">
                 {effect.formula && <p><span className="font-medium text-foreground">食谱/食材：</span>{effect.formula}</p>}
                 {effect.parameters && <p><span className="font-medium text-foreground">食谱参数：</span>{typeof effect.parameters === 'string' ? effect.parameters : Object.entries(effect.parameters).map(([key, value]) => `${key}：${String(value)}`).join('；')}</p>}
               </div>}
-              <div className="border-t pt-3"><p className="text-sm font-semibold">效果评价</p><p className="mt-1 text-sm text-muted-foreground">整体判断：{evaluationStatusLabel(effect.evaluationStatus)}</p>{effect.evaluation && <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{effect.evaluation}</p>}<div className="mt-2"><MediaList items={effect.evidence} role="evidence" label="素材" carrierKey={model.header.id} /></div></div>
-              {effect.steps.length > 0 && <details className="rounded-md border bg-muted/10 px-3 py-2"><summary className="cursor-pointer text-sm font-medium">食谱步骤：{effect.steps.length}步</summary><ol className="mt-3 space-y-3 border-t pt-3">{effect.steps.map((item, index) => <li key={item.id} data-content-id={`function-step:${item.id}`} className="space-y-2 text-sm"><div><span className="font-medium">步骤 {String(item.stepNumber ?? index + 1)}</span>{item.operation && <span className="ml-2 text-muted-foreground">{item.operation}</span>}</div>{item.problemPoints.length > 0 && <p className="whitespace-pre-wrap text-muted-foreground">步骤问题点：{item.problemPoints.join('；')}</p>}<MediaList items={item.evidence} role="evidence" label="素材" carrierKey={model.header.id} /></li>)}</ol></details>}
+              <div className="border-t pt-3"><p className="text-sm font-semibold">效果评价</p><p className="mt-1 text-sm text-muted-foreground">整体判断：{evaluationStatusLabel(effect.evaluationStatus)}</p>{effect.evaluation && <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{effect.evaluation}</p>}<div className="mt-2"><MediaList items={effect.evidence} role="primary" label="素材" carrierKey={model.header.id} /></div></div>
+              {steps.length > 0 && <details className="rounded-md border bg-muted/10 px-3 py-2"><summary className="cursor-pointer text-sm font-medium">食谱步骤：{steps.length}步</summary><ol className="mt-3 space-y-3 border-t pt-3">{steps.map((item, index) => <li key={item.id} data-content-id={`function-step:${item.id}`} className="space-y-2 text-sm"><div><span className="font-medium">步骤 {String(item.stepNumber ?? index + 1)}</span>{item.operation && <span className="ml-2 text-muted-foreground">{item.operation}</span>}</div>{(item.problemPoints ?? []).length > 0 && <p className="whitespace-pre-wrap text-muted-foreground">步骤问题点：{(item.problemPoints ?? []).join('；')}</p>}<MediaList items={item.evidence ?? []} role="evidence" label="素材" carrierKey={model.header.id} /></li>)}</ol></details>}
             </div>
           </article>;
         })}

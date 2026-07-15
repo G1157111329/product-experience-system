@@ -159,6 +159,9 @@ test('comparison media route uses one checked batch replacement without legacy w
   const post = source.slice(source.indexOf('export async function POST'));
   assert.doesNotMatch(post, /\.from\('materials'\)[\s\S]*?\.update\(/);
   assert.doesNotMatch(post, /oldMaterials|currentLinks|\.from\('material_links'\)/);
+  const service = readFileSync('src/lib/server/material-asset-service.ts', 'utf8');
+  assert.doesNotMatch(service, /set\(\{\s*\[column\.name\]/, 'Drizzle updates must never use SQL column names as object keys');
+  assert.match(service, /comparisonCellId: targetId/, 'comparison legacy fallback uses the typed Drizzle property');
 });
 
 test('comparison roles keep five inline slots and expose the primary role to projection', () => {

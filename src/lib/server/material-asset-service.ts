@@ -755,18 +755,6 @@ async function resolveTargetWithTransaction(
   return rows[0]?.matrixId ? { kind: 'matrix', id: rows[0].matrixId } : null;
 }
 
-function legacyColumn(targetType: MaterialLinkTargetType) {
-  switch (targetType) {
-    case 'record': return materials.recordId;
-    case 'recipe': return materials.recipeId;
-    case 'recipe_step': return materials.recipeStepId;
-    case 'issue': return materials.issueId;
-    case 're_evaluation': return materials.reEvaluationId;
-    case 'comparison_cell': return materials.comparisonCellId;
-    default: return null;
-  }
-}
-
 function createDatabaseReplacementRepository(tx: DbTransaction): ComparisonTargetReplacementRepository {
   return {
     transaction: async (work) => work(createDatabaseReplacementRepository(tx)),
@@ -818,12 +806,21 @@ function createDatabaseReplacementRepository(tx: DbTransaction): ComparisonTarge
     },
     async syncLegacyTargets(materialId, targetTypes) {
       for (const targetType of targetTypes) {
-        const column = legacyColumn(targetType);
-        if (!column) continue;
         const rows = await tx.select({ targetId: materialLinks.targetId }).from(materialLinks)
           .where(and(eq(materialLinks.materialId, materialId), eq(materialLinks.targetType, targetType)))
           .orderBy(materialLinks.bindingOrder, materialLinks.boundAt, materialLinks.id).limit(1).execute();
-        await tx.update(materials).set({ [column.name]: rows[0]?.targetId ?? null }).where(eq(materials.id, materialId)).execute();
+        const targetId = rows[0]?.targetId ?? null;
+        // Drizzle update keys are TypeScript property names, not SQL column
+        // names. Keep these assignments explicit so an unknown snake_case key
+        // can never be filtered into an invalid `UPDATE ... SET` statement.
+        const patch = targetType === 'record' ? { recordId: targetId }
+          : targetType === 'recipe' ? { recipeId: targetId }
+          : targetType === 'recipe_step' ? { recipeStepId: targetId }
+          : targetType === 'issue' ? { issueId: targetId }
+          : targetType === 're_evaluation' ? { reEvaluationId: targetId }
+          : targetType === 'comparison_cell' ? { comparisonCellId: targetId }
+          : null;
+        if (patch) await tx.update(materials).set(patch).where(eq(materials.id, materialId)).execute();
       }
     },
     async listLinks(materialId) {

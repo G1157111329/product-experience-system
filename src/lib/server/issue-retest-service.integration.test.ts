@@ -70,21 +70,25 @@ async function main() {
     const withMaterial = await apply({
       action: 'create', issue_id: issueId, description: '带素材复测', result: 'qualified', material_ids: [materialId],
     });
-    const linked = await client.query<{ re_evaluation_id: string | null }>('SELECT re_evaluation_id FROM materials WHERE id = $1', [materialId]);
-    assert.equal(linked.rows[0].re_evaluation_id, withMaterial.re_evaluation!.id);
-    await apply({ action: 'delete', re_evaluation_id: withMaterial.re_evaluation!.id });
-    const unlinked = await client.query<{ count: string; re_evaluation_id: string | null }>(
-      'SELECT count(*) OVER ()::text AS count, re_evaluation_id FROM materials WHERE id = $1',
-      [materialId],
+    const linked = await client.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM material_links WHERE material_id = $1 AND target_type = 're_evaluation' AND target_id = $2",
+      [materialId, withMaterial.re_evaluation!.id],
     );
-    assert.equal(unlinked.rows[0].count, '1', 'delete must retain the asset row');
-    assert.equal(unlinked.rows[0].re_evaluation_id, null, 'delete must only unlink the asset');
+    assert.equal(linked.rows[0].count, '1', 'retest save creates a link without claiming the material asset');
+    await apply({ action: 'delete', re_evaluation_id: withMaterial.re_evaluation!.id });
+    const unlinked = await client.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM material_links WHERE material_id = $1 AND target_type = 're_evaluation' AND target_id = $2",
+      [materialId, withMaterial.re_evaluation!.id],
+    );
+    assert.equal(unlinked.rows[0].count, '0', 'delete must remove only the retest link');
+    const retainedAsset = await client.query<{ count: string }>('SELECT count(*)::text AS count FROM materials WHERE id = $1', [materialId]);
+    assert.equal(retainedAsset.rows[0].count, '1', 'delete must retain the asset row');
 
     const before = await client.query<{ count: string }>('SELECT count(*)::text AS count FROM issue_re_evaluations WHERE issue_id = $1', [issueId]);
     await client.query('SAVEPOINT invalid_material');
     await assert.rejects(
       apply({ action: 'create', issue_id: issueId, description: '非法素材', result: 'unqualified', material_ids: [invalidMaterialId] }),
-      /invalid or occupied retest material/,
+      /invalid(?: or occupied)? retest material/,
     );
     await client.query('ROLLBACK TO SAVEPOINT invalid_material');
     const after = await client.query<{ count: string }>('SELECT count(*)::text AS count FROM issue_re_evaluations WHERE issue_id = $1', [issueId]);
