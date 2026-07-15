@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Filter, Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 
 type SensesInputWorkspaceProps = {
   records: CheckRecord[];
+  focusedRecordId?: string;
   recordMaterials: Record<string, Material[]>;
   onCreateRecord: () => void;
   onEditRecord: (record: CheckRecord) => void;
@@ -21,6 +22,7 @@ type SensesInputWorkspaceProps = {
   onBindingTargetChange: (target: EvidenceBindingTarget | null) => void;
   onMaterialsChange?: () => void;
   onRecordPatched?: (recordId: string, patch: Partial<CheckRecord>) => void;
+  attemptNavigation: (next: () => void) => Promise<void>;
 };
 
 function getRecordTitle(record: CheckRecord) {
@@ -37,6 +39,7 @@ function isFailed(record: CheckRecord) {
 
 export function SensesInputWorkspace({
   records,
+  focusedRecordId,
   recordMaterials,
   onCreateRecord,
   onEditRecord,
@@ -45,8 +48,10 @@ export function SensesInputWorkspace({
   onBindingTargetChange,
   onMaterialsChange,
   onRecordPatched,
+  attemptNavigation,
 }: SensesInputWorkspaceProps) {
   const [selectedId, setSelectedId] = useState(records[0]?.id || '');
+  const lastFocusedRecordId = useRef<string | undefined>(undefined);
   const selectedRecord = useMemo(
     () => records.find((record) => record.id === selectedId) || records[0] || null,
     [records, selectedId]
@@ -55,9 +60,29 @@ export function SensesInputWorkspace({
   const failedRecords = records.filter(isFailed);
 
   const selectRecord = (record: CheckRecord) => {
-    setSelectedId(record.id);
-    onBindingTargetChange({ type: 'record', id: record.id, label: '当前五感记录' });
+    void attemptNavigation(() => {
+      setSelectedId(record.id);
+      onBindingTargetChange({ type: 'record', id: record.id, label: '当前五感记录' });
+    });
   };
+
+  useEffect(() => {
+    if (!focusedRecordId) {
+      lastFocusedRecordId.current = undefined;
+      return;
+    }
+    if (lastFocusedRecordId.current === focusedRecordId || !records.some((record) => record.id === focusedRecordId)) return;
+    lastFocusedRecordId.current = focusedRecordId;
+    let frame: number | null = null;
+    void attemptNavigation(() => {
+      setSelectedId(focusedRecordId);
+      onBindingTargetChange({ type: 'record', id: focusedRecordId, label: '来源检查记录' });
+      frame = window.requestAnimationFrame(() => {
+        document.getElementById(`record-${focusedRecordId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    });
+    return () => { if (frame !== null) window.cancelAnimationFrame(frame); };
+  }, [attemptNavigation, focusedRecordId, onBindingTargetChange, records]);
 
   const bindDroppedMaterial = async (event: React.DragEvent<HTMLElement>, record: CheckRecord) => {
     event.preventDefault();
@@ -68,7 +93,7 @@ export function SensesInputWorkspace({
     const response = await fetch('/api/materials', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: materialId, record_id: record.id, recipe_step_id: null, recipe_id: null }),
+      body: JSON.stringify({ id: materialId, record_id: record.id }),
     });
     const data = await response.json().catch(() => ({}));
     if (data.code === 0) {
@@ -108,6 +133,7 @@ export function SensesInputWorkspace({
               const mats = recordMaterials[record.id] || [];
               return (
                 <button
+                  id={`record-${record.id}`}
                   key={record.id}
                   type="button"
                   onClick={() => selectRecord(record)}
@@ -115,7 +141,8 @@ export function SensesInputWorkspace({
                   onDrop={(event) => void bindDroppedMaterial(event, record)}
                   className={cn(
                     'w-full rounded-md border p-3 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                    selectedRecord?.id === record.id ? 'border-primary bg-primary/5' : 'bg-background'
+                    selectedRecord?.id === record.id ? 'border-primary bg-primary/5' : 'bg-background',
+                    focusedRecordId === record.id && 'ring-2 ring-primary ring-offset-2'
                   )}
                 >
                   <div className="flex items-start gap-2">
@@ -127,11 +154,11 @@ export function SensesInputWorkspace({
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">{getRecordTitle(record)}</div>
                       <div className="mt-1 flex flex-wrap gap-1">
-                        <Badge variant="outline" className="text-[10px]">{record.standard_category || '未分类'}</Badge>
-                        <Badge variant={isPassed(record) ? 'secondary' : isFailed(record) ? 'destructive' : 'outline'} className="text-[10px]">
+                        <Badge variant="outline" className="text-xs">{record.standard_category || '未分类'}</Badge>
+                        <Badge variant={isPassed(record) ? 'secondary' : isFailed(record) ? 'destructive' : 'outline'} className="text-xs">
                           {record.evaluation_result}
                         </Badge>
-                        {mats.length > 0 && <Badge variant="outline" className="text-[10px]">{mats.length} 个证据</Badge>}
+                        {mats.length > 0 && <Badge variant="outline" className="text-xs">{mats.length} 个证据</Badge>}
                       </div>
                     </div>
                   </div>

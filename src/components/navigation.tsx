@@ -74,6 +74,7 @@ function NavContent({
   const router = useRouter();
   const createNavigateHandler = useCallback((href: string) => {
     return (event: MouseEvent<HTMLAnchorElement>) => {
+      if (event.defaultPrevented) return;
       if (
         event.button !== 0 ||
         event.metaKey ||
@@ -276,13 +277,13 @@ function CategoryProductSettings({ open, onOpenChange }: { open: boolean; onOpen
             {/* Category Management */}
             <div className="space-y-3">
               <h3 className="text-sm font-semibold flex items-center gap-2">
-                <Badge variant="secondary" className="text-[10px]">品类</Badge> 品类管理
+                <Badge variant="secondary" className="text-xs">品类</Badge> 品类管理
               </h3>
               <div className="space-y-1.5">
                 {categories.map(cat => (
                   <div key={cat.id} className="flex items-center gap-2 p-2 rounded-lg border">
                     <span className="text-sm flex-1">{cat.name}</span>
-                    <Badge variant="outline" className="text-[10px]">{cat.products.length}个产品</Badge>
+                    <Badge variant="outline" className="text-xs">{cat.products.length}个产品</Badge>
                     <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-red-700 hover:bg-red-50"
                       onClick={() => setDeletingCatId(cat.id)}>
                       <Minus className="h-3.5 w-3.5" />
@@ -312,7 +313,7 @@ function CategoryProductSettings({ open, onOpenChange }: { open: boolean; onOpen
             {/* Product Management */}
             <div className="space-y-3">
               <h3 className="text-sm font-semibold flex items-center gap-2">
-                <Badge variant="secondary" className="text-[10px]">产品</Badge> 产品管理
+                <Badge variant="secondary" className="text-xs">产品</Badge> 产品管理
               </h3>
               <div className="space-y-1.5">
                 <Label className="text-xs">选择品类</Label>
@@ -535,13 +536,13 @@ function StandardOptionsSettings({ open, onOpenChange }: { open: boolean; onOpen
             {/* 产品使用阶段管理 */}
             <div className="space-y-3">
               <h3 className="text-sm font-semibold flex items-center gap-2">
-                <Badge variant="secondary" className="text-[10px]">阶段</Badge> 产品使用阶段
+                <Badge variant="secondary" className="text-xs">阶段</Badge> 产品使用阶段
               </h3>
               <div className="space-y-1.5">
                 {options.test_phases.map((phase, idx) => (
                   <div key={idx} className="flex items-center gap-2 p-2 rounded-lg border">
                     <span className="text-sm flex-1">{phase}</span>
-                    <Badge variant="outline" className="text-[10px]">{(options.experience_flows[phase] || []).length}个流程</Badge>
+                    <Badge variant="outline" className="text-xs">{(options.experience_flows[phase] || []).length}个流程</Badge>
                     <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-red-700 hover:bg-red-50"
                       onClick={() => setDeletingPhaseIdx(idx)}>
                       <Minus className="h-3.5 w-3.5" />
@@ -571,7 +572,7 @@ function StandardOptionsSettings({ open, onOpenChange }: { open: boolean; onOpen
             {/* 体验流程管理 */}
             <div className="space-y-3">
               <h3 className="text-sm font-semibold flex items-center gap-2">
-                <Badge variant="secondary" className="text-[10px]">流程</Badge> 体验流程
+                <Badge variant="secondary" className="text-xs">流程</Badge> 体验流程
               </h3>
               <div className="space-y-1.5">
                 <Label className="text-xs">选择产品使用阶段</Label>
@@ -621,7 +622,7 @@ function StandardOptionsSettings({ open, onOpenChange }: { open: boolean; onOpen
             {/* 感官维度管理 */}
             <div className="space-y-3">
               <h3 className="text-sm font-semibold flex items-center gap-2">
-                <Badge variant="secondary" className="text-[10px]">维度</Badge> 感官维度
+                <Badge variant="secondary" className="text-xs">维度</Badge> 感官维度
               </h3>
               <div className="space-y-1.5">
                 {options.sensory_dimensions.map((dim, idx) => (
@@ -911,7 +912,7 @@ function UserSection({ collapsed = false }: { collapsed?: boolean }) {
           {!collapsed && (
             <div className="min-w-0 flex-1">
               <div className="text-xs font-medium truncate">{user?.name || user?.account || '未登录'}</div>
-              <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+              <div className="text-xs text-muted-foreground flex items-center gap-1">
                 <span className="truncate">{user?.account}</span>
                 {isAdmin && <Badge variant="secondary" className="text-[9px] px-1 py-0 h-3.5">管理</Badge>}
               </div>
@@ -1001,7 +1002,7 @@ function UserSection({ collapsed = false }: { collapsed?: boolean }) {
                   </Button>
                 )}
               </div>
-              <p className="text-[11px] text-muted-foreground">集中管理品类产品、通用标准选项、AI助手与 Prompt 模板</p>
+              <p className="text-xs text-muted-foreground">集中管理品类产品、通用标准选项、AI助手与 Prompt 模板</p>
             </div>
 
             {/* Admin: Settings button in profile dialog */}
@@ -1024,15 +1025,15 @@ function UserSection({ collapsed = false }: { collapsed?: boolean }) {
                           <span className="text-xs text-muted-foreground ml-1">({u.account})</span>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
-                          <Badge variant={u.role === 'admin' ? 'default' : 'secondary'} className="text-[10px] px-1.5">{u.role === 'admin' ? '管理' : '普通'}</Badge>
+                          <Badge variant={u.role === 'admin' ? 'default' : 'secondary'} className="text-xs px-1.5">{u.role === 'admin' ? '管理' : '普通'}</Badge>
                           {u.id !== user?.id && (
                             <>
                               {u.role === 'user' ? (
-                                <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5" onClick={() => handleRoleChange(u.id, 'upgrade')} disabled={roleLoading}>升级</Button>
+                                <Button size="sm" variant="outline" className="h-5 text-xs px-1.5" onClick={() => handleRoleChange(u.id, 'upgrade')} disabled={roleLoading}>升级</Button>
                               ) : (
-                                <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5" onClick={() => handleRoleChange(u.id, 'downgrade')} disabled={roleLoading}>降级</Button>
+                                <Button size="sm" variant="outline" className="h-5 text-xs px-1.5" onClick={() => handleRoleChange(u.id, 'downgrade')} disabled={roleLoading}>降级</Button>
                               )}
-                              <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5 text-destructive hover:text-destructive" onClick={() => handleDeleteUser(u.id, u.name || u.account)} disabled={roleLoading}>
+                              <Button size="sm" variant="outline" className="h-5 text-xs px-1.5 text-destructive hover:text-destructive" onClick={() => handleDeleteUser(u.id, u.name || u.account)} disabled={roleLoading}>
                                 <Trash2 className="h-3 w-3" />
                               </Button>
                             </>
@@ -1177,7 +1178,7 @@ function MobileUserIcon() {
                 </Button>
               )}
             </div>
-            <p className="text-[11px] text-muted-foreground">集中管理品类产品、通用标准选项、AI助手与 Prompt 模板</p>
+            <p className="text-xs text-muted-foreground">集中管理品类产品、通用标准选项、AI助手与 Prompt 模板</p>
             {isAdmin && (
               <Button variant="outline" className="w-full gap-2" onClick={() => { setProfileOpen(false); setTimeout(() => setPlatformSettingsOpen(true), 100); }}>
                 <Settings className="h-4 w-4" /> 平台设置
@@ -1223,7 +1224,7 @@ export function BottomNav() {
               <span className={cn('flex h-7 w-10 items-center justify-center rounded-full transition-colors', isActive && 'bg-primary/10')}>
                 <item.icon className="h-[18px] w-[18px]" />
               </span>
-              <span className="max-w-full truncate text-[10px] leading-tight">{item.label}</span>
+              <span className="max-w-full truncate text-xs leading-tight">{item.label}</span>
             </Link>
           );
         })}

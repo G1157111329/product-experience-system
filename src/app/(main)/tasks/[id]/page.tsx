@@ -25,7 +25,8 @@ import { PageShell } from '@/components/app';
 import { MediaGallery } from '@/components/app/media-gallery';
 import { buildReportReadiness } from '@/lib/report-readiness';
 import { formatAiSummaryText, parseAiSummaryText } from '@/lib/report-content-rules';
-import { waitForPendingInlineSaves } from '@/lib/inline-save-registry';
+import { waitForPendingInlineSavesOrThrow } from '@/lib/inline-save-registry';
+import { useUnsavedNavigationGuard } from '@/hooks/use-unsaved-navigation-guard';
 import { RecipeEvaluationPanel } from '@/components/recipes/recipe-evaluation-panel';
 import { MaterialEvidenceRail } from './components/material-evidence-rail';
 import { ReportAuthoringShell } from './components/report-authoring-shell';
@@ -34,7 +35,7 @@ import { FunctionsInputWorkspace } from './components/functions-input-workspace'
 import { ComparisonWorkspace } from './components/comparison-workspace';
 import { MatrixTab } from './components/matrix-tab';
 import { BasicInfoTab as BasicInfoTabView } from './components/basic-info-tab';
-import { TaskAuthoringHeader, type TaskAuthoringSection } from './components/task-authoring-header';
+import { TaskAuthoringHeader } from './components/task-authoring-header';
 import { type IngredientDraftItem } from './components/recipe-ingredient-editor';
 import type { EvidenceBindingTarget } from './types';
 import { hasMeaningfulActiveComparison, hasMeaningfulActiveMatrix } from '@/lib/matrix/task-header-status';
@@ -84,6 +85,8 @@ const statusConfig: Record<string, { label: string; color: string }> = {
 function summaryToForm(summary: AiTaskSummary) {
   return { text: formatAiSummaryText(summary) };
 }
+
+type TaskDetailTab = 'info' | 'materials' | 'senses' | 'functions' | 'comparison' | 'matrix';
 
 async function loadRecipesForTask(taskId: string): Promise<Recipe[]> {
   const res = await fetch(`/api/recipes?task_id=${taskId}`);
@@ -141,7 +144,12 @@ export default function TaskDetailPage() {
   const id = params.id as string;
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'info' | 'materials' | 'senses' | 'functions' | 'comparison' | 'matrix'>('info');
+  const [activeTab, setActiveTab] = useState<TaskDetailTab>('info');
+  const unsavedNavigation = useUnsavedNavigationGuard();
+  const { attemptNavigation } = unsavedNavigation;
+  const changeActiveTab = useCallback((section: TaskDetailTab) => {
+    void attemptNavigation(() => setActiveTab(section));
+  }, [attemptNavigation]);
   const [evidenceBindingTarget, setEvidenceBindingTarget] = useState<EvidenceBindingTarget | null>(null);
   const [generateConfirmOpen, setGenerateConfirmOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
@@ -197,9 +205,9 @@ export default function TaskDetailPage() {
   useEffect(() => {
     const tab = searchParams.get('tab');
     if (tab === 'info' || tab === 'materials' || tab === 'senses' || tab === 'functions' || tab === 'comparison' || tab === 'matrix') {
-      setActiveTab(tab);
+      changeActiveTab(tab);
     }
-  }, [searchParams]);
+  }, [changeActiveTab, searchParams]);
   const [hasMatrixInstance, setHasMatrixInstance] = useState(false);
   const [hasComparisonInstance, setHasComparisonInstance] = useState(false);
   const refreshMatrixHeaderStatus = useCallback(async () => {
@@ -265,6 +273,9 @@ export default function TaskDetailPage() {
   // Transfer task to another user
   const handleTransfer = async () => {
     if (!transferTargetId || transferring) return;
+    let saveGatePassed = false;
+    await attemptNavigation(() => { saveGatePassed = true; });
+    if (!saveGatePassed) return;
     setTransferring(true);
     try {
       const res = await fetch(`/api/tasks/${id}/transfer`, {
@@ -322,7 +333,7 @@ export default function TaskDetailPage() {
     setGeneratingReport(true);
     try {
       window.dispatchEvent(new Event('inline-save:flush'));
-      await waitForPendingInlineSaves();
+      await waitForPendingInlineSavesOrThrow();
       const res = await fetch('/api/reports', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ task_id: id }),
@@ -335,10 +346,12 @@ export default function TaskDetailPage() {
           body: JSON.stringify({ status: '已完成' }),
         });
         toast.success('报告生成成功，任务已标记为已完成');
-        router.push('/reports');
+        await attemptNavigation(() => router.push('/reports'));
       } else {
         toast.error(data.message || '报告生成失败');
       }
+    } catch (error) {
+      toast.error(error instanceof Error && error.message ? error.message : '保存失败，报告未生成');
     } finally {
       setGeneratingReport(false);
     }
@@ -422,10 +435,10 @@ export default function TaskDetailPage() {
         hasAiSummary={Boolean(aiSummary)}
         generatingReport={generatingReport}
         summarizing={aiSummarizing}
-        onBack={() => router.back()}
+        onBack={() => void unsavedNavigation.attemptBackNavigation()}
         onGenerateSummary={aiSummary ? openAiSummaryDialog : handleGenerateAiSummary}
         onGenerateReport={handleRequestGenerateReport}
-        onOpenSection={(section: TaskAuthoringSection) => setActiveTab(section)}
+        onOpenSection={changeActiveTab}
         transferAction={isAdmin ? (
           <Button variant="outline" size="sm" className="w-full min-w-0 sm:w-auto" onClick={handleOpenTransfer}>
             <ArrowRightLeft className="mr-1.5 h-4 w-4" /> 转移
@@ -435,7 +448,7 @@ export default function TaskDetailPage() {
 
       <ReportAuthoringShell
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={changeActiveTab}
         hasMatrixInstance={hasMatrixInstance}
         materialRail={(activeTab === 'senses' || activeTab === 'functions' || activeTab === 'comparison' || activeTab === 'matrix') ? (
           <MaterialEvidenceRail
@@ -459,10 +472,10 @@ export default function TaskDetailPage() {
           <ComparisonWorkspace taskId={id} taskName={task.task_name} initialLayoutType={task.comparison_layout_type} onMeaningfulContentChange={setHasComparisonInstance} />
         )}
         {activeTab === 'matrix' && (
-          <MatrixTab taskId={id} taskName={task.task_name} onMeaningfulContentChange={refreshMatrixHeaderStatus} />
+          <MatrixTab taskId={id} taskName={task.task_name} attemptNavigation={attemptNavigation} onMeaningfulContentChange={refreshMatrixHeaderStatus} />
         )}
-        {activeTab === 'senses' && <SensesTab taskId={id} records={task.records || []} focusedRecordId={focusedRecordId} taskProductCategory={task.product_category} taskProduct={task.product} onRefresh={fetchTask} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onBindingTargetChange={setEvidenceBindingTarget} />}
-        {activeTab === 'functions' && <FunctionsTab taskId={id} initialRecipes={reportRecipes} focusedRecipeId={focusedRecipeId} focusedRecipeStepId={focusedRecipeStepId} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onRecipesChange={setReportRecipes} onBindingTargetChange={setEvidenceBindingTarget} />}
+        {activeTab === 'senses' && <SensesTab taskId={id} records={task.records || []} focusedRecordId={focusedRecordId} taskProductCategory={task.product_category} taskProduct={task.product} onRefresh={fetchTask} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onBindingTargetChange={setEvidenceBindingTarget} attemptNavigation={attemptNavigation} />}
+        {activeTab === 'functions' && <FunctionsTab taskId={id} initialRecipes={reportRecipes} focusedRecipeId={focusedRecipeId} focusedRecipeStepId={focusedRecipeStepId} onStatusUpdate={() => updateTaskStatusIfNeeded('add_content')} onRecipesChange={setReportRecipes} onBindingTargetChange={setEvidenceBindingTarget} attemptNavigation={attemptNavigation} />}
       </ReportAuthoringShell>
 
       {/* Transfer Dialog */}
@@ -525,7 +538,7 @@ export default function TaskDetailPage() {
                     className="w-full rounded-md border bg-background p-2 text-left text-sm hover:bg-muted/50"
                     onClick={() => {
                       const targetTab = item.id.includes('recipe') || item.id.includes('raw-json') ? 'functions' : item.id.includes('record') ? 'senses' : 'info';
-                      setActiveTab(targetTab);
+                      changeActiveTab(targetTab);
                       setGenerateConfirmOpen(false);
                     }}
                   >
@@ -543,6 +556,26 @@ export default function TaskDetailPage() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={unsavedNavigation.isPromptOpen}
+        onOpenChange={(open) => {
+          if (!open) unsavedNavigation.cancelDiscard();
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>内容尚未保存</DialogTitle>
+            <DialogDescription>
+              {unsavedNavigation.errorMessage || '保存失败，请重试；仅在确认不保留修改时选择放弃。'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button variant="destructive" onClick={unsavedNavigation.confirmDiscard}>放弃未保存修改</Button>
+            <Button onClick={() => void unsavedNavigation.retryNavigation()}>重试保存</Button>
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -899,7 +932,7 @@ const defaultFlowByPhase: Record<string, string[]> = {
 };
 const standardCategoryOptions = ['通用标准', '品类标准', '感官评价标准', '非标准'];
 
-function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, taskProduct, onRefresh, onStatusUpdate, onBindingTargetChange }: { taskId: string; records: CheckRecord[]; focusedRecordId?: string; taskProductCategory?: string; taskProduct?: string | null; onRefresh: () => void; onStatusUpdate: () => void; onBindingTargetChange?: (target: EvidenceBindingTarget | null) => void }) {
+function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, taskProduct, onRefresh, onStatusUpdate, onBindingTargetChange, attemptNavigation }: { taskId: string; records: CheckRecord[]; focusedRecordId?: string; taskProductCategory?: string; taskProduct?: string | null; onRefresh: () => void; onStatusUpdate: () => void; onBindingTargetChange?: (target: EvidenceBindingTarget | null) => void; attemptNavigation: (next: () => void) => Promise<void> }) {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [savingRecord, setSavingRecord] = useState(false);
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
@@ -1925,6 +1958,7 @@ function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, task
         onDeleteRecord={handleDeleteRecord}
         onPreview={open}
         onBindingTargetChange={(target) => onBindingTargetChange?.(target)}
+        attemptNavigation={attemptNavigation}
         onMaterialsChange={onRefresh}
         onRecordPatched={(recordId, patch) => {
           setRecordPatches((current) => ({
@@ -2058,6 +2092,7 @@ function FunctionsTab({
   onStatusUpdate,
   onRecipesChange,
   onBindingTargetChange,
+  attemptNavigation,
 }: {
   taskId: string;
   initialRecipes?: Recipe[];
@@ -2066,6 +2101,7 @@ function FunctionsTab({
   onStatusUpdate: () => void;
   onRecipesChange?: (recipes: Recipe[]) => void;
   onBindingTargetChange?: (target: EvidenceBindingTarget | null) => void;
+  attemptNavigation: (next: () => void) => Promise<void>;
 }) {
   const [recipes, setRecipes] = useState<Recipe[]>(initialRecipes || []);
   const [loading, setLoading] = useState((initialRecipes || []).length === 0);
@@ -2441,6 +2477,7 @@ function FunctionsTab({
           });
         }}
         onBindingTargetChange={(target) => onBindingTargetChange?.(target)}
+        attemptNavigation={attemptNavigation}
         onRefresh={fetchRecipes}
         onSaveIngredients={async (recipe, items) => {
           const response = await fetch(`/api/recipes/${recipe.id}`, {

@@ -22,6 +22,7 @@ import { toast } from 'sonner';
 import type { MatrixReadProjectionV2 } from '@/lib/matrix/task-matrix-types';
 import type { V3MatrixProjection } from '@/lib/matrix/v3-types';
 import { selectCurrentMatrix } from '@/lib/matrix/current-matrix-selection';
+import { getCreatedMatrixId } from '@/lib/matrix-create-response';
 import { MatrixDesigner } from './matrix-designer';
 import { DesktopMatrixGrid } from './matrix-desktop-grid';
 import { MobileMatrixCards } from './matrix-mobile-v2';
@@ -30,6 +31,8 @@ import { MatrixV3Grid } from './matrix-v3-grid';
 interface MatrixTabProps {
   taskId: string;
   taskName: string;
+  onMeaningfulContentChange?: () => void;
+  attemptNavigation: (next: () => void) => Promise<void>;
 }
 
 type TabState = 'loading' | 'feature_disabled' | 'forbidden' | 'api_error' | 'empty' | 'ready';
@@ -79,7 +82,7 @@ const STATUS_ICONS: Record<string, React.ReactNode> = {
   archived: <Archive className="h-3 w-3" />,
 };
 
-export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
+export function MatrixTab({ taskId, taskName, onMeaningfulContentChange, attemptNavigation }: MatrixTabProps) {
   const [tabState, setTabState] = useState<TabState>('loading');
   const [matrices, setMatrices] = useState<TabStatePayload['matrices']>([]);
   const [canCreate, setCanCreate] = useState(false);
@@ -149,7 +152,7 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
   useEffect(() => {
     void fetchTabState().then((data) => {
       const currentMatrix = selectCurrentMatrix(data?.matrices ?? []);
-      if (data?.state === 'ready' && currentMatrix) {
+      if (currentMatrix) {
         setSelectedMatrixId((current) => current ?? currentMatrix.id);
       }
     });
@@ -173,10 +176,10 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
         body: JSON.stringify(body),
       });
       const json = await res.json();
-      const created = json.data;
-      if (json.code === 0 && created?.id) {
+      const createdId = getCreatedMatrixId(res.ok, json);
+      if (createdId) {
         toast.success(excelLike ? '矩阵已创建，可直接录入' : '矩阵创建成功，请设计结构');
-        setSelectedMatrixId(created.id);
+        setSelectedMatrixId(createdId);
         await fetchTabState();
       } else {
         toast.error(json.message || '创建失败');
@@ -195,7 +198,7 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
   useEffect(() => {
     if (
       canCreate
-      && (tabState === 'empty' || activeMatrixCount === 0)
+      && activeMatrixCount === 0
       && !autoCreateStartedRef.current
     ) {
       autoCreateStartedRef.current = true;
@@ -208,50 +211,6 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
     const matrix = matrices.find((m) => m.id === selectedMatrixId);
     return (
       <div className="space-y-3">
-        <div className="flex items-center gap-2 flex-wrap">
-          <label className="sr-only" htmlFor="task-matrix-selector">切换数据矩阵</label>
-          <select
-            id="task-matrix-selector"
-            aria-label="切换数据矩阵"
-            className="h-9 max-w-[260px] rounded-md border border-input bg-background px-2 text-sm"
-            value={selectedMatrixId}
-            onChange={(event) => setSelectedMatrixId(event.target.value)}
-          >
-            {matrices.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name} · {STATUS_LABELS[item.status] ?? item.status}{item.meaningful ? ' · 有内容' : ''}
-              </option>
-            ))}
-          </select>
-          <Button variant="ghost" size="sm" onClick={() => setSelectedMatrixId(null)}>
-            矩阵管理
-          </Button>
-          {matrix && (
-            <>
-              <span className="text-sm font-medium truncate max-w-[240px]">{matrix.name}</span>
-              <Badge className={STATUS_COLORS[matrix.status] ?? 'bg-muted'} variant="outline">
-                <span className="flex items-center gap-1">
-                  {STATUS_ICONS[matrix.status]}
-                  {STATUS_LABELS[matrix.status] ?? matrix.status}
-                </span>
-              </Badge>
-              {matrix.status !== 'archived' && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="ml-auto h-8 w-8 text-muted-foreground hover:text-destructive"
-                  title="清空并停用矩阵"
-                  aria-label="清空并停用矩阵"
-                  onClick={() => void handleLifecycle(matrix.id, 'clear_and_archive')}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  <span className="sr-only">清空并停用</span>
-                </Button>
-              )}
-            </>
-          )}
-        </div>
-
         {excelLike ? (
           <MatrixV3Shell
             matrixId={selectedMatrixId}
@@ -259,13 +218,15 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
             formulaEnabled={formulaEnabled}
             cellStyleEnabled={cellStyleEnabled}
             hermesEnabled={hermesEnabled}
-            onBack={() => setSelectedMatrixId(null)}
+            onBack={() => void attemptNavigation(() => setSelectedMatrixId(null))}
+            attemptNavigation={attemptNavigation}
+            onMeaningfulContentChange={onMeaningfulContentChange}
           />
         ) : matrix?.status === 'designing' ? (
           <MatrixDesigner
             matrixId={selectedMatrixId}
             taskId={taskId}
-            onBack={() => setSelectedMatrixId(null)}
+            onBack={() => void attemptNavigation(() => setSelectedMatrixId(null))}
             onConfirmed={() => { void fetchTabState(); }}
           />
         ) : (
@@ -361,7 +322,7 @@ export function MatrixTab({ taskId, taskName }: MatrixTabProps) {
           <Card
             key={m.id}
             className="cursor-pointer transition-shadow hover:shadow-md hover:border-primary/30"
-            onClick={() => setSelectedMatrixId(m.id)}
+            onClick={() => void attemptNavigation(() => setSelectedMatrixId(m.id))}
           >
             <CardHeader className="pb-2">
               <div className="flex items-start justify-between gap-2">
@@ -472,6 +433,8 @@ function MatrixV3Shell({
   cellStyleEnabled = true,
   hermesEnabled = true,
   onBack,
+  onMeaningfulContentChange,
+  attemptNavigation,
 }: {
   matrixId: string;
   taskId: string;
@@ -479,6 +442,8 @@ function MatrixV3Shell({
   cellStyleEnabled?: boolean;
   hermesEnabled?: boolean;
   onBack: () => void;
+  onMeaningfulContentChange?: () => void;
+  attemptNavigation: (next: () => void) => Promise<void>;
 }) {
   const [projection, setProjection] = useState<V3MatrixProjection | null>(null);
   const [loading, setLoading] = useState(true);
@@ -591,7 +556,11 @@ function MatrixV3Shell({
       formulaEnabled={formulaEnabled}
       cellStyleEnabled={cellStyleEnabled}
       hermesEnabled={hermesEnabled}
-      onChanged={() => { void fetchProjection({ silent: true }); }}
+      attemptNavigation={attemptNavigation}
+      onChanged={() => {
+        void fetchProjection({ silent: true });
+        onMeaningfulContentChange?.();
+      }}
     />
   );
 }

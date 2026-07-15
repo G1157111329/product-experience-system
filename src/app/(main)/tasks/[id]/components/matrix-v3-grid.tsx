@@ -4,7 +4,7 @@
  * MatrixV3Grid — desktop Excel-like dynamic matrix view (PRD V3.1.2.4 §7).
  *
  * Renders the V3 projection as a spreadsheet-style grid:
- *   - Frozen left columns (hierarchy A/B/C + primary_media D + comparison E)
+ *   - Frozen left columns (hierarchy A/B/C + comparison E)
  *   - Horizontally-scrollable detail/calculation/effect/evaluation/issue zones
  *   - Merged row headers (rowspan) for level_1/level_2/level_3 hierarchy
  *   - Inline cell editing via the unified /api/v1/inline-values PATCH
@@ -21,10 +21,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { formatMatrixNumber } from '@/lib/matrix/number-format';
 import { InlineEditable } from '@/components/inline-editable';
 import { patchInlineValue, putMatrixCellValue } from '@/lib/inline-save-helpers';
+import { flushInlineSave, markInlineSaveDirty } from '@/lib/inline-save-registry';
 import type {
   V3MatrixProjection,
   V3Column,
@@ -47,13 +50,21 @@ import { MatrixZoneNavigator } from './matrix-zone-navigator';
 import {
   getMatrixColumnDisplayWidth,
   getMatrixZoneAnchors,
+  getPinnedHierarchyBoundaryId,
   getPinnedHierarchyOffsets,
 } from '@/lib/matrix/matrix-zone-layout';
+import { orderRowsByHierarchy } from '@/lib/matrix/hierarchy-row-order';
 
 type MatrixSummarySuggestion = {
   id: string;
   content: string;
   scopeNodeId?: string | null;
+};
+
+type ChildNodeDialogState = {
+  level: 2;
+  parentId: string;
+  label: string;
 };
 
 interface MatrixV3GridProps {
@@ -67,6 +78,17 @@ interface MatrixV3GridProps {
   hermesEnabled?: boolean;
   /** P1 cell/column-header style toolbar. Default true. */
   cellStyleEnabled?: boolean;
+  attemptNavigation: (next: () => void) => Promise<void>;
+}
+
+function registerMatrixSave<T>(key: string, operation: () => Promise<T>): Promise<T> {
+  const registryKey = `matrix-v3:${key}`;
+  markInlineSaveDirty(registryKey, operation);
+  return flushInlineSave(registryKey) as Promise<T>;
+}
+
+function markMatrixSaveDirty<T>(key: string, operation: () => Promise<T>): void {
+  markInlineSaveDirty(`matrix-v3:${key}`, operation);
 }
 
 const CONFIGURABLE_COLUMN_ZONES = new Set<ColumnZone>([
@@ -114,7 +136,7 @@ function zoneIcon(zone: ColumnZone) {
     case 'detail_dimension':
       return <Hash className="h-3 w-3" />;
     case 'calculation_dimension':
-      return <span className="text-[10px] font-mono">fx</span>;
+      return <span className="text-xs font-mono">fx</span>;
     case 'primary_media':
     case 'effect_media':
       return <ImageIcon className="h-3 w-3" />;
@@ -136,29 +158,22 @@ interface GridRow {
 
 function buildGridRows(projection: V3MatrixProjection): GridRow[] {
   const nodeById = new Map<string, V3HierarchyNode>();
+  const sortOrderByNodeId = new Map<string, number>();
   const indexTree = (nodes: V3HierarchyNode[]) => {
     for (const n of nodes) {
       nodeById.set(n.id, n);
+      sortOrderByNodeId.set(n.id, n.sortOrder);
       indexTree(n.children);
     }
   };
   indexTree(projection.hierarchy);
 
-  return projection.rows.map((leaf) => {
+  return orderRowsByHierarchy(projection.rows, sortOrderByNodeId).map((leaf) => {
     const level3 = leaf.level3NodeId ? nodeById.get(leaf.level3NodeId) ?? null : null;
     const level2 = leaf.level2NodeId ? nodeById.get(leaf.level2NodeId) ?? null : null;
     const level1 = nodeById.get(leaf.level1NodeId)!;
     return { leaf, level1, level2, level3 };
   });
-}
-
-function findHierarchyNode(nodes: V3HierarchyNode[], nodeId: string): V3HierarchyNode | null {
-  for (const node of nodes) {
-    if (node.id === nodeId) return node;
-    const child = findHierarchyNode(node.children, nodeId);
-    if (child) return child;
-  }
-  return null;
 }
 
 export function MatrixV3Grid({
@@ -169,12 +184,15 @@ export function MatrixV3Grid({
   formulaEnabled = true,
   hermesEnabled = true,
   cellStyleEnabled = true,
+  attemptNavigation,
 }: MatrixV3GridProps) {
   const gridScrollRef = useRef<HTMLDivElement>(null);
   const [gridRows, setGridRows] = useState<GridRow[]>([]);
   const [addingNode, setAddingNode] = useState(false);
   const [newNodeLabel, setNewNodeLabel] = useState('');
   const [showAddLevel1, setShowAddLevel1] = useState(false);
+  const [nodeDialog, setNodeDialog] = useState<ChildNodeDialogState | null>(null);
+  const [nodeDialogSaving, setNodeDialogSaving] = useState(false);
 
   // P1 cell style toolbar
   const [styleTarget, setStyleTarget] = useState<StyleTarget | null>(null);
@@ -185,6 +203,7 @@ export function MatrixV3Grid({
   const [columnDialogMode, setColumnDialogMode] = useState<'create' | 'edit'>('create');
   const [editingColumn, setEditingColumn] = useState<V3Column | null>(null);
   const [columnSaving, setColumnSaving] = useState(false);
+  const [editingHeaderId, setEditingHeaderId] = useState<string | null>(null);
 
   // Wave 3 formula editor state
   const [formulaColumn, setFormulaColumn] = useState<V3Column | null>(null);
@@ -201,10 +220,12 @@ export function MatrixV3Grid({
     setGridRows(buildGridRows(projection));
   }, [projection]);
 
-  const hasLevel3 = projection.hierarchy.some((level1) =>
-    level1.children.some((level2) => level2.children.some((child) => child.level === 3)),
-  );
-  const columns = projection.columns.filter((column) => column.zoneRole !== 'C' || hasLevel3);
+  // Keep the historical primary-media slot in the formula coordinate model so
+  // existing expressions keep their references, but do not render that
+  // redundant image column. The later effect-media column is the sole matrix
+  // material entry point.
+  const formulaColumns = projection.columns.filter((column) => column.columnZone !== 'primary_media');
+  const columns = formulaColumns;
   const allColumns = columns;
   const tableWidth = allColumns.reduce(
     (total, column) => total + getMatrixColumnDisplayWidth(column),
@@ -212,6 +233,7 @@ export function MatrixV3Grid({
   );
   const zoneAnchors = getMatrixZoneAnchors(allColumns);
   const pinnedHierarchyOffsets = getPinnedHierarchyOffsets(allColumns);
+  const frozenHierarchyBoundaryId = getPinnedHierarchyBoundaryId(allColumns);
 
   const scrollToZone = useCallback((scrollLeft: number) => {
     gridScrollRef.current?.scrollTo({ left: scrollLeft, behavior: 'smooth' });
@@ -236,11 +258,11 @@ export function MatrixV3Grid({
   const handleCellPick = useCallback(
     (columnId: string, rowIndex: number) => {
       if (!pickMode || !formulaColumn) return;
-      const colIndex = columns.findIndex((c) => c.id === columnId);
+      const colIndex = formulaColumns.findIndex((c) => c.id === columnId);
       if (colIndex < 0) return;
       setPendingCellRef({ colIndex, rowIndex });
     },
-    [pickMode, formulaColumn, columns],
+    [pickMode, formulaColumn, formulaColumns],
   );
 
   // Hierarchy merge computation: for each grid row, determine if it's the
@@ -321,48 +343,41 @@ export function MatrixV3Grid({
     }
   }, [matrixId, newNodeLabel, onChanged]);
 
-  const handleAddLevel2 = useCallback(async (parentId: string) => {
-    const label = window.prompt('二级细项名称：', '新细项');
-    if (!label?.trim()) return;
-    try {
-      const res = await fetch(`/api/v1/matrices/${matrixId}/hierarchy-nodes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ level: 2, parentId, nodeLabel: label.trim() }),
-      });
-      const json = await res.json();
-      if (json.code === 0) {
-        toast.success('二级细项已创建');
-        onChanged();
-      } else {
-        toast.error(json.message || '创建失败');
-      }
-    } catch {
-      toast.error('创建失败，请重试');
-    }
-  }, [matrixId, onChanged]);
+  const openChildNodeDialog = useCallback((parentId: string) => {
+    setNodeDialog({
+      level: 2,
+      parentId,
+      label: '新细项',
+    });
+  }, []);
 
-  const handleAddLevel3 = useCallback(async (parentId: string) => {
-    const parent = findHierarchyNode(projection.hierarchy, parentId);
-    const label = window.prompt('三级细项名称：', `新三级细项${(parent?.children.length ?? 0) + 1}`);
-    if (!label?.trim()) return;
+  const createChildNode = useCallback(async () => {
+    if (!nodeDialog?.label.trim()) return;
+    setNodeDialogSaving(true);
     try {
       const res = await fetch(`/api/v1/matrices/${matrixId}/hierarchy-nodes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ level: 3, parentId, nodeLabel: label.trim() }),
+        body: JSON.stringify({
+          level: nodeDialog.level,
+          parentId: nodeDialog.parentId,
+          nodeLabel: nodeDialog.label.trim(),
+        }),
       });
       const json = await res.json();
       if (json.code === 0) {
-        toast.success('三级细项已创建');
+        toast.success(nodeDialog.level === 2 ? '二级细项已创建' : '三级细项已创建');
+        setNodeDialog(null);
         onChanged();
       } else {
         toast.error(json.message || '创建失败');
       }
     } catch {
       toast.error('创建失败，请重试');
+    } finally {
+      setNodeDialogSaving(false);
     }
-  }, [matrixId, onChanged, projection.hierarchy]);
+  }, [matrixId, nodeDialog, onChanged]);
 
   const handleDeleteHierarchyNode = useCallback(async (nodeId: string) => {
     const remove = async (confirmArchive: boolean) => {
@@ -415,6 +430,29 @@ export function MatrixV3Grid({
     },
     [cellStyleEnabled],
   );
+
+  const persistColumnHeader = useCallback(async (column: V3Column, columnLabel: string) => {
+    try {
+      const response = await fetch(`/api/v1/matrix-columns/${column.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ columnLabel }),
+      });
+      const json = await response.json();
+      if (json.code !== 0) throw new Error(json.message || '保存失败');
+      onChanged();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '列名保存失败');
+      throw error;
+    }
+  }, [onChanged]);
+
+  const saveColumnHeader = useCallback((column: V3Column, value: string) => {
+    const columnLabel = value.trim();
+    setEditingHeaderId(null);
+    if (!columnLabel || columnLabel === column.columnLabel) return;
+    return registerMatrixSave(`column-header:${column.id}`, () => persistColumnHeader(column, columnLabel));
+  }, [persistColumnHeader]);
 
   const handleApplyStyle = useCallback(
     async (patch: {
@@ -529,12 +567,12 @@ export function MatrixV3Grid({
     [editingColumn, onChanged],
   );
 
-  const handleArchiveColumn = useCallback(async () => {
-    if (!editingColumn) return;
-    if (!window.confirm(`确定归档列「${editingColumn.columnLabel}」？`)) return;
+  const handleArchiveColumn = useCallback(async (column: V3Column | null = editingColumn) => {
+    if (!column) return;
+    if (!window.confirm(`确定删除列「${column.columnLabel}」？`)) return;
     setColumnSaving(true);
     try {
-      const res = await fetch(`/api/v1/matrix-columns/${editingColumn.id}`, {
+      const res = await fetch(`/api/v1/matrix-columns/${column.id}`, {
         method: 'DELETE',
       });
       const json = await res.json();
@@ -545,7 +583,7 @@ export function MatrixV3Grid({
       toast.success('列已归档');
       setColumnDialogOpen(false);
       setEditingColumn(null);
-      if (styleTarget?.type === 'column_header' && styleTarget.id === editingColumn.id) {
+      if (styleTarget?.type === 'column_header' && styleTarget.id === column.id) {
         setStyleTarget(null);
       }
       onChanged();
@@ -593,6 +631,7 @@ export function MatrixV3Grid({
         taskId={taskId}
         projection={projection}
         onChanged={onChanged}
+        attemptNavigation={attemptNavigation}
       />
 
       {/* Desktop grid */}
@@ -612,13 +651,17 @@ export function MatrixV3Grid({
                 const isHeaderSelected =
                   styleTarget?.type === 'column_header' && styleTarget.id === col.id;
                 const isPinnedHierarchy = col.columnZone === 'hierarchy';
+                const isFrozenHierarchyBoundary = col.id === frozenHierarchyBoundaryId;
                 return (
                 <th
                   key={col.id}
                   data-matrix-column-id={col.id}
+                  data-frozen-hierarchy-boundary={isFrozenHierarchyBoundary || undefined}
                   className={cn(
                     'border-b border-r px-2 py-1.5 text-left font-medium whitespace-nowrap',
                     isPinnedHierarchy && 'sticky z-30 bg-muted/95',
+                    isFrozenHierarchyBoundary &&
+                      'after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-border shadow-[4px_0_8px_-6px_rgb(15_23_42_/_0.35)]',
                     styleToClass(headerStyle),
                     cellStyleEnabled && 'cursor-pointer',
                     isHeaderSelected && 'ring-2 ring-inset ring-primary/50',
@@ -631,12 +674,45 @@ export function MatrixV3Grid({
                 >
                   <div className="flex items-center gap-1">
                     {zoneIcon(col.columnZone)}
-                    <span className="min-w-0 truncate">{col.columnLabel}</span>
+                    {editingHeaderId === col.id ? (
+                      <Input
+                        autoFocus
+                        defaultValue={col.columnLabel}
+                        aria-label={`编辑列名 ${col.columnLabel}`}
+                        className="h-7 min-w-0 text-xs"
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) => {
+                          const next = event.target.value.trim();
+                          if (next && next !== col.columnLabel) {
+                            markMatrixSaveDirty(`column-header:${col.id}`, () => persistColumnHeader(col, next));
+                          }
+                        }}
+                        onBlur={(event) => void saveColumnHeader(col, event.currentTarget.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') event.currentTarget.blur();
+                          if (event.key === 'Escape') {
+                            setEditingHeaderId(null);
+                            event.currentTarget.blur();
+                          }
+                        }}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="min-w-0 truncate text-left hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setEditingHeaderId(col.id);
+                        }}
+                      >
+                        {col.columnLabel}
+                      </button>
+                    )}
                     {col.unitText && <span className="text-muted-foreground text-xs">({col.unitText})</span>}
                     {col.columnZone === 'calculation_dimension' && formulaEnabled && (
                       <button
                         type="button"
-                        className="inline-flex items-center gap-0.5 text-[10px] font-mono text-primary hover:underline ml-0.5"
+                        className="inline-flex items-center gap-0.5 text-xs font-mono text-primary hover:underline ml-0.5"
                         title="编辑公式"
                         onClick={(e) => {
                           e.stopPropagation();
@@ -648,7 +724,7 @@ export function MatrixV3Grid({
                       </button>
                     )}
                     {col.columnZone === 'calculation_dimension' && !formulaEnabled && (
-                      <span className="text-[10px] font-mono text-muted-foreground">fx</span>
+                      <span className="text-xs font-mono text-muted-foreground">fx</span>
                     )}
                     {CONFIGURABLE_COLUMN_ZONES.has(col.columnZone) && (
                       <button
@@ -662,6 +738,18 @@ export function MatrixV3Grid({
                       >
                         <Settings2 className="h-3.5 w-3.5" />
                       </button>
+                    )}
+                    {allColumns.length > 1 && (
+                      <button
+                        type="button"
+                        className="ml-auto inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-sm leading-none text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                        title={`删除列 ${col.columnLabel}`}
+                        aria-label={`删除列 ${col.columnLabel}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleArchiveColumn(col);
+                        }}
+                      >−</button>
                     )}
                   </div>
                 </th>
@@ -684,12 +772,16 @@ export function MatrixV3Grid({
                     const isCellSelected =
                       styleTarget?.type === 'cell' && styleTarget.id === cellId;
                     const isPinnedHierarchy = col.columnZone === 'hierarchy';
+                    const isFrozenHierarchyBoundary = col.id === frozenHierarchyBoundaryId;
                     return (
                       <td
                         key={col.id}
+                        data-frozen-hierarchy-boundary={isFrozenHierarchyBoundary || undefined}
                         className={cn(
                           'border-b border-r px-1 py-0.5 align-top',
                           isPinnedHierarchy && 'sticky z-10 bg-background',
+                          isFrozenHierarchyBoundary &&
+                            'after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-border shadow-[4px_0_8px_-6px_rgb(15_23_42_/_0.35)]',
                           styleToClass(style),
                           pickMode && 'cursor-crosshair hover:bg-primary/10',
                           !pickMode && cellStyleEnabled && 'cursor-pointer',
@@ -729,8 +821,7 @@ export function MatrixV3Grid({
                           }
                           hierarchyContext={{ level1: grow.level1, level2: grow.level2, level3: grow.level3 }}
                           mergeInfo={merges}
-                          onAddLevel2={handleAddLevel2}
-                          onAddLevel3={handleAddLevel3}
+                          onAddLevel2={openChildNodeDialog}
                           onDeleteNode={handleDeleteHierarchyNode}
                           onChanged={onChanged}
                           formulaEnabled={formulaEnabled}
@@ -834,7 +925,7 @@ export function MatrixV3Grid({
           matrixId={matrixId}
           column={formulaColumn}
           formula={formulaByColumnId(formulaColumn.id) ?? null}
-          columns={columns}
+          columns={formulaColumns}
           rows={projection.rows}
           pendingCellRef={pendingCellRef}
           onPendingCellConsumed={() => setPendingCellRef(null)}
@@ -855,6 +946,41 @@ export function MatrixV3Grid({
         }
         onArchive={columnDialogMode === 'edit' ? () => void handleArchiveColumn() : undefined}
       />
+
+      <Dialog
+        open={nodeDialog !== null}
+        onOpenChange={(open) => {
+          if (!open && !nodeDialogSaving) setNodeDialog(null);
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>新增二级细项</DialogTitle>
+          </DialogHeader>
+          <Input
+            aria-label="细项名称"
+            value={nodeDialog?.label ?? ''}
+            onChange={(event) => {
+              setNodeDialog((current) => current ? { ...current, label: event.target.value } : current);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                void createChildNode();
+              }
+            }}
+            autoFocus
+            disabled={nodeDialogSaving}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNodeDialog(null)} disabled={nodeDialogSaving}>取消</Button>
+            <Button onClick={() => void createChildNode()} disabled={nodeDialogSaving || !nodeDialog?.label.trim()}>
+              {nodeDialogSaving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+              创建
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -874,7 +1000,6 @@ interface MatrixV3CellProps {
   hierarchyContext: { level1: V3HierarchyNode; level2: V3HierarchyNode | null; level3: V3HierarchyNode | null };
   mergeInfo?: MergeInfo;
   onAddLevel2?: (parentId: string) => void;
-  onAddLevel3?: (parentId: string) => void;
   onDeleteNode?: (nodeId: string) => void;
   onChanged: () => void;
   formulaEnabled?: boolean;
@@ -893,7 +1018,6 @@ function MatrixV3Cell({
   hierarchyContext,
   mergeInfo,
   onAddLevel2,
-  onAddLevel3,
   onDeleteNode,
   onChanged,
   formulaEnabled,
@@ -920,7 +1044,7 @@ function MatrixV3Cell({
             {onAddLevel2 && (
               <button
                 type="button"
-                className="text-[10px] text-muted-foreground hover:text-primary"
+                className="text-xs text-muted-foreground hover:text-primary"
                 onClick={(event) => {
                   event.stopPropagation();
                   onAddLevel2(hierarchyContext.level1.id);
@@ -964,18 +1088,6 @@ function MatrixV3Cell({
             }}
             inputClassName="h-7 text-xs"
           />
-          {onAddLevel3 && (
-            <button
-              type="button"
-              className="text-[10px] text-muted-foreground hover:text-primary"
-              onClick={(event) => {
-                event.stopPropagation();
-                onAddLevel3(hierarchyContext.level2!.id);
-              }}
-            >
-              + 三级细项
-            </button>
-          )}
           </div>
           {onDeleteNode && (
             <button
@@ -1032,7 +1144,9 @@ function MatrixV3Cell({
 
   // Calculation columns: show computed value; click opens formula editor (Wave 3).
   if (column.columnZone === 'calculation_dimension') {
-    const display = cell?.valueNumber ?? cell?.displayText ?? '';
+    const display = cell?.valueNumber != null
+      ? formatMatrixNumber(cell.valueNumber, column.decimalPlaces)
+      : cell?.displayText ?? '';
     if (cell?.valueState === 'calculation_pending') {
       return <span className="text-muted-foreground text-xs italic px-1">计算中…</span>;
     }
@@ -1076,12 +1190,6 @@ function MatrixV3Cell({
         leafRowId={leafRowId}
         column={column}
         media={media}
-        targetLabel={[
-          hierarchyContext.level1.nodeLabel,
-          hierarchyContext.level2?.nodeLabel,
-          hierarchyContext.level3?.nodeLabel,
-          column.columnLabel,
-        ].filter(Boolean).join(' / ')}
         onChanged={onChanged}
       />
     );
@@ -1148,24 +1256,33 @@ function InlineCellText({
   const [saving, setSaving] = useState(false);
   useEffect(() => setDraft(value), [value]);
 
-  const save = async () => {
+  const saveKey = `text:${leafRowId}:${columnId}`;
+  const persist = async (next: string) => {
+      setSaving(true);
+      try {
+        await putMatrixCellValue({ matrixId, leafRowId, columnId, valueText: next });
+        onChanged();
+      } catch (error) {
+        toast.error('保存失败');
+        throw error;
+      } finally {
+        setSaving(false);
+      }
+  };
+  const save = () => {
     if (draft === value) return;
-    setSaving(true);
-    try {
-      await putMatrixCellValue({ matrixId, leafRowId, columnId, valueText: draft });
-      onChanged();
-    } catch {
-      toast.error('保存失败');
-    } finally {
-      setSaving(false);
-    }
+    return registerMatrixSave(saveKey, () => persist(draft));
   };
 
   return (
     <div className="flex items-center gap-1">
       <Input
         value={draft}
-        onChange={(event) => setDraft(event.target.value)}
+        onChange={(event) => {
+          const next = event.target.value;
+          setDraft(next);
+          markMatrixSaveDirty(saveKey, () => persist(next));
+        }}
         onBlur={() => void save()}
         onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.nativeEvent.isComposing) event.currentTarget.blur();
@@ -1199,28 +1316,33 @@ function InlineCellNumber({
   const [saving, setSaving] = useState(false);
   useEffect(() => setDraft(value), [value]);
 
-  const save = async () => {
-    if (draft === value) return;
-    setSaving(true);
-    try {
-      const num = draft.trim() === '' ? null : Number(draft);
-      if (cellId && draft.trim() !== '' && !Number.isNaN(num)) {
-        await patchInlineValue('dynamic_matrix_cell_value', cellId, 'value', draft);
-      } else {
-        await putMatrixCellValue({
-          matrixId,
-          leafRowId,
-          columnId,
-          valueNumber: draft.trim() === '' || Number.isNaN(num as number) ? null : num,
-          valueText: draft.trim() === '' ? '' : undefined,
-        });
+  const saveKey = `number:${leafRowId}:${columnId}`;
+  const persist = async (next: string) => {
+      setSaving(true);
+      try {
+        const num = next.trim() === '' ? null : Number(next);
+        if (cellId && next.trim() !== '' && !Number.isNaN(num)) {
+          await patchInlineValue('dynamic_matrix_cell_value', cellId, 'value', next);
+        } else {
+          await putMatrixCellValue({
+            matrixId,
+            leafRowId,
+            columnId,
+            valueNumber: next.trim() === '' || Number.isNaN(num as number) ? null : num,
+            valueText: next.trim() === '' ? '' : undefined,
+          });
+        }
+        onChanged();
+      } catch (error) {
+        toast.error('保存失败');
+        throw error;
+      } finally {
+        setSaving(false);
       }
-      onChanged();
-    } catch {
-      toast.error('保存失败');
-    } finally {
-      setSaving(false);
-    }
+  };
+  const save = () => {
+    if (draft === value) return;
+    return registerMatrixSave(saveKey, () => persist(draft));
   };
 
   return (
@@ -1229,7 +1351,11 @@ function InlineCellNumber({
         type="text"
         inputMode="decimal"
         value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(event) => {
+          const next = event.target.value;
+          setDraft(next);
+          markMatrixSaveDirty(saveKey, () => persist(next));
+        }}
         onBlur={() => void save()}
         onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.nativeEvent.isComposing) event.currentTarget.blur();
@@ -1256,60 +1382,53 @@ function MatrixV3IssueCell({
   issuePoint: V3IssuePoint | null;
   onChanged: () => void;
 }) {
-  const [converting, setConverting] = useState(false);
   const [draft, setDraft] = useState(issuePoint?.issueText ?? '');
   const [saving, setSaving] = useState(false);
   useEffect(() => setDraft(issuePoint?.issueText ?? ''), [issuePoint?.issueText]);
 
-  const saveText = async () => {
-    if (draft === (issuePoint?.issueText ?? '')) return;
-    setSaving(true);
-    try {
-      if (issuePoint?.id) {
-        await patchInlineValue('matrix_issue_point', issuePoint.id, 'issue_text', draft);
-      } else if (draft.trim()) {
-        const res = await fetch(`/api/v1/matrices/${matrixId}/issue-points`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ leafRowId, columnId, issueText: draft }),
-        });
-        const json = await res.json();
-        if (json.code !== 0) throw new Error(json.message || '保存问题点失败');
+  const saveKey = `issue:${leafRowId}:${columnId}`;
+  const persist = async (next: string) => {
+      setSaving(true);
+      try {
+        if (issuePoint?.id) {
+          const res = await fetch(`/api/v1/matrices/${matrixId}/issue-points/${issuePoint.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ issueText: next }),
+          });
+          const json = await res.json();
+          if (json.code !== 0) throw new Error(json.message || '保存问题点失败');
+        } else if (next.trim()) {
+          const res = await fetch(`/api/v1/matrices/${matrixId}/issue-points`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ leafRowId, columnId, issueText: next }),
+          });
+          const json = await res.json();
+          if (json.code !== 0) throw new Error(json.message || '保存问题点失败');
+        }
+        onChanged();
+      } catch (error) {
+        toast.error('保存问题点失败');
+        throw error;
+      } finally {
+        setSaving(false);
       }
-      onChanged();
-    } catch {
-      toast.error('保存问题点失败');
-    } finally {
-      setSaving(false);
-    }
   };
-
-  const convertToIssue = async () => {
-    if (!issuePoint?.id || issuePoint.linkedIssueId) return;
-    setConverting(true);
-    try {
-      const res = await fetch(`/api/v1/matrices/${matrixId}/issue-points/${issuePoint.id}/convert`, {
-        method: 'POST',
-      });
-      const json = await res.json();
-      if (json.code !== 0) {
-        toast.error(json.message || '转问题失败');
-        return;
-      }
-      toast.success('已转为问题管理条目');
-      onChanged();
-    } catch {
-      toast.error('转问题失败');
-    } finally {
-      setConverting(false);
-    }
+  const saveText = () => {
+    if (draft === (issuePoint?.issueText ?? '')) return;
+    return registerMatrixSave(saveKey, () => persist(draft));
   };
 
   return (
     <div className="px-1 py-0.5 min-h-[28px] space-y-1">
       <Input
         value={draft}
-        onChange={(event) => setDraft(event.target.value)}
+        onChange={(event) => {
+          const next = event.target.value;
+          setDraft(next);
+          markMatrixSaveDirty(saveKey, () => persist(next));
+        }}
         placeholder="问题点…"
         onBlur={() => void saveText()}
         onKeyDown={(event) => {
@@ -1319,22 +1438,6 @@ function MatrixV3IssueCell({
         aria-label="矩阵问题点"
       />
       {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
-      {issuePoint?.id && !issuePoint.linkedIssueId && (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="h-6 text-[10px] px-1.5"
-          disabled={converting || !issuePoint.issueText?.trim()}
-          onClick={() => void convertToIssue()}
-        >
-          {converting ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-          转问题
-        </Button>
-      )}
-      {issuePoint?.linkedIssueId && (
-        <Badge variant="secondary" className="text-[10px]">已转问题</Badge>
-      )}
     </div>
   );
 }
@@ -1366,29 +1469,34 @@ function NarrativeEditor({
   const [saving, setSaving] = useState(false);
   useEffect(() => setContent(block?.content ?? ''), [block]);
 
-  const save = async () => {
-    if (content === (block?.content ?? '')) return;
-    setSaving(true);
-    try {
-      if (block) {
-        // Update existing block content.
-        await patchInlineValue('dynamic_matrix_narrative_block', block.id, 'content', content);
-      } else {
-        // Create new block.
-        const res = await fetch(`/api/v1/matrices/${matrixId}/narrative-blocks`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ blockType, scope: 'matrix', content, showInReport: content.trim() !== '' }),
-        });
-        const json = await res.json();
-        if (json.code !== 0) throw new Error(json.message);
+  const saveKey = `narrative:${block?.id ?? blockType}`;
+  const persist = async (next: string) => {
+      setSaving(true);
+      try {
+        if (block) {
+          // Update existing block content.
+          await patchInlineValue('dynamic_matrix_narrative_block', block.id, 'content', next);
+        } else {
+          // Create new block.
+          const res = await fetch(`/api/v1/matrices/${matrixId}/narrative-blocks`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ blockType, scope: 'matrix', content: next, showInReport: next.trim() !== '' }),
+          });
+          const json = await res.json();
+          if (json.code !== 0) throw new Error(json.message);
+        }
+        onChanged();
+      } catch (error) {
+        toast.error('保存失败');
+        throw error;
+      } finally {
+        setSaving(false);
       }
-      onChanged();
-    } catch {
-      toast.error('保存失败');
-    } finally {
-      setSaving(false);
-    }
+  };
+  const save = () => {
+    if (content === (block?.content ?? '')) return;
+    return registerMatrixSave(saveKey, () => persist(content));
   };
 
   return (
@@ -1400,7 +1508,11 @@ function NarrativeEditor({
         <div className="relative">
           <Textarea
             value={content}
-            onChange={(e) => setContent(e.target.value)}
+            onChange={(event) => {
+              const next = event.target.value;
+              setContent(next);
+              markMatrixSaveDirty(saveKey, () => persist(next));
+            }}
             onBlur={save}
             placeholder={placeholder}
             rows={blockType === 'summary' ? 3 : 2}
@@ -1489,6 +1601,7 @@ function getRowSpanForColumn(
   // A column at hierarchy zone representing level_1:
   if (col.zoneRole === 'A') return merges.isLevel1Start ? merges.level1RowSpan : 0;
   if (col.zoneRole === 'B') return merges.isLevel2Start ? merges.level2RowSpan : 0;
+  if (col.zoneRole === 'C' && !grow.level3) return undefined;
   if (col.zoneRole === 'C') return merges.isLevel3Start ? merges.level3RowSpan : 0;
   void grow;
   return undefined;

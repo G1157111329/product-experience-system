@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect, type ReactNode } from 'react';
+import { useState, useMemo, useEffect, useRef, type ReactNode } from 'react';
 import { ChefHat, ClipboardList, GripVertical, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,8 @@ import { RecipeIngredientSummary } from './recipe-ingredient-summary';
 
 type FunctionsInputWorkspaceProps = {
   recipes: Recipe[];
+  focusedRecipeId?: string;
+  focusedRecipeStepId?: string;
   loading?: boolean;
   onCreateRecipe: () => void;
   onEditRecipe: (recipe: Recipe) => void;
@@ -26,11 +28,14 @@ type FunctionsInputWorkspaceProps = {
   onBindingTargetChange: (target: EvidenceBindingTarget | null) => void;
   onRefresh?: () => void;
   onSaveIngredients: (recipe: Recipe, items: IngredientItem[]) => Promise<void>;
+  attemptNavigation: (next: () => void) => Promise<void>;
   renderEffectEditor?: (recipe: Recipe) => ReactNode;
 };
 
 export function FunctionsInputWorkspace({
   recipes,
+  focusedRecipeId,
+  focusedRecipeStepId,
   loading = false,
   onCreateRecipe,
   onEditRecipe,
@@ -43,13 +48,24 @@ export function FunctionsInputWorkspace({
   onBindingTargetChange,
   onRefresh,
   onSaveIngredients,
+  attemptNavigation,
   renderEffectEditor,
 }: FunctionsInputWorkspaceProps) {
   const [selectedRecipeId, setSelectedRecipeId] = useState('');
+  const lastFocusKey = useRef('');
   const selectedRecipe = useMemo(
     () => recipes.find((recipe) => recipe.id === selectedRecipeId) || recipes[0] || null,
     [recipes, selectedRecipeId]
   );
+  const selectedRecipeStats = useMemo(
+    () => selectedRecipe ? getRecipeStatistics(selectedRecipe) : { stepCount: 0, problemCount: 0 },
+    [selectedRecipe],
+  );
+  const selectedIngredientCount = useMemo(() => {
+    if (!selectedRecipe) return 0;
+    if (selectedRecipe.ingredient_items?.length) return selectedRecipe.ingredient_items.length;
+    return (selectedRecipe.ingredients || '').split(/\r?\n/).filter((item) => item.trim()).length;
+  }, [selectedRecipe]);
 
   // Drag state for recipe reorder
   const [dragRecipeIdx, setDragRecipeIdx] = useState<number | null>(null);
@@ -73,9 +89,38 @@ export function FunctionsInputWorkspace({
     }
   }, [onBindingTargetChange, recipes, selectedRecipeId]);
 
+  useEffect(() => {
+    const focusKey = `${focusedRecipeId || ''}:${focusedRecipeStepId || ''}`;
+    if (focusKey === ':') {
+      lastFocusKey.current = '';
+      return;
+    }
+    if (lastFocusKey.current === focusKey) return;
+    const targetRecipe = recipes.find((recipe) => recipe.id === focusedRecipeId)
+      || recipes.find((recipe) => recipe.recipe_steps?.some((step) => step.id === focusedRecipeStepId));
+    if (!targetRecipe) return;
+    lastFocusKey.current = focusKey;
+    let frame: number | null = null;
+    void attemptNavigation(() => {
+      setSelectedRecipeId(targetRecipe.id);
+      if (focusedRecipeStepId) {
+        onBindingTargetChange({ type: 'recipe_step', id: focusedRecipeStepId, label: '来源步骤' });
+      } else {
+        onBindingTargetChange({ type: 'recipe_effect', id: targetRecipe.id, label: '来源食谱/功能' });
+      }
+      frame = window.requestAnimationFrame(() => {
+        const targetId = focusedRecipeStepId ? `recipe-step-${focusedRecipeStepId}` : `recipe-${targetRecipe.id}`;
+        document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    });
+    return () => { if (frame !== null) window.cancelAnimationFrame(frame); };
+  }, [attemptNavigation, focusedRecipeId, focusedRecipeStepId, onBindingTargetChange, recipes]);
+
   const selectRecipe = (recipe: Recipe) => {
-    setSelectedRecipeId(recipe.id);
-    onBindingTargetChange({ type: 'recipe_effect', id: recipe.id, label: '当前效果评价' });
+    void attemptNavigation(() => {
+      setSelectedRecipeId(recipe.id);
+      onBindingTargetChange({ type: 'recipe_effect', id: recipe.id, label: '当前效果评价' });
+    });
   };
 
   const bindDroppedMaterial = async (
@@ -92,9 +137,7 @@ export function FunctionsInputWorkspace({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         id: materialId,
-        record_id: null,
-        recipe_step_id: target.recipe_step_id ?? null,
-        recipe_id: target.recipe_id ?? null,
+        ...(target.recipe_step_id ? { recipe_step_id: target.recipe_step_id } : { recipe_id: target.recipe_id }),
       }),
     });
     const data = await response.json().catch(() => ({}));
@@ -124,7 +167,7 @@ export function FunctionsInputWorkspace({
       <div className="rounded-lg border bg-card p-3 shadow-sm">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-sm font-semibold">功能/食谱</h2>
+            <h2 className="text-sm font-semibold">食谱/功能</h2>
             <p className="mt-1 text-xs text-muted-foreground">{recipes.length} 个功能项</p>
           </div>
           <Button size="sm" onClick={onCreateRecipe}>
@@ -133,7 +176,7 @@ export function FunctionsInputWorkspace({
         </div>
 
         <div className="mt-2 mb-1">
-          <span className="text-[10px] text-muted-foreground">拖拽食谱可重新排序</span>
+          <span className="text-xs text-muted-foreground">拖拽食谱可重新排序</span>
         </div>
 
         <div className="mt-1 space-y-2">
@@ -143,18 +186,30 @@ export function FunctionsInputWorkspace({
             ))
           ) : recipes.length === 0 ? (
             <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
-              暂无功能/食谱
+              暂无食谱/功能
             </div>
           ) : recipes.map((recipe, recipeIdx) => (
             <div
+              id={`recipe-${recipe.id}`}
               key={recipe.id}
+              role="button"
+              tabIndex={0}
+              aria-label={`打开食谱/功能 ${recipe.name}`}
               className={cn(
                 'w-full rounded-md border p-3 text-left transition-all group focus-within:ring-2 focus-within:ring-ring/30',
                 selectedRecipe?.id === recipe.id ? 'border-primary bg-primary/5' : 'bg-background hover:bg-muted/50',
                 dragRecipeIdx === recipeIdx && 'opacity-50 scale-95',
                 dragRecipeOverIdx === recipeIdx && 'border-primary border-2',
+                focusedRecipeId === recipe.id && 'ring-2 ring-primary ring-offset-2',
               )}
               onClick={() => selectRecipe(recipe)}
+              onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) return;
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  selectRecipe(recipe);
+                }
+              }}
               onDragOver={(e) => { e.preventDefault(); setDragRecipeOverIdx(recipeIdx); }}
               onDragLeave={() => setDragRecipeOverIdx(null)}
             >
@@ -164,7 +219,7 @@ export function FunctionsInputWorkspace({
                   role="button"
                   tabIndex={0}
                   aria-label={`拖拽排序 ${recipe.name}`}
-                  className="mt-0.5 flex h-8 w-8 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground/40 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
+                  className="mt-0.5 flex min-h-11 min-w-11 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground/40 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
                   draggable
                   onDragStart={() => setDragRecipeIdx(recipeIdx)}
                   onDragEnd={() => {
@@ -193,8 +248,8 @@ export function FunctionsInputWorkspace({
                     />
                   )}
                   <div className="mt-1 grid grid-cols-2 gap-1">
-                    <Badge variant="outline" className="justify-center text-[10px]">{getRecipeStatistics(recipe).stepCount} 步</Badge>
-                    <Badge variant={recipe.effect_description ? 'secondary' : 'outline'} className="text-[10px]">
+                    <Badge variant="outline" className="justify-center text-xs">{getRecipeStatistics(recipe).stepCount} 步</Badge>
+                    <Badge variant={recipe.effect_description ? 'secondary' : 'outline'} className="text-xs">
                       {recipe.effect_description ? '有效果评价' : '缺效果评价'}
                     </Badge>
                   </div>
@@ -202,11 +257,11 @@ export function FunctionsInputWorkspace({
 
                 {/* Edit & Delete buttons */}
                 <div className="flex shrink-0 items-center gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
-                  <Button variant="ghost" size="icon" className="h-8 w-8"
+                  <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label={`编辑 ${recipe.name}`}
                     onClick={(e) => { e.stopPropagation(); onEditRecipe(recipe); }}>
                     <Pencil className="h-3 w-3 text-muted-foreground" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8"
+                  <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label={`删除 ${recipe.name}`}
                     onClick={(e) => { e.stopPropagation(); onDeleteRecipe(recipe); }}>
                     <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
                   </Button>
@@ -225,6 +280,13 @@ export function FunctionsInputWorkspace({
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h3 className="truncate text-base font-semibold">{selectedRecipe.name}</h3>
+                  <div className="mt-2 flex flex-wrap gap-1.5" aria-label="当前食谱摘要">
+                    <Badge variant="outline">食材 {selectedIngredientCount}</Badge>
+                    <Badge variant="outline">步骤 {selectedRecipeStats.stepCount}</Badge>
+                    <Badge variant={selectedRecipeStats.problemCount > 0 ? 'destructive' : 'outline'}>
+                      问题 {selectedRecipeStats.problemCount}
+                    </Badge>
+                  </div>
                 </div>
                 <Button variant="outline" size="sm" onClick={() => onEditRecipe(selectedRecipe)}>
                   <Pencil className="mr-1.5 h-3.5 w-3.5" />编辑
@@ -240,16 +302,18 @@ export function FunctionsInputWorkspace({
                 </Button>
               </div>
               <div className="mb-2">
-                <span className="text-[10px] text-muted-foreground">拖拽步骤可重新排序</span>
+                <span className="text-xs text-muted-foreground">拖拽步骤可重新排序</span>
               </div>
               <div className="max-h-[30rem] space-y-2 overflow-y-auto pr-1">
                 {(selectedRecipe.recipe_steps || []).map((step, stepIdx) => (
                   <div
+                    id={`recipe-step-${step.id}`}
                     key={step.id}
                     className={cn(
                       'w-full rounded-md border bg-background p-3 text-left transition-all group/step',
                       dragStepIdx === stepIdx && 'opacity-50 scale-95',
                       dragStepOverIdx === stepIdx && 'border-primary border-2',
+                      focusedRecipeStepId === step.id && 'ring-2 ring-primary ring-offset-2',
                     )}
                     onDragOver={(e) => { e.preventDefault(); setDragStepOverIdx(stepIdx); }}
                     onDragLeave={() => setDragStepOverIdx(null)}
@@ -261,7 +325,7 @@ export function FunctionsInputWorkspace({
                         role="button"
                         tabIndex={0}
                         aria-label={`拖拽排序步骤 ${step.step_number}`}
-                        className="flex h-8 w-8 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground/40 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
+                        className="flex min-h-11 min-w-11 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground/40 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
                         draggable
                         onDragStart={() => setDragStepIdx(stepIdx)}
                         onDragEnd={() => handleStepDragEnd(selectedRecipe)}
@@ -279,14 +343,14 @@ export function FunctionsInputWorkspace({
                       >
                         <div className="text-sm cursor-pointer">{step.operation || '暂无操作说明'}</div>
                         <div className="mt-1 flex flex-wrap gap-1">
-                          <Badge variant="outline" className="text-[10px]">{step.materials?.length || 0} 个素材</Badge>
+                          <Badge variant="outline" className="text-xs">{step.materials?.length || 0} 个素材</Badge>
                         </div>
                       </button>
                       <div className="flex shrink-0 items-center gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover/step:opacity-100">
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onEditStep(step, selectedRecipe)}>
+                        <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label={`编辑步骤 ${step.step_number}`} onClick={() => onEditStep(step, selectedRecipe)}>
                           <Pencil className="h-3 w-3 text-muted-foreground" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onDeleteStep(step, selectedRecipe)}>
+                        <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label={`删除步骤 ${step.step_number}`} onClick={() => onDeleteStep(step, selectedRecipe)}>
                           <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
                         </Button>
                       </div>
@@ -301,7 +365,7 @@ export function FunctionsInputWorkspace({
         ) : (
           <div className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-lg border border-dashed text-sm text-muted-foreground">
             <div className="flex items-center">
-              <ClipboardList className="mr-2 h-4 w-4" />{loading ? '正在加载功能/食谱...' : '选择或新增一个功能'}
+              <ClipboardList className="mr-2 h-4 w-4" />{loading ? '正在加载食谱/功能...' : '选择或新增一个功能'}
             </div>
             {onRefresh && (
               <Button variant="outline" size="sm" onClick={onRefresh} disabled={loading}>

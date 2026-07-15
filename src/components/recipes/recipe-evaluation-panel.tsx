@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { evaluationStatusLabel, normalizeEvaluationStatus, type EvaluationStatus } from '@/lib/evaluation-status';
 import { materialSignature, shouldReportSaveError, shouldSyncExternalMaterials } from '@/lib/recipe-evaluation-state';
+import { flushInlineSave, markInlineSaveDirty } from '@/lib/inline-save-registry';
 
 type RecipeEvaluation = {
   id: string;
@@ -43,6 +44,7 @@ export function RecipeEvaluationPanel({
   const valuesRef = useRef({ status, description, materialIds, materials });
   valuesRef.current = { status, description, materialIds, materials };
   const saveChain = useRef(Promise.resolve());
+  const recipeSaveFailureKeyRef = useRef(Symbol('recipe-evaluation-save'));
   const saveGeneration = useRef(0);
   const materialSaveInFlight = useRef(0);
   const localMaterialsDirty = useRef(false);
@@ -108,13 +110,16 @@ export function RecipeEvaluationPanel({
   const queueSave = useCallback((
     overrides: Partial<{ status: EvaluationStatus; description: string; materialIds: string[]; materials: Material[] }> = {},
     options: { silent?: boolean } = {},
+    flush = true,
   ) => {
-    const targetRecipeId = recipe.id;
-    const generation = ++saveGeneration.current;
-    const lifecycle = disposedGeneration.current;
-    const snapshot = { ...valuesRef.current, ...overrides };
-    setSaveState('saving');
-    const operation = saveChain.current.catch(() => undefined).then(async () => {
+    valuesRef.current = { ...valuesRef.current, ...overrides };
+    markInlineSaveDirty(recipeSaveFailureKeyRef.current, () => {
+      const targetRecipeId = recipe.id;
+      const generation = ++saveGeneration.current;
+      const lifecycle = disposedGeneration.current;
+      const snapshot = { ...valuesRef.current };
+      setSaveState('saving');
+      const operation = saveChain.current.catch(() => undefined).then(async () => {
       if (recipeIdentity.current !== targetRecipeId
         || disposedGeneration.current !== lifecycle
         || generation !== saveGeneration.current) return;
@@ -156,16 +161,18 @@ export function RecipeEvaluationPanel({
         effect_materials: snapshot.materials,
       });
       await loadIssue();
+      });
+      saveChain.current = operation.catch((error) => {
+        if (recipeIdentity.current === targetRecipeId
+          && disposedGeneration.current === lifecycle
+          && generation === saveGeneration.current
+          && shouldReportSaveError(Boolean(options.silent))) {
+          toast.error(error instanceof Error ? error.message : '效果评价保存失败');
+        }
+      });
+      return operation;
     });
-    saveChain.current = operation.catch((error) => {
-      if (recipeIdentity.current === targetRecipeId
-        && disposedGeneration.current === lifecycle
-        && generation === saveGeneration.current
-        && shouldReportSaveError(Boolean(options.silent))) {
-        toast.error(error instanceof Error ? error.message : '效果评价保存失败');
-      }
-    });
-    return operation;
+    return flush ? flushInlineSave(recipeSaveFailureKeyRef.current) : Promise.resolve();
   }, [loadIssue, onRecipeUpdated, recipe.id]);
 
   const chooseStatus = (next: EvaluationStatus) => {
@@ -209,7 +216,7 @@ export function RecipeEvaluationPanel({
     <section className="space-y-3 rounded-lg border bg-card p-3 shadow-sm" aria-label="效果或出品评价">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-sm font-semibold">效果/出品评价</span>
-        <span className={cn('text-[11px]', saveState === 'error' ? 'text-destructive' : 'text-muted-foreground')} aria-live="polite">
+        <span className={cn('text-xs', saveState === 'error' ? 'text-destructive' : 'text-muted-foreground')} aria-live="polite">
           {saveState === 'saving' && '保存中'}
           {saveState === 'saved' && <span className="inline-flex items-center gap-1"><Check className="h-3 w-3" />已保存</span>}
           {saveState === 'error' && '保存失败'}
@@ -247,6 +254,7 @@ export function RecipeEvaluationPanel({
               setDescription(event.target.value);
               valuesRef.current = { ...valuesRef.current, description: event.target.value };
               setSaveState('idle');
+              void queueSave({ description: event.target.value }, {}, false);
             }}
             onBlur={() => void queueSave()}
           />
