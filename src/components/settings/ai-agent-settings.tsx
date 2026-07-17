@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Sparkles, Save, Power, Pencil, Trash2, RefreshCw } from 'lucide-react';
+import { Sparkles, Save, Power, Pencil, Trash2, RefreshCw, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -95,6 +95,7 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
   const [saving, setSaving] = useState(false);
   const [initializingSkills, setInitializingSkills] = useState(false);
   const [skillsError, setSkillsError] = useState<string | null>(null);
+  const [initialAdminSecurityReminder, setInitialAdminSecurityReminder] = useState(false);
   const displaySkills = skills.length > 0 ? skills : builtinSkillTemplates;
 
   const fetchData = useCallback(async () => {
@@ -109,6 +110,16 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
       }
     } catch {
       setModels([]);
+    }
+
+    try {
+      const reminderRes = await fetch('/api/admin/security-reminders');
+      const reminderData = await reminderRes.json();
+      setInitialAdminSecurityReminder(
+        reminderData.code === 0 && reminderData.data?.initial_admin_bootstrap_cleanup_required === true,
+      );
+    } catch {
+      setInitialAdminSecurityReminder(false);
     }
 
     try {
@@ -296,6 +307,13 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
           <DialogDescription>管理模型接入、Prompt 模板版本、启停与审计能力</DialogDescription>
         </DialogHeader>
 
+        {initialAdminSecurityReminder && (
+          <div role="alert" className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>检测到初始管理员环境变量仍在使用。已有管理员账号后，请在部署环境中移除 INITIAL_ADMIN_ACCOUNT 和 INITIAL_ADMIN_PASSWORD。</span>
+          </div>
+        )}
+
         <ScrollArea className="max-h-[72vh] pr-3">
           <div className="flex min-w-0 flex-col gap-5 xl:flex-row">
             <section className="min-w-0 space-y-3 xl:w-[360px] xl:shrink-0">
@@ -387,12 +405,12 @@ export function AiAgentSettings({ open, onOpenChange }: { open: boolean; onOpenC
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-medium text-sm">{skill.name}</span>
-                          <Badge variant="outline" className="text-[10px]">v{skill.active_version?.version || '-'}</Badge>
-                          {skill.is_builtin_draft && <Badge variant="secondary" className="text-[10px]">内置草稿</Badge>}
-                          <Badge variant={skill.is_enabled ? 'default' : 'secondary'} className="text-[10px]">{skill.is_enabled ? '启用' : '停用'}</Badge>
+                          <Badge variant="outline" className="text-xs">v{skill.active_version?.version || '-'}</Badge>
+                          {skill.is_builtin_draft && <Badge variant="secondary" className="text-xs">内置草稿</Badge>}
+                          <Badge variant={skill.is_enabled ? 'default' : 'secondary'} className="text-xs">{skill.is_enabled ? '启用' : '停用'}</Badge>
                         </div>
                         <p className="mt-1 text-xs text-muted-foreground">{skill.description}</p>
-                        <p className="mt-1 text-[11px] text-muted-foreground">
+                        <p className="mt-1 text-xs text-muted-foreground">
                           作用模块：{skillModuleLabels[skill.skill_key] || skill.skill_key}
                         </p>
                       </div>

@@ -43,7 +43,7 @@ async function run() {
   });
   assert.deepEqual(classifyRecipeEvaluationSaveError(new Error('recipe not found')), { status: 404, message: '食谱不存在', log: false });
   assert.deepEqual(classifyRecipeEvaluationSaveError(new Error('invalid evaluation status')), { status: 400, message: '评价状态格式错误', log: false });
-  assert.deepEqual(classifyRecipeEvaluationSaveError(new Error('invalid or occupied recipe material')), { status: 409, message: '所选素材不可用于当前食谱，请刷新后重试', log: false });
+  assert.deepEqual(classifyRecipeEvaluationSaveError(new Error('invalid recipe material')), { status: 400, message: '所选素材不属于当前任务', log: false });
   assert.deepEqual(classifyRecipeEvaluationSaveError(new Error('secret database detail')), { status: 500, message: '效果评价保存失败', log: true });
   console.log('recipe evaluation atomic save tests passed');
 }

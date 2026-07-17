@@ -115,10 +115,10 @@ export function MatrixSummarySuggestionsDialog({
               items.map((s) => (
                 <div key={s.id} className="rounded-md border p-3 space-y-2">
                   <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="text-[10px]">
+                    <Badge variant="outline" className="text-xs">
                       {s.scopeNodeId ? '一级大类小结' : '矩阵小结'}
                     </Badge>
-                    <Badge variant="secondary" className="text-[10px] font-mono">
+                    <Badge variant="secondary" className="text-xs font-mono">
                       {s.blockType}
                     </Badge>
                   </div>

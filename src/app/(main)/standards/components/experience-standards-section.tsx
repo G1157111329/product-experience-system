@@ -9,6 +9,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import {
   FilterBar,
   SearchField,
@@ -48,6 +49,7 @@ function ExperienceStandardsSection({ categories, isAdmin, onSelectedCountChange
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const [keyword, setKeyword] = useState('');
+  const debouncedKeyword = useDebouncedValue(keyword, 300);
   const [filterCategory, setFilterCategory] = useState<string>('');
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -64,14 +66,14 @@ function ExperienceStandardsSection({ categories, isAdmin, onSelectedCountChange
     onSelectedCountChange?.(selectedIds.size);
   }, [selectedIds.size, onSelectedCountChange]);
 
-  const fetchStandards = useCallback(async () => {
+  const fetchStandards = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setErrorMessage('');
     try {
       const params = new URLSearchParams();
-      if (keyword.trim()) params.set('keyword', keyword.trim());
+      if (debouncedKeyword.trim()) params.set('keyword', debouncedKeyword.trim());
       if (filterCategory && filterCategory !== 'all') params.set('category', filterCategory);
-      const res = await fetch(`/api/standards?${params}`, { cache: 'no-store' });
+      const res = await fetch(`/api/standards?${params}`, { cache: 'no-store', signal: signal });
       const text = await res.text();
       const data = text ? JSON.parse(text) : null;
       if (!res.ok || data?.code !== 0) {
@@ -80,14 +82,18 @@ function ExperienceStandardsSection({ categories, isAdmin, onSelectedCountChange
       setStandards(data.data || []);
       setSelectedIds(new Set());
     } catch (error) {
-      setStandards([]);
+      if (error instanceof DOMException && error.name === 'AbortError') return;
       setErrorMessage(error instanceof Error ? error.message : '标准列表加载失败');
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
-  }, [keyword, filterCategory]);
+  }, [debouncedKeyword, filterCategory]);
 
-  useEffect(() => { fetchStandards(); }, [fetchStandards]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchStandards(controller.signal);
+    return () => controller.abort();
+  }, [fetchStandards]);
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -109,9 +115,18 @@ function ExperienceStandardsSection({ categories, isAdmin, onSelectedCountChange
         </Select>
       </FilterBar>
 
-      {loading ? (
+      {errorMessage && standards.length > 0 && (
+        <div role="status" className="flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          <span className="min-w-0 break-words">刷新失败，当前仍显示上一次结果：{errorMessage}</span>
+          <Button variant="outline" size="sm" className="shrink-0" onClick={() => void fetchStandards()}>
+            重试
+          </Button>
+        </div>
+      )}
+
+      {loading && standards.length === 0 ? (
         <SkeletonList rows={3} />
-      ) : errorMessage ? (
+      ) : errorMessage && standards.length === 0 ? (
         <div className="flex items-start justify-between gap-3 rounded-lg border border-destructive/20 bg-destructive/5 p-3">
           <div className="flex min-w-0 items-start gap-2">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
@@ -120,7 +135,7 @@ function ExperienceStandardsSection({ categories, isAdmin, onSelectedCountChange
               <p className="mt-1 break-words text-xs text-muted-foreground">{errorMessage}</p>
             </div>
           </div>
-          <Button variant="outline" size="sm" className={cn(pageActionButtonClass, 'shrink-0')} onClick={fetchStandards}>
+          <Button variant="outline" size="sm" className={cn(pageActionButtonClass, 'shrink-0')} onClick={() => void fetchStandards()}>
             重新加载
           </Button>
         </div>
@@ -150,7 +165,7 @@ function ExperienceStandardsSection({ categories, isAdmin, onSelectedCountChange
                           {std.product_category ? `${std.product_category}${std.product ? ` - ${std.product}` : ''}` : '平台通用标准'}
                         </div>
                         <div className={pageListMetaClass}>
-                          <StatusBadge kind="generic" value={`${std.standard_items?.[0]?.count || 0} 项检查项`} className="text-[10px]" />
+                          <StatusBadge kind="generic" value={`${std.standard_items?.[0]?.count || 0} 项检查项`} className="text-xs" />
                         </div>
                       </div>
                     </div>

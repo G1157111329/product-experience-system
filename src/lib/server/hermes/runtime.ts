@@ -17,6 +17,10 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { resolveAIConfig, invokeConfiguredAI, type MessageContent } from '@/lib/server/ai';
 import { agentRuns } from '@/storage/database/shared/schema';
 
+// Reasoning-capable providers may spend a substantial part of the completion
+// budget before emitting the user-visible JSON action plan.
+export const HERMES_RUN_MAX_TOKENS = 6400;
+
 export type HermesTrigger = 'manual' | 'matrix_summary' | 'report_draft' | 'wecom_ingest';
 
 export interface HermesRunInput {
@@ -128,7 +132,7 @@ export async function executeHermesRun(input: HermesRunInput): Promise<HermesRun
   try {
     modelConfig = await resolveAIConfig(client, {
       defaultTemperature: 0.4,
-      maxTokens: 2400,
+      maxTokens: HERMES_RUN_MAX_TOKENS,
     });
     // Snapshot base_url + model_name only — NEVER the api_key (PRD §11.2).
     modelSnapshot = {
@@ -175,7 +179,7 @@ export async function executeHermesRun(input: HermesRunInput): Promise<HermesRun
       client,
       messages,
       defaultTemperature: 0.4,
-      maxTokens: 2400,
+      maxTokens: HERMES_RUN_MAX_TOKENS,
       timeoutMs: input.timeoutMs ?? 120000,
     });
   } catch (err) {

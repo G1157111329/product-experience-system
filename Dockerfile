@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
 ARG NODE_IMAGE=node:18-bookworm-slim
 ARG PLAYWRIGHT_IMAGE=mcr.microsoft.com/playwright:v1.60.0-noble
 

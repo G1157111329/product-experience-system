@@ -11,7 +11,18 @@ async function run() {
   }
 
   const { mediaPresentation, visibleMedia } = mediaModule;
-  assert.deepEqual(mediaPresentation('primary'), { limit: 6, imageAspect: '4/3', videoAspect: '16/9' });
+  assert.deepEqual(mediaPresentation('primary'), {
+    limit: 6,
+    imageAspect: '4/3',
+    videoAspect: '16/9',
+    minWidth: 112,
+    maxWidth: null,
+  });
+  assert.deepEqual(
+    { minWidth: mediaPresentation('evidence').minWidth, maxWidth: mediaPresentation('evidence').maxWidth },
+    { minWidth: 80, maxWidth: 80 },
+    'supporting evidence must remain visually secondary to primary evidence',
+  );
   assert.equal(mediaPresentation('evidence').limit, 4);
   assert.equal(mediaPresentation('appendix').limit, 4);
   assert.equal(mediaPresentation('compact').limit, 2);
@@ -50,6 +61,7 @@ async function run() {
   const previewSource = readFileSync(resolve(process.cwd(), 'src/components/reports/report-media-preview.tsx'), 'utf8');
   assert.match(gridSource, /usePresignedUrls/);
   assert.match(gridSource, /mediaExpansionSignature/);
+  assert.match(gridSource, /gridTemplateColumns/);
   assert.doesNotMatch(previewSource, /usePresignedUrls/);
   assert.match(previewSource, /resolvedUrl/);
 

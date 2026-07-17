@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  getPinnedHierarchyBoundaryId,
   getMatrixZoneAnchors,
   getPinnedHierarchyOffsets,
 } from './matrix-zone-layout';
@@ -54,4 +55,20 @@ test('pinned hierarchy offsets use displayed widths and exclude non-hierarchy co
     'level-2': 120,
     'level-3': 340,
   });
+});
+
+test('the frozen hierarchy boundary follows the last displayed hierarchy column', () => {
+  const columns = [
+    column({ id: 'level-2', columnZone: 'hierarchy', zoneRole: 'B', displayOrder: 20 }),
+    column({ id: 'comparison', columnZone: 'comparison_category', displayOrder: 30 }),
+    column({ id: 'level-1', columnZone: 'hierarchy', zoneRole: 'A', displayOrder: 10 }),
+  ];
+
+  assert.equal(getPinnedHierarchyBoundaryId(columns), 'level-2');
+  assert.equal(
+    getPinnedHierarchyBoundaryId([
+      column({ id: 'comparison', columnZone: 'comparison_category', displayOrder: 10 }),
+    ]),
+    null,
+  );
 });

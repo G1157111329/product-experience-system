@@ -30,6 +30,127 @@ export function isUnavailableMediaUrl(value: string | null | undefined): boolean
   return value === unavailableMediaDataUrl;
 }
 
+function decodePathSegments(pathname: string): string | null {
+  try {
+    return pathname.split('/').map(decodeURIComponent).join('/');
+  } catch {
+    return null;
+  }
+}
+
+function decodeOpaqueVideoStreamKey(token: string): string | null {
+  try {
+    const base64 = token.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(token.length / 4) * 4, '=');
+    const binary = atob(base64);
+    return new TextDecoder().decode(Uint8Array.from(binary, (character) => character.charCodeAt(0)));
+  } catch {
+    return null;
+  }
+}
+
+function localUploadUrl(storageKey: string | null): string | undefined {
+  if (!storageKey) return undefined;
+  const segments = storageKey.split('/').filter(Boolean);
+  if (!segments.length || segments.some((segment) => segment === '.' || segment === '..')) return undefined;
+  return `/uploads/${segments.map(encodeURIComponent).join('/')}`;
+}
+
+function encodeStorageKey(storageKey: string): string | null {
+  const segments = storageKey.split('/').filter(Boolean);
+  if (!segments.length || segments.some((segment) => segment === '.' || segment === '..')) return null;
+  return segments.map(encodeURIComponent).join('/');
+}
+
+/** Builds a thumbnail or poster URL from a local media URL while preserving the
+ * short-lived authorization query from a protected `/api/materials/file` URL. */
+export function buildMediaDerivativeUrl(
+  value: string | null | undefined,
+  derivative: 'thumb' | 'poster',
+): string | null {
+  if (!value || value.startsWith('data:') || value.startsWith('blob:')) return null;
+
+  let pathname = value;
+  let search = '';
+  try {
+    const parsed = new URL(value, 'https://media.local');
+    pathname = parsed.pathname;
+    search = parsed.search;
+  } catch {
+    return null;
+  }
+
+  const filePrefix = '/api/materials/file/';
+  const uploadPrefix = '/uploads/';
+  const rawKey = pathname.startsWith(filePrefix)
+    ? decodePathSegments(pathname.slice(filePrefix.length))
+    : pathname.startsWith(uploadPrefix)
+      ? decodePathSegments(pathname.slice(uploadPrefix.length))
+      : !pathname.startsWith('/')
+        ? decodePathSegments(pathname)
+        : null;
+  if (!rawKey) return null;
+
+  const encodedKey = encodeStorageKey(rawKey);
+  if (!encodedKey) return null;
+  return `/api/materials/${derivative}/${encodedKey}${pathname.startsWith(filePrefix) ? search : ''}`;
+}
+
+function toLocalVideoUrl(pathname: string): string | undefined {
+  if (pathname.startsWith('/uploads/')) {
+    return localUploadUrl(decodePathSegments(pathname.slice('/uploads/'.length)));
+  }
+  if (pathname.startsWith('/api/materials/file/')) {
+    return localUploadUrl(decodePathSegments(pathname.slice('/api/materials/file/'.length)));
+  }
+  if (pathname.startsWith('/api/materials/video/')) {
+    return localUploadUrl(decodeOpaqueVideoStreamKey(pathname.slice('/api/materials/video/'.length)));
+  }
+  if (!pathname.startsWith('/')) return localUploadUrl(decodePathSegments(pathname));
+  return undefined;
+}
+
+function isSignedMediaEndpoint(pathname: string, search: string): boolean {
+  if (!pathname.startsWith('/api/materials/file/') && !pathname.startsWith('/api/materials/video/')) return false;
+  const params = new URLSearchParams(search);
+  return params.has('token') && params.has('exp');
+}
+
+/** Never put image data-URL placeholders onto <video src> — CSP media-src and
+ *  browsers reject them (or play nothing), flooding the console. */
+export function toPlayableVideoSrc(
+  value: string | null | undefined,
+  origin = currentOrigin(),
+): string | undefined {
+  if (!value) return undefined;
+  if (isPendingMediaUrl(value) || isUnavailableMediaUrl(value) || value.startsWith('data:')) {
+    return undefined;
+  }
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      const mediaUrl = new URL(value);
+      if (origin && mediaUrl.origin === new URL(origin).origin) {
+        if (isSignedMediaEndpoint(mediaUrl.pathname, mediaUrl.search)) {
+          return value;
+        }
+        const localUrl = toLocalVideoUrl(mediaUrl.pathname);
+        if (localUrl) return localUrl;
+      }
+    } catch {
+      return undefined;
+    }
+    if (!isAllowedMediaSource(value, origin)) return undefined;
+    return value;
+  }
+  if (value.startsWith('/api/materials/file/') || value.startsWith('/api/materials/video/')) {
+    const signedFileUrl = new URL(value, origin || 'https://media.local');
+    if (isSignedMediaEndpoint(signedFileUrl.pathname, signedFileUrl.search)) return value;
+  }
+  const [relativePathname] = value.split('?', 2);
+  const relativeLocalUrl = toLocalVideoUrl(relativePathname.split('#', 1)[0]);
+  if (relativeLocalUrl) return relativeLocalUrl;
+  return value;
+}
+
 function areUrlMapsEqual(a: Map<string, string>, b: Map<string, string>): boolean {
   if (a.size !== b.size) return false;
   for (const [key, value] of a) {
@@ -49,6 +170,7 @@ function currentOrigin(): string | undefined {
 export function isAllowedMediaSource(value: string, origin = currentOrigin()): boolean {
   if (
     value.startsWith('/api/materials/file/')
+    || value.startsWith('/api/materials/video/')
     || value.startsWith('/uploads/')
     || value.startsWith('/media/')
     || value.startsWith('blob:')
@@ -74,20 +196,46 @@ export function toPublicMediaUrl(value: string | null | undefined): string | nul
   return `/uploads/${value.replace(/^\/+/, '')}`;
 }
 
-function toStorageKey(value: string | null | undefined): string | null {
+export function toMediaStorageKey(value: string | null | undefined): string | null {
   if (!value) return null;
-  if (value.startsWith('/uploads/')) return value.slice('/uploads/'.length);
-  if (value.startsWith('/api/materials/file/')) return null;
+  const pathname = (() => {
+    if (/^https?:\/\//i.test(value)) {
+      try { return new URL(value).pathname; } catch { return value; }
+    }
+    return value.split(/[?#]/, 1)[0];
+  })();
+  const filePrefix = '/api/materials/file/';
+  if (pathname.startsWith(filePrefix)) {
+    return pathname.slice(filePrefix.length).split('/').map(decodeURIComponent).join('/');
+  }
+  if (pathname.startsWith('/uploads/')) return pathname.slice('/uploads/'.length).split('/').map(decodeURIComponent).join('/');
   if (/^(https?:|blob:|data:)/i.test(value)) return null;
   return value;
 }
 
+/**
+ * Returns the storage key that must be resolved through the presign endpoint.
+ * Historical local records may contain `/uploads/<key>` and cannot be handed
+ * directly to browsers once local media access is protected.
+ */
+export function mediaPresignKey(value: string | null | undefined): string | null {
+  if (!value || isPendingMediaUrl(value) || isUnavailableMediaUrl(value) || value.startsWith('blob:') || value.startsWith('data:')) {
+    return null;
+  }
+  if (value.startsWith('/api/materials/')) return null;
+  if (value.startsWith('/uploads/')) return toMediaStorageKey(value);
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      return new URL(value).pathname.startsWith('/uploads/') ? toMediaStorageKey(value) : null;
+    } catch {
+      return null;
+    }
+  }
+  return toMediaStorageKey(value);
+}
+
 function getStorageKey(material: { file_url?: string | null; file_path?: string | null }): string | null {
-  const filePath = toStorageKey(material.file_path);
-  const fileUrl = toStorageKey(material.file_url);
-  if (filePath && !isDirectMediaUrl(filePath)) return filePath;
-  if (fileUrl && !isDirectMediaUrl(fileUrl)) return fileUrl;
-  return null;
+  return toMediaStorageKey(material.file_path) ?? toMediaStorageKey(material.file_url);
 }
 
 function getShareTokenFromLocation(): string | null {
@@ -251,10 +399,13 @@ export function getMediaSrc(material: { file_url?: string | null; file_path?: st
 export function usePresignedUrl(filePath: string | null | undefined): string | null {
   const [url, setUrl] = useState<string | null>(() => {
     if (!filePath) return null;
+    const presignKey = mediaPresignKey(filePath);
+    if (presignKey) {
+      const cached = globalCache.get(presignKey);
+      return cached && cached.expireAt > Date.now() ? cached.url : null;
+    }
     if (isDirectMediaUrl(filePath)) return filePath;
     if (/^https?:\/\//i.test(filePath)) return null;
-    const cached = globalCache.get(filePath);
-    if (cached && cached.expireAt > Date.now()) return cached.url;
     return null;
   });
   const mountedRef = useRef(true);
@@ -267,6 +418,22 @@ export function usePresignedUrl(filePath: string | null | undefined): string | n
     }
 
     // 兼容旧数据：已经是完整URL
+    const presignKey = mediaPresignKey(filePath);
+    if (presignKey) {
+      const cached = globalCache.get(presignKey);
+      if (cached && cached.expireAt > Date.now()) {
+        setUrl(cached.url);
+        return;
+      }
+      setUrl(null);
+      scheduleBatch(presignKey, (resolvedUrl) => {
+        if (mountedRef.current) setUrl(resolvedUrl);
+      });
+      return () => {
+        mountedRef.current = false;
+      };
+    }
+
     if (isDirectMediaUrl(filePath)) {
       setUrl(filePath);
       return;

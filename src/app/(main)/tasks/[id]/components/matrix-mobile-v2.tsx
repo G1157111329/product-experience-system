@@ -68,7 +68,7 @@ export function MobileMatrixCards({ projection, taskId, onRefresh }: MobileMatri
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <Badge variant="outline" className="text-[10px]">
+                  <Badge variant="outline" className="text-xs">
                     {row.completionStatus === 'completed' ? '已完成' :
                       row.completionStatus === 'in_progress' ? '进行中' :
                         row.completionStatus === 'not_applicable' ? '不适用' :
@@ -80,7 +80,7 @@ export function MobileMatrixCards({ projection, taskId, onRefresh }: MobileMatri
                     </div>
                   ))}
                 </div>
-                <div className="flex gap-3 mt-2 text-[11px] text-muted-foreground">
+                <div className="flex gap-3 mt-2 text-xs text-muted-foreground">
                   <span>证据 {Object.values(row.evidenceCounts).reduce((a, b) => a + b, 0)}</span>
                   <span>问题 {Object.values(row.issueCounts).reduce((a, b) => a + b, 0)}</span>
                 </div>

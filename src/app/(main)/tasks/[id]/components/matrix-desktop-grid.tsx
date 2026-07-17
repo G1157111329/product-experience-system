@@ -141,7 +141,7 @@ export function DesktopMatrixGrid({ projection, onRefresh }: DesktopMatrixGridPr
                     <span className="truncate" title={f.label}>{f.label}</span>
                     {f.requiredMode === 'required' && <span className="text-red-500">*</span>}
                   </div>
-                  {f.unitText && <span className="text-[10px] text-muted-foreground">({f.unitText})</span>}
+                  {f.unitText && <span className="text-xs text-muted-foreground">({f.unitText})</span>}
                 </th>
               ))}
             </tr>
@@ -436,7 +436,7 @@ function MatrixCell({
         <Button
           size="sm"
           variant="outline"
-          className="h-7 gap-1 text-[10px]"
+          className="h-7 gap-1 text-xs"
           onClick={() => {
             const next = window.prompt('请输入证据说明或素材编号', value?.textValue ?? '');
             if (next !== null) save(next.trim());
@@ -445,7 +445,7 @@ function MatrixCell({
           <ImagePlus className="h-3 w-3" />
           证据 {row.evidenceCounts[field.id] ?? 0}
         </Button>
-        {value?.textValue && <div className="mt-1 max-w-[160px] truncate text-[10px] text-muted-foreground">{value.textValue}</div>}
+        {value?.textValue && <div className="mt-1 max-w-[160px] truncate text-xs text-muted-foreground">{value.textValue}</div>}
       </td>
     );
   }
@@ -457,7 +457,7 @@ function MatrixCell({
         <Button
           size="sm"
           variant="outline"
-          className="h-7 gap-1 text-[10px]"
+          className="h-7 gap-1 text-xs"
           onClick={() => {
             const next = window.prompt('请输入问题描述', value?.textValue ?? '');
             if (next !== null) save(next.trim());
@@ -466,7 +466,7 @@ function MatrixCell({
           <AlertTriangle className="h-3 w-3" />
           问题 {row.issueCounts[field.id] ?? 0}
         </Button>
-        {value?.textValue && <div className="mt-1 max-w-[160px] truncate text-[10px] text-amber-700">{value.textValue}</div>}
+        {value?.textValue && <div className="mt-1 max-w-[160px] truncate text-xs text-amber-700">{value.textValue}</div>}
       </td>
     );
   }
@@ -494,7 +494,7 @@ function MatrixCell({
           disabled={saving}
         />
         {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
-        {error && <span className="text-[10px] text-red-600">{error}</span>}
+        {error && <span className="text-xs text-red-600">{error}</span>}
       </div>
     </td>
   );

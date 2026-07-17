@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type CSSProperties } from 'react';
 import { ImageOff, VideoOff } from 'lucide-react';
-import { usePresignedUrl } from '@/lib/use-presigned-url';
+import { toPlayableVideoSrc, usePresignedUrl } from '@/lib/use-presigned-url';
 import { cn } from '@/lib/utils';
 
 interface PresignedImageProps {
@@ -107,9 +107,11 @@ export function PresignedVideo({
   if (!filePath) return null;
   if (loadFailed) return <MediaFallback type="video" className={className} style={style} />;
 
+  const playableSrc = toPlayableVideoSrc(signedUrl);
+
   return (
     <video
-      src={signedUrl || undefined}
+      src={playableSrc}
       className={className}
       style={style}
       preload={preload}
@@ -117,7 +119,9 @@ export function PresignedVideo({
       autoPlay={autoPlay}
       loop={loop}
       playsInline={playsInline}
-      onError={() => setLoadFailed(true)}
+      onError={() => {
+        if (playableSrc) setLoadFailed(true);
+      }}
     />
   );
 }

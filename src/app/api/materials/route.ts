@@ -10,6 +10,7 @@ import {
 } from '@/lib/server/material-asset-service';
 import { deleteFile, generatePresignedUrl } from '@/lib/server/storage';
 import { deleteMaterialAsset } from '@/lib/server/frozen-media-retention';
+import { sortMaterialsByBinding } from '@/lib/stable-display-order';
 
 type MaterialScope = {
   task_id?: string | null;
@@ -31,6 +32,8 @@ type MaterialLinkRow = {
   id: string;
   material_id: string;
   binding_order: number | null;
+  bound_at: string | null;
+  created_at: string | null;
 };
 
 function linkTargetForScope(scope: MaterialScope): LinkTarget | null {
@@ -148,8 +151,8 @@ export async function GET(request: NextRequest) {
   if (scope.comparison_cell_id) query = query.eq('comparison_cell_id', scope.comparison_cell_id);
 
   query = scope.comparison_cell_id
-    ? query.order('media_display_order', { ascending: true }).limit(limit)
-    : query.order('created_at', { ascending: false }).limit(limit);
+    ? query.order('media_display_order', { ascending: true }).order('id', { ascending: true }).limit(limit)
+    : query.order('created_at', { ascending: true }).order('id', { ascending: true }).limit(limit);
   const { data: legacyData, error } = await query;
   if (error) return NextResponse.json({ code: 1, message: '查询失败' }, { status: 500 });
 
@@ -161,10 +164,13 @@ export async function GET(request: NextRequest) {
   if (linkedTarget) {
     const { data: linkRows, error: linkError } = await client
       .from('material_links')
-      .select('id, material_id, binding_order')
+      .select('id, material_id, binding_order, bound_at, created_at')
       .eq('target_type', linkedTarget.type)
       .eq('target_id', linkedTarget.id)
-      .order('binding_order', { ascending: true });
+      .order('binding_order', { ascending: true })
+      .order('bound_at', { ascending: true })
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true });
     if (linkError) return NextResponse.json({ code: 1, message: '查询素材绑定失败' }, { status: 500 });
     const links = (linkRows || []) as MaterialLinkRow[];
     const materialIds = links.map((link) => link.material_id);
@@ -177,15 +183,17 @@ export async function GET(request: NextRequest) {
       const byId = new Map<string, Record<string, unknown>>();
       for (const material of legacyData || []) byId.set(String(material.id), material as Record<string, unknown>);
       for (const material of linkedMaterials || []) byId.set(String(material.id), material as Record<string, unknown>);
-      const linkedOrder = new Map<string, number>(links.map((link) => [link.material_id, link.binding_order ?? 0]));
-      merged = [...byId.values()].sort((left, right) => {
-        const leftOrder = linkedOrder.get(String(left.id));
-        const rightOrder = linkedOrder.get(String(right.id));
-        if (leftOrder !== undefined && rightOrder !== undefined) return leftOrder - rightOrder;
-        if (leftOrder !== undefined) return -1;
-        if (rightOrder !== undefined) return 1;
-        return 0;
-      }).slice(0, limit);
+      const linkByMaterialId = new Map(links.map((link) => [link.material_id, link]));
+      merged = sortMaterialsByBinding([...byId.values()].map((material) => {
+        const link = linkByMaterialId.get(String(material.id));
+        return {
+          material,
+          id: String(material.id),
+          bindingOrder: link?.binding_order,
+          linkedAt: link?.bound_at || link?.created_at,
+          created_at: typeof material.created_at === 'string' ? material.created_at : null,
+        };
+      })).map((item) => item.material).slice(0, limit);
     }
   }
 
@@ -290,6 +298,7 @@ export async function DELETE(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
+  const detachMutableReferences = searchParams.get('detach_mutable_references') === '1';
 
   if (!id) return NextResponse.json({ code: 1, message: '缺少id' }, { status: 400 });
 
@@ -302,24 +311,14 @@ export async function DELETE(request: NextRequest) {
   if (!material) return NextResponse.json({ code: 1, message: '素材不存在' }, { status: 404 });
   if (!(await canAccessMaterial(client, user, id))) return forbidden();
 
-  const guardedError = await deleteMaterialAsset({ materialId: id, actorId: user.id }, (fileKey) => deleteFile(fileKey))
-    .then(() => null)
+  let deletionResult: Awaited<ReturnType<typeof deleteMaterialAsset>> | null = null;
+  const guardedError = await deleteMaterialAsset({ materialId: id, actorId: user.id, detachMutableReferences }, (fileKey) => deleteFile(fileKey))
+    .then((result) => { deletionResult = result; return null; })
     .catch((caught: unknown) => caught);
   if (guardedError) {
     const message = guardedError instanceof Error ? guardedError.message : 'material_delete_failed';
     const status = message.includes('active_links') || message.includes('frozen_snapshot') ? 409 : message.includes('owner') ? 403 : 500;
     return NextResponse.json({ code: 1, message }, { status });
   }
-  const error = null;
-  if (error) return NextResponse.json({ code: 1, message: '删除失败' }, { status: 500 });
-
-  try {
-    const fileKey = null;
-    await deleteFile(fileKey);
-  } catch (storageError) {
-    console.error('[materials] Physical file delete failed:', storageError);
-    return NextResponse.json({ code: 0, message: '删除成功', warning: 'physical_file_delete_failed' });
-  }
-
-  return NextResponse.json({ code: 0, message: '删除成功' });
+  return NextResponse.json({ code: 0, message: '删除成功', data: deletionResult });
 }

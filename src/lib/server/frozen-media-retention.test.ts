@@ -6,15 +6,16 @@ import {
   type FrozenMediaRetentionRepository,
 } from './frozen-media-retention';
 
-function repo(input: { owner?: string; links?: number; frozen?: boolean } = {}) {
+function repo(input: { owner?: string; links?: number; frozen?: boolean; legacy?: boolean } = {}) {
   const events: string[] = [];
   const repository: FrozenMediaRetentionRepository = {
     async transaction(work) { return work(repository); },
     async findMaterial() {
-      return { id: 'material-1', createdBy: input.owner ?? 'user-1', fileKey: 'task/file.jpg', hasLegacyReference: false };
+      return { id: 'material-1', createdBy: input.owner ?? 'user-1', fileKey: 'task/file.jpg', hasLegacyReference: input.legacy ?? false };
     },
     async countActiveLinks() { return input.links ?? 0; },
     async hasFrozenSnapshotReference() { return input.frozen ?? false; },
+    async retainForFrozenSnapshot() { events.push('frozen-retain'); },
     async createCleanupJob(value) { events.push(`cleanup-create:${value.fileKey}`); },
     async completeCleanupJob(value) { events.push(`cleanup-complete:${value.fileKey}`); },
     async recordCleanupFailure(value) { events.push(`cleanup-failed:${value.fileKey}:${value.error}`); },
@@ -49,6 +50,33 @@ test('blocks another user from deleting the asset', async () => {
 test('allows an owned and wholly unreferenced asset', async () => {
   const memory = repo();
   assert.deepEqual(await assertMaterialMayBePhysicallyDeletedWithRepository({ materialId: 'material-1', actorId: 'user-1' }, memory.repository), { fileKey: 'task/file.jpg' });
+});
+
+test('confirmed authoring deletion permits mutable links but still protects frozen snapshots', async () => {
+  const linked = repo({ links: 1, legacy: true });
+  assert.deepEqual(await assertMaterialMayBePhysicallyDeletedWithRepository(
+    { materialId: 'material-1', actorId: 'user-1', detachMutableReferences: true },
+    linked.repository,
+  ), { fileKey: 'task/file.jpg' });
+
+  const frozen = repo({ links: 1, legacy: true, frozen: true });
+  await assert.rejects(() => assertMaterialMayBePhysicallyDeletedWithRepository(
+    { materialId: 'material-1', actorId: 'user-1', detachMutableReferences: true },
+    frozen.repository,
+  ), /frozen_snapshot/);
+});
+
+test('confirmed authoring deletion removes mutable visibility while retaining immutable snapshot media', async () => {
+  const memory = repo({ links: 1, legacy: true, frozen: true });
+
+  const result = await deleteMaterialAssetWithRepository(
+    { materialId: 'material-1', actorId: 'user-1', detachMutableReferences: true },
+    memory.repository,
+    async () => { memory.events.push('file-delete'); },
+  );
+
+  assert.deepEqual(result, { cleanupQueued: false, retainedForFrozenSnapshot: true });
+  assert.deepEqual(memory.events, ['frozen-retain']);
 });
 
 test('commits database deletion before physical deletion and audits file cleanup failure', async () => {

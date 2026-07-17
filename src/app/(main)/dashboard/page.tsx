@@ -242,7 +242,7 @@ export default function DashboardPage() {
                     meta={
                       <>
                         {task.product_category && (
-                          <Badge variant="outline" className="max-w-[180px] text-[10px]">
+                          <Badge variant="outline" className="max-w-[180px] text-xs">
                             <span className="truncate">
                               {task.product_category}
                               {task.product ? ` - ${task.product}` : ''}
@@ -314,10 +314,10 @@ export default function DashboardPage() {
                 {pendingRequests.map((req) => (
                   <div key={req.id} className="space-y-2 rounded-lg border p-3">
                     <div className="flex items-center justify-between gap-3">
-                      <Badge variant="outline" className="text-[10px]">
+                      <Badge variant="outline" className="text-xs">
                         {req.request_type}
                       </Badge>
-                      <span className="text-[10px] text-muted-foreground">{formatDate(req.created_at)}</span>
+                      <span className="text-xs text-muted-foreground">{formatDate(req.created_at)}</span>
                     </div>
                     {isAdmin && req.user_name && (
                       <div className="break-all text-sm">

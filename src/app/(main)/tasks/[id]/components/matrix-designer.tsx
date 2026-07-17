@@ -446,7 +446,7 @@ export function MatrixDesigner({ matrixId, onBack, onConfirmed }: MatrixDesigner
                                 onChange={(e) => updateField(sec.key, f.key, { label: e.target.value })}
                                 placeholder="字段名"
                               />
-                              <Badge variant="outline" className="text-[10px]">
+                              <Badge variant="outline" className="text-xs">
                                 {FIELD_TYPE_OPTIONS.find((t) => t.value === f.dataType)?.label ?? f.dataType}
                               </Badge>
 
@@ -537,7 +537,7 @@ export function MatrixDesigner({ matrixId, onBack, onConfirmed }: MatrixDesigner
                       <CardContent className="py-3 space-y-2">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-medium">{f.label}</span>
-                          <Badge variant="outline" className="text-[10px]">公式字段</Badge>
+                          <Badge variant="outline" className="text-xs">公式字段</Badge>
                         </div>
                         <Textarea
                           className="text-xs font-mono"
@@ -546,7 +546,7 @@ export function MatrixDesigner({ matrixId, onBack, onConfirmed }: MatrixDesigner
                           placeholder={`例如：ROUND(SELF("成品重量") / SELF("原料重量"), 4)`}
                           rows={2}
                         />
-                        <p className="text-[11px] text-muted-foreground">
+                        <p className="text-xs text-muted-foreground">
                           使用 SELF(&quot;字段名&quot;) 引用同一行的其他字段。支持 ROUND、IF、ABS、SUM。
                         </p>
                       </CardContent>
@@ -627,11 +627,11 @@ export function MatrixDesigner({ matrixId, onBack, onConfirmed }: MatrixDesigner
                       {sec.fields.map((f) => (
                         <div key={f.key} className="ml-4 text-xs flex items-center gap-2">
                           <span>{f.label}</span>
-                          <Badge variant="outline" className="text-[10px]">
+                          <Badge variant="outline" className="text-xs">
                             {FIELD_TYPE_OPTIONS.find((t) => t.value === f.dataType)?.label}
                           </Badge>
                           {f.unitText && <span className="text-muted-foreground">({f.unitText})</span>}
-                          {f.requiredMode === 'required' && <Badge className="text-[10px] bg-red-100 text-red-800">必填</Badge>}
+                          {f.requiredMode === 'required' && <Badge className="text-xs bg-red-100 text-red-800">必填</Badge>}
                         </div>
                       ))}
                     </div>

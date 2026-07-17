@@ -5,20 +5,7 @@
 import { useState, useCallback, useEffect, useMemo, type KeyboardEvent } from 'react';
 import { X, ZoomIn, ZoomOut, Play, ImageOff, VideoOff, Crop } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { usePresignedUrl } from '@/lib/use-presigned-url';
-
-/** Extract a storage key (e.g. "experience-media/.../x.png") from a url that may
- *  be a raw key, a /uploads/... path, or an already-absolute URL. Returns null
- *  for data URLs / remote URLs where no local key can be derived. */
-function toStorageKey(value: string | null | undefined): string | null {
-  if (!value) return null;
-  if (value.startsWith('data:')) return null;
-  if (value.startsWith('http')) return null;
-  if (value.startsWith('/uploads/')) return value.slice('/uploads/'.length);
-  if (value.startsWith('/api/materials/file/')) return null;
-  // Raw storage key (e.g. "experience-media/.../x.png")
-  return value.replace(/^\/+/, '');
-}
+import { buildMediaDerivativeUrl, toPlayableVideoSrc, usePresignedUrl } from '@/lib/use-presigned-url';
 
 interface ImagePreviewProps {
   url: string | null;
@@ -54,12 +41,14 @@ export function ImagePreview({ url, onClose, onEdit, mediaType }: ImagePreviewPr
             <MediaLoadError type={isVideo ? 'video' : 'image'} large />
           ) : isVideo ? (
             <video
-              src={displayUrl}
+              src={toPlayableVideoSrc(displayUrl)}
               controls
               autoPlay
               className="max-w-full max-h-[90vh] object-contain"
               style={{ borderRadius: '4px' }}
-              onError={() => setLoadFailed(true)}
+              onError={() => {
+                if (toPlayableVideoSrc(displayUrl)) setLoadFailed(true);
+              }}
             />
           ) : (
             <div
@@ -121,7 +110,7 @@ function MediaLoadError({ type, large = false }: { type: 'image' | 'video'; larg
   return (
     <div className={`flex flex-col items-center justify-center gap-2 bg-muted text-muted-foreground ${large ? 'min-h-72 min-w-72 rounded-lg p-8' : 'h-full w-full p-2'}`}>
       <Icon className={large ? 'h-8 w-8' : 'h-5 w-5'} />
-      <span className={large ? 'text-sm font-medium' : 'text-[11px] leading-tight'}>素材加载失败</span>
+      <span className={large ? 'text-sm font-medium' : 'text-xs leading-tight'}>素材加载失败</span>
       {large && <span className="text-xs">请检查文件是否存在、格式是否支持，或重新上传素材。</span>}
     </div>
   );
@@ -143,14 +132,14 @@ export function MediaThumbnail({ url, type, onClick, size = 'md', responsive }: 
   // Derive a thumbnail/poster URL from the storage key so list/grid views load
   // small derivatives instead of multi-MB originals. Falls back to the presigned
   // original when the key can't be derived or the derivative fails to load.
-  const storageKey = useMemo(() => toStorageKey(url), [url]);
+  const derivativeSource = presignedSrc || (url.startsWith('/uploads/') ? url : null);
   const thumbUrl = useMemo(
-    () => (storageKey && !isVideo && !thumbFallback ? `/api/materials/thumb/${storageKey}` : null),
-    [storageKey, isVideo, thumbFallback],
+    () => (!isVideo && !thumbFallback ? buildMediaDerivativeUrl(derivativeSource, 'thumb') : null),
+    [derivativeSource, isVideo, thumbFallback],
   );
   const posterUrl = useMemo(
-    () => (storageKey && isVideo ? `/api/materials/poster/${storageKey}` : null),
-    [storageKey, isVideo],
+    () => (isVideo ? buildMediaDerivativeUrl(derivativeSource, 'poster') : null),
+    [derivativeSource, isVideo],
   );
 
   useEffect(() => {
@@ -178,12 +167,15 @@ export function MediaThumbnail({ url, type, onClick, size = 'md', responsive }: 
       ) : isVideo ? (
         <>
           <video
-            src={presignedSrc || undefined}
+            src={toPlayableVideoSrc(presignedSrc)}
             poster={posterUrl || undefined}
             className="w-full h-full object-cover"
             muted
             preload="metadata"
-            onError={() => setLoadFailed(true)}
+            onError={() => {
+              // Ignore placeholder/empty state; only mark failure after a real URL fails.
+              if (toPlayableVideoSrc(presignedSrc)) setLoadFailed(true);
+            }}
           />
           <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/40 transition-colors">
             <Play className="h-5 w-5 text-white fill-white" />

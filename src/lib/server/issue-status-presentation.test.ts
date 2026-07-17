@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   applyTransition,
+  resolveIssueStatusChange,
   getAvailableTransitions,
   getIssueStatusPresentation,
   normalizeIssueStatus,
@@ -41,5 +43,51 @@ assert.equal(normalizeIssueStatus('已重开'), 'rectifying');
 assert.equal(normalizeIssueStatus('已整改'), 'verified_closed');
 assert.equal(applyTransition('verified_closed', 'return_to_rectifying'), 'rectifying');
 assert.equal(getAvailableTransitions('verified_closed', 'admin').includes('reopen' as never), false);
+
+assert.throws(
+  () => resolveIssueStatusChange({
+    currentStatus: 'open',
+    requestedStatus: 'verified_closed',
+    role: 'admin',
+  }),
+  /explicit transition command/i,
+);
+assert.equal(resolveIssueStatusChange({
+  currentStatus: 'open',
+  requestedStatus: 'rectifying',
+  transition: 'start_rectify',
+  role: 'admin',
+}), 'rectifying');
+assert.throws(
+  () => resolveIssueStatusChange({
+    currentStatus: 'open',
+    requestedStatus: 'waived',
+    transition: 'start_rectify',
+    role: 'admin',
+  }),
+  /does not produce/i,
+);
+
+assert.equal(resolveIssueStatusChange({ currentStatus: 'rectifying', transition: 'verify', role: 'reviewer' }), 'verified_closed');
+assert.throws(
+  () => resolveIssueStatusChange({ currentStatus: 'open', transition: 'verify', role: 'admin' }),
+  /not allowed from open/i,
+);
+assert.equal(resolveIssueStatusChange({
+  currentStatus: 'open', transition: 'waive', role: 'product_manager', fields: { no_improve_reason: 'accepted risk' },
+}), 'waived');
+assert.equal(resolveIssueStatusChange({ currentStatus: 'open', transition: 'start_rectify', role: 'rectification_owner' }), 'rectifying');
+assert.throws(
+  () => resolveIssueStatusChange({ currentStatus: 'open', transition: 'start_rectify', role: 'executor' }),
+  /not allowed/i,
+);
+
+const issueDetailSource = readFileSync('src/app/(main)/issues/[id]/page.tsx', 'utf8');
+assert.doesNotMatch(issueDetailSource, /to === 'verified_closed' && \(from === 'open'/, 'open issue cannot offer direct verification');
+assert.match(issueDetailSource, /to === 'verified_closed' && from === 'rectifying'/, 'rectifying issue keeps the explicit verify command');
+assert.throws(
+  () => resolveIssueStatusChange({ currentStatus: 'open', transition: 'verify', role: 'executive_viewer' }),
+  /not allowed/i,
+);
 
 console.log('issue status presentation tests passed');

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessTask, forbidden, isAuthResponse, requireUser } from '@/lib/server/auth';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
+import { sortMaterialsByBinding } from '@/lib/stable-display-order';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -22,7 +23,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     .from('check_records')
     .select('*')
     .eq('task_id', id)
-    .order('sort_order', { ascending: true });
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true });
 
   if (recordsError) return NextResponse.json({ code: 1, message: '检查记录查询失败' }, { status: 500 });
 
@@ -33,18 +35,46 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   if (materialsError) return NextResponse.json({ code: 1, message: '素材查询失败' }, { status: 500 });
 
-  const materialsByRecordId = new Map<string, Record<string, unknown>[]>();
-  for (const material of materials || []) {
-    const recordId = String((material as Record<string, unknown>).record_id || '');
+  const recordRows = (records || []) as Array<Record<string, unknown>>;
+  const materialRows = (materials || []) as Array<Record<string, unknown>>;
+  const recordIds = recordRows.map((record) => String(record.id || '')).filter(Boolean);
+  const { data: recordLinks, error: recordLinksError } = recordIds.length
+    ? await client
+      .from('material_links')
+      .select('id, material_id, target_id, binding_order, bound_at, created_at')
+      .eq('target_type', 'record')
+      .in('target_id', recordIds)
+    : { data: [], error: null };
+  if (recordLinksError) return NextResponse.json({ code: 1, message: '绱犳潗缁戝畾鏌ヨ澶辫触' }, { status: 500 });
+
+  const materialById = new Map(materialRows.map((material) => [String(material.id || ''), material]));
+  type OrderedMaterialRow = Record<string, unknown> & { id: string; bindingOrder?: number | null; linkedAt?: string | null };
+  const materialsByRecordId = new Map<string, OrderedMaterialRow[]>();
+  for (const material of materialRows) {
+    const recordId = String(material.record_id || '');
     if (!recordId) continue;
     const current = materialsByRecordId.get(recordId) || [];
-    current.push(material as Record<string, unknown>);
+    current.push({ ...material, id: String(material.id || '') });
     materialsByRecordId.set(recordId, current);
   }
+  for (const link of recordLinks || []) {
+    const recordId = String(link.target_id || '');
+    const material = materialById.get(String(link.material_id));
+    if (!recordId || !material) continue;
+    const current = materialsByRecordId.get(recordId) || [];
+    const next = current.filter((item) => String(item.id) !== String(material.id));
+    next.push({
+      ...material,
+      id: String(material.id),
+      bindingOrder: link.binding_order,
+      linkedAt: link.bound_at || link.created_at,
+    });
+    materialsByRecordId.set(recordId, next);
+  }
 
-  const recordsWithMaterials = ((records || []) as Array<Record<string, unknown>>).map((record) => ({
+  const recordsWithMaterials = recordRows.map((record) => ({
     ...record,
-    materials: materialsByRecordId.get(String(record.id || '')) || [],
+    materials: sortMaterialsByBinding(materialsByRecordId.get(String(record.id || '')) || []),
   }));
 
   const { data: issues, error: issuesError } = await client

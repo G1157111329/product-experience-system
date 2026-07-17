@@ -183,13 +183,13 @@ function MobileGroupCard({
             </span>
           )}
         </div>
-        <span className="shrink-0 text-[10px] text-muted-foreground">
+        <span className="shrink-0 text-xs text-muted-foreground">
           {group.rows.length} 行
         </span>
         <Button
           size="sm"
           variant="ghost"
-          className="h-7 shrink-0 gap-1 text-[11px]"
+          className="h-7 shrink-0 gap-1 text-xs"
           onClick={() => handlers.onAddRowToGroup(group.id)}
         >
           <Plus className="h-3.5 w-3.5" />
@@ -277,7 +277,7 @@ function MobileRowCard({
           {row.subject.label || '未命名记录'}
         </span>
         {row.subject.key && (
-          <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
+          <span className="ml-auto shrink-0 text-xs text-muted-foreground">
             {row.subject.key}
           </span>
         )}
@@ -327,7 +327,7 @@ function MobileRowCard({
             <Button
               size="sm"
               variant="ghost"
-              className="ml-auto h-7 shrink-0 gap-1 text-[11px]"
+              className="ml-auto h-7 shrink-0 gap-1 text-xs"
               onClick={() => setDrawerOpen(true)}
             >
               <Layers className="h-3.5 w-3.5" />
@@ -412,7 +412,7 @@ function SlotRow({
 }) {
   return (
     <div className="grid grid-cols-[84px_1fr] items-start bg-background">
-      <span className="self-center px-3 py-2 text-[11px] text-muted-foreground">
+      <span className="self-center px-3 py-2 text-xs text-muted-foreground">
         {label}
       </span>
       <div className="min-w-0 border-l">{children}</div>
@@ -439,7 +439,7 @@ function MetricRow({
     >
       <div className="flex min-w-0 items-center gap-1 px-3 py-1.5">
         <span
-          className="min-w-0 truncate text-[11px]"
+          className="min-w-0 truncate text-xs"
           title={dimension.displayName}
         >
           {dimension.displayName}
@@ -473,7 +473,7 @@ function SegmentToggle<T extends string>({
           type="button"
           onClick={() => onChange(opt.value)}
           className={cn(
-            'px-3 py-1 text-[11px] transition-colors',
+            'px-3 py-1 text-xs transition-colors',
             value === opt.value
               ? 'bg-primary text-primary-foreground'
               : 'bg-background text-muted-foreground hover:bg-muted',
@@ -541,7 +541,7 @@ function DimensionDrawer({
               >
                 <div className="flex min-w-0 items-center gap-1 px-3 py-2">
                   <span
-                    className="min-w-0 truncate text-[11px]"
+                    className="min-w-0 truncate text-xs"
                     title={d.displayName}
                   >
                     {d.displayName}
@@ -589,13 +589,13 @@ function DimensionDrawer({
           })}
         </div>
         <div className="flex items-center justify-between gap-2 border-t px-4 py-2">
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-xs text-muted-foreground">
             共 {dimensions.length} 个维度
           </span>
           <Button
             size="sm"
             variant="outline"
-            className="h-7 gap-1 text-[11px]"
+            className="h-7 gap-1 text-xs"
             onClick={() => onOpenChange(false)}
           >
             完成

@@ -13,9 +13,13 @@ import {
   matrixDesignVersions,
   matrixSections,
   matrixFieldDefinitions,
+  matrixGroups,
+  matrixRows,
+  matrixFieldValues,
+  matrixNarratives,
   matrixFormulaDefinitions,
 } from '@/storage/database/shared/schema';
-import { compileFormula } from './formula-engine';
+import { compileFormula, type CompiledFormula } from './formula-engine';
 import type {
   TaskMatrix,
   MatrixDesignVersion,
@@ -34,7 +38,6 @@ import { createHash } from 'crypto';
 // ---------------------------------------------------------------------------
 
 export async function getTaskMatrices(taskId: string, userId: string): Promise<TaskMatrix[]> {
-  void userId;
   const db = await getDb();
   const rows = await db
     .select()

@@ -2,8 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { generatePresignedUrl, localFileExists } from '@/lib/server/storage';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessTask, canReadReport, getCurrentUser } from '@/lib/server/auth';
+import { jsonResponse } from '@/lib/http-json-response';
+import { toOpaqueVideoTransportUrl } from '@/lib/video-media-transport';
 
-async function resolveSharedTaskId(client: ReturnType<typeof getSupabaseClient>, shareToken: string | null | undefined) {
+type ReportMediaScope = { id: string; taskId: string; snapshotId: string };
+
+function mediaAccessUrl(signedUrl: string) {
+  return toOpaqueVideoTransportUrl(signedUrl) || signedUrl;
+}
+
+async function resolveSharedReport(client: ReturnType<typeof getSupabaseClient>, shareToken: string | null | undefined): Promise<ReportMediaScope | null> {
   if (!shareToken) return null;
   const { data: share } = await client
     .from('report_shares')
@@ -15,40 +23,75 @@ async function resolveSharedTaskId(client: ReturnType<typeof getSupabaseClient>,
 
   const { data: report } = await client
     .from('reports')
-    .select('id, task_id, content')
+    .select('id, task_id, snapshot_id, content')
     .eq('id', share.report_id)
     .maybeSingle();
   if (!report) return null;
-  return String(report.task_id || report.content?.task?.id || '');
+  return {
+    id: String(report.id),
+    taskId: String(report.task_id || report.content?.task?.id || ''),
+    snapshotId: String(report.snapshot_id || ''),
+  };
 }
 
-async function resolveReadableReportTaskId(
+async function resolveReadableReport(
   client: ReturnType<typeof getSupabaseClient>,
   user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>,
   reportId: string | null | undefined,
-) {
+): Promise<ReportMediaScope | null> {
   if (!reportId || !(await canReadReport(client, user, reportId))) return null;
   const { data: report } = await client
     .from('reports')
-    .select('id, task_id, content')
+    .select('id, task_id, snapshot_id, content')
     .eq('id', reportId)
     .maybeSingle();
   if (!report) return null;
-  return String(report.task_id || report.content?.task?.id || '');
+  return {
+    id: String(report.id),
+    taskId: String(report.task_id || report.content?.task?.id || ''),
+    snapshotId: String(report.snapshot_id || ''),
+  };
+}
+
+async function isFrozenReportMaterial(
+  client: ReturnType<typeof getSupabaseClient>,
+  report: ReportMediaScope | null,
+  materialId: string,
+) {
+  if (!report?.snapshotId || !materialId) return false;
+  const { data } = await client
+    .from('frozen_material_references')
+    .select('material_id')
+    .eq('snapshot_id', report.snapshotId)
+    .eq('material_id', materialId)
+    .maybeSingle();
+  return Boolean(data);
 }
 
 async function findMaterialByPath(client: ReturnType<typeof getSupabaseClient>, path: string) {
+  const normalizedPath = path.trim();
+  const withoutUploadsPrefix = normalizedPath.startsWith('/uploads/')
+    ? normalizedPath.slice('/uploads/'.length)
+    : normalizedPath.replace(/^\/+/, '');
+  const candidates = [...new Set([
+    normalizedPath,
+    withoutUploadsPrefix,
+    withoutUploadsPrefix ? `/uploads/${withoutUploadsPrefix}` : '',
+  ].filter(Boolean))];
+
   const { data: byFilePath } = await client
     .from('materials')
     .select('id, file_path, file_url, task_id, recipe_library_step_id')
-    .eq('file_path', path)
+    .in('file_path', candidates)
+    .limit(1)
     .maybeSingle();
   if (byFilePath) return byFilePath;
 
   const { data: byFileUrl } = await client
     .from('materials')
     .select('id, file_path, file_url, task_id, recipe_library_step_id')
-    .eq('file_url', path)
+    .in('file_url', candidates)
+    .limit(1)
     .maybeSingle();
   return byFileUrl;
 }
@@ -66,8 +109,8 @@ export async function POST(request: NextRequest) {
       share_token?: string;
     };
     const requestedPaths = Array.isArray(paths) ? paths : file_paths;
-    const sharedTaskId = user ? null : await resolveSharedTaskId(client, share_token);
-    const readableReportTaskId = user ? await resolveReadableReportTaskId(client, user, report_id) : null;
+    const sharedReport = user ? null : await resolveSharedReport(client, share_token);
+    const readableReport = user ? await resolveReadableReport(client, user, report_id) : null;
 
     // local + public access 模式下，素材通过 /uploads/ 静态目录公开访问，无需鉴权
     // 这样分享页（未登录）也能正常加载素材，避免裂图。
@@ -75,7 +118,7 @@ export async function POST(request: NextRequest) {
     const isLocalPublicMode = process.env.LOCAL_UPLOAD_PUBLIC_ACCESS !== 'protected'
       && process.env.STORAGE_DRIVER !== 's3';
     if (!isLocalPublicMode) {
-      if (!user && !sharedTaskId) {
+      if (!user && !sharedReport) {
         return NextResponse.json({ code: 1, message: '未登录' }, { status: 401 });
       }
     }
@@ -94,14 +137,14 @@ export async function POST(request: NextRequest) {
         const existsLocally = await localFileExists(path);
         if (existsLocally) {
           try {
-            urlMap[path] = await generatePresignedUrl({ key: path, expireTime: 30 * 60 });
+            urlMap[path] = mediaAccessUrl(await generatePresignedUrl({ key: path, expireTime: 30 * 60 }));
           } catch (err) {
             console.error('[presign] Failed for path:', path, err);
           }
           continue;
         }
         // Fall through to authenticated branch for S3-only files.
-        if (!user && !sharedTaskId) {
+        if (!user && !sharedReport) {
           continue; // cannot auth → skip this path
         }
       }
@@ -109,24 +152,30 @@ export async function POST(request: NextRequest) {
       const material = await findMaterialByPath(client, path);
       if (!material) continue;
 
+      const reportScope = user ? readableReport : sharedReport;
+      const frozenByReport = await isFrozenReportMaterial(client, reportScope, String(material.id || ''));
       const canAccess = user
         ? user.role === 'admin'
           || Boolean(material.task_id && await canAccessTask(client, user, String(material.task_id)))
-          || Boolean(readableReportTaskId && material.task_id && String(material.task_id) === readableReportTaskId)
-        : Boolean(sharedTaskId && material.task_id && String(material.task_id) === sharedTaskId);
+          || Boolean(readableReport?.taskId && material.task_id && String(material.task_id) === readableReport.taskId)
+          || frozenByReport
+        : Boolean(
+          frozenByReport
+          || (sharedReport?.taskId && material.task_id && String(material.task_id) === sharedReport.taskId)
+        );
       if (!canAccess) continue;
 
       try {
-        urlMap[path] = await generatePresignedUrl({
+        urlMap[path] = mediaAccessUrl(await generatePresignedUrl({
           key: path,
           expireTime: 30 * 60,
-        });
+        }));
       } catch (err) {
         console.error('[presign] Failed for path:', path, err);
       }
     }
 
-    return NextResponse.json({ code: 0, data: urlMap });
+    return jsonResponse({ code: 0, data: urlMap });
   } catch (error) {
     console.error('[presign] Error:', error);
     return NextResponse.json(

@@ -67,6 +67,7 @@ export function SensesInputWorkspace({
       const record = records.find((item) => item.id === target.id);
       if (!record) throw new Error('删除目标不存在，请刷新后重试');
       await onDeleteRecord(record);
+      onBindingTargetChange(null);
     },
     refresh: async () => { await onMaterialsChange?.(); },
     onError: (error) => toast.error(error instanceof Error ? error.message : '删除失败，请稍后重试'),

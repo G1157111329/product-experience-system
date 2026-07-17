@@ -55,7 +55,7 @@ export async function GET(
     .limit(1)
     .execute();
   if (convRows.length === 0) {
-    return fail(traceId, { message: 'conversation 不存在', status: 404 });
+    return fail(traceId, { message: '对话不存在', status: 404 });
   }
   const conv = convRows[0];
   if (!canAccessConversationRow(user, conv)) {

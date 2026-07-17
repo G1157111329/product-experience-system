@@ -234,55 +234,40 @@ export function parseMetricDraft(
 }
 
 // ---------------------------------------------------------------------------
-// Small debounce hook (used by text-based cells)
+// Completion-save hook (used by text-based cells)
 // ---------------------------------------------------------------------------
 
-interface DebouncedSave {
+interface CompletionSave {
   schedule: (value: string) => void;
   flush: () => void;
-  cancel: () => void;
+  hasPending: () => boolean;
 }
 
 /**
- * Debounce a save by `delay` ms. Holds the latest value in a ref so a late
- * keystroke isn't lost, and exposes `flush` (blur / unmount) + `cancel`.
+ * Keep typing local and save only when the field is completed by blur, Enter,
+ * unmount, or another explicit navigation flush.
  */
-function useDebouncedSave(save: (value: string) => void, delay = 800): DebouncedSave {
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+function useCompletionSave(save: (value: string) => void): CompletionSave {
   const valueRef = useRef<string>('');
+  const dirtyRef = useRef(false);
   const saveRef = useRef(save);
   saveRef.current = save;
 
-  const schedule = useCallback(
-    (value: string) => {
-      valueRef.current = value;
-      if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => {
-        saveRef.current(valueRef.current);
-        timerRef.current = null;
-      }, delay);
-    },
-    [delay],
-  );
+  const schedule = useCallback((value: string) => {
+    valueRef.current = value;
+    dirtyRef.current = true;
+  }, []);
 
   const flush = useCallback(() => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-      saveRef.current(valueRef.current);
-    }
+    if (!dirtyRef.current) return;
+    dirtyRef.current = false;
+    saveRef.current(valueRef.current);
   }, []);
-
-  const cancel = useCallback(() => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-  }, []);
+  const hasPending = useCallback(() => dirtyRef.current, []);
 
   useEffect(() => () => flush(), [flush]);
 
-  return { schedule, flush, cancel };
+  return { schedule, flush, hasPending };
 }
 
 // ---------------------------------------------------------------------------
@@ -307,12 +292,11 @@ export function ResultSlotCell({
 }) {
   const [summary, setSummary] = useState(row.slots.result.summary ?? '');
   const summaryComposition = useRef(createCompositionController());
+  const { schedule, flush, hasPending } = useCompletionSave((v) => onChange({ summary: v }));
   // Reset the draft when the authoritative summary changes (refetch / 409 revert).
   useEffect(() => {
-    setSummary(row.slots.result.summary ?? '');
-  }, [row.slots.result.summary]);
-
-  const { schedule, flush } = useDebouncedSave((v) => onChange({ summary: v }));
+    if (!hasPending()) setSummary(row.slots.result.summary ?? '');
+  }, [hasPending, row.slots.result.summary]);
 
   // Schema options override the platform default; see DEFAULT_RESULT_STATUS_OPTIONS.
   const options = effectiveResultStatusOptions(resultStatusOptions);
@@ -347,6 +331,13 @@ export function ResultSlotCell({
         onBlur={() => {
           if (summaryComposition.current.blur(summary) !== null) flush();
         }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            flush();
+            event.currentTarget.blur();
+          }
+        }}
         rows={2}
         placeholder="效果结论"
         className="min-h-12 resize-y text-xs"
@@ -371,11 +362,10 @@ export function ProcessSlotCell({
 }) {
   const [note, setNote] = useState(row.slots.process.note ?? '');
   const noteComposition = useRef(createCompositionController());
+  const { schedule, flush, hasPending } = useCompletionSave(onChange);
   useEffect(() => {
-    setNote(row.slots.process.note ?? '');
-  }, [row.slots.process.note]);
-
-  const { schedule, flush } = useDebouncedSave(onChange);
+    if (!hasPending()) setNote(row.slots.process.note ?? '');
+  }, [hasPending, row.slots.process.note]);
 
   return (
     <div className="min-w-0 p-1.5">
@@ -390,6 +380,13 @@ export function ProcessSlotCell({
         onCompositionEnd={(e) => schedule(noteComposition.current.end(e.currentTarget.value))}
         onBlur={() => {
           if (noteComposition.current.blur(note) !== null) flush();
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            flush();
+            event.currentTarget.blur();
+          }
         }}
         rows={2}
         placeholder="过程记录"
@@ -409,7 +406,7 @@ export function IssueSlotCell({ row }: { row: MatrixReadRow }) {
   return (
     <div className="flex min-w-0 flex-col gap-1 p-1.5">
       <div className="flex items-center gap-1.5">
-        <Badge variant={count > 0 ? 'destructive' : 'secondary'} className="h-5 text-[10px]">
+        <Badge variant={count > 0 ? 'destructive' : 'secondary'} className="h-5 text-xs">
           {count} 个问题
         </Badge>
         <div className="flex items-center gap-1">
@@ -428,7 +425,7 @@ export function IssueSlotCell({ row }: { row: MatrixReadRow }) {
       <Button
         size="sm"
         variant="outline"
-        className="h-6 w-full gap-1 text-[10px]"
+        className="h-6 w-full gap-1 text-xs"
         onClick={() => toast.info('问题创建将在后续任务接入')}
       >
         <Plus className="h-3 w-3" />
@@ -475,16 +472,15 @@ export function ObservedMetricCell({
   })();
   const [draft, setDraft] = useState(seed);
   const metricComposition = useRef(createCompositionController());
-  useEffect(() => {
-    setDraft(seed);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [metric?.value, metric?.durationMs, metric?.text, dimension.valueKind]);
-
-  const { schedule, flush } = useDebouncedSave((v) => {
+  const { schedule, flush, hasPending } = useCompletionSave((v) => {
     onChange(parseMetricDraft(v, dimension.valueKind));
   });
+  useEffect(() => {
+    if (!hasPending()) setDraft(seed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [metric?.value, metric?.durationMs, metric?.text, dimension.valueKind, hasPending]);
 
-  const unit = dimension.unitCode ? <span className="text-[10px] text-muted-foreground">{dimension.unitCode}</span> : null;
+  const unit = dimension.unitCode ? <span className="text-xs text-muted-foreground">{dimension.unitCode}</span> : null;
 
   // Batch-paste failure overlay: red ring + native tooltip with the error text.
   // Clears once the user focuses/edits the cell — they are about to overwrite
@@ -544,7 +540,14 @@ export function ObservedMetricCell({
         onCompositionStart={() => metricComposition.current.start()}
         onCompositionEnd={(e) => schedule(metricComposition.current.end(e.currentTarget.value))}
         onFocus={clearFailure}
-        onKeyDown={clearFailure}
+        onKeyDown={(event) => {
+          clearFailure();
+          if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            flush();
+            event.currentTarget.blur();
+          }
+        }}
         onBlur={() => {
           if (metricComposition.current.blur(draft) !== null) flush();
         }}
@@ -650,7 +653,7 @@ export function EvidenceCell({
       <Button
         size="sm"
         variant="outline"
-        className="h-7 gap-1 text-[10px]"
+        className="h-7 gap-1 text-xs"
         onClick={() => setOpen(true)}
         title="选择/上传证据素材"
       >
@@ -669,6 +672,7 @@ export function EvidenceCell({
           setMaterials(mats);
         }}
         selectedPreviewSize="sm"
+        enableImageEditing
       />
     </div>
   );

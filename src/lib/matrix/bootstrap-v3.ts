@@ -3,7 +3,7 @@
  *
  * PRD V3.1.2.4 §6.2 / §7 / §13.2:
  *   - Creates matrix_view_definitions (confirmed)
- *   - Seeds default A~E / O / P / Q structural columns (no business field presets)
+ *   - Seeds default A/B / E / O / P / Q structural columns (no business field presets)
  *   - Points task_matrices.current_view_definition_id at the new view
  *   - Sets status to `active` so the user can enter data immediately
  *
@@ -34,8 +34,6 @@ type DefaultColumn = {
 const DEFAULT_COLUMNS: DefaultColumn[] = [
   { columnZone: 'hierarchy', zoneRole: 'A', columnLabel: '一级大类', dataType: 'text', displayOrder: 10, desktopWidthPx: 120, isPinned: true },
   { columnZone: 'hierarchy', zoneRole: 'B', columnLabel: '二级细项', dataType: 'text', displayOrder: 20, desktopWidthPx: 220, isPinned: false },
-  { columnZone: 'hierarchy', zoneRole: 'C', columnLabel: '三级细项', dataType: 'text', displayOrder: 30, desktopWidthPx: 120, isPinned: true },
-  { columnZone: 'primary_media', zoneRole: 'D', columnLabel: '图片', dataType: 'image_slot', displayOrder: 40, desktopWidthPx: 100, isPinned: true, maxMediaCount: 3 },
   { columnZone: 'comparison_category', zoneRole: 'E', columnLabel: '一级对比类目', dataType: 'text', displayOrder: 50, desktopWidthPx: 140, isPinned: true },
   { columnZone: 'effect_media', zoneRole: 'O', columnLabel: '效果素材', dataType: 'media_slot', displayOrder: 200, desktopWidthPx: 120, isPinned: false, maxMediaCount: 12 },
   { columnZone: 'evaluation', zoneRole: 'P', columnLabel: '效果评价', dataType: 'long_text', displayOrder: 210, desktopWidthPx: 180, isPinned: false },
@@ -54,7 +52,7 @@ export async function bootstrapV3MatrixView(opts: {
     .values({
       matrixId,
       versionNo: 1,
-      maxHierarchyLevel: 3,
+      maxHierarchyLevel: 2,
       leftFrozenColumnCount: 0,
       formulaMode: 'relative_cell_reference',
       styleMode: 'basic_text_style',

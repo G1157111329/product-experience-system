@@ -5,6 +5,7 @@ import { fail, ok } from '@/lib/server/api-v1/response';
 import { resolveTraceId } from '@/lib/server/api-v1/trace';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
+import { ingestWecomTextMessage } from '@/lib/server/hermes/wecom-text-ingest';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,7 +58,7 @@ export async function POST(req: NextRequest) {
   try { body = await req.text(); }
   catch { return denyCallback(req, traceId, 'wecom_callback_body_unreadable', 400); }
   try {
-    const job = await processWecomCallback(
+    const result = await processWecomCallback(
       callbackInput(req, body),
       undefined,
       async (denial) => writeSecurityAudit(getSupabaseClient(), {
@@ -69,8 +70,9 @@ export async function POST(req: NextRequest) {
         targetId: null,
         metadata: { reason: denial.reason, traceId },
       }),
-    ) as { id: string; downloadStatus: string };
-    return ok({ accepted: true, jobId: job.id, downloadStatus: job.downloadStatus }, traceId);
+      ingestWecomTextMessage,
+    ) as { accepted?: boolean; id?: string; downloadStatus?: string; conversationId?: string };
+    return ok({ accepted: result.accepted ?? true, jobId: result.id ?? null, downloadStatus: result.downloadStatus ?? null, conversationId: result.conversationId ?? null }, traceId);
   } catch (error) {
     const code = error instanceof WecomCallbackError ? error.code : 'wecom_callback_rejected';
     const status = code === 'wecom_replay_detected' ? 409 : 403;

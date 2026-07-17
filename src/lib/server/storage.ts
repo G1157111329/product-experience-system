@@ -15,6 +15,7 @@ import { Upload } from '@aws-sdk/lib-storage';
 import crypto from 'crypto';
 import { createReadStream, createWriteStream } from 'fs';
 import { access, mkdir, readFile, stat, unlink, writeFile } from 'fs/promises';
+import { randomUUID } from 'crypto';
 import path from 'path';
 import { pipeline } from 'stream/promises';
 import { isProductionRuntime, requireProductionEnv } from './security-config';
@@ -32,6 +33,21 @@ const STORAGE_DRIVER = (process.env.STORAGE_DRIVER || 'local').toLowerCase();
 const NEW_UPLOAD_DRIVER = (process.env.NEW_UPLOAD_DRIVER || STORAGE_DRIVER).toLowerCase();
 const DEFAULT_LOCAL_UPLOAD_DIR = path.join(/*turbopackIgnore: true*/ process.cwd(), 'public', 'uploads');
 const LOCAL_UPLOAD_DIR = path.resolve(/*turbopackIgnore: true*/ process.env.LOCAL_UPLOAD_DIR || DEFAULT_LOCAL_UPLOAD_DIR);
+
+/** Fail startup before accepting traffic when local uploads cannot be persisted. */
+export async function validateLocalUploadDirectoryWritable(directory = LOCAL_UPLOAD_DIR) {
+  const resolved = path.resolve(directory);
+  const probe = path.join(resolved, `.write-probe-${process.pid}-${randomUUID()}`);
+  try {
+    await mkdir(resolved, { recursive: true });
+    await writeFile(probe, '', { flag: 'wx' });
+    await unlink(probe);
+  } catch (error) {
+    try { await unlink(probe); } catch { /* probe may not have been created */ }
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`LOCAL_UPLOAD_DIR is not writable: ${resolved} (${detail})`);
+  }
+}
 const LOCAL_PUBLIC_BASE_PATH = normalizePublicBasePath(process.env.LOCAL_PUBLIC_BASE_PATH || '/uploads');
 const LOCAL_PROTECTED_BASE_PATH = normalizePublicBasePath(process.env.LOCAL_PROTECTED_BASE_PATH || '/api/materials/file');
 const PUBLIC_MEDIA_BASE_URL = process.env.PUBLIC_MEDIA_BASE_URL?.replace(/\/+$/, '') || '';
@@ -98,6 +114,7 @@ function isNewUploadS3(): boolean {
  * operations. Used to decide whether the fallback path is available.
  */
 function isS3FallbackAvailable(): boolean {
+  if (!isNewUploadS3() && !isS3Driver()) return false;
   if (!process.env.S3_BUCKET && !S3_BUCKET) return false;
   if (isProductionRuntime()) {
     return Boolean(process.env.S3_ACCESS_KEY) && Boolean(process.env.S3_SECRET_KEY);

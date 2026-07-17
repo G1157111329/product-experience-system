@@ -17,6 +17,13 @@ import { fetchJson, getErrorMessage } from '@/lib/http';
 import { toast } from 'sonner';
 import { IssueRectificationDialog } from '@/components/issues/issue-rectification-dialog';
 
+interface TaskContext {
+  id: string;
+  task_name: string;
+  project_number: string | null;
+  product_model: string | null;
+}
+
 interface Issue {
   id: string; title: string; product_model: string | null;
   category: string | null; sub_category: string | null;
@@ -27,7 +34,7 @@ interface Issue {
   no_improve_reason: string | null;
   responsible_person: string | null; plan_complete_date: string | null;
   actual_complete_date: string | null; verification_note: string | null;
-  task_id: string; created_at: string; updated_at: string;
+  task_id: string; task: TaskContext | null; created_at: string; updated_at: string;
   [key: string]: unknown;
 }
 
@@ -36,6 +43,26 @@ interface ReportGroup {
   report_title: string;
   created_at: string;
   issues: Issue[];
+}
+
+function issueGroupMeta(issue: Issue): Pick<ReportGroup, 'report_id' | 'report_title'> {
+  if (issue.source_report_id) {
+    return {
+      report_id: issue.source_report_id,
+      report_title: issue.source?.split(' - ')[0] || '报告问题',
+    };
+  }
+  if (!issue.task) {
+    return { report_id: `unattributed:${issue.id}`, report_title: '未关联项目/任务的问题' };
+  }
+  const taskContext = `项目：${issue.task.project_number || issue.task.product_model || '未命名项目'} · 任务：${issue.task.task_name}`;
+  if (issue.source_type === 'recipe_problem') {
+    return { report_id: `unreported-recipe:${issue.task.id}`, report_title: `食谱/功能问题（未归档报告） · ${taskContext}` };
+  }
+  if (issue.source_type === 'record_fail') {
+    return { report_id: `unreported-record:${issue.task.id}`, report_title: `五感体验问题（未归档报告） · ${taskContext}` };
+  }
+  return { report_id: `unreported-other:${issue.task.id}`, report_title: `其他未关联报告问题 · ${taskContext}` };
 }
 
 const LEVEL_COLORS: Record<string, string> = {
@@ -198,18 +225,20 @@ export default function IssuesPage() {
 
   // Group issues by source_report_id with status/level filters
   useEffect(() => {
-    const filtered = issues.filter(i => {
+      const filtered = issues.filter(i => {
+        if (!i.task_id) return false;
       if (filterStatus !== 'all' && getIssueStatusPresentation(i.status).label !== filterStatus) return false;
       if (filterLevel !== 'all' && i.level !== filterLevel) return false;
       return true;
     });
     const groups: Record<string, ReportGroup> = {};
     for (const issue of filtered) {
-      const key = issue.source_report_id || 'no-report';
+      const groupMeta = issueGroupMeta(issue);
+      const key = groupMeta.report_id;
       if (!groups[key]) {
         groups[key] = {
           report_id: key,
-          report_title: issue.source?.split(' - ')[0] || '未分类问题',
+          report_title: groupMeta.report_title,
           created_at: issue.created_at,
           issues: [],
         };
@@ -346,7 +375,19 @@ export default function IssuesPage() {
         <div className="grid gap-3 xl:grid-cols-2">
           {reportGroups.map((group) => (
             <Card key={group.report_id} className="overflow-hidden transition-colors hover:border-primary/30">
-              <CardHeader className="border-b bg-muted/20 pb-3 cursor-pointer" onClick={() => setSelectedGroup(selectedGroup?.report_id === group.report_id ? null : group)}>
+              <CardHeader
+                role="button"
+                tabIndex={0}
+                aria-expanded={selectedGroup?.report_id === group.report_id || reportGroups.length <= 5}
+                className="cursor-pointer border-b bg-muted/20 pb-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => setSelectedGroup(selectedGroup?.report_id === group.report_id ? null : group)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    setSelectedGroup(selectedGroup?.report_id === group.report_id ? null : group);
+                  }
+                }}
+              >
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-sm font-medium">{group.report_title}</CardTitle>
                   <Badge variant="secondary" className="text-xs">{group.issues.length}个问题</Badge>
@@ -356,11 +397,21 @@ export default function IssuesPage() {
                 <CardContent className="pt-0 space-y-2">
                   {group.issues.map((issue) => (
                     <div key={issue.id}
+                      role="row"
+                      tabIndex={0}
                       className="group flex items-center gap-2 p-2 rounded-lg bg-background border cursor-pointer transition-colors hover:bg-muted/30 flex-wrap sm:flex-nowrap"
-                      onClick={() => { setSelectedIssue(issue); setDetailOpen(true); }}>
-                      <Badge className={cn('text-[10px] shrink-0', LEVEL_COLORS[issue.level || '二类'] || LEVEL_COLORS['二类'])}>{issue.level || '二类'}</Badge>
+                      onClick={() => { setSelectedIssue(issue); setDetailOpen(true); }}
+                      onKeyDown={(event) => {
+                        if (event.target !== event.currentTarget) return;
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setSelectedIssue(issue);
+                          setDetailOpen(true);
+                        }
+                      }}>
+                      <Badge className={cn('text-xs shrink-0', LEVEL_COLORS[issue.level || '二类'] || LEVEL_COLORS['二类'])}>{issue.level || '二类'}</Badge>
                       {issue.source_type === 'recipe_problem' && (
-                        <Badge variant="outline" className="text-[10px] shrink-0">食谱/功能</Badge>
+                        <Badge variant="outline" className="text-xs shrink-0">食谱/功能</Badge>
                       )}
                       <span className="text-sm flex-1 min-w-0 truncate">{issue.title}</span>
                       <div className="flex w-full shrink-0 flex-wrap gap-1 sm:w-auto" onClick={(e) => e.stopPropagation()}>
@@ -371,8 +422,9 @@ export default function IssuesPage() {
                             <button
                               key={label}
                               onClick={() => void handleStatusAction(issue, label)}
+                              aria-pressed={current.key === candidate.key}
                               className={cn(
-                                'min-h-8 rounded px-2 py-1.5 text-[11px] transition-colors sm:min-h-7 sm:flex-none sm:px-2 sm:py-1 lg:min-w-14',
+                                'min-h-11 rounded px-2 py-1.5 text-xs transition-colors sm:flex-none sm:px-2 sm:py-1 lg:min-w-14',
                                 candidate.className,
                                 current.key === candidate.key
                                   ? 'font-semibold underline underline-offset-2'

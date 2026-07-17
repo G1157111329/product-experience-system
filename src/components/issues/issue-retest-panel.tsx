@@ -349,10 +349,10 @@ export function IssueRetestPanel({ issueId, taskId, onIssueUpdated }: IssueRetes
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <span className="text-xs font-medium">{latest ? '最新复测' : '历史复测'}</span>
-            <Badge variant="outline" className="text-[10px]">{evaluationStatusLabel(record.result)}</Badge>
+            <Badge variant="outline" className="text-xs">{evaluationStatusLabel(record.result)}</Badge>
           </div>
           <div className="flex items-center gap-1">
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-xs text-muted-foreground">
               {new Date(record.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
             </span>
             <Button type="button" variant="ghost" size="icon" className="h-7 w-7" aria-label="编辑复测" disabled={busy} onClick={() => startEdit(record)}>
@@ -363,7 +363,7 @@ export function IssueRetestPanel({ issueId, taskId, onIssueUpdated }: IssueRetes
             </Button>
           </div>
         </div>
-        <p className="text-[10px] text-muted-foreground">录入人：{record.created_by_name || record.created_by || '未知'}</p>
+        <p className="text-xs text-muted-foreground">录入人：{record.created_by_name || record.created_by || '未知'}</p>
         {editing ? (
           <div className="space-y-3">
             <ResultControl value={editResult} onChange={setEditResult} disabled={busy} />
@@ -401,7 +401,7 @@ export function IssueRetestPanel({ issueId, taskId, onIssueUpdated }: IssueRetes
     <section className="border-t pt-3 space-y-3" aria-label="整改复测">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium">整改复测</span>
-        <Badge variant="secondary" className="text-[10px]">{records.length} 次</Badge>
+        <Badge variant="secondary" className="text-xs">{records.length} 次</Badge>
       </div>
 
       <div className="rounded-lg border bg-primary/5 p-3 space-y-3">

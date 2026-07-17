@@ -10,6 +10,7 @@
  */
 import type { V3MatrixProjection, V3HierarchyNode, V3Column, V3CellValue } from './v3-types';
 import { cellKey } from './v3-types';
+import { formatMatrixNumber } from './number-format';
 
 // ---------------------------------------------------------------------------
 // Frozen report shape
@@ -29,6 +30,8 @@ export interface ReportV3Column {
   dataType: string;
   unitText: string | null;
   displayOrder: number;
+  /** Frozen display precision for numeric and formula values. */
+  decimalPlaces: number | null;
 }
 
 export interface ReportV3Row {
@@ -48,19 +51,28 @@ export interface ReportV3NarrativeBlock {
 
 export interface ReportV3IssuePoint {
   id: string;
+  /** Immutable issue-point identity used to join the canonical mutable issue. */
+  sourceCellId: string;
   leafRowId: string;
   columnId: string;
   leafRowIndex: number;
   issueText: string;
+  linkedIssueId: string | null;
   status: string;
   materialIds: string[];
+  createdAt?: string | null;
 }
 
 export interface ReportV3CellMedia {
   materialId: string;
   materialType: string;
   fileName: string | null;
+  /** Immutable storage key; renderers re-sign this instead of trusting frozen URLs. */
+  filePath: string | null;
   fileUrl: string | null;
+  /** Stable video preview descriptor retained with the frozen source cell. */
+  thumbnailUrl: string | null;
+  durationSec: number | null;
 }
 
 export interface ReportV3MatrixProjection {
@@ -109,12 +121,17 @@ function freezeHierarchy(nodes: V3HierarchyNode[]): ReportV3HierarchyNode[] {
   }));
 }
 
+export function formatFrozenMatrixNumber(value: unknown, decimalPlaces: number | null | undefined): string {
+  return formatMatrixNumber(value, decimalPlaces);
+}
+
 function cellToDisplay(cell: V3CellValue | undefined, column: V3Column): string {
   if (!cell || cell.valueState === 'empty') return '';
-  if (cell.displayText) return cell.displayText;
-  if (column.dataType === 'number' || column.dataType === 'percentage') {
-    return cell.valueNumber ?? '';
+  if (column.dataType === 'number' || column.dataType === 'percentage' || column.dataType === 'formula') {
+    const value = cell.valueNumber ?? cell.valuePercentage ?? cell.valueText ?? cell.displayText;
+    return formatFrozenMatrixNumber(value, column.decimalPlaces);
   }
+  if (cell.displayText) return cell.displayText;
   if (column.dataType === 'duration') {
     if (cell.valueDurationSeconds === null) return '';
     const mins = Math.floor(cell.valueDurationSeconds / 60);
@@ -169,11 +186,14 @@ export function freezeV3MatrixForReport(
     const leafRow = projection.rows.find((r) => r.id === ip.leafRowId);
     return {
       id: ip.id,
+      sourceCellId: ip.id,
       leafRowId: ip.leafRowId,
       columnId: ip.columnId,
       leafRowIndex: leafRow?.visibleRowIndex ?? -1,
       issueText: ip.issueText,
+      linkedIssueId: ip.linkedIssueId,
       status: ip.status,
+      createdAt: ip.createdAt ?? null,
       materialIds: Object.entries(projection.cellMedia ?? {})
         .filter(([key]) => key.startsWith(`${ip.leafRowId}:`))
         .flatMap(([, items]) => items.map((item) => item.materialId)),
@@ -186,7 +206,10 @@ export function freezeV3MatrixForReport(
       materialId: m.materialId,
       materialType: m.materialType,
       fileName: m.fileName,
+      filePath: m.filePath,
       fileUrl: m.fileUrl,
+      thumbnailUrl: m.thumbnailUrl,
+      durationSec: m.durationSec,
     }));
   }
 
@@ -203,6 +226,7 @@ export function freezeV3MatrixForReport(
       dataType: c.dataType,
       unitText: c.unitText,
       displayOrder: c.displayOrder,
+      decimalPlaces: c.decimalPlaces,
     })),
     rows,
     cellMedia,

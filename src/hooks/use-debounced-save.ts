@@ -26,8 +26,7 @@ export function useDebouncedSave<T>(
   saveFn: (value: T) => Promise<{ conflict?: boolean } | void>,
   options: DebouncedSaveOptions = {},
 ): DebouncedSaveResult<T> {
-  const { debounceMs = 800, savedFlashMs = 1500 } = options;
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { savedFlashMs = 1500 } = options;
   const savedFlashRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingValueRef = useRef<T | null>(null);
   const saveKeyRef = useRef(Symbol('debounced-inline-save'));
@@ -69,10 +68,6 @@ export function useDebouncedSave<T>(
   }, [persistLatest]);
 
   const flush = useCallback(() => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
     void flushInlineSave(saveKeyRef.current).catch(() => undefined);
   }, []);
 
@@ -80,16 +75,9 @@ export function useDebouncedSave<T>(
     pendingValueRef.current = value;
     if (mountedRef.current) setStatusState('dirty');
     registerLatestDraft();
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      timerRef.current = null;
-      void flushInlineSave(saveKeyRef.current).catch(() => undefined);
-    }, debounceMs);
-  }, [debounceMs, registerLatestDraft]);
+  }, [registerLatestDraft]);
 
   const reset = useCallback(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = null;
     pendingValueRef.current = null;
     clearInlineSave(saveKeyRef.current);
     if (mountedRef.current) setStatusState('idle');
@@ -111,7 +99,6 @@ export function useDebouncedSave<T>(
     const saveKey = saveKeyRef.current;
     return () => {
       mountedRef.current = false;
-      if (timerRef.current) clearTimeout(timerRef.current);
       if (savedFlashRef.current) clearTimeout(savedFlashRef.current);
       if (pendingValueRef.current !== null) {
         void flushInlineSave(saveKey).catch(() => undefined);

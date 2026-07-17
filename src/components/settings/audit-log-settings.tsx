@@ -249,7 +249,7 @@ export function AuditLogSettings({ open, onOpenChange }: AuditLogSettingsProps) 
                       <span className="mt-0.5 block truncate text-muted-foreground">{log.request_method || '-'} {log.request_path || '-'}</span>
                     </span>
                     <span>
-                      <Badge variant="outline" className={cn('text-[10px]', outcomeClass(log.outcome))}>{outcomeLabel(log.outcome)}</Badge>
+                      <Badge variant="outline" className={cn('text-xs', outcomeClass(log.outcome))}>{outcomeLabel(log.outcome)}</Badge>
                     </span>
                     <span className="truncate text-muted-foreground">{log.actor_account || '-'}</span>
                   </button>
@@ -266,39 +266,39 @@ export function AuditLogSettings({ open, onOpenChange }: AuditLogSettingsProps) 
             {selected ? (
               <div className="mt-3 space-y-3 text-xs">
                 <div>
-                  <Label className="text-[11px] text-muted-foreground">动作</Label>
+                  <Label className="text-xs text-muted-foreground">动作</Label>
                   <p className="mt-1 break-words font-medium">{actionLabels[selected.action] || selected.action}</p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <Label className="text-[11px] text-muted-foreground">操作者</Label>
+                    <Label className="text-xs text-muted-foreground">操作者</Label>
                     <p className="mt-1 break-words">{selected.actor_account || '-'}</p>
                   </div>
                   <div>
-                    <Label className="text-[11px] text-muted-foreground">结果</Label>
+                    <Label className="text-xs text-muted-foreground">结果</Label>
                     <p className="mt-1">{outcomeLabel(selected.outcome)}</p>
                   </div>
                   <div>
-                    <Label className="text-[11px] text-muted-foreground">对象类型</Label>
+                    <Label className="text-xs text-muted-foreground">对象类型</Label>
                     <p className="mt-1 break-words">{selected.target_type || '-'}</p>
                   </div>
                   <div>
-                    <Label className="text-[11px] text-muted-foreground">对象ID</Label>
+                    <Label className="text-xs text-muted-foreground">对象ID</Label>
                     <p className="mt-1 break-words">{selected.target_id || '-'}</p>
                   </div>
                 </div>
                 <div>
-                  <Label className="text-[11px] text-muted-foreground">请求路径</Label>
+                  <Label className="text-xs text-muted-foreground">请求路径</Label>
                   <p className="mt-1 break-words">{selected.request_method || '-'} {selected.request_path || '-'}</p>
                 </div>
                 <div>
-                  <Label className="text-[11px] text-muted-foreground">IP / 浏览器</Label>
+                  <Label className="text-xs text-muted-foreground">IP / 浏览器</Label>
                   <p className="mt-1 break-words">{selected.ip_address || '-'}</p>
                   <p className="mt-1 break-words text-muted-foreground">{selected.user_agent || '-'}</p>
                 </div>
                 <div>
-                  <Label className="text-[11px] text-muted-foreground">附加信息</Label>
-                  <pre className="mt-1 max-h-48 overflow-auto rounded-md border bg-background p-2 text-[11px] leading-5">
+                  <Label className="text-xs text-muted-foreground">附加信息</Label>
+                  <pre className="mt-1 max-h-48 overflow-auto rounded-md border bg-background p-2 text-xs leading-5">
                     {JSON.stringify(selected.metadata || {}, null, 2)}
                   </pre>
                 </div>

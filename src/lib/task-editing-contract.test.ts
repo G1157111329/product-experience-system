@@ -3,6 +3,8 @@ import { classifyTaskEditAction, requiresTaskEditConfirmation } from './task-edi
 
 assert.equal(classifyTaskEditAction('recipe_step_update'), 'direct');
 assert.equal(classifyTaskEditAction('material_bind'), 'direct');
+assert.equal(classifyTaskEditAction('comparison_cell_material_bind'), 'direct');
+assert.equal(classifyTaskEditAction('data_matrix_cell_material_bind'), 'direct');
 assert.equal(classifyTaskEditAction('issue_update'), 'direct');
 assert.equal(classifyTaskEditAction('recipe_step_delete'), 'confirm');
 assert.equal(classifyTaskEditAction('user_role_update'), 'confirm');

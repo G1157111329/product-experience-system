@@ -37,6 +37,7 @@ async function main() {
       model: 'vision-model',
       temperature: 6,
       max_tokens: 3000,
+      request_options: { tokenField: 'max_completion_tokens', extraBody: { response_format: { type: 'json_object' } } },
       custom_api_url: 'https://example.com/v1/chat/completions',
       custom_api_key_encrypted: 'secret',
     },
@@ -45,10 +46,12 @@ async function main() {
   assert.deepEqual(active, {
     provider: 'custom',
     model: 'vision-model',
+    supportsVision: false,
     temperature: 0.6,
     maxTokens: 3000,
     customApiUrl: 'https://example.com/v1/chat/completions',
     customApiKey: 'secret',
+    requestOptions: { tokenField: 'max_completion_tokens', extraBody: { response_format: { type: 'json_object' } } },
   });
 
   const legacy = await resolveAIConfig(makeClient({
@@ -63,6 +66,7 @@ async function main() {
   assert.equal(legacy.model, 'legacy-model');
   assert.equal(legacy.temperature, 0.4);
   assert.equal(legacy.maxTokens, 2400);
+  assert.deepEqual(legacy.requestOptions, {});
 
   const fallback = await resolveAIConfig(makeClient({}));
 

@@ -54,6 +54,7 @@ export interface AiTaskSummary {
 
 export interface CheckRecord {
   id: string;
+  created_at: string;
   sensory_dimension: string | null;
   check_dimension: string | null;
   sub_check_dimension: string | null;

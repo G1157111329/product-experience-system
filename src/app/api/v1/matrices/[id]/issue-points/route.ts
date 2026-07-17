@@ -7,6 +7,7 @@
 import { NextRequest } from 'next/server';
 import { getDb } from '@/storage/database/pg-db';
 import { matrixIssuePoints } from '@/storage/database/shared/schema';
+import { syncMatrixIssuePointToIssue } from '@/lib/matrix/issue-point-sync';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessMatrix, requireUser, isAuthResponse } from '@/lib/server/auth';
 import { ok, fail } from '@/lib/server/api-v1/response';
@@ -54,7 +55,8 @@ export async function POST(
       .returning()
       .execute();
 
-    return ok(issuePoint, traceId, 'created');
+    const linkedIssueId = issuePoint ? await syncMatrixIssuePointToIssue(db, issuePoint) : null;
+    return ok({ ...issuePoint, linkedIssueId, status: linkedIssueId ? 'converted' : issuePoint?.status }, traceId, 'created');
   } catch (err) {
     const message = err instanceof Error ? err.message : '创建失败';
     return fail(traceId, { message, status: 500 });

@@ -48,13 +48,35 @@ import {
  * columns as STRINGS (e.g. `"558.700000"`) — a bare `typeof === 'number'`
  * check would silently drop every value in production.
  */
-function toNumber(v: unknown): number | null {
+export function toFormulaNumber(v: unknown): number | null {
+  if (typeof v === 'object' && v !== null) {
+    const cell = v as {
+      valueNumber?: unknown;
+      valuePercentage?: unknown;
+      valueText?: unknown;
+    };
+    return toFormulaNumber(cell.valueNumber ?? cell.valuePercentage ?? cell.valueText);
+  }
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
-  if (typeof v === 'string' && v !== '') {
-    const n = Number(v);
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v.trim());
     return Number.isFinite(n) ? n : null;
   }
   return null;
+}
+
+/**
+ * Formula A1 coordinates retain the optional level-3 hierarchy slot even when
+ * it is visually collapsed. This keeps D/E and following references stable as
+ * users add or remove third-level items. The retired primary image slot is the
+ * only omitted column because it is no longer a matrix entry surface.
+ */
+export function getFormulaCoordinateColumns<T extends { archivedAt: unknown; zoneRole: string | null; columnZone: string }>(
+  columns: T[],
+): T[] {
+  return columns.filter(
+    (column) => column.archivedAt === null && column.columnZone !== 'primary_media',
+  );
 }
 
 /** The A1 row index for a leaf row: 0-based, derived from visibleRowIndex. */
@@ -117,16 +139,16 @@ export async function recomputeMatrixFormulas(matrixId: string): Promise<void> {
   ]);
 
   // --- 2. Build the coordinate space. ---
-  // Columns: ordered by displayOrder, active only (archivedAt null). Their
-  // position in this array IS the A1 column index (A=0, B=1, ...).
-  const activeColumns = columnRows.filter((c) => c.archivedAt === null);
-  const colIdToIndex = new Map<string, number>();
-  activeColumns.forEach((c, i) => colIdToIndex.set(c.id, i));
-
   // Leaf rows: active only. Their visibleRowIndex IS the A1 row index (0-based).
   const activeLeafRows = leafRows.filter((r) => r.status === 'active');
   const leafById = new Map<string, (typeof activeLeafRows)[number]>();
   for (const r of activeLeafRows) leafById.set(r.id, r);
+
+  // Columns: ordered by displayOrder and exactly aligned with the currently
+  // visible grid. Their position in this array IS the A1 column index.
+  const activeColumns = getFormulaCoordinateColumns(columnRows);
+  const colIdToIndex = new Map<string, number>();
+  activeColumns.forEach((c, i) => colIdToIndex.set(c.id, i));
 
   const totalCols = activeColumns.length;
   // The grid's row extent is max(visibleRowIndex)+1 (visibleRowIndex is dense
@@ -140,7 +162,7 @@ export async function recomputeMatrixFormulas(matrixId: string): Promise<void> {
   // cellsByRowCol: leafRowId -> columnId -> numeric value.
   const numericByRowCol = new Map<string, Map<string, number>>();
   for (const c of cellRows) {
-    const n = toNumber(c.valueNumber);
+    const n = toFormulaNumber(c);
     if (n === null) continue;
     let rowMap = numericByRowCol.get(c.leafRowId);
     if (!rowMap) {

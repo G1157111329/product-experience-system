@@ -1,14 +1,18 @@
 'use client';
 
-import { Fragment, type CSSProperties } from 'react';
+import { Fragment, useState, type CSSProperties } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { pendingMediaDataUrl, toPublicMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import { cn } from '@/lib/utils';
 import type { ReportDetailMediaItem, ReportDetailModel, ReportDetailSection, ReportDetailSectionBlock } from '@/lib/server/report-detail';
 import { ReportDataMatrixReadView } from '@/components/reports/report-data-matrix-read-view';
 import { ReportMediaGrid, type ReportMediaItem, type ReportMediaRole } from '@/components/reports/report-media-grid';
-import type { PrintMedia, PrintReportViewModel } from '@/lib/server/report-print-renderer';
+import { printSummaryContent, type PrintMedia, type PrintReportViewModel } from '@/lib/server/report-print-renderer';
+import { dataMatrixPrintColumns } from '@/lib/report-data-matrix-layout';
 import { evaluationStatusLabel } from '@/lib/evaluation-status';
+import { normalizeFrozenIssueLevel } from '@/lib/report-frozen-view';
+import { PRINT_GOLDEN_YELLOW, PRINT_GOLDEN_YELLOW_INK, PRINT_TYPOGRAPHY } from '@/lib/report-print-theme';
+import { isPrintVideoSource } from '@/lib/print-assets';
 
 function blockItemClass(status: string | undefined) {
   if (status === 'risk') return 'border-red-200 bg-red-50 text-red-800';
@@ -21,8 +25,8 @@ function isImageType(type: string) {
   return type.toLowerCase().includes('image');
 }
 
-function isVideoType(type: string) {
-  return type.toLowerCase().includes('video');
+function isVideoType(type: string, url = '') {
+  return isPrintVideoSource(type, url);
 }
 
 function blockTypeLabel(type: string) {
@@ -206,7 +210,7 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
     <div data-testid="report-section-block" className={cn('min-w-0 overflow-hidden rounded-md border bg-background', compact ? 'p-2.5' : 'p-3')}>
       <div className="mb-2 flex min-w-0 items-start justify-between gap-2">
         <p className="min-w-0 break-words text-xs font-medium">{block.title}</p>
-        <Badge variant="outline" className="shrink-0 text-[10px]">{blockTypeLabel(block.type)}</Badge>
+        <Badge variant="outline" className="shrink-0 text-xs">{blockTypeLabel(block.type)}</Badge>
       </div>
 
       {block.description && (
@@ -219,7 +223,7 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
             <div key={`${item.label}-${index}`} data-testid="report-section-block-row" className={cn('min-w-0 rounded-md border px-3 py-2 text-xs', blockItemClass(item.status))}>
               <p className="break-words font-medium text-muted-foreground">{item.label}</p>
               <p className="mt-1 break-words text-sm text-foreground">{item.value}</p>
-              {item.note && <p className="mt-1 text-[11px] text-muted-foreground">{item.note}</p>}
+              {item.note && <p className="mt-1 text-xs text-muted-foreground">{item.note}</p>}
               <InlineMediaStrip media={item.media} role={item.mediaRole} />
             </div>
           ))}
@@ -232,7 +236,7 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
             <div key={`${item.label}-${index}`} data-testid="report-section-block-row" className={cn('min-w-0 rounded-md border px-3 py-2 text-xs leading-5', blockItemClass(item.status))}>
               <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                 <p className="min-w-0 break-words font-medium">{item.label}</p>
-                {item.note && <span className="break-words text-[11px] text-muted-foreground">{item.note}</span>}
+                {item.note && <span className="break-words text-xs text-muted-foreground">{item.note}</span>}
               </div>
               <p className="mt-1 break-words text-muted-foreground">{item.value}</p>
               <InlineMediaStrip media={item.media} role={item.mediaRole} />
@@ -247,8 +251,8 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
             <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
               {block.collapsedLabel || '展开明细'}
             </summary>
-            <div className="mt-2 max-w-full overflow-x-auto">
-              <table className="w-full min-w-[36rem] border-collapse text-xs">
+            <div className="mt-2 min-w-0">
+              <table className="w-full table-fixed border-collapse text-xs">
                 <thead>
                   <tr className="border-b bg-muted/30 text-left text-muted-foreground">
                     {block.columns?.map((column) => (
@@ -271,8 +275,8 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
             </div>
           </details>
         ) : (
-          <div className="max-w-full overflow-x-auto">
-            <table className="w-full min-w-[36rem] border-collapse text-xs">
+          <div className="min-w-0">
+            <table className="w-full table-fixed border-collapse text-xs">
               <thead>
                 <tr className="border-b bg-muted/30 text-left text-muted-foreground">
                   {block.columns?.map((column) => (
@@ -297,8 +301,8 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
       )}
 
       {block.type === 'matrix' && block.matrix && block.matrix.rows.length > 0 && (
-        <div className="max-w-full overflow-x-auto">
-          <table data-testid="report-matrix-block" className="w-full min-w-full border-collapse text-xs">
+        <div className="min-w-0">
+          <table data-testid="report-matrix-block" className="w-full table-fixed border-collapse text-xs">
             <thead>
               <tr className="border-b bg-muted/30 text-left text-muted-foreground">
                 <th className="sticky left-0 z-10 w-40 bg-muted px-2 py-2 font-medium">维度/项目</th>
@@ -359,19 +363,19 @@ export function ReportSectionBlockView({ block, compact = false }: { block: Repo
                     return (
                       <td key={object.id} className="h-px max-w-72 px-2 py-2 align-top text-muted-foreground">
                         {isEmpty ? (
-                          <div data-testid="report-matrix-empty-cell" className="flex h-full min-h-20 items-center justify-center rounded-md border border-dashed bg-muted/10 px-2 py-2 text-[11px] text-muted-foreground/60">
+                          <div data-testid="report-matrix-empty-cell" className="flex h-full min-h-20 items-center justify-center rounded-md border border-dashed bg-muted/10 px-2 py-2 text-xs text-muted-foreground/60">
                             -
                           </div>
                         ) : cell ? (
                           <div data-testid="report-matrix-filled-cell" className={cn('flex h-full min-h-28 flex-col rounded-md border px-2 py-2', blockItemClass(cell.conclusionTag === 'risk' || cell.problems.length > 0 ? 'risk' : undefined))}>
                             <div className="flex items-start justify-between gap-2">
                               <p className="break-words text-foreground">{isBlankMatrixText(cell.conclusion) ? cell.value : cell.conclusion}</p>
-                              {cell.score && !isBlankMatrixText(cell.score) && <Badge variant="outline" className="shrink-0 text-[10px]">{cell.score}</Badge>}
+                              {cell.score && !isBlankMatrixText(cell.score) && <Badge variant="outline" className="shrink-0 text-xs">{cell.score}</Badge>}
                             </div>
                             {cell.value && cell.value !== cell.conclusion && !isBlankMatrixText(cell.value) && <p className="mt-1 break-words">{cell.value}</p>}
                             {cell.problems.length > 0 && <p className="mt-1 break-words text-red-700">{cell.problems.join('；')}</p>}
                             {cell.anomaly && !isBlankMatrixText(cell.anomaly) && <p className="mt-1 break-words text-amber-700">{cell.anomaly}</p>}
-                            {cell.aiStatus && <p className="mt-1 text-[11px] text-muted-foreground">结论状态：{aiStatusLabel(cell.aiStatus)}</p>}
+                            {cell.aiStatus && <p className="mt-1 text-xs text-muted-foreground">结论状态：{aiStatusLabel(cell.aiStatus)}</p>}
                             <InteractiveMediaStrip media={cell.media} role="compact" context={context} testId="report-matrix-media-item" />
                           </div>
                         ) : null}
@@ -419,7 +423,7 @@ export function ReportSectionBlockStack({ sections, compact = false }: { section
         <section key={section.key} data-testid="report-section-block-group" className="space-y-2">
           <div className="flex items-center justify-between gap-2">
             <h3 className={cn('font-semibold', compact ? 'text-sm' : 'text-base')}>{section.title}</h3>
-            <Badge variant="outline" className="text-[10px]">{sectionStatusLabel(section.status)}</Badge>
+            <Badge variant="outline" className="text-xs">{sectionStatusLabel(section.status)}</Badge>
           </div>
           {section.summary && <p className="text-xs leading-5 text-muted-foreground">{section.summary}</p>}
           <div className="grid gap-2">
@@ -500,8 +504,8 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
         </div>
       )}
       {block.type === 'table' && hasRows && (
-        <div style={{ maxWidth: '100%', overflowX: 'auto' }}>
-        <table style={{ width: '100%', minWidth: '520px', borderCollapse: 'collapse', fontSize: '10px', tableLayout: 'fixed' }}>
+        <div style={{ maxWidth: '100%' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10px', tableLayout: 'fixed' }}>
           <thead>
             <tr>
               {block.columns?.map((column) => (
@@ -524,7 +528,7 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
         </div>
       )}
       {block.type === 'matrix' && block.matrix && block.matrix.rows.length > 0 && (
-        <div style={{ maxWidth: '100%', overflowX: 'auto' }}>
+        <div style={{ maxWidth: '100%' }}>
         <table style={{ width: '100%', minWidth: '100%', borderCollapse: 'collapse', fontSize: '9px', tableLayout: 'fixed' }}>
           <thead>
             <tr>
@@ -570,7 +574,7 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
         </div>
       )}
       {block.type === 'data_matrix' && block.dataMatrix && block.dataMatrix.groups.length > 0 && (
-        <div style={{ maxWidth: '100%', overflowX: 'auto' }}>
+        <div style={{ maxWidth: '100%' }}>
         <table data-testid="print-data-matrix-block" style={{ width: '100%', minWidth: '100%', borderCollapse: 'collapse', fontSize: '9px', tableLayout: 'fixed' }}>
           <thead>
             <tr>
@@ -625,7 +629,7 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
           (a, b) => (a.visibleRowIndex ?? 0) - (b.visibleRowIndex ?? 0),
         );
         return (
-          <div data-testid="print-data-matrix-v3-block" style={{ maxWidth: '100%', overflowX: 'auto' }}>
+          <div data-testid="print-data-matrix-v3-block" style={{ maxWidth: '100%' }}>
             <div style={{ marginBottom: '6px', fontSize: '10px', color: '#6b7280' }}>
               {projection.matrixName || '数据矩阵'}
               {projection.summary
@@ -637,7 +641,6 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
                 <tr>
                   <th style={{ border: '1px solid #d1d5db', textAlign: 'left', padding: '5px', color: '#374151' }}>一级</th>
                   <th style={{ border: '1px solid #d1d5db', textAlign: 'left', padding: '5px', color: '#374151' }}>二级</th>
-                  <th style={{ border: '1px solid #d1d5db', textAlign: 'left', padding: '5px', color: '#374151' }}>三级</th>
                   {columns.map((col) => (
                     <th key={col.id} style={{ border: '1px solid #d1d5db', textAlign: 'left', padding: '5px', color: '#374151' }}>
                       {col.label}{col.unitText ? ` (${col.unitText})` : ''}
@@ -650,7 +653,6 @@ function PrintBlock({ block }: { block: ReportDetailSectionBlock }) {
                   <tr key={row.id} data-testid="print-data-matrix-v3-row">
                     <td style={{ border: '1px solid #e5e7eb', padding: '5px', color: '#111827', verticalAlign: 'top', wordBreak: 'break-word' }}>{row.level1Label || '-'}</td>
                     <td style={{ border: '1px solid #e5e7eb', padding: '5px', color: '#111827', verticalAlign: 'top', wordBreak: 'break-word' }}>{row.level2Label || '-'}</td>
-                    <td style={{ border: '1px solid #e5e7eb', padding: '5px', color: '#111827', verticalAlign: 'top', wordBreak: 'break-word' }}>{row.level3Label || '-'}</td>
                     {columns.map((col) => {
                       const mediaKey = `${row.id}:${col.id}`;
                       const mediaCount = projection.cellMedia?.[mediaKey]?.length ?? 0;
@@ -690,7 +692,7 @@ function PrintMediaThumbs({ media }: { media?: ReportDetailMediaItem[] }) {
   if (!media?.length) return null;
   return (
     <div data-testid="print-inline-media-item" style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '5px' }}>
-      {media.slice(0, 4).map((item) => (
+      {media.map((item) => (
         <div key={`${item.id}-${item.url}`} style={{ width: '58px', fontSize: '8px', color: '#4b5563' }}>
           {isImageType(item.type) ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -702,79 +704,155 @@ function PrintMediaThumbs({ media }: { media?: ReportDetailMediaItem[] }) {
           )}
         </div>
       ))}
-      {media.length > 4 && <span style={{ alignSelf: 'center', fontSize: '9px', color: '#6b7280' }}>+{media.length - 4}</span>}
     </div>
   );
 }
 
-function PaperMedia({ items }: { items: PrintMedia[] }) {
-  if (items.length === 0) return null;
+function PaperVideoPoster({ item, compact = false }: { item: PrintMedia; compact?: boolean }) {
+  const [posterFailed, setPosterFailed] = useState(false);
+  const width = compact ? 34 : 86;
+  const height = compact ? 26 : 64;
   return (
-    <div data-testid="paper-media-grid" style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '6px' }}>
+    <div data-testid="paper-video-poster" style={{ position: 'relative', width: `${width}px`, height: `${height}px`, maxWidth: '100%', overflow: 'hidden', background: '#e5e7eb' }}>
+      {item.posterUrl && !posterFailed ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img data-video-poster src={item.posterUrl} alt={item.name} onError={() => setPosterFailed(true)} style={{ width: `${width}px`, height: `${height}px`, maxWidth: '100%', objectFit: 'cover', display: 'block' }} />
+      ) : (
+        <div data-testid="paper-video-poster-placeholder" style={{ display: 'flex', width: `${width}px`, height: `${height}px`, maxWidth: '100%', alignItems: 'center', justifyContent: 'center', padding: '3px', boxSizing: 'border-box', color: '#475569', fontSize: compact ? '6px' : '8px', textAlign: 'center' }}>视频预览不可用</div>
+      )}
+      <span style={{ position: 'absolute', inset: 'auto 0 0', background: 'rgba(17,24,39,.72)', color: '#fff', textAlign: 'center', fontSize: compact ? '6px' : '8px', fontWeight: 700 }}>VIDEO</span>
+    </div>
+  );
+}
+
+function PaperMedia({ items, density = 'standard' }: { items: PrintMedia[]; density?: 'standard' | 'compact' }) {
+  if (items.length === 0) return null;
+  const compact = density === 'compact';
+  const width = compact ? 38 : 92;
+  const imageWidth = compact ? 34 : 86;
+  const imageHeight = compact ? 26 : 64;
+  return (
+    <div data-testid="paper-media-grid" data-density={density} style={{ display: 'flex', maxWidth: '100%', overflow: 'hidden', flexWrap: 'wrap', alignItems: 'flex-start', gap: compact ? '3px' : '6px', marginTop: compact ? '2px' : '6px' }}>
       {items.map((item) => (
-        <figure key={`${item.id}:${item.url}`} data-media-id={item.id} style={{ width: '72px', margin: 0, border: '1px solid #d1d5db', borderRadius: '4px', padding: '3px', breakInside: 'avoid' }}>
-          {isVideoType(item.type) ? (
-            <div data-testid="paper-video-poster" style={{ position: 'relative', width: '64px', height: '48px', background: '#e5e7eb' }}>
-              {item.posterUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img data-video-poster src={item.posterUrl} alt={item.name} style={{ width: '64px', height: '48px', objectFit: 'cover', display: 'block' }} />
-              )}
-              <span style={{ position: 'absolute', inset: 'auto 0 0', background: 'rgba(17,24,39,.72)', color: '#fff', textAlign: 'center', fontSize: '9px', fontWeight: 700 }}>VIDEO</span>
-            </div>
+        <figure key={`${item.id}:${item.url}`} data-media-id={item.id} style={{ flex: `0 0 ${width}px`, width: `${width}px`, maxWidth: '100%', boxSizing: 'border-box', margin: 0, border: '1px solid #d1d5db', borderRadius: '4px', padding: compact ? '1px' : '2px', overflow: 'hidden', breakInside: 'avoid' }}>
+          {isVideoType(item.type, item.url) ? (
+            <PaperVideoPoster item={item} compact={compact} />
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={item.url} alt={item.name} style={{ width: '64px', height: '48px', objectFit: 'cover', display: 'block', background: '#f3f4f6' }} />
+            <img src={item.url} alt={item.name} style={{ width: `${imageWidth}px`, height: `${imageHeight}px`, maxWidth: '100%', objectFit: 'cover', display: 'block', background: '#f3f4f6' }} />
           )}
-          <figcaption style={{ marginTop: '2px', color: '#6b7280', fontSize: '8px', overflowWrap: 'anywhere' }}>{item.name}</figcaption>
         </figure>
       ))}
     </div>
   );
 }
 
+function uniquePaperMedia(items: PrintMedia[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = `${item.id}:${item.url}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function PaperMatrix({ matrix }: { matrix: NonNullable<PrintReportViewModel['matrix']> }) {
   if (matrix.kind === 'comparison') {
     return (
-      <section data-testid="print-comparison-matrix" style={{ marginTop: '18px' }}>
-        <h2 style={{ fontSize: '16px', color: '#0f766e', borderBottom: '2px solid #0f766e', paddingBottom: '4px' }}>{matrix.title}</h2>
+      <section data-testid="print-comparison-matrix" style={{ marginTop: '18px', breakBefore: 'page' }}>
+        <h2 style={{ fontSize: '16px', color: PRINT_GOLDEN_YELLOW_INK, borderBottom: `2px solid ${PRINT_GOLDEN_YELLOW}`, paddingBottom: '4px' }}>{matrix.title}</h2>
         <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', fontSize: '9px' }}>
+          <colgroup><col style={{ width: '14%' }} />{matrix.columns.map((column) => <col key={column.id} style={{ width: `${86 / Math.max(matrix.columns.length, 1)}%` }} />)}</colgroup>
           <thead><tr><th style={paperCellStyle}>项目</th>{matrix.columns.map((column) => <th key={column.id} style={paperCellStyle}>{column.label}</th>)}</tr></thead>
-          <tbody>{matrix.rows.map((row) => (
-            <tr key={row.id}><th style={paperCellStyle}>{row.path.join(' / ')}</th>{matrix.columns.map((column) => {
+          <tbody>{matrix.rows.map((row) => row.rowKind === 'group' ? (
+            <tr key={row.id} data-testid="print-comparison-group-row"><th colSpan={matrix.columns.length + 1} style={{ ...paperCellStyle, padding: '5px 7px', background: '#eef2f7', color: '#111827', textAlign: 'left' }}>{row.label || row.path.at(-1)}</th></tr>
+          ) : row.rowKind === 'summary' ? (
+            <tr key={row.id} data-testid="print-comparison-summary-row"><th style={{ ...paperCellStyle, background: '#fff9e6', color: '#111827', textAlign: 'left' }}>{row.label || '本大类小结'}</th><td colSpan={matrix.columns.length} style={{ ...paperCellStyle, background: '#fffdf5', whiteSpace: 'pre-wrap' }}>{row.summaryText || '-'}</td></tr>
+          ) : (
+            <tr key={row.id}><th style={{ ...paperCellStyle, textAlign: 'left' }}>{row.label || row.path.at(-1) || '-'}</th>{matrix.columns.map((column) => {
               const cell = row.cells[column.id];
-              return <td key={column.id} style={paperCellStyle}>{cell?.value || '-'}{cell?.score && <p><b>评分：</b>{cell.score}</p>}{(cell ? cell.notes : []).map((item) => <p key={`note:${item}`}><b>过程记录：</b>{item}</p>)}{(cell ? cell.problems : []).map((item) => <p key={`problem:${item}`} style={{ color: '#991b1b' }}><b>问题点：</b>{item}</p>)}<PaperMedia items={cell?.media || []} /></td>;
+              return <td key={column.id} style={paperCellStyle}>{cell?.value || '-'}{cell?.score && <p><b>评分：</b>{cell.score}</p>}{(cell ? cell.notes : []).map((item) => <p key={`note:${item}`}><b>过程记录：</b>{item}</p>)}{(cell ? cell.problems : []).map((item) => <p key={`problem:${item}`} style={{ color: '#991b1b' }}><b>问题点：</b>{item}</p>)}<PaperMedia items={cell?.media || []} density="compact" /></td>;
             })}</tr>
           ))}</tbody>
         </table>
       </section>
     );
   }
+  const fieldColumns = dataMatrixPrintColumns(matrix.rows);
+  const valueColumns = fieldColumns.filter((column) => column.group !== 'evaluation');
+  const evaluationColumns = fieldColumns.filter((column) => column.group === 'evaluation');
+  const hierarchyLabels = ['一级大类', '二级细项'];
+  const hasNarratives = matrix.rows.some((row) => row.narratives.length > 0);
+  const valueColumnWidth = (hasNarratives ? 34 : 44) / Math.max(valueColumns.length, 1);
+  const groups = matrix.rows.reduce<Array<{ label: string; rows: typeof matrix.rows }>>((items, row) => {
+    const label = row.path[0] || '未分类';
+    const current = items[items.length - 1];
+    if (current?.label === label) current.rows.push(row);
+    else items.push({ label, rows: [row] });
+    return items;
+  }, []);
   return (
-    <section data-testid={`print-${matrix.kind}-matrix`} style={{ marginTop: '18px' }}>
-      <h2 style={{ fontSize: '16px', color: '#0f766e', borderBottom: '2px solid #0f766e', paddingBottom: '4px' }}>{matrix.title}</h2>
+    <section data-testid="print-data-matrix-paper" style={{ marginTop: '18px', breakBefore: 'page' }}>
+      <h2 style={{ fontSize: '16px', color: PRINT_GOLDEN_YELLOW_INK, borderBottom: `2px solid ${PRINT_GOLDEN_YELLOW}`, paddingBottom: '4px' }}>{matrix.title}</h2>
       {matrix.summary && <p style={{ color: '#6b7280' }}>{matrix.summary}</p>}
-      {matrix.rows.map((row) => (
-        <article key={row.id} data-testid="print-matrix-paper-row" style={paperRowStyle}>
-          <h3 style={{ margin: '0 0 6px', fontSize: '12px' }}>{row.path.join(' / ')}</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: '5px' }}>
-            {row.fields.map((field) => {
-              const value = field.unit && !String(field.value).includes(field.unit) ? `${field.value} ${field.unit}` : String(field.value);
-              return <div key={field.id} style={{ border: '1px solid #e5e7eb', borderRadius: '4px', padding: '5px' }}><span style={{ display: 'block', color: '#6b7280' }}>{field.label}</span><b>{value}</b></div>;
-            })}
-          </div>
-          {row.narratives.map((item) => <p key={item.id}><b>{item.label}：</b>{item.text}</p>)}
-          {row.issueSummary && <p style={{ color: '#991b1b' }}>问题 {row.issueSummary.count} 个{row.issueSummary.levels.length > 0 ? ` / ${row.issueSummary.levels.join('、')}` : ''}</p>}
-          {row.issues.length > 0 && <ul style={{ color: '#991b1b' }}>{row.issues.map((item) => <li key={item.id}>{item.text}{item.status ? `（${item.status}）` : ''}</li>)}</ul>}
-          <PaperMedia items={row.media} />
-        </article>
-      ))}
+      <table data-testid="print-data-matrix-table" style={{ width: '100%', maxWidth: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', fontSize: '7px' }}>
+        <colgroup>
+          <col style={{ width: '10%' }} /><col style={{ width: '12%' }} />
+          {valueColumns.map((column) => <col key={`value:${column.id}`} style={{ width: `${valueColumnWidth}%` }} />)}
+          <col style={{ width: '16%' }} />
+          {evaluationColumns.map((column) => <col key={`evaluation:${column.id}`} style={{ width: `${10 / Math.max(evaluationColumns.length, 1)}%` }} />)}
+          <col style={{ width: '8%' }} />{hasNarratives && <col style={{ width: '10%' }} />}
+        </colgroup>
+        <thead>
+          <tr>
+            {hierarchyLabels.map((label) => <th key={label} style={paperCellStyle}>{label}</th>)}
+            {valueColumns.map((column) => <th key={column.id} style={paperCellStyle}>{column.label}{column.unit ? ` (${column.unit})` : ''}</th>)}
+            <th style={paperCellStyle}>效果素材</th>
+            {evaluationColumns.map((column) => <th key={column.id} style={paperCellStyle}>{column.label}{column.unit ? ` (${column.unit})` : ''}</th>)}
+            <th style={paperCellStyle}>问题点</th>
+            {hasNarratives && <th style={paperCellStyle}>过程/备注</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {groups.flatMap((group) => group.rows.map((row, rowIndex) => {
+            const values = new Map(row.fields.map((field) => [field.id, field]));
+            const issueText = [
+              ...(row.issueSummary ? [`问题 ${row.issueSummary.count} 个${row.issueSummary.levels.length ? ` / ${row.issueSummary.levels.join('、')}` : ''}`] : []),
+              ...row.issues.map((item) => `${item.text}${item.status ? `（${item.status}）` : ''}`),
+            ].join('\n');
+            return (
+              <tr key={row.id} data-testid="print-data-matrix-table-row" style={{ breakInside: 'avoid' }}>
+                {rowIndex === 0 && <th rowSpan={group.rows.length} scope="rowgroup" style={paperCellStyle}>{group.label}</th>}
+                <th style={paperCellStyle}>{row.path[1] || '-'}</th>
+                {valueColumns.map((column) => {
+                  const field = values.get(column.id);
+                  const value = field ? field.unit && !String(field.value).includes(field.unit) ? `${field.value} ${field.unit}` : String(field.value) : '-';
+                  return <td key={`${row.id}:${column.id}`} style={paperCellStyle}>{value}</td>;
+                })}
+                <td style={{ ...paperCellStyle, overflow: 'hidden' }}><PaperMedia items={row.media} density="compact" /></td>
+                {evaluationColumns.map((column) => {
+                  const field = values.get(column.id);
+                  const value = field ? field.unit && !String(field.value).includes(field.unit) ? `${field.value} ${field.unit}` : String(field.value) : '-';
+                  return <td key={`${row.id}:${column.id}`} style={paperCellStyle}>{value}</td>;
+                })}
+                <td style={{ ...paperCellStyle, color: row.issues.length > 0 || row.issueSummary ? '#991b1b' : '#4b5563', whiteSpace: 'pre-wrap' }}>{issueText || '-'}</td>
+                {hasNarratives && <td style={{ ...paperCellStyle, whiteSpace: 'pre-wrap' }}>{row.narratives.map((item) => `${item.label}：${item.text}`).join('\n') || '-'}</td>}
+              </tr>
+            );
+          }))}
+        </tbody>
+      </table>
       {matrix.narratives.map((item) => <p key={item.id}><b>{item.label}：</b>{item.text}</p>)}
     </section>
   );
 }
 
-const paperRowStyle: CSSProperties = { border: '1px solid #d1d5db', borderRadius: '6px', padding: '9px', margin: '7px 0', breakInside: 'avoid' };
+const paperRowStyle: CSSProperties = { borderTop: '1px solid #cbd5e1', borderRight: '1px solid #cbd5e1', borderBottom: '1px solid #cbd5e1', borderLeft: `3px solid ${PRINT_GOLDEN_YELLOW}`, padding: '10px 12px', margin: '9px 0', breakInside: 'avoid', background: '#fff' };
 const paperCellStyle: CSSProperties = { border: '1px solid #d1d5db', padding: '5px', verticalAlign: 'top', overflowWrap: 'anywhere' };
+const paperSectionTitleStyle: CSSProperties = { margin: '0 0 8px', fontSize: `${PRINT_TYPOGRAPHY.sectionTitle}px`, lineHeight: 1.4, color: PRINT_GOLDEN_YELLOW_INK, letterSpacing: '.04em', borderBottom: `2px solid ${PRINT_GOLDEN_YELLOW}`, paddingBottom: '5px' };
+const paperIssueMetaStyle: CSSProperties = { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '5px', marginBottom: '8px', paddingBottom: '7px', borderBottom: '1px solid #e5e7eb' };
+const paperIssueChipStyle: CSSProperties = { border: '1px solid #d1d5db', borderRadius: '999px', padding: '1px 6px', color: '#374151', fontSize: '10px', lineHeight: 1.35 };
 
 function paperDate(value: unknown) {
   if (!value) return '';
@@ -789,11 +867,15 @@ function paperDate(value: unknown) {
 }
 
 function paperIssueSource(kind: PrintReportViewModel['issues'][number]['sourceKind']) {
-  return ({ sensory: '五感体验', function: '食谱/功能', comparison: '对比项', matrix: '数据矩阵' }[kind]);
+  return ({ sensory: '五感体验', function: '食谱/功能', comparison: '食谱/功能-对比矩阵', matrix: '数据矩阵' }[kind]);
 }
 
 function paperIssueStatus(status: string) {
-  return ({ open: '待整改', rectifying: '整改中', verified_closed: '整改完成', waived: '不整改' }[status] ?? status);
+  return ({ open: '待整改', rectifying: '整改中', verified_closed: '已整改', waived: '不整改' }[status] ?? status);
+}
+
+function paperIssueLevel(level: string) {
+  return normalizeFrozenIssueLevel(level);
 }
 
 export function ReportPrintDocument({ model }: { model: PrintReportViewModel }) {
@@ -808,42 +890,73 @@ export function ReportPrintDocument({ model }: { model: PrintReportViewModel }) 
     ['问题点总数', stats.issueCount], ['五感体验问题点', stats.sensoryIssueCount], ['功能效果问题点', stats.functionIssueCount],
     ['对比问题点', stats.comparisonIssueCount], ['整改率', `${stats.rectificationRate}%`],
   ];
+  const summary = printSummaryContent(model.summary);
   return (
-    <article data-testid="report-print-document" data-report-id={model.sourceReportId} style={{ maxWidth: '100%', color: '#111827', fontSize: '11px', lineHeight: 1.55 }}>
-      <style>{`@page { size: ${model.page.paper} ${model.page.orientation}; margin: 12mm; } @media print { [data-testid="report-print-document"] { break-after: page; } [data-testid="report-print-document"]:last-child { break-after: auto; } }`}</style>
-      <header style={{ borderBottom: '2px solid #0f766e', paddingBottom: '9px' }}><h1 style={{ margin: '0 0 4px', fontSize: '22px', color: '#0f766e' }}>{model.header.title}</h1>{model.header.productModel && <p style={{ margin: 0, color: '#4b5563' }}>{model.header.productModel}</p>}</header>
-      {productInfo.length > 0 && <section><h2 style={{ fontSize: '16px', color: '#0f766e', borderBottom: '2px solid #0f766e', paddingBottom: '4px' }}>产品信息</h2><div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: '6px 12px' }}>{productInfo.map(([label, value]) => <p key={label} style={{ margin: 0 }}><span style={{ color: '#6b7280' }}>{label}：</span>{String(value)}</p>)}</div>{Boolean(task.test_purpose) && <p style={{ marginBottom: 0 }}><span style={{ color: '#6b7280' }}>体验目的：</span>{String(task.test_purpose)}</p>}</section>}
-      <section><h2 style={{ fontSize: '16px', color: '#0f766e', borderBottom: '2px solid #0f766e', paddingBottom: '4px' }}>概览统计</h2><div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,minmax(0,1fr))', gap: '5px' }}>{overview.map((entry) => {
+    <article data-testid="report-print-document" data-report-id={model.sourceReportId} style={{ maxWidth: '1180px', margin: '0 auto', color: '#1f2937', fontSize: `${PRINT_TYPOGRAPHY.body}px`, lineHeight: 1.62 }}>
+      <style>{`@page { size: ${model.page.paper} ${model.page.orientation}; margin: 12mm; } @media print { [data-testid="report-print-document"] + [data-testid="report-print-document"] { break-before: page; } }`}</style>
+      <header style={{ borderTop: `4px solid ${PRINT_GOLDEN_YELLOW}`, borderBottom: '1px solid #94a3b8', padding: '12px 0 10px', marginBottom: '16px' }}><p style={{ margin: '0 0 3px', color: PRINT_GOLDEN_YELLOW_INK, fontSize: `${PRINT_TYPOGRAPHY.meta}px`, fontWeight: 700, letterSpacing: '.12em' }}>PRODUCT EXPERIENCE REPORT</p><h1 style={{ margin: '0 0 4px', fontSize: `${PRINT_TYPOGRAPHY.title}px`, lineHeight: 1.3, color: '#0f172a', letterSpacing: '.01em' }}>{model.header.title}</h1></header>
+      {productInfo.length > 0 && <section data-testid="print-report-product-info" style={{ marginTop: '14px' }}><h2 style={paperSectionTitleStyle}>产品信息</h2><div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', borderTop: '1px solid #cbd5e1' }}>{productInfo.map(([label, value]) => <div key={label} style={{ padding: '7px 10px', borderRight: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0' }}><span style={{ color: '#64748b', marginRight: '5px' }}>{label}：</span>{String(value)}</div>)}{Boolean(task.test_purpose) && <div style={{ gridColumn: '1 / -1', padding: '8px 10px', borderBottom: '1px solid #cbd5e1' }}><span style={{ color: '#64748b', marginRight: '5px' }}>体验目的：</span>{String(task.test_purpose)}</div>}</div></section>}
+      <section style={{ marginTop: '16px' }}><h2 style={paperSectionTitleStyle}>概览统计</h2><div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,minmax(0,1fr))', borderTop: '1px solid #cbd5e1', borderBottom: '1px solid #cbd5e1' }}>{overview.map((entry) => {
         const label = entry[0];
         const value = String(entry[1]);
-        return <div key={label} style={{ border: '1px solid #d1d5db', padding: '6px', textAlign: 'center' }}><b style={{ display: 'block', fontSize: '15px' }}>{value}</b><span style={{ color: '#6b7280' }}>{label}</span></div>;
+        return <div key={label} style={{ padding: '7px 5px', textAlign: 'center', borderRight: '1px solid #e2e8f0' }}><b style={{ display: 'block', fontSize: '15px', color: PRINT_GOLDEN_YELLOW_INK }}>{value}</b><span style={{ color: '#64748b' }}>{label}</span></div>;
       })}</div></section>
-      {model.summary.text && <section><h2 style={{ fontSize: '16px', color: '#0f766e', borderBottom: '2px solid #0f766e', paddingBottom: '4px' }}>总结</h2><p style={{ whiteSpace: 'pre-wrap' }}>{model.summary.text}</p></section>}
-      {model.issues.length > 0 && <section><h2 style={{ fontSize: '16px', color: '#0f766e' }}>问题</h2>{model.issues.map((issue) => {
+      {summary && <section data-testid="print-report-summary" style={{ marginTop: '16px' }}><div style={{ display: 'flex', alignItems: 'center', gap: '8px', borderBottom: `2px solid ${PRINT_GOLDEN_YELLOW}` }}><h2 style={{ ...paperSectionTitleStyle, flex: 1, marginBottom: 0, borderBottom: 0 }}>总结</h2>{summary.tag && <span style={paperIssueChipStyle}>{summary.tag}</span>}</div>{summary.summary && <p style={{ margin: '8px 0', whiteSpace: 'pre-wrap' }}>{summary.summary}</p>}{[
+        ['主要优势', summary.strengths, '#10b981'],
+        ['主要风险', summary.risks, '#f59e0b'],
+        ['后续建议', summary.suggestions, PRINT_GOLDEN_YELLOW],
+      ].map(([title, items, color]) => (items as string[]).length > 0 && <div key={String(title)} style={{ marginTop: '8px', paddingLeft: '9px', borderLeft: `3px solid ${String(color)}` }}><h3 style={{ margin: '0 0 3px', fontSize: `${PRINT_TYPOGRAPHY.subsectionTitle}px`, lineHeight: 1.45 }}>{String(title)}</h3><ul style={{ margin: 0, paddingLeft: '18px' }}>{(items as string[]).map((item) => <li key={item}>{item}</li>)}</ul></div>)}</section>}
+      {model.issues.length > 0 && <section style={{ marginTop: '18px' }}><h2 style={paperSectionTitleStyle}>问题</h2>{model.issues.map((issue) => {
         const recipe = issue.recipe;
-        const latest = issue.liveOverlay.retest.latest;
+        const issueMedia = uniquePaperMedia([...(recipe?.evidence || []), ...issue.evidence]);
+        const rectification = issue.rectificationProjection;
+        const latest = rectification.retest ? null : issue.liveOverlay.retest.latest;
         const parameters = recipe?.parameters
           ? typeof recipe.parameters === 'string' ? recipe.parameters : Object.entries(recipe.parameters).map(([key, value]) => `${key}：${String(value)}`).join('；')
           : '';
-        return <article key={issue.id} style={paperRowStyle}><h3>{issue.level && <span style={{ marginRight: '5px', color: '#4b5563' }}>{issue.level}</span>}<span style={{ marginRight: '5px', color: '#0f766e' }}>{paperIssueSource(issue.sourceKind)}</span>{issue.title}{issue.liveOverlay.status && <span style={{ float: 'right', color: '#4b5563', fontWeight: 400 }}>{paperIssueStatus(issue.liveOverlay.status)}</span>}</h3>
-          {(issue.context.object || issue.context.project || issue.context.item) && <div style={{ color: '#4b5563' }}>{issue.context.object && <p>对象：{issue.context.object}</p>}{issue.context.project && <p>项目：{issue.context.project}</p>}{issue.context.item && <p>细项：{issue.context.item}</p>}</div>}
+        const context = issue.context ?? { object: '', project: '', item: '' };
+        const contextView = issue.sourceKind === 'sensory'
+          ? <div style={{ color: '#4b5563' }}>{context.standardType && <p>检验标准类型：{context.standardType}</p>}{context.inspectionRange && <p>检验要求及范围：{context.inspectionRange}</p>}{context.inspectionStandard && <p>检查标准：{context.inspectionStandard}</p>}{context.nonStandardContent && <p>描述检查项内容：{context.nonStandardContent}</p>}{context.checkResult && <p>检查结果：{context.checkResult}</p>}</div>
+          : issue.sourceKind === 'matrix'
+            ? <div style={{ color: '#4b5563' }}>{context.primaryCategory && <p>一级大类：{context.primaryCategory}</p>}{context.secondaryDetail && <p>二级细项/三级细项：{context.secondaryDetail}</p>}{context.comparisonDimension && <p>对比维度：{context.comparisonDimension}</p>}</div>
+            : (context.object || context.project || context.item) && <div style={{ color: '#4b5563' }}>{context.object && <p>对象：{context.object}</p>}{context.project && <p>项目：{context.project}</p>}{context.item && <p>细项：{context.item}</p>}</div>;
+        return <article key={issue.id} data-testid="print-issue-row" style={paperRowStyle}><div data-testid="print-issue-meta" style={paperIssueMetaStyle}><span style={paperIssueChipStyle}>{paperIssueLevel(issue.level)}</span><span style={{ ...paperIssueChipStyle, borderColor: '#d69700', background: '#fff8dc', color: '#7a5100' }}>{paperIssueSource(issue.sourceKind)}</span><span style={{ flex: '1 1 15ch', minWidth: 0, fontSize: '12px', fontWeight: 700, overflowWrap: 'anywhere' }}>{issue.title}</span><span style={{ ...paperIssueChipStyle, marginLeft: 'auto', background: '#f8fafc' }}>{paperIssueStatus(issue.liveOverlay.status || 'open')}</span></div>
+          {contextView}
           {recipe ? <>
             <p><b>食谱名称：</b>{recipe.name}</p>
             {recipe.formula && <p><b>食谱配方：</b>{recipe.formula}</p>}
             {parameters && <p><b>食谱参数：</b>{parameters}</p>}
-            {recipe.steps.length > 0 && <div><p><b>食谱步骤：</b>{recipe.steps.length}步</p>{recipe.steps.map((step, index) => <div key={step.id}><b>步骤 {step.stepNumber ?? index + 1}</b> {step.operation}<PaperMedia items={step.evidence} /></div>)}</div>}
-            <p><b>食谱效果评价：</b>{recipe.evaluation}（{evaluationStatusLabel(recipe.evaluationStatus)}）</p><PaperMedia items={recipe.evidence} />
-            <p><b>问题：</b>{issue.details || issue.title}</p><PaperMedia items={issue.evidence} />
-          </> : <><p><b>问题：</b>{issue.details || issue.title}</p><PaperMedia items={issue.evidence} /></>}
-          {issue.liveOverlay.status === 'verified_closed' && (issue.liveOverlay.rectification || issue.liveOverlay.evidence.length > 0) && <><p><b>整改效果评价：</b>{issue.liveOverlay.rectification}</p><p><b>整改素材：</b></p><PaperMedia items={issue.liveOverlay.evidence} /></>}
+            {recipe.steps.length > 0 && <div><p><b>食谱步骤：</b>{recipe.steps.length}步</p>{recipe.steps.map((step, index) => <div key={step.id}><b>步骤 {step.stepNumber ?? index + 1}</b> {step.operation}{step.problemPoints.length > 0 && <p><b>步骤问题点：</b>{step.problemPoints.join('；')}</p>}<PaperMedia items={step.evidence} /></div>)}</div>}
+            <p><b>食谱效果评价：</b>{recipe.evaluation}（{evaluationStatusLabel(recipe.evaluationStatus)}）</p>
+            <PaperMedia items={issueMedia} />
+            <p><b>问题：</b>{issue.details || issue.title}</p>
+          </> : <><p><b>问题：</b>{issue.details || issue.title}</p><PaperMedia items={issueMedia} /></>}
+          {(rectification.plan || rectification.responsible || rectification.time || rectification.retest || issue.liveOverlay.rectification || issue.liveOverlay.evidence.length > 0) && <div data-testid="print-issue-rectification">{(rectification.plan || issue.liveOverlay.rectification) && <p><b>整改方案：</b>{rectification.plan || issue.liveOverlay.rectification}</p>}{rectification.responsible && <p><b>责任人：</b>{rectification.responsible}</p>}{rectification.time && <p><b>整改时间：</b>{rectification.time}</p>}{rectification.retest && <p><b>复测结果：</b>{rectification.retest}</p>}{issue.liveOverlay.evidence.length > 0 && <><p><b>整改素材：</b></p><PaperMedia items={issue.liveOverlay.evidence} /></>}</div>}
           {latest && <div><b>整改复测：</b>{evaluationStatusLabel(latest.result)} {latest.description}<PaperMedia items={latest.evidence} />{issue.liveOverlay.retest.count >= 2 && <p>整改复测记录数：{issue.liveOverlay.retest.count}</p>}</div>}
         </article>;
       })}</section>}
-      {model.functionEffects.length > 0 && <section><h2 style={{ fontSize: '16px', color: '#0f766e' }}>功能效果</h2>{model.functionEffects.map((effect) => {
-        const issueCount = model.issues.filter((issue) => issue.recipe?.recipeId === effect.recipeId).length;
-        return <article key={effect.recipeId} style={paperRowStyle}><h3>{effect.name}<span style={{ marginLeft: '7px', color: '#6b7280', fontWeight: 400 }}>步骤数：{effect.steps.length}{effect.effectScore && `　效果评分：${effect.effectScore}`}　问题点数量：{issueCount}</span></h3>{effect.formula && <p><b>食谱/食材：</b>{effect.formula}</p>}{effect.parameters && <p><b>食谱参数：</b>{typeof effect.parameters === 'string' ? effect.parameters : Object.entries(effect.parameters).map(([key, value]) => `${key}：${String(value)}`).join('；')}</p>}<p><b>效果评价：</b>{effect.evaluation || '—'}（{evaluationStatusLabel(effect.evaluationStatus)}）</p><PaperMedia items={effect.evidence} />{effect.steps.length > 0 && <div><p><b>食谱步骤：</b>{effect.steps.length}步</p>{effect.steps.map((step, index) => <div key={step.id}><b>步骤 {step.stepNumber ?? index + 1}</b> {step.operation}<PaperMedia items={step.evidence} /></div>)}</div>}</article>;
+      {model.functionEffects.length > 0 && <section style={{ marginTop: '18px' }}><h2 style={paperSectionTitleStyle}>功能效果</h2>{model.functionEffects.map((effect) => {
+        const problemCount = model.issues.filter((issue) => issue.recipe?.recipeId === effect.recipeId).length;
+        const parameters = effect.parameters
+          ? typeof effect.parameters === 'string' ? effect.parameters : Object.entries(effect.parameters).map(([key, value]) => `${key}：${String(value)}`).join('；')
+          : '';
+        return <article key={effect.recipeId} data-function-effect={effect.recipeId} data-testid="print-function-card" style={{ border: '1px solid #cbd5e1', borderRadius: '6px', margin: '10px 0 14px', background: '#fff', overflow: 'hidden', breakInside: 'auto' }}>
+          <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', padding: '8px 10px', borderBottom: '1px solid #cbd5e1', background: '#f8fafc', breakAfter: 'avoid' }}>
+            <h3 style={{ margin: 0, minWidth: 0, fontSize: '13px', color: '#111827' }}><span style={{ marginRight: '6px', color: PRINT_GOLDEN_YELLOW_INK }}>食谱</span>{effect.name}</h3>
+            <div data-testid="print-function-metrics" style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: '4px' }}>
+              {['步骤数：' + effect.steps.length, '判断：' + evaluationStatusLabel(effect.evaluationStatus), '问题点：' + problemCount].map((label) => <span key={label} style={paperIssueChipStyle}>{label}</span>)}
+            </div>
+          </header>
+          <div style={{ padding: '8px 10px' }}>
+            {effect.formula && <p style={{ margin: '0 0 6px', whiteSpace: 'pre-wrap' }}><b>食谱/食材：</b>{effect.formula}</p>}
+            {parameters && <p style={{ margin: '0 0 6px' }}><b>食谱参数：</b>{parameters}</p>}
+            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '7px' }}><p style={{ margin: 0 }}><b style={{ color: PRINT_GOLDEN_YELLOW_INK }}>食谱效果评价</b></p><p style={{ margin: '3px 0 0', whiteSpace: 'pre-wrap' }}>{effect.evaluation || '—'}</p><PaperMedia items={effect.evidence} /></div>
+            {effect.steps.length > 0 && <div style={{ marginTop: '9px' }}><p style={{ margin: '0 0 5px', fontWeight: 700 }}>食谱步骤：{effect.steps.length}步</p>{effect.steps.map((step, index) => <div key={step.id} data-testid="print-function-step" style={{ padding: '6px 8px', borderTop: '1px solid #e2e8f0', breakInside: 'avoid' }}><p style={{ margin: 0 }}><b>步骤 {step.stepNumber ?? index + 1}</b>　{step.operation}</p>{step.problemPoints.length > 0 && <p style={{ margin: '3px 0 0', color: '#991b1b' }}><b>步骤问题点：</b>{step.problemPoints.join('；')}</p>}<PaperMedia items={step.evidence} /></div>)}</div>}
+          </div>
+        </article>;
       })}</section>}
       {model.matrix && <PaperMatrix matrix={model.matrix} />}
+      {model.dataMatrix && <PaperMatrix matrix={model.dataMatrix} />}
     </article>
   );
 }

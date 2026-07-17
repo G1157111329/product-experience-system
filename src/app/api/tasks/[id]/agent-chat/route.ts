@@ -101,6 +101,8 @@ function buildAgentSystemPrompt() {
 6. material_ai_result_update: { "material_id": "素材ID", "summary": "图片/视频内容整理", "tags": ["标签"] }
 7. material_rename: { "material_id": "素材ID", "file_name": "新素材名称" }
 8. material_bind: { "material_id": "素材ID", "record_id | recipe_id | recipe_step_id | issue_id": "绑定目标ID" }
+9. comparison_cell_material_bind: { "material_id": "素材ID", "comparison_cell_id": "对比矩阵单元格ID" }
+10. data_matrix_cell_material_bind: { "material_id": "素材ID", "matrix_id": "数据矩阵ID", "leaf_row_id": "行ID", "column_id": "图片/素材列ID" }
 9. issue_create: { "title": "问题标题", "description": "描述", "level": "一类|二类|三类" }
 10. issue_update: { "issue_id": "问题ID", "title|description|level|status|improve_plan|responsible_person|verification_note": "新值" }
 11. record_update: { "record_id": "体验记录ID", "actual_result|problem_description|evaluation_result|experience_standard|check_standard": "新值" }

@@ -83,6 +83,22 @@ async function enrichIssueProjection(
   };
 }
 
+async function enrichIssueProjectionSafely(
+  client: ReturnType<typeof getSupabaseClient>,
+  user: AuthUser,
+  issue: IssueRow,
+) {
+  try {
+    return await enrichIssueProjection(client, user, issue);
+  } catch (error) {
+    console.error('[issues] issue projection enrichment failed after mutation', {
+      issueId: issue.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return issue;
+  }
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const client = getSupabaseClient();
@@ -162,7 +178,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       });
       const { data, error } = await client.from('issues').select('*').eq('id', id).single();
       if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
-      return NextResponse.json({ code: 0, message: '更新成功', data: await enrichIssueProjection(client, user, data) });
+      return NextResponse.json({ code: 0, message: '更新成功', data: await enrichIssueProjectionSafely(client, user, data) });
     } catch (error) {
       if (error instanceof IssueStatusTransitionError) {
         return NextResponse.json({ code: 1, message: error.message }, { status: 422 });

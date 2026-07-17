@@ -251,25 +251,25 @@ function MatrixHeader({
       <TableRow className="hover:bg-transparent">
         <TableHead
           style={{ width: RAIL_WIDTH, left: STICKY_OFFSETS.rail }}
-          className={cn(stickyCellClass(STICKY_OFFSETS.rail, 'z-30'), 'top-0 h-8 border-b text-center text-[10px]')}
+          className={cn(stickyCellClass(STICKY_OFFSETS.rail, 'z-30'), 'top-0 h-8 border-b text-center text-xs')}
         >
           #
         </TableHead>
         <TableHead
           style={{ width: COL_GROUP_WIDTH, left: STICKY_OFFSETS.group }}
-          className={cn(stickyCellClass(STICKY_OFFSETS.group, 'z-30'), 'top-0 h-8 border-b text-[11px]')}
+          className={cn(stickyCellClass(STICKY_OFFSETS.group, 'z-30'), 'top-0 h-8 border-b text-xs')}
         >
           一级分组
         </TableHead>
         <TableHead
           style={{ width: COL_SPEC_WIDTH, left: STICKY_OFFSETS.spec }}
-          className={cn(stickyCellClass(STICKY_OFFSETS.spec, 'z-30'), 'top-0 h-8 border-b text-[11px]')}
+          className={cn(stickyCellClass(STICKY_OFFSETS.spec, 'z-30'), 'top-0 h-8 border-b text-xs')}
         >
           二级规格
         </TableHead>
         <TableHead
           style={{ width: COL_ITEM_WIDTH, left: STICKY_OFFSETS.item }}
-          className={cn(stickyCellClass(STICKY_OFFSETS.item, 'z-30'), 'top-0 h-8 border-b text-[11px]')}
+          className={cn(stickyCellClass(STICKY_OFFSETS.item, 'z-30'), 'top-0 h-8 border-b text-xs')}
         >
           三级细项
         </TableHead>
@@ -278,7 +278,7 @@ function MatrixHeader({
           <TableHead
             key={d.dimensionKey}
             style={{ width: COL_METRIC_WIDTH }}
-            className="top-0 h-8 border-b text-[11px]"
+            className="top-0 h-8 border-b text-xs"
           >
             <div className="flex flex-col">
               <span className="truncate" title={d.displayName}>{d.displayName}</span>
@@ -290,7 +290,7 @@ function MatrixHeader({
           <TableHead
             key={d.dimensionKey}
             style={{ width: COL_METRIC_WIDTH }}
-            className="top-0 h-8 border-b bg-muted/30 text-[11px]"
+            className="top-0 h-8 border-b bg-muted/30 text-xs"
           >
             <div className="flex flex-col">
               <span className="truncate" title={d.displayName}>{d.displayName}</span>
@@ -299,10 +299,10 @@ function MatrixHeader({
           </TableHead>
         ))}
 
-        <TableHead style={{ width: COL_SLOT_WIDTH }} className="top-0 h-8 border-b text-[11px]">效果结论</TableHead>
-        <TableHead style={{ width: COL_SLOT_WIDTH }} className="top-0 h-8 border-b text-[11px]">过程记录</TableHead>
-        <TableHead style={{ width: COL_SLOT_WIDTH }} className="top-0 h-8 border-b text-[11px]">关联问题</TableHead>
-        <TableHead style={{ width: COL_SLOT_WIDTH }} className="top-0 h-8 border-b text-[11px]">证据</TableHead>
+        <TableHead style={{ width: COL_SLOT_WIDTH }} className="top-0 h-8 border-b text-xs">效果结论</TableHead>
+        <TableHead style={{ width: COL_SLOT_WIDTH }} className="top-0 h-8 border-b text-xs">过程记录</TableHead>
+        <TableHead style={{ width: COL_SLOT_WIDTH }} className="top-0 h-8 border-b text-xs">关联问题</TableHead>
+        <TableHead style={{ width: COL_SLOT_WIDTH }} className="top-0 h-8 border-b text-xs">证据</TableHead>
       </TableRow>
     </TableHeader>
   );
@@ -369,11 +369,11 @@ function GroupBlock({
             {group.conditionSummary && (
               <span className="min-w-0 truncate text-xs text-muted-foreground">{group.conditionSummary}</span>
             )}
-            <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{group.rows.length} 行</span>
+            <span className="ml-auto shrink-0 text-xs text-muted-foreground">{group.rows.length} 行</span>
             <Button
               size="sm"
               variant="ghost"
-              className="h-6 shrink-0 text-[10px]"
+              className="h-6 shrink-0 text-xs"
               onClick={() => handlers.onAddRowToGroup(group.id)}
             >
               + 行
@@ -451,14 +451,14 @@ function MatrixDataRow({
       {/* Rail */}
       <TableCell
         style={{ left: STICKY_OFFSETS.rail }}
-        className={cn(stickyCellClass(STICKY_OFFSETS.rail), 'h-9 border-b text-center text-[10px] text-muted-foreground')}
+        className={cn(stickyCellClass(STICKY_OFFSETS.rail), 'h-9 border-b text-center text-xs text-muted-foreground')}
       >
         {index + 1}
       </TableCell>
       {/* Hierarchy — group label repeats the band for context when scrolled right. */}
       <TableCell
         style={{ left: STICKY_OFFSETS.group }}
-        className={cn(stickyCellClass(STICKY_OFFSETS.group), 'border-b text-[11px]')}
+        className={cn(stickyCellClass(STICKY_OFFSETS.group), 'border-b text-xs')}
       >
         <span className="block truncate text-muted-foreground" title={row.subject.key}>
           {row.subject.key || '—'}
@@ -466,13 +466,13 @@ function MatrixDataRow({
       </TableCell>
       <TableCell
         style={{ left: STICKY_OFFSETS.spec }}
-        className={cn(stickyCellClass(STICKY_OFFSETS.spec), 'border-b text-[11px]')}
+        className={cn(stickyCellClass(STICKY_OFFSETS.spec), 'border-b text-xs')}
       >
         <span className="block truncate text-muted-foreground">—</span>
       </TableCell>
       <TableCell
         style={{ left: STICKY_OFFSETS.item }}
-        className={cn(stickyCellClass(STICKY_OFFSETS.item), 'border-b text-[11px] font-medium')}
+        className={cn(stickyCellClass(STICKY_OFFSETS.item), 'border-b text-xs font-medium')}
       >
         <span className="block truncate" title={row.subject.label}>{row.subject.label}</span>
       </TableCell>

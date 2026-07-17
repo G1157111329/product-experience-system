@@ -21,7 +21,7 @@ export function ReportTabBar({ idPrefix = 'report', tabs, active, onChange }: Re
   };
 
   return (
-    <nav role="tablist" aria-label="报告内容" className="flex items-center gap-1 overflow-x-auto border-b bg-muted/30 px-4 py-2">
+    <nav role="tablist" aria-label="报告内容" className="flex items-center gap-1 overflow-x-auto bg-muted/30 px-4 py-2">
       {tabs.map((tab, index) => (
         <button
           key={tab.key}
@@ -40,15 +40,18 @@ export function ReportTabBar({ idPrefix = 'report', tabs, active, onChange }: Re
             if (event.key === 'End') { event.preventDefault(); onChange(tabs[tabs.length - 1].key); tabRefs.current[tabs.length - 1]?.focus(); }
           }}
           className={cn(
-            'relative flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+            'relative flex min-h-11 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
             active === tab.key
-              ? 'bg-background text-foreground shadow-sm'
+              ? 'bg-primary text-primary-foreground shadow-sm ring-1 ring-primary/25'
               : 'text-muted-foreground hover:bg-background/50 hover:text-foreground'
           )}
         >
           {tab.label}
           {typeof tab.count === 'number' && (
-            <span className="rounded-full bg-muted px-1.5 py-0 text-[10px] tabular-nums">{tab.count}</span>
+            <span className={cn(
+              'rounded-full px-1.5 py-0 text-xs tabular-nums',
+              active === tab.key ? 'bg-primary-foreground/15 text-primary-foreground' : 'bg-muted',
+            )}>{tab.count}</span>
           )}
         </button>
       ))}

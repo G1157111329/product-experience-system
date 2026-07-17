@@ -214,7 +214,10 @@ test('anonymous reader presigns raw object keys without requesting them as page-
   expect(rawRequests).toEqual([]);
   const remoteThumbnail = page.getByTestId('report-media-item');
   await expect(remoteThumbnail).toHaveCount(1);
-  await expect(remoteThumbnail.locator('img')).toHaveAttribute('src', '/api/materials/thumb/garage/private/raw.jpg');
+  await expect(remoteThumbnail.locator('img')).toHaveAttribute(
+    'src',
+    'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==',
+  );
   await remoteThumbnail.click();
   await expect(page.getByRole('dialog')).toBeVisible();
 });
@@ -590,8 +593,8 @@ test('frozen recipe issue reader keeps snapshot facts and renders four states wi
     }
     else await expect(reader.getByText(/整改复测记录数：/)).toHaveCount(0);
     await reader.getByRole('tab', { name: '功能效果' }).click();
-    await expect(reader.getByAltText('recipe-context.jpg')).toHaveCount(0);
-    await expect(reader.getByAltText('explicit-issue.jpg')).toHaveCount(0);
+    await expect(reader.getByAltText('recipe-context.jpg')).toHaveCount(1);
+    await expect(reader.getByAltText('explicit-issue.jpg')).toHaveCount(1);
     await expect(reader.getByAltText('qualified-extra.jpg')).toHaveCount(1);
   }
 });

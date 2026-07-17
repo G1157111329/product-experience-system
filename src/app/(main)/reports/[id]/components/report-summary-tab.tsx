@@ -89,14 +89,14 @@ export function ReportSummaryTab({ data }: { data: ReportSummaryData | null }) {
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3 lg:grid-cols-4">
               {productInfoItems.map((item) => (
                 <div key={item.label} className="min-w-0">
-                  <p className="text-[11px] text-muted-foreground">{item.label}</p>
+                  <p className="text-xs text-muted-foreground">{item.label}</p>
                   <p className="break-words text-sm font-medium">{String(item.value)}</p>
                 </div>
               ))}
             </div>
             {testPurpose && (
               <div className="mt-3 border-t pt-3">
-                <p className="text-[11px] text-muted-foreground">体验目的</p>
+                <p className="text-xs text-muted-foreground">体验目的</p>
                 <p className="break-words text-sm font-medium leading-relaxed">{testPurpose}</p>
               </div>
             )}

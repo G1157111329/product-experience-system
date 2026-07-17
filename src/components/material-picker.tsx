@@ -4,11 +4,12 @@ import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Plus, Loader2, Film, Image as ImageIcon, Camera, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { ImagePreview, MediaThumbnail } from './image-preview';
+import { ImageEditorDialog, type SaveMode } from './image-editor-dialog';
 import { MediaCaptureDialog } from './media-capture-dialog';
+import { resolveMaterialEditSaveMode } from '@/lib/material-edit-policy';
 import { cn } from '@/lib/utils';
-import { getMediaSrc, pendingMediaDataUrl, usePresignedUrls } from '@/lib/use-presigned-url';
+import { getMediaSrc, isPendingMediaUrl, pendingMediaDataUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import { toast } from 'sonner';
 import { orderMaterialsByIds } from '@/lib/material-selection-order';
 
@@ -54,6 +55,10 @@ interface MaterialPickerProps {
   onSelectionChange?: (ids: string[], materials: Material[]) => void;
   onPreview?: (url: string) => void;
   selectedPreviewSize?: 'sm' | 'md';
+  /** Use an icon trigger and single-line previews in compact matrix cells. */
+  compact?: boolean;
+  /** Only report-entry surfaces may opt into editing a selected original image. */
+  enableImageEditing?: boolean;
 }
 
 type FilterType = 'all' | 'image' | 'video';
@@ -80,6 +85,8 @@ export function MaterialPicker({
   onSelectionChange,
   onPreview,
   selectedPreviewSize = 'sm',
+  compact = false,
+  enableImageEditing = false,
 }: MaterialPickerProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const [materials, setMaterials] = useState<Material[]>([]);
@@ -88,6 +95,8 @@ export function MaterialPicker({
   const [filterType, setFilterType] = useState<FilterType>('all');
   const [captureMode, setCaptureMode] = useState<'image' | 'video' | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewMaterial, setPreviewMaterial] = useState<Material | null>(null);
+  const [editingMaterial, setEditingMaterial] = useState<{ material: Material; url: string } | null>(null);
   const [selected, setSelected] = useState<string[]>(selectedIds || []);
   const [selectedMaterialMap, setSelectedMaterialMap] = useState<Record<string, Material>>(() => {
     const map: Record<string, Material> = {};
@@ -101,6 +110,7 @@ export function MaterialPicker({
 
   const galleryImageInputRef = useRef<HTMLInputElement>(null);
   const galleryVideoInputRef = useRef<HTMLInputElement>(null);
+  const fetchedForOpenRef = useRef(false);
 
   const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
   const allKnownMaterials = useMemo(() => {
@@ -112,10 +122,17 @@ export function MaterialPicker({
   const presignedUrls = usePresignedUrls(allKnownMaterials);
   const materialUrl = (material: Material) => {
     const signedUrl = presignedUrls.get(material.id);
-    if (signedUrl) return signedUrl;
+    // Never feed the image loading placeholder into a <video src> — CSP media-src
+    // (and browsers) reject data:image placeholders and spam console errors.
+    if (signedUrl) {
+      if (isPendingMediaUrl(signedUrl) && material.material_type === 'video') return '';
+      return signedUrl;
+    }
     const fallback = getMediaSrc(material);
     if (!fallback) return material.file_url;
+    if (fallback.startsWith('data:') && material.material_type === 'video') return '';
     if (/^(https?:|data:|\/api\/materials\/file\/|\/uploads\/|\/media\/)/.test(fallback)) return fallback;
+    if (material.material_type === 'video') return '';
     return pendingMediaDataUrl;
   };
   const setIsOpen = onOpenChange || setInternalOpen;
@@ -164,15 +181,9 @@ export function MaterialPicker({
         };
       });
 
-      if (onSelect && !onSelectionChange) {
-        list = list.filter((material) => {
-          if (recordId && material.record_id === recordId) return true;
-          if (recipeStepId && material.recipe_step_id === recipeStepId) return true;
-          if (recipeId && material.recipe_id === recipeId) return true;
-          if (issueId && material.issue_id === issueId) return true;
-          return !material.record_id && !material.recipe_step_id && !material.recipe_id && !material.issue_id;
-        });
-      }
+      // A material asset is reusable. Existing legacy bindings must never hide
+      // it from another business location; choosing it creates a new link for
+      // the current target rather than moving the old one.
 
       setMaterials(list);
       setSelectedMaterialMap((prev) => {
@@ -189,9 +200,21 @@ export function MaterialPicker({
     }
   }, [taskId, recordId, recipeStepId, recipeId, issueId, onSelect, onSelectionChange, selected, selectedIds]);
 
+  // Controlled consumers (such as a matrix cell) only update `open`; they do
+  // not call handleOpen. Load once per open cycle so both controlled and
+  // uncontrolled pickers always expose the same task material library.
+  useEffect(() => {
+    if (!isOpen) {
+      fetchedForOpenRef.current = false;
+      return;
+    }
+    if (fetchedForOpenRef.current) return;
+    fetchedForOpenRef.current = true;
+    void fetchMaterials();
+  }, [isOpen, fetchMaterials]);
+
   const handleOpen = (nextOpen: boolean) => {
     setIsOpen(nextOpen);
-    if (nextOpen) fetchMaterials();
   };
 
   // Sync initialMaterials into selectedMaterialMap so thumbnails and delete buttons show
@@ -226,7 +249,7 @@ export function MaterialPicker({
     input.click();
   };
 
-  const uploadFiles = useCallback(async (files: File[]) => {
+  const uploadFiles = useCallback(async (files: File[], options: { copySourceFileName?: string } = {}) => {
     if (files.length === 0) return;
 
     setUploading(true);
@@ -244,6 +267,7 @@ export function MaterialPicker({
         const formData = new FormData();
         formData.append('file', file);
         formData.append('task_id', taskId);
+        if (options.copySourceFileName) formData.append('copy_source_file_name', options.copySourceFileName);
         if (recordId) formData.append('record_id', recordId);
         if (recipeStepId) formData.append('recipe_step_id', recipeStepId);
         if (recipeId) formData.append('recipe_id', recipeId);
@@ -279,7 +303,10 @@ export function MaterialPicker({
         notifySelectionChange(nextSelected, nextMaterials);
       }
 
-      if (uploadedCount > 0) toast.success('上传成功');
+      if (uploadedCount > 0) {
+        window.dispatchEvent(new CustomEvent('task-materials:changed', { detail: { taskId } }));
+        toast.success('上传成功');
+      }
     } finally {
       setUploading(false);
       resetFileInputs();
@@ -391,7 +418,10 @@ export function MaterialPicker({
     const wrapperClass = selectedPreviewSize === 'md' ? 'w-20 h-20' : 'w-12 h-12';
 
     return (
-      <div className={cn('flex flex-wrap', selectedPreviewSize === 'md' ? 'gap-2.5' : 'gap-1.5')}>
+      <div className={cn(
+        'flex',
+        compact ? 'flex-nowrap gap-1.5' : selectedPreviewSize === 'md' ? 'flex-wrap gap-2.5' : 'flex-wrap gap-1.5',
+      )}>
         {selected.map((id) => {
           const material = selectedMaterialMap[id];
           if (!material) return null;
@@ -404,6 +434,7 @@ export function MaterialPicker({
                 if (onPreview) {
                   onPreview(previewSrc);
                 } else {
+                  setPreviewMaterial(material);
                   setPreviewUrl(previewSrc);
                 }
               }}>
@@ -426,8 +457,46 @@ export function MaterialPicker({
   };
 
   const renderPreviewModal = () => {
-    if (!previewUrl) return null;
-    return <ImagePreview url={previewUrl} onClose={() => setPreviewUrl(null)} />;
+    if (!previewUrl || !previewMaterial) return null;
+    return <ImagePreview
+      url={previewUrl}
+      mediaType={previewMaterial.material_type}
+      onClose={() => { setPreviewUrl(null); setPreviewMaterial(null); }}
+      onEdit={enableImageEditing && previewMaterial.material_type === 'image'
+        ? (resolvedUrl) => setEditingMaterial({ material: previewMaterial, url: resolvedUrl })
+        : undefined}
+    />;
+  };
+
+  const handleEditedImageSave = async (editedFile: File, requestedMode: SaveMode) => {
+    if (!editingMaterial) return;
+    const saveMode = resolveMaterialEditSaveMode({ requested: requestedMode, hasFrozenReference: false });
+    try {
+      if (saveMode === 'save_new') {
+        await uploadFiles([editedFile], { copySourceFileName: editingMaterial.material.file_name });
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('file', editedFile);
+      const response = await fetch(`/api/materials/${editingMaterial.material.id}/replace`, { method: 'POST', body: formData });
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && payload.code === 0) {
+        const updated = payload.data as Material;
+        setMaterials((current) => current.map((material) => material.id === updated.id ? { ...material, ...updated } : material));
+        setSelectedMaterialMap((current) => ({ ...current, [updated.id]: { ...current[updated.id], ...updated } }));
+        toast.success('图片已覆盖保存，原绑定保持不变');
+        return;
+      }
+      if (response.status === 409 && payload.save_mode === 'save_new') {
+        await uploadFiles([editedFile], { copySourceFileName: editingMaterial.material.file_name });
+        toast.info('原图已被冻结报告引用，已另存为新图片');
+        return;
+      }
+      toast.error(payload.message || '保存编辑图片失败');
+    } finally {
+      setEditingMaterial(null);
+    }
   };
 
   const renderFilterButtons = () => (
@@ -511,12 +580,20 @@ export function MaterialPicker({
   );
 
   const renderDialogBody = () => (
-    <div className="space-y-3">
-      {renderUploadActions()}
-      <p className="text-[11px] text-muted-foreground text-center pt-1">
-        也可以直接粘贴图片 (Ctrl/Cmd+V)
-      </p>
-      <ScrollArea className="h-[50vh]">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <div className="shrink-0 space-y-3">
+        {renderUploadActions()}
+        <p className="text-xs text-muted-foreground text-center pt-1">
+          也可以直接粘贴图片 (Ctrl/Cmd+V)
+        </p>
+      </div>
+      {/* Native overflow — Radix ScrollArea inside draggable Dialog often clips
+          at ~12 thumbnails and swallows scrollbar / wheel interaction. */}
+      <div
+        data-testid="material-picker-scroll"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1"
+        style={{ maxHeight: 'min(50vh, 28rem)' }}
+      >
         {loading ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-5 w-5 animate-spin" />
@@ -524,7 +601,7 @@ export function MaterialPicker({
         ) : filteredMaterials.length === 0 ? (
           <div className="text-center py-8 text-sm text-muted-foreground">暂无素材，请先上传</div>
         ) : (
-          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 pb-1">
             {filteredMaterials.map((material) => (
               <div
                 key={material.id}
@@ -549,28 +626,44 @@ export function MaterialPicker({
             ))}
           </div>
         )}
-      </ScrollArea>
+      </div>
     </div>
   );
 
   if (controlledOpen === undefined && onOpenChange === undefined) {
     return (
       <>
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2 flex-wrap">
-            <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => handleOpen(true)}>
-              <Plus className="h-3.5 w-3.5" />
-              选择素材
-            </Button>
-            {selected.length > 0 && (
+        <div className={cn(compact ? 'flex h-12 items-center gap-2 overflow-hidden' : 'space-y-1.5')}>
+          <div className="flex shrink-0 items-center gap-2">
+            {compact ? (
+              <Button
+                type="button"
+                size="icon"
+                variant="outline"
+                className="h-8 w-8"
+                onClick={() => handleOpen(true)}
+                aria-label="选择素材"
+                title="选择素材"
+              >
+                <ImageIcon className="h-3.5 w-3.5" />
+              </Button>
+            ) : (
+              <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => handleOpen(true)}>
+                <Plus className="h-3.5 w-3.5" />
+                选择素材
+              </Button>
+            )}
+            {!compact && selected.length > 0 && (
               <span className="text-xs text-muted-foreground">已选 {selected.length} 项</span>
             )}
           </div>
-          {renderSelectedThumbnails()}
+          {compact ? (
+            <div className="min-w-0 overflow-x-auto">{renderSelectedThumbnails()}</div>
+          ) : renderSelectedThumbnails()}
         </div>
         <Dialog modal={false} open={isOpen} onOpenChange={handleOpen}>
-          <DialogContent className="max-w-lg max-h-[85vh]">
-            <DialogHeader>
+          <DialogContent className="flex max-h-[85vh] max-w-lg flex-col overflow-hidden">
+            <DialogHeader className="shrink-0">
               <DialogTitle>选择素材</DialogTitle>
               <DialogDescription>从素材库选择，或通过独立入口直接上传图片/视频</DialogDescription>
             </DialogHeader>
@@ -578,6 +671,13 @@ export function MaterialPicker({
           </DialogContent>
         </Dialog>
         {renderPreviewModal()}
+        <ImageEditorDialog
+          open={editingMaterial !== null}
+          onOpenChange={(open) => { if (!open) setEditingMaterial(null); }}
+          imageUrl={editingMaterial?.url || ''}
+          fileName={editingMaterial?.material.file_name || 'edited-image'}
+          onSave={handleEditedImageSave}
+        />
       </>
     );
   }
@@ -585,8 +685,8 @@ export function MaterialPicker({
   return (
     <>
       <Dialog modal={false} open={isOpen} onOpenChange={handleOpen}>
-        <DialogContent className="max-w-lg max-h-[85vh]">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[85vh] max-w-lg flex-col overflow-hidden">
+          <DialogHeader className="shrink-0">
             <DialogTitle>选择素材</DialogTitle>
             <DialogDescription>从素材库选择，或通过独立入口直接上传图片/视频</DialogDescription>
           </DialogHeader>
@@ -594,6 +694,13 @@ export function MaterialPicker({
         </DialogContent>
       </Dialog>
       {renderPreviewModal()}
+      <ImageEditorDialog
+        open={editingMaterial !== null}
+        onOpenChange={(open) => { if (!open) setEditingMaterial(null); }}
+        imageUrl={editingMaterial?.url || ''}
+        fileName={editingMaterial?.material.file_name || 'edited-image'}
+        onSave={handleEditedImageSave}
+      />
     </>
   );
 }

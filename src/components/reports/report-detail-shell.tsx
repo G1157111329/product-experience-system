@@ -224,7 +224,7 @@ function EvidenceSlotList({ slots }: { slots: ReportEvidenceSlot[] }) {
         >
           <div className="flex items-center justify-between gap-2">
             <span className="min-w-0 truncate font-medium">{evidenceRoleLabel(slot.role)}</span>
-            <Badge variant={slot.status === 'missing' && slot.required ? 'destructive' : 'outline'} className="text-[10px]">
+            <Badge variant={slot.status === 'missing' && slot.required ? 'destructive' : 'outline'} className="text-xs">
               {evidenceStatusLabel[slot.status]}
             </Badge>
           </div>
@@ -305,7 +305,7 @@ function ReportSectionCanvas({ model, showDiagnostics }: { model: ReportDetailMo
             {showDiagnostics && (
               <div className="mt-4 flex flex-wrap gap-2">
                 {section.blockKeys.map((key) => (
-                  <span key={key} className="rounded-md border bg-muted/20 px-2 py-1 text-[11px] text-muted-foreground">
+                  <span key={key} className="rounded-md border bg-muted/20 px-2 py-1 text-xs text-muted-foreground">
                     {key}
                   </span>
                 ))}
@@ -390,19 +390,19 @@ export function ReportDetailShell({
             </Button>
             <div className="min-w-0 flex-1">
               <div className="mb-2 flex flex-wrap items-center gap-2">
-                <Badge variant="secondary" className="text-[10px]">
+                <Badge variant="secondary" className="text-xs">
                   {reportTypeLabel[reportType] || reportType}
                 </Badge>
-                <Badge variant="outline" className="text-[10px]">
+                <Badge variant="outline" className="text-xs">
                   {header?.status || fallbackStatus || '草稿'}
                 </Badge>
                 {header?.defaultViewMode && (
-                  <Badge variant="outline" className="text-[10px]">
+                  <Badge variant="outline" className="text-xs">
                     {viewModeLabel[header.defaultViewMode]}模式
                   </Badge>
                 )}
                 {mergedCount && mergedCount > 1 && (
-                  <Badge variant="secondary" className="text-[10px]">合并 {mergedCount} 份报告</Badge>
+                  <Badge variant="secondary" className="text-xs">合并 {mergedCount} 份报告</Badge>
                 )}
               </div>
               <h1 className="break-words text-xl font-semibold leading-tight lg:text-2xl">{title}</h1>
@@ -442,10 +442,10 @@ export function ReportDetailShell({
               <div className="mb-1 flex flex-wrap items-center gap-2">
                 <p className="text-xs font-medium text-muted-foreground">结论摘要</p>
                 {conclusion?.conclusionLevel && (
-                  <Badge variant="outline" className="text-[10px]">{levelLabel[conclusion.conclusionLevel]}</Badge>
+                  <Badge variant="outline" className="text-xs">{levelLabel[conclusion.conclusionLevel]}</Badge>
                 )}
                 {conclusion?.recommendedNextAction && conclusion.recommendedNextAction !== 'no_action' && (
-                  <Badge variant="secondary" className="text-[10px]">下一步：{userActionLabel(conclusion.recommendedNextAction)}</Badge>
+                  <Badge variant="secondary" className="text-xs">下一步：{userActionLabel(conclusion.recommendedNextAction)}</Badge>
                 )}
               </div>
               <p className="break-words text-sm leading-6 text-foreground">
@@ -499,7 +499,7 @@ export function ReportDetailShell({
                   <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <span className="truncate">原始报告内容</span>
                 </span>
-                <Badge variant={legacyBodyOpen ? 'secondary' : 'outline'} className="shrink-0 text-[10px]">
+                <Badge variant={legacyBodyOpen ? 'secondary' : 'outline'} className="shrink-0 text-xs">
                   {legacyBodyOpen ? '兜底视图' : '核对视图'}
                 </Badge>
               </summary>

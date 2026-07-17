@@ -92,7 +92,7 @@ export function MatrixStyleToolbar({
             type="button"
             size="sm"
             variant={size === s.token ? 'secondary' : 'ghost'}
-            className="h-6 px-1.5 text-[10px]"
+            className="h-6 px-1.5 text-xs"
             disabled={saving}
             onClick={() => onApply({ fontSizeToken: s.token })}
           >

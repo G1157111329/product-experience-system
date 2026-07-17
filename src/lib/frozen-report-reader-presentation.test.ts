@@ -20,13 +20,16 @@ test('frozen issue reader keeps evidence at its source and exposes one dedicated
   assert.match(readerSource, /issueStatusLabel\(issue\.liveOverlay\.status \|\| 'open'\)/);
   assert.match(readerSource, /issue\.canManage\s*&&\s*issue\.liveIssueId\s*&&\s*onManageIssue/, 'only a canonically authorized linked issue may make the status interactive');
   assert.match(readerSource, /onClick:\s*\(\) => onManageIssue\(issue\)/, 'the managed status itself opens rectification');
-  assert.match(readerSource, /retest\.history\.slice\(1\)/, 'older retests are rendered from the complete frozen history');
+  assert.doesNotMatch(readerSource, /retest\.history\.slice\(1\)/, 'only the latest retest is rendered');
   assert.match(readerSource, /关联缺失，无法进入整改/, 'unlinked internal rows explain why management is unavailable');
   assert.match(readerSource, /issue\.recipe[\s\S]*items=\{issue\.evidence\}/, 'explicit recipe-issue evidence is rendered once outside recipe context');
-  assert.match(readerSource, /excludeClaimedRecipeMediaFromEffects/, 'browser rendering defensively removes same-recipe media already claimed by an issue');
+  assert.doesNotMatch(readerSource, /excludeClaimedRecipeMediaFromEffects/, 'function evidence must remain visible even when the same recipe also appears in the issue tab');
   assert.doesNotMatch(readerSource, />\s*查看整改\s*</, 'managed rows use the status itself as the action');
   assert.doesNotMatch(readerSource, /role="appendix"/, 'issue evidence must never be collected as an appendix');
-  assert.equal(readerSource.includes("comparison: '\\u98df\\u8c31/\\u529f\\u80fd-\\u5bf9\\u6bd4\\u77e9\\u9635'"), true);
+  assert.equal(readerSource.includes("comparison: '\\u5bf9\\u6bd4\\u77e9\\u9635'"), true);
+  assert.match(readerSource, /`\\u95ee\\u9898\\u63cf\\u8ff0\\uff1a\$\{issue\.title\}`/, 'five-sense list title uses the inspection item');
+  assert.match(readerSource, /context\.descriptionResult/, 'the observed result is rendered as 描述检查项内容');
+  assert.match(readerSource, /context\.problemPoints\s*\?\?\s*\[\]\)\.map/, 'comparison problem lines are rendered independently');
 });
 
 test('function effect reader is a single recipe list without a duplicated issue section', () => {

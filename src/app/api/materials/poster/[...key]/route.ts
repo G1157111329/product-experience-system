@@ -4,9 +4,11 @@ import { mkdir, stat, unlink, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { Readable } from 'stream';
+import { pathToFileURL } from 'url';
 import { promisify } from 'util';
 import { NextRequest, NextResponse } from 'next/server';
 import { canAccessTask, getCurrentUser } from '@/lib/server/auth';
+import { localStoragePathVariants } from '@/lib/material-storage-path';
 import {
   getLocalContentType,
   isLocalUploadPublicAccess,
@@ -23,21 +25,40 @@ export const maxDuration = 60;
 
 const execFileAsync = promisify(execFile);
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.m4v', '.mov', '.webm']);
+const FFMPEG_BIN = process.env.FFMPEG_BIN || 'ffmpeg';
+
+/** Return a stable video tile when a source cannot yield a poster. */
+function posterFallbackResponse() {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="视频预览不可用"><rect width="640" height="360" fill="#e2e8f0"/><path d="M276 135v90l82-45z" fill="#64748b"/><text x="320" y="290" text-anchor="middle" fill="#475569" font-family="Arial, sans-serif" font-size="20">视频预览不可用</text></svg>`;
+  return new NextResponse(svg, {
+    headers: {
+      'Content-Type': 'image/svg+xml; charset=utf-8',
+      'Cache-Control': 'public, max-age=300',
+      'X-Poster-Fallback': '1',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  });
+}
 
 async function findMaterialByPath(client: ReturnType<typeof getSupabaseClient>, filePath: string) {
-  const { data: byFilePath } = await client
-    .from('materials')
-    .select('id, file_path, file_url, task_id, recipe_library_step_id')
-    .eq('file_path', filePath)
-    .maybeSingle();
-  if (byFilePath) return byFilePath;
-
-  const { data: byFileUrl } = await client
-    .from('materials')
-    .select('id, file_path, file_url, task_id, recipe_library_step_id')
-    .eq('file_url', filePath)
-    .maybeSingle();
-  return byFileUrl;
+  const variants = localStoragePathVariants(filePath);
+  for (const candidate of variants) {
+    const { data } = await client
+      .from('materials')
+      .select('id, file_path, file_url, task_id, recipe_library_step_id')
+      .eq('file_path', candidate)
+      .maybeSingle();
+    if (data) return data;
+  }
+  for (const candidate of variants) {
+    const { data } = await client
+      .from('materials')
+      .select('id, file_path, file_url, task_id, recipe_library_step_id')
+      .eq('file_url', candidate)
+      .maybeSingle();
+    if (data) return data;
+  }
+  return null;
 }
 
 function normalizeObjectKey(key: string): string {
@@ -91,23 +112,55 @@ async function isFreshPoster(sourcePath: string, posterPath: string) {
 
 async function generatePoster(sourcePath: string, posterPath: string) {
   await mkdir(path.dirname(posterPath), { recursive: true });
-  await execFileAsync('ffmpeg', [
-    '-y',
-    '-hide_banner',
-    '-loglevel',
-    'error',
-    '-ss',
-    '0.2',
-    '-i',
-    sourcePath,
-    '-frames:v',
-    '1',
-    '-vf',
-    'scale=640:-2',
-    '-q:v',
-    '4',
-    posterPath,
-  ], { timeout: 30_000 });
+  try {
+    await execFileAsync(FFMPEG_BIN, [
+      '-y',
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-ss',
+      '0.2',
+      '-i',
+      sourcePath,
+      '-frames:v',
+      '1',
+      '-vf',
+      'scale=640:-2',
+      '-q:v',
+      '4',
+      posterPath,
+    ], { timeout: 30_000 });
+  } catch (ffmpegError) {
+    // Historical mobile MP4 files can be decoded by Chromium even when the
+    // lightweight Playwright ffmpeg build rejects their container metadata.
+    // Generate the same stable JPG poster through Chromium before falling
+    // back to a generic video tile.
+    console.warn('[materials/poster] ffmpeg extraction failed; using Chromium fallback', ffmpegError);
+    const { chromium } = await import('playwright');
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 640, height: 360 } });
+      await page.goto(pathToFileURL(sourcePath).href, { waitUntil: 'domcontentloaded' });
+      const video = page.locator('video');
+      await video.evaluate(async (element) => {
+        const videoElement = element as HTMLVideoElement;
+        if (videoElement.readyState < 2) {
+          await new Promise<void>((resolve, reject) => {
+            videoElement.addEventListener('loadeddata', () => resolve(), { once: true });
+            videoElement.addEventListener('error', () => reject(new Error('Video decode failed')), { once: true });
+          });
+        }
+        videoElement.style.width = '640px';
+        videoElement.style.height = '360px';
+        videoElement.style.objectFit = 'cover';
+        videoElement.currentTime = Math.min(0.2, Number.isFinite(videoElement.duration) ? videoElement.duration / 2 : 0.2);
+        await new Promise<void>((resolve) => videoElement.addEventListener('seeked', () => resolve(), { once: true }));
+      });
+      await video.screenshot({ path: posterPath, type: 'jpeg', quality: 82 });
+    } finally {
+      await browser.close();
+    }
+  }
 }
 
 export async function GET(
@@ -136,9 +189,7 @@ export async function GET(
   // Decide source location (gray-release aware).
   const existsLocally = STORAGE_DRIVER === 's3' ? false : await localFileExists(safeKey);
   const useS3 = !existsLocally && isS3FallbackAvailable();
-  if (!existsLocally && !useS3) {
-    return NextResponse.json({ code: 1, message: '视频源文件不存在' }, { status: 404 });
-  }
+  if (!existsLocally && !useS3) return posterFallbackResponse();
 
   // Poster cache lives next to local uploads regardless of source.
   const posterPath = path.resolve(LOCAL_UPLOAD_DIR, '.posters', ...safeKey.split('/')) + '.jpg';
@@ -186,6 +237,6 @@ export async function GET(
     });
   } catch (error) {
     console.error('[materials/poster] Failed to generate poster:', error);
-    return NextResponse.json({ code: 1, message: '视频首帧生成失败' }, { status: 500 });
+    return posterFallbackResponse();
   }
 }

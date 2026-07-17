@@ -20,7 +20,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/lib/auth-context';
 import { getErrorMessage, readJsonResponse } from '@/lib/http';
+import { normalizeProjectPhase } from '@/lib/dictionary-types';
 import { useDictLabels } from '@/hooks/useDictionary';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import {
@@ -97,6 +99,7 @@ export default function TasksPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [keyword, setKeyword] = useState('');
+  const debouncedKeyword = useDebouncedValue(keyword, 300);
   const [filterStatus, setFilterStatus] = useState('all');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -112,18 +115,22 @@ export default function TasksPage() {
   const [creating, setCreating] = useState(false);
 
   const fetchCategories = useCallback(async () => {
-    const res = await fetch('/api/categories');
-    const data = await res.json();
-    if (data.code === 0) setCategories(data.data || []);
+    try {
+      const res = await fetch('/api/categories');
+      const data = await readApiJson<{ code: number; data?: CategoryWithProducts[] }>(res);
+      if (data.code === 0) setCategories(data.data || []);
+    } catch {
+      setCategories([]);
+    }
   }, []);
 
-  const fetchTasks = useCallback(async () => {
+  const fetchTasks = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (keyword) params.set('keyword', keyword);
+      if (debouncedKeyword) params.set('keyword', debouncedKeyword);
       if (filterStatus && filterStatus !== 'all') params.set('status', filterStatus);
-      const res = await fetch(`/api/tasks?${params}`);
+      const res = await fetch(`/api/tasks?${params}`, { signal: signal });
       const data = await readApiJson<{ code: number; message?: string; data?: { list?: Task[]; total?: number } }>(res);
       if (data.code === 0) {
         setTasks(data.data?.list || []);
@@ -132,11 +139,12 @@ export default function TasksPage() {
         toast.error(data.message || '获取体验计划失败');
       }
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
       toast.error(error instanceof Error ? error.message : '获取体验计划失败');
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
-  }, [filterStatus, keyword]);
+  }, [debouncedKeyword, filterStatus]);
 
   useEffect(() => {
     fetchCategories();
@@ -152,7 +160,10 @@ export default function TasksPage() {
   }, [dialogOpen, user?.name]);
 
   useEffect(() => {
-    if (user?.id) fetchTasks();
+    if (!user?.id) return;
+    const controller = new AbortController();
+    void fetchTasks(controller.signal);
+    return () => controller.abort();
   }, [fetchTasks, user?.id]);
 
   useEffect(() => {
@@ -437,7 +448,7 @@ export default function TasksPage() {
         }
       />
 
-      <FilterBar>
+      <FilterBar sticky={false}>
         <div className="flex gap-1.5 overflow-x-auto pb-1 sm:pb-0" role="tablist" aria-label="体验计划状态筛选">
           {STATUS_TABS.map((tab) => (
             <button
@@ -466,11 +477,11 @@ export default function TasksPage() {
 
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <span>当前显示 {loading ? '-' : tasks.length} 条</span>
-        {filterStatus !== 'all' && <Badge variant="outline" className="text-[10px]">状态：{filterStatus}</Badge>}
-        {keyword.trim() && <Badge variant="outline" className="max-w-full text-[10px]">关键词：{keyword.trim()}</Badge>}
+        {filterStatus !== 'all' && <Badge variant="outline" className="text-xs">状态：{filterStatus}</Badge>}
+        {keyword.trim() && <Badge variant="outline" className="max-w-full text-xs">关键词：{keyword.trim()}</Badge>}
       </div>
 
-      {loading ? (
+      {loading && tasks.length === 0 ? (
         <SkeletonList rows={3} />
       ) : tasks.length === 0 ? (
         <EmptyState
@@ -501,9 +512,9 @@ export default function TasksPage() {
               meta={
                 <>
                   <StatusBadge kind="task" value={task.status} />
-                  {task.project_type && <Badge variant="outline" className="text-[10px]">{task.project_type}</Badge>}
-                  {task.project_phase && <Badge variant="outline" className="text-[10px]">{task.project_phase}</Badge>}
-                  {task.test_date && <Badge variant="outline" className="text-[10px]">{task.test_date}</Badge>}
+                  {task.project_type && <Badge variant="outline" className="text-xs">{task.project_type}</Badge>}
+                  {task.project_phase && <Badge variant="outline" className="text-xs">{normalizeProjectPhase(task.project_phase)}</Badge>}
+                  {task.test_date && <Badge variant="outline" className="text-xs">{task.test_date}</Badge>}
                 </>
               }
               actions={

@@ -28,22 +28,46 @@ export type DictItem = {
 
 export type DictMap = Record<DictType, DictItem[]>;
 
+export const PROJECT_PHASE_SELECTION_LABELS = [
+  "手板研究",
+  "试制阶段",
+  "试产阶段",
+  "量产阶段",
+] as const;
+
+const LEGACY_PROJECT_PHASE_LABELS: Record<string, (typeof PROJECT_PHASE_SELECTION_LABELS)[number]> = {
+  "手板": "手板研究",
+  "试制": "试制阶段",
+  "试产": "试产阶段",
+  "量产": "量产阶段",
+};
+
+/**
+ * Existing tasks may still contain the former short labels. They remain
+ * readable, but all new selections use the four canonical phase names.
+ */
+export function normalizeProjectPhase(value: string | null | undefined): string {
+  if (!value) return "";
+  return LEGACY_PROJECT_PHASE_LABELS[value] ?? value;
+}
+
+/** The task-creation selector is intentionally fixed to the canonical phases. */
+export function getProjectPhaseSelectionLabels(): string[] {
+  return [...PROJECT_PHASE_SELECTION_LABELS];
+}
+
 /**
  * Frozen fallback values. Ported verbatim from the existing hardcoded constant
  * sets to guarantee UI keeps working when the dictionary table is empty or the
  * DB is unreachable. Do NOT edit without bumping the version and migrating rows.
  */
 export const defaultDict: DictMap = {
-  project_phase_dict: [
-    { code: "手板", label: "手板", sortOrder: 10, isActive: true },
-    { code: "试制", label: "试制", sortOrder: 20, isActive: true },
-    { code: "试产", label: "试产", sortOrder: 30, isActive: true },
-    { code: "量产", label: "量产", sortOrder: 40, isActive: true },
-    { code: "手板研究", label: "手板研究", sortOrder: 11, isActive: true, description: "兼容旧值" },
-    { code: "试制阶段", label: "试制阶段", sortOrder: 21, isActive: true, description: "兼容旧值" },
-    { code: "试产阶段", label: "试产阶段", sortOrder: 31, isActive: true, description: "兼容旧值" },
-    { code: "量产阶段", label: "量产阶段", sortOrder: 41, isActive: true, description: "兼容旧值" },
-  ],
+  project_phase_dict: PROJECT_PHASE_SELECTION_LABELS.map((label, index) => ({
+    code: label,
+    label,
+    sortOrder: (index + 1) * 10,
+    isActive: true,
+  })),
   issue_status_dict: [
     { code: "open", label: "待整改", sortOrder: 10, isActive: true },
     { code: "rectifying", label: "整改中", sortOrder: 20, isActive: true },

@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 
-type TaskTabKey = 'agent' | 'info' | 'materials' | 'senses' | 'functions' | 'comparison' | 'matrix';
+type TaskTabKey = 'info' | 'materials' | 'senses' | 'functions' | 'comparison' | 'matrix';
 
 type ReportAuthoringShellProps = {
   activeTab: TaskTabKey;

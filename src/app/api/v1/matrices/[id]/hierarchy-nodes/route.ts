@@ -2,19 +2,18 @@
  * POST /api/v1/matrices/{id}/hierarchy-nodes
  * PRD V3.1.2.4 §7.3-7.5 / §13.3-13.4 — Create a hierarchy node.
  *
- * Body: { level: 1|2|3, parentId?: string, nodeLabel: string }
+ * Body: { level: 1|2, parentId?: string, nodeLabel: string }
  *
  * Auto-creation rules (PRD §7.3.2, §7.4.3):
  *   - level_1: also creates a default level_2 node + a leaf_row so the user can
  *     immediately input data.
- *   - level_2 (no level_3 enabled): creates a leaf_row.
- *   - level_3: creates a leaf_row.
+ *   - level_2 creates a leaf_row below a level_1 parent.
  *
  * visible_row_index is computed as max(existing)+1 within the matrix.
  */
 import { NextRequest } from 'next/server';
 import { getDb } from '@/storage/database/pg-db';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import {
   materialLinks,
   matrixCellValues,
@@ -66,8 +65,11 @@ export async function POST(
   }
 
   const level = body.level;
-  if (level !== 1 && level !== 2 && level !== 3) {
-    return fail(traceId, { message: 'level 必须是 1/2/3', status: 400 });
+  if (level === 3) {
+    return fail(traceId, { message: '数据矩阵仅支持一级大类和二级细项，不能新增三级细项', status: 422 });
+  }
+  if (level !== 1 && level !== 2) {
+    return fail(traceId, { message: 'level 必须是 1/2', status: 400 });
   }
   if (!body.nodeLabel?.trim()) {
     return fail(traceId, { message: 'nodeLabel 不能为空', status: 400 });
@@ -75,6 +77,27 @@ export async function POST(
 
   try {
     const db = await getDb();
+
+    if (level === 1 && body.parentId) {
+      return fail(traceId, { message: '一级大类不能指定父级', status: 400 });
+    }
+    if (level === 2 && !body.parentId) {
+      return fail(traceId, { message: '二级细项必须隶属于一级大类', status: 400 });
+    }
+
+    let parent: typeof matrixHierarchyNodes.$inferSelect | null = null;
+    if (level === 2 && body.parentId) {
+      const [candidate] = await db
+        .select()
+        .from(matrixHierarchyNodes)
+        .where(eq(matrixHierarchyNodes.id, body.parentId))
+        .limit(1)
+        .execute();
+      parent = candidate ?? null;
+      if (!parent || parent.matrixId !== matrixId || parent.nodeType !== 'level_1' || parent.archivedAt !== null) {
+        return fail(traceId, { message: '二级细项必须隶属于当前矩阵的有效一级大类', status: 400 });
+      }
+    }
 
     // Compute next sort_order under the parent (or at root for level_1).
     const sortOrderResult = await db
@@ -89,7 +112,7 @@ export async function POST(
     const sortOrder = sortOrderResult[0]?.maxOrder ?? 1;
 
     // Insert the node.
-    const nodeType = `level_${level}` as 'level_1' | 'level_2' | 'level_3';
+    const nodeType = `level_${level}` as 'level_1' | 'level_2';
     const [node] = await db
       .insert(matrixHierarchyNodes)
       .values({
@@ -129,41 +152,7 @@ export async function POST(
       level2NodeId = child.id;
     } else if (level === 2) {
       level2NodeId = node.id;
-      level1NodeId = node.parentId ?? node.id;
-    } else {
-      // level 3
-      level2NodeId = node.parentId;
-      const parentRows = level2NodeId
-        ? await db
-            .select({ parentId: matrixHierarchyNodes.parentId })
-            .from(matrixHierarchyNodes)
-            .where(and(eq(matrixHierarchyNodes.id, level2NodeId), eq(matrixHierarchyNodes.matrixId, matrixId)))
-            .limit(1)
-            .execute()
-        : [];
-      if (!parentRows[0]?.parentId) throw new Error('三级细项必须隶属于有效的二级细项');
-      level1NodeId = parentRows[0].parentId;
-
-      // The first level-3 item replaces the level-2 placeholder row instead of
-      // creating a second row and leaving the original row as a non-editable dash.
-      const [placeholderRow] = await db
-        .select()
-        .from(matrixLeafRows)
-        .where(and(
-          eq(matrixLeafRows.matrixId, matrixId),
-          eq(matrixLeafRows.level2NodeId, level2NodeId!),
-          isNull(matrixLeafRows.level3NodeId),
-          eq(matrixLeafRows.status, 'active'),
-        ))
-        .limit(1);
-      if (placeholderRow) {
-        const [updatedRow] = await db.update(matrixLeafRows)
-          .set({ level3NodeId: node.id })
-          .where(eq(matrixLeafRows.id, placeholderRow.id))
-          .returning();
-        created.leafRow = updatedRow;
-        return ok(created, traceId, 'created');
-      }
+      level1NodeId = parent!.id;
     }
 
     // Compute next visible_row_index.
@@ -181,7 +170,7 @@ export async function POST(
         matrixId,
         level1NodeId,
         level2NodeId,
-        level3NodeId: level === 3 ? node.id : null,
+        level3NodeId: null,
         visibleRowIndex: nextIdx,
         groupRowIndex: 1,
         status: 'active',

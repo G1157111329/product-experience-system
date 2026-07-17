@@ -35,7 +35,7 @@ async function main() {
   assert.deepEqual(classifyIssueRetestError(new Error('retest not found')), { status: 404, message: '复测记录不存在', log: false });
   assert.deepEqual(classifyIssueRetestError(new Error('invalid retest result')), { status: 400, message: '复测结果格式错误', log: false });
   assert.deepEqual(classifyIssueRetestError(new Error('material_ids must be an array')), { status: 400, message: '素材参数格式错误', log: false });
-  assert.deepEqual(classifyIssueRetestError(new Error('invalid or occupied retest material')), { status: 409, message: '所选素材不可用于本次复测，请刷新后重试', log: false });
+  assert.deepEqual(classifyIssueRetestError(new Error('invalid retest material')), { status: 400, message: '所选素材不属于该问题任务', log: false });
   assert.deepEqual(classifyIssueRetestError(new Error('password=secret internal detail')), { status: 500, message: '复测操作失败', log: true });
 
   const created = rpcClient();
@@ -86,14 +86,14 @@ async function main() {
 
   const failing = {
     async rpc() {
-      return { data: null, error: { message: 'invalid or occupied retest material' } };
+      return { data: null, error: { message: 'invalid retest material' } };
     },
   };
   await assert.rejects(
     createIssueRetest(failing, {
       issueId: 'issue-1', description: '失败事务', result: 'pending', materialIds: ['occupied'], createdBy: 'user-1',
     }),
-    /所选素材不可用于本次复测/,
+    /所选素材不属于该问题任务/,
   );
 
   await assert.rejects(

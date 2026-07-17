@@ -50,6 +50,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!material) return NextResponse.json({ code: 1, message: '素材不存在' }, { status: 404 });
   if (!(await canReplaceMaterial(client, user, material))) return forbidden();
 
+  const { data: frozenReference } = await client
+    .from('frozen_material_references')
+    .select('material_id')
+    .eq('material_id', id)
+    .maybeSingle();
+  if (frozenReference) {
+    return NextResponse.json({
+      code: 1,
+      message: '该素材已被冻结报告引用，请另存为新图片以保留历史报告',
+      save_mode: 'save_new',
+    }, { status: 409 });
+  }
+
   const formData = await request.formData();
   const file = formData.get('file') as File | null;
   if (!file) return NextResponse.json({ code: 1, message: '缺少文件' }, { status: 400 });

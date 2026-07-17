@@ -144,7 +144,7 @@ export function MaterialsTab({ taskId }: { taskId: string }) {
                         </div>
                       ) : (
                         <div className="flex items-center justify-between">
-                          <p className="text-[10px] text-white truncate flex-1">{mat.file_name}</p>
+                          <p className="text-xs text-white truncate flex-1">{mat.file_name}</p>
                           <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button onClick={() => { setEditingId(mat.id); setEditName(mat.file_name); }} className="p-0.5 text-white/70 hover:text-white">
                               <Pencil className="h-3 w-3" />
@@ -181,7 +181,7 @@ export function MaterialsTab({ taskId }: { taskId: string }) {
                       ) : (
                         <p className="text-sm truncate">{mat.file_name}</p>
                       )}
-                      <p className="text-[10px] text-muted-foreground">{(mat.file_size / 1024 / 1024).toFixed(1)} MB</p>
+                      <p className="text-xs text-muted-foreground">{(mat.file_size / 1024 / 1024).toFixed(1)} MB</p>
                     </div>
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setEditingId(mat.id); setEditName(mat.file_name); }}>

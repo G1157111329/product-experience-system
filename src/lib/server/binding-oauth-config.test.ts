@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
-import { resolveBindingOAuthConfig, updateStoredBindingOAuthConfig } from './binding-oauth-config';
+import {
+  describeWeChatWebsiteOAuthCallback,
+  resolveBindingOAuthConfig,
+  updateStoredBindingOAuthConfig,
+} from './binding-oauth-config';
 
 const stored = updateStoredBindingOAuthConfig(null, 'wechat', {
   appId: 'wx-platform',
@@ -23,5 +27,11 @@ const incomplete = resolveBindingOAuthConfig('wecom', {
   wecom: { corpId: 'corp', agentId: 'agent' },
 }, {});
 assert.equal(incomplete.ready, false);
+
+const callback = describeWeChatWebsiteOAuthCallback(
+  'https://experience.example.com/api/v1/bindings/oauth/callback',
+);
+assert.equal(callback.authorizedRedirectDomain, 'experience.example.com');
+assert.equal(callback.callbackPath, '/api/v1/bindings/oauth/callback');
 
 console.log('binding oauth config tests passed');

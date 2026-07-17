@@ -187,22 +187,27 @@ function MultiMatrixView({ matrix }: { matrix: ComparisonSnapshot }) {
         String(c.item_node_id ?? c.itemNodeId ?? '') === nodeId &&
         String(c.object_id ?? c.objectId ?? '') === objId,
     );
+  const objectColumnWidth = `${86 / Math.max(objects.length, 1)}%`;
 
   return (
-    <div className="space-y-4 p-4">
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full text-xs">
+    <div className="mx-auto w-full max-w-full p-2 sm:p-4">
+      <div className="overflow-hidden rounded-lg border bg-background shadow-sm">
+        <table className="w-full table-fixed border-collapse text-xs leading-[1.55]">
+          <colgroup>
+            <col className="w-[14%]" />
+            {objects.map((obj) => <col key={obj.id as string} style={{ width: objectColumnWidth }} />)}
+          </colgroup>
           <thead>
             <tr>
-              <th className="sticky left-0 top-0 z-[3] min-w-[140px] border-b border-r bg-muted p-2 text-left">维度 / 对象</th>
+              <th className="border-b border-r bg-muted/80 px-2.5 py-2 text-left break-words">维度 / 对象</th>
               {objects.map((obj) => (
                 <th
                   key={obj.id as string}
-                  className="sticky top-0 z-[2] min-w-[120px] border-b border-r bg-muted p-2 text-center align-bottom"
+                  className="border-b border-r bg-muted/80 px-2.5 py-2 text-center align-bottom break-words"
                 >
                   <div className="font-semibold">{objectType(obj)}</div>
                   {objectSubtitle(obj) && (
-                    <div className="mt-0.5 text-[10px] font-normal text-muted-foreground">{objectSubtitle(obj)}</div>
+                    <div className="mt-0.5 text-xs font-normal text-muted-foreground">{objectSubtitle(obj)}</div>
                   )}
                 </th>
               ))}
@@ -266,7 +271,7 @@ function SectionGroup({
     <>
       {/* 大类标题行 */}
       <tr>
-        <td colSpan={objects.length + 1} className="border-b border-r bg-muted/70 p-2 text-left font-semibold">
+        <td colSpan={objects.length + 1} className="border-b border-r bg-primary/[0.08] px-2.5 py-2 text-left font-semibold break-words">
           {nodeName(section)}
         </td>
       </tr>
@@ -275,14 +280,15 @@ function SectionGroup({
         <MatrixRow key={node.id as string} node={node} objects={objects} findCell={findCell} isSummary={false} />
       ))}
       {/* 大类小结汇总行：优先读 summary 节点的 config.summary_text（用户输入），跨列显示 */}
-      {summaryNode && (() => {
-        const summaryText = summaryTextOf(summaryNode);
+      {(summaryNode || summaryTextOf(section)) && (() => {
+        const summarySource = summaryNode ?? section;
+        const summaryText = summaryTextOf(summarySource);
         return (
           <tr className="bg-amber-50/60">
-            <td className="sticky left-0 z-[2] border-b border-r bg-inherit p-2 font-semibold align-top whitespace-nowrap">
-              {nodeName(summaryNode) || '小结'}
+            <td className="border-b border-r bg-inherit px-2.5 py-2 font-semibold align-top break-words">
+              本大类小结
             </td>
-            <td colSpan={objects.length} className="border-b border-r p-2 text-[11px] whitespace-pre-wrap leading-relaxed">
+            <td colSpan={objects.length} className="border-b border-r px-2.5 py-2 text-xs whitespace-pre-wrap leading-relaxed">
               {summaryText || <span className="text-muted-foreground">暂无小结内容</span>}
             </td>
           </tr>
@@ -305,13 +311,13 @@ function MatrixRow({
 }) {
   return (
     <tr className={isSummary ? 'bg-amber-50/60' : ''}>
-      <td className={cn('sticky left-0 z-[2] border-b border-r bg-inherit p-2', isSummary ? 'font-semibold' : 'font-medium')}>
+      <td className={cn('border-b border-r bg-inherit px-2.5 py-2 break-words', isSummary ? 'font-semibold' : 'font-medium')}>
         {nodeName(node)}
       </td>
       {objects.map((obj) => {
         const cell = findCell(String(node.id ?? ''), String(obj.id ?? ''));
         return (
-          <td key={`${node.id}-${obj.id}`} className="border-b border-r p-2 align-top">
+          <td key={`${node.id}-${obj.id}`} className="border-b border-r px-2.5 py-2 align-top break-words">
             <MatrixCell cell={cell} />
           </td>
         );
@@ -336,31 +342,31 @@ function MatrixCell({ cell }: { cell: Row | undefined }) {
   const allMedia = [...inlineMedia, ...appendixMedia];
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
       <div className="flex items-center gap-1">
         {conclusion && <span className={cn('font-semibold', conclusionColor(conclusion))}>{conclusion}</span>}
         {score && <span className="text-muted-foreground">{score}分</span>}
       </div>
       {dedupedProcessNotes.length > 0 && (
-        <p className="whitespace-pre-wrap text-[10px] text-muted-foreground">
+        <p className="whitespace-pre-wrap text-xs text-muted-foreground">
           <span className="font-medium">过程记录：</span>{dedupedProcessNotes.join('；')}
         </p>
       )}
       {summary && (
-        <p className="whitespace-pre-wrap text-[10px] text-muted-foreground">
+        <p className="whitespace-pre-wrap text-xs text-muted-foreground">
           <span className="font-medium">效果结论：</span>{summary}
         </p>
       )}
       {dedupedProblems.length > 0 && (
         <ul className="space-y-0.5">
           {dedupedProblems.map((p, i) => (
-            <li key={i} className="line-clamp-1 text-[10px] text-red-600">• {p}</li>
+            <li key={i} className="whitespace-pre-wrap break-words text-xs text-red-600">• {p}</li>
           ))}
         </ul>
       )}
       {allMedia.length > 0 && (
         <ReportMediaGrid
-          role="compact"
+          role="matrix"
           items={allMedia.flatMap((media, index): ReportMediaItem[] => {
             const url = String(media.file_path || media.file_url || '');
             if (!url) return [];
@@ -407,7 +413,7 @@ function WaterfallList({ recipes }: { recipes: Row[] }) {
                 {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                 <span className="text-sm font-semibold">{String(recipe.name || '')}</span>
                 {effectScore !== undefined && effectScore !== null && (
-                  <Badge className="text-[10px]">
+                  <Badge className="text-xs">
                     <Star className="mr-1 h-3 w-3" />{String(effectScore)}分
                   </Badge>
                 )}

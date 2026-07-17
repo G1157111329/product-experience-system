@@ -252,6 +252,9 @@ void (async () => {
   assert.equal(await deleteRecordAtomically({ recordId: 'record-1', actorId: 'actor-1' }, fakeStore(recordState)), true);
   assert.equal(recordState.records.some((record) => record.id === 'record-1'), false);
   assert.equal(recordState.recipes.includes('recipe-1'), true);
+  assert.equal(recordState.links.some((link) => link.targetType === 'record' && link.targetId === 'record-1'), false);
+  assert.equal(recordState.legacy.find((item) => item.materialId === 'material-record')?.recordId, null);
+  assert.equal(recordState.statuses['material-record'], 'unassigned');
 
   console.log('atomic content deletion tests passed');
 })();

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { normalizePrintMode, uniqueUrls, mapWithConcurrency, posterStorageKey, signedPosterUrl } from './print-assets';
+import { localPrintMediaUrl, normalizePrintMode, uniqueUrls, mapWithConcurrency, posterStorageKey, printPresignStorageKey, signedPosterUrl } from './print-assets';
 
 assert.equal(normalizePrintMode('high'), 'high');
 assert.equal(normalizePrintMode('text'), 'text');
@@ -16,6 +16,27 @@ assert.equal(
   signedPosterUrl('/api/materials/poster/videos/demo%20clip.mp4', '/api/materials/file/videos/demo%20clip.mp4?exp=123&token=signed'),
   '/api/materials/poster/videos/demo%20clip.mp4?exp=123&token=signed',
 );
+assert.equal(printPresignStorageKey('/uploads/garage/private/effect.jpg'), '/uploads/garage/private/effect.jpg');
+assert.equal(printPresignStorageKey('garage/private/effect.jpg'), 'garage/private/effect.jpg');
+assert.equal(
+  printPresignStorageKey('/api/materials/file/garage/private/effect.jpg?exp=123&token=stale'),
+  'garage/private/effect.jpg',
+);
+assert.equal(
+  printPresignStorageKey('http://172.19.3.12/api/materials/file/garage/private/effect.jpg?token=stale'),
+  'garage/private/effect.jpg',
+);
+assert.equal(
+  printPresignStorageKey('http://118.25.178.78:5000/uploads/garage/private/effect.jpg'),
+  '/uploads/garage/private/effect.jpg',
+);
+assert.equal(
+  localPrintMediaUrl('/api/materials/file/garage/private/effect.jpg?exp=123&token=stale'),
+  '/uploads/garage/private/effect.jpg',
+);
+assert.equal(localPrintMediaUrl('garage/private/effect.jpg'), '/uploads/garage/private/effect.jpg');
+assert.equal(printPresignStorageKey('data:image/gif;base64,AA=='), null);
+assert.equal(printPresignStorageKey('https://media.example/effect.jpg'), null);
 assert.equal(
   signedPosterUrl('/api/materials/poster/videos/demo.mp4', 'https://media.example/api/materials/file/videos/demo.mp4?token=signed'),
   'https://media.example/api/materials/poster/videos/demo.mp4?token=signed',

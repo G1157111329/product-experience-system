@@ -98,3 +98,13 @@ export function getPinnedHierarchyOffsets(
 
   return offsets;
 }
+
+export function getPinnedHierarchyBoundaryId(
+  columns: readonly MatrixLayoutColumn[],
+): string | null {
+  const hierarchyColumns = ordered(columns).filter(
+    (column) => column.columnZone === 'hierarchy',
+  );
+
+  return hierarchyColumns.at(-1)?.id ?? null;
+}

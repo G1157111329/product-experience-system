@@ -186,7 +186,7 @@ export default function AnalysisPage() {
           <div className="flex items-center gap-2 mb-3">
             <Filter className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm font-medium">筛选条件</span>
-            {activeFilterCount > 0 && <Badge variant="secondary" className="text-[10px]">已启用 {activeFilterCount} 项</Badge>}
+            {activeFilterCount > 0 && <Badge variant="secondary" className="text-xs">已启用 {activeFilterCount} 项</Badge>}
             <Button variant="ghost" size="sm" className={cn(pageActionButtonClass, 'ml-auto')} onClick={resetFilters}>重置</Button>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7">

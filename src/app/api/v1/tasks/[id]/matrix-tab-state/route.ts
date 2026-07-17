@@ -235,10 +235,10 @@ export async function GET(
       }
     }
 
-    const hasMatrices = matrices.length > 0;
+    const hasMeaningfulMatrices = matrices.some((matrix) => matrix.status !== 'archived' && matrix.meaningful);
     // When task_matrix_enabled=false, keep empty + no create CTA even if rows exist.
     const state: 'empty' | 'ready' =
-      !flags.taskMatrixEnabled ? 'empty' : hasMatrices ? 'ready' : 'empty';
+      !flags.taskMatrixEnabled ? 'empty' : hasMeaningfulMatrices ? 'ready' : 'empty';
 
     return ok<MatrixTabStateResponse>(
       {

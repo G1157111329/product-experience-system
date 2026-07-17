@@ -10,7 +10,7 @@ import {
 } from '@/lib/use-presigned-url';
 import { ReportMediaPreview } from './report-media-preview';
 
-export type ReportMediaRole = 'primary' | 'evidence' | 'appendix' | 'compact';
+export type ReportMediaRole = 'primary' | 'evidence' | 'appendix' | 'compact' | 'matrix';
 
 export interface ReportMediaItem {
   id: string;
@@ -24,13 +24,16 @@ export interface ReportMediaPresentation {
   limit: number;
   imageAspect: '4/3';
   videoAspect: '16/9';
+  minWidth: number;
+  maxWidth: number | null;
 }
 
 const PRESENTATIONS: Record<ReportMediaRole, ReportMediaPresentation> = {
-  primary: { limit: 6, imageAspect: '4/3', videoAspect: '16/9' },
-  evidence: { limit: 4, imageAspect: '4/3', videoAspect: '16/9' },
-  appendix: { limit: 4, imageAspect: '4/3', videoAspect: '16/9' },
-  compact: { limit: 2, imageAspect: '4/3', videoAspect: '16/9' },
+  primary: { limit: 6, imageAspect: '4/3', videoAspect: '16/9', minWidth: 112, maxWidth: null },
+  evidence: { limit: 4, imageAspect: '4/3', videoAspect: '16/9', minWidth: 80, maxWidth: 80 },
+  appendix: { limit: 4, imageAspect: '4/3', videoAspect: '16/9', minWidth: 80, maxWidth: 80 },
+  compact: { limit: 2, imageAspect: '4/3', videoAspect: '16/9', minWidth: 80, maxWidth: 80 },
+  matrix: { limit: Number.MAX_SAFE_INTEGER, imageAspect: '4/3', videoAspect: '16/9', minWidth: 64, maxWidth: 64 },
 };
 
 export function mediaPresentation(role: ReportMediaRole): ReportMediaPresentation {
@@ -56,25 +59,21 @@ export function isMediaExpanded(expandedSignature: string | null, currentSignatu
   return expandedSignature === currentSignature;
 }
 
-const GRID_CLASSES: Record<ReportMediaRole, string> = {
-  primary: 'grid-cols-1 min-[360px]:grid-cols-2 lg:grid-cols-3',
-  evidence: 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4',
-  appendix: 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4',
-  compact: 'grid-cols-2 sm:grid-cols-3',
-};
-
 export function ReportMediaGrid({
   items,
   role,
   label,
   className,
   carrierKey,
+  adaptiveThumbnail = false,
 }: {
   items: ReportMediaItem[];
   role: ReportMediaRole;
   label?: string;
   className?: string;
   carrierKey?: string;
+  /** Fit every matrix attachment inside the frozen table without truncation or a scroll rail. */
+  adaptiveThumbnail?: boolean;
 }) {
   const signature = mediaExpansionSignature(role, items, carrierKey);
   const [expandedSignature, setExpandedSignature] = useState<string | null>(null);
@@ -86,7 +85,13 @@ export function ReportMediaGrid({
   })), { unavailableUrl: unavailableMediaDataUrl });
   if (items.length === 0) return null;
   const visible = visibleMedia(items, role, expanded);
-  const canCollapse = expanded && items.length > mediaPresentation(role).limit;
+  const presentation = mediaPresentation(role);
+  const canCollapse = expanded && items.length > presentation.limit;
+  const gridTemplateColumns = adaptiveThumbnail
+    ? 'repeat(auto-fill, minmax(clamp(32px, 6cqi, 52px), clamp(32px, 6cqi, 52px)))'
+    : presentation.maxWidth === null
+    ? `repeat(auto-fit, minmax(${presentation.minWidth}px, 1fr))`
+    : `repeat(auto-fill, minmax(${presentation.minWidth}px, ${presentation.maxWidth}px))`;
 
   return (
     <section
@@ -95,7 +100,7 @@ export function ReportMediaGrid({
       className={cn('min-w-0 space-y-2', className)}
     >
       {label && <p className="text-xs font-medium text-muted-foreground">{label}</p>}
-      <div className={cn('grid min-w-0 gap-2', GRID_CLASSES[role])}>
+      <div className={cn('grid min-w-0 justify-start', adaptiveThumbnail ? 'gap-1' : 'gap-2')} style={{ gridTemplateColumns }}>
         {visible.items.map((item) => (
           <ReportMediaPreview
             key={item.id}
@@ -108,7 +113,7 @@ export function ReportMediaGrid({
           <button
             type="button"
             data-testid="report-media-more"
-            className="aspect-[4/3] min-w-0 rounded-lg border border-dashed bg-muted/20 text-sm font-medium text-muted-foreground hover:bg-muted/40"
+            className="aspect-[4/3] min-h-11 min-w-11 rounded-lg border border-dashed bg-muted/20 text-sm font-medium text-muted-foreground hover:bg-muted/40"
             onClick={() => setExpandedSignature(signature)}
           >
             +{visible.remaining}
@@ -119,7 +124,7 @@ export function ReportMediaGrid({
         <button
           type="button"
           data-testid="report-media-collapse"
-          className="text-xs text-primary hover:underline"
+          className="min-h-11 min-w-11 text-xs text-primary hover:underline"
           onClick={() => setExpandedSignature(null)}
         >
           收起

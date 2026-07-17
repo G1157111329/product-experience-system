@@ -1,6 +1,6 @@
 # 产品体验管理平台
 
-面向体验工程师的本地化产品体验管理平台，覆盖体验计划、素材采集、五感体验、功能效果、问题整改、报告输出和数据分析。当前项目按本地/单机内网部署优先维护：数据库使用本地 PostgreSQL，**文件存储默认采用 local 模式并写入 `public/uploads`**；如部署环境需要对象存储，可切换到 S3 兼容对象存储（MinIO / AWS S3 / 火山引擎 TOS）。AI 接入通过运行环境或应用设置配置。
+面向体验工程师的本地化产品体验管理平台，覆盖体验计划、素材采集、五感体验、功能效果、问题整改、报告输出和数据分析。生产环境使用自建 PostgreSQL，**所有素材只写入服务器本地持久化目录 `public/uploads`**；不得将素材上传到 S3、MinIO、Garage 或任何第三方对象存储。AI 接入通过运行环境或应用设置配置。
 
 ## 技术栈
 
@@ -9,7 +9,7 @@
 | Web | Next.js 15.5.19 App Router, React 19, TypeScript 5 |
 | UI | shadcn/ui, Radix UI, Tailwind CSS 4 |
 | 数据库 | PostgreSQL + Drizzle ORM，本地模式通过 Supabase 兼容层复用 API 写法 |
-| 文件存储 | **默认 local 模式写入 `public/uploads`**；可切换 S3 兼容对象存储（MinIO / AWS S3 / 火山引擎 TOS / Garage）。生产支持 local + S3 **灰度共存**：`STORAGE_DRIVER=local` 保护旧文件，`NEW_UPLOAD_DRIVER=s3` 让新上传走 Garage，读取链路自动双路径 fallback |
+| 文件存储 | **仅 local 模式**写入服务器持久化目录 `public/uploads`；生产禁止 S3/MinIO/Garage 与任何对象存储写入 |
 | AI | 可配置的 Chat Completions 兼容接口 |
 | 文档解析 | pdf-parse, xlsx |
 | 包管理 | pnpm |
@@ -19,7 +19,7 @@
 - Node.js 18.20+
 - pnpm 9+
 - PostgreSQL 14+
-- 可选：Docker，用于启动 PostgreSQL，或在 S3 模式下启动 MinIO
+- 可选：Docker，用于启动 PostgreSQL
 
 项目默认端口为 `5000`。开发和生产启动都读取 `PORT`，未设置时使用 `5000`。
 
@@ -43,32 +43,16 @@ cp .env.example .env.local
 DATABASE_URL=postgresql://<user>:<password>@<host>:<port>/<database>
 
 # ── 文件存储 ──
-# 默认 local 模式：上传文件写入 public/uploads，默认保留 /uploads 静态直连
+# 生产仅 local 模式：上传文件写入 public/uploads，外部读取经受保护接口
 STORAGE_DRIVER=local
+NEW_UPLOAD_DRIVER=local
 LOCAL_UPLOAD_DIR=./public/uploads
 LOCAL_PUBLIC_BASE_PATH=/uploads
 LOCAL_PROTECTED_BASE_PATH=/api/materials/file
-LOCAL_UPLOAD_PUBLIC_ACCESS=public
-LOCAL_UPLOAD_PUBLIC_ACCESS_ACCEPTED=
+LOCAL_UPLOAD_PUBLIC_ACCESS=protected
+NGINX_UPLOADS_INTERNAL=/_protected_uploads
 # 云服务器/内网部署时建议配置为平台可访问的完整站点地址
 PUBLIC_MEDIA_BASE_URL=http://<host>:5000
-
-# 灰度共存（可选）：STORAGE_DRIVER 保持 local 保护旧文件，
-# 同时让「新上传」走 S3。读取链路会自动 local-then-S3 双路径 fallback。
-# 不设置 NEW_UPLOAD_DRIVER 时默认跟随 STORAGE_DRIVER。
-# NEW_UPLOAD_DRIVER=s3
-# S3_ENDPOINT=http://127.0.0.1:3900   # Garage 默认端口
-# S3_REGION=garage
-# S3_BUCKET=xp-experience-media
-# S3_ACCESS_KEY=<access-key>
-# S3_SECRET_KEY=<secret-key>
-
-# 如需整体切到 S3/MinIO（一刀切，无 local 兜底），将 STORAGE_DRIVER 改为 s3 并配置 S3_*
-# S3_ENDPOINT=http://<s3-host>:<port>
-# S3_REGION=<region>
-# S3_BUCKET=<bucket-name>
-# S3_ACCESS_KEY=<access-key>
-# S3_SECRET_KEY=<secret-key>
 
 PORT=5000
 NODE_ENV=development
@@ -90,17 +74,11 @@ psql "postgresql://xp_user:xp_password_local_only@127.0.0.1:5433/xp_experience" 
 mkdir -p public/uploads
 ```
 
-本地模式会把上传素材写入 `public/uploads`，数据库仅记录相对对象 key（如 `materials/xxx.jpg`）。`LOCAL_UPLOAD_DIR` 指向文件系统目录，`LOCAL_PUBLIC_BASE_PATH` 是默认静态访问前缀，默认业务访问保留 `/uploads/<key>` 稳定 URL；如显式设置 `LOCAL_UPLOAD_PUBLIC_ACCESS=protected`，才会改由 `LOCAL_PROTECTED_BASE_PATH=/api/materials/file` 签名接口提供短期访问。`PUBLIC_MEDIA_BASE_URL` 是平台可访问的完整地址。缺失文件会返回 SVG 占位图而非 404。
+本地模式会把上传素材写入 `public/uploads`，数据库仅记录相对对象 key（如 `materials/xxx.jpg`）。生产必须使用 `LOCAL_UPLOAD_PUBLIC_ACCESS=protected`：Nginx 不公开 `/uploads/*`，图片、缩略图和海报由短期签名接口提供，缺失文件返回 SVG 占位图而非 404。
+
+视频播放必须使用无扩展名的同源 `/api/materials/video/<base64url-key>?token=...&exp=...`。该入口在服务端校验签名、解析原始 key 并返回完整 `200` 单流；浏览器页面不得把裸 `/uploads/*.mp4`、带 `.mp4` 的 `/api/materials/file/...` 或 Range 分段地址交给 `<video>`，以免企业网关误判为下载工具并重定向到拦截页。
 
 Docker 或云服务器部署时必须把 `public/uploads` 目录挂载到持久化 volume，否则重建容器后图片和视频会丢失。
-
-如果使用 S3/MinIO 模式，可启动 MinIO：
-
-```bash
-docker run -p 9000:9000 -p 9001:9001 minio/minio server /data --console-address ":9001"
-```
-
-启动后在 `http://127.0.0.1:9001` 创建 bucket：`xp-experience-media`，并将 `STORAGE_DRIVER=s3`。
 
 5. 启动开发服务
 
@@ -170,8 +148,7 @@ NODE_ENV=production PORT=5000 pnpm start
    - **构建需要 DATABASE_URL**：Next.js 的 page-data 收集阶段会连库，需把运行时 env（DATABASE_URL、AUTH_SESSION_SECRET、AI_CONFIG_ENCRYPTION_KEY、SECURITY_SCHEMA_VERIFIED 等）source 进构建环境。
 7. 使用 PM2、systemd 或同类进程管理器执行 `pnpm start`，并由 Nginx/Caddy 等反向代理提供 HTTPS。
    - PM2 推荐用 `ecosystem.config.cjs` 管理进程，所有 env 写在 `env: {}` 块；重启用 `pm2 delete <name> && pm2 start ecosystem.config.cjs && pm2 save`。
-8. 将 `public/uploads` 挂载到持久化磁盘目录；使用 S3 模式时确认 bucket、访问密钥和生命周期策略。
-   - **灰度共存（推荐）**：保持 `STORAGE_DRIVER=local`，加 `NEW_UPLOAD_DRIVER=s3` + S3_* env，旧文件零迁移、新上传走 S3。详见 `docs/operations/2026-07-06-object-storage-gray-release.md`。
+8. 将 `public/uploads` 挂载到持久化磁盘目录，并验证 `STORAGE_DRIVER=local`、`NEW_UPLOAD_DRIVER=local` 与 `LOCAL_UPLOAD_PUBLIC_ACCESS=protected`；不得配置对象存储 bucket 或访问密钥。
 9. 部署数据矩阵特性需额外执行矩阵迁移（已登记进 drizzle journal）：
    - `psql "$DATABASE_URL" -f src/storage/database/shared/migrations/0002_matrix_input_tables.sql`（V1 schema 注册表 5 张表 + comparison_assemblies/metric_evaluations 扩展列）
    - `psql "$DATABASE_URL" -f src/storage/database/shared/migrations/0003_task_matrix_model.sql`（**V2 用户自设计模型 8 张表，当前 UI 实际使用，必须执行**）
@@ -256,7 +233,7 @@ docker compose -f docker-compose.local.yml down -v
 - 不设置 `NEXT_PUBLIC_SUPABASE_URL` 和 `NEXT_PUBLIC_SUPABASE_ANON_KEY` 时，系统走本地 PostgreSQL 模式。
 - 生产环境必须显式设置 `DATABASE_ACCESS_MODE`；自建 PostgreSQL 使用 `self-hosted-postgres`。
 - local 模式下 `public/uploads` 已创建，并在 Docker/云服务器中挂载为持久化目录。
-- S3 模式下 MinIO bucket 已创建，且 `.env.local` 中的 S3 配置一致。
+- `STORAGE_DRIVER=local`、`NEW_UPLOAD_DRIVER=local`、`LOCAL_UPLOAD_PUBLIC_ACCESS=protected` 已显式配置；不得配置 S3/MinIO/Garage 写入。
 - `pnpm ts-check` 通过。
 - `pnpm build` 通过。
 - 手机端访问验收/生产地址时，左下角不应出现黑色 Next.js “N” 浮层；如出现，优先检查是否误用 `pnpm dev` 或未以 `NODE_ENV=production pnpm start` 运行生产构建。
@@ -264,21 +241,20 @@ docker compose -f docker-compose.local.yml down -v
 - 本地开发访问 `http://localhost:5000`；首次管理员需通过 `INITIAL_ADMIN_ACCOUNT` 和 `INITIAL_ADMIN_PASSWORD` 显式引导创建，或使用数据库中已有的已审核管理员账号。
 - 在“AI Agent / Prompt 模板”中确认当前启用的 AI 配置可访问。
 
-## 存储模式说明
+## 素材存储与稳定性
 
-默认文件存储模式是 **local**：上传文件写入 `public/uploads`，数据库仅保存相对对象 key。S3 兼容对象存储是可选切换模式，适用于需要 MinIO、AWS S3、Garage、火山引擎 TOS 等统一对象存储的部署环境。
+生产只允许 **local** 存储：文件写入 `LOCAL_UPLOAD_DIR`（默认 `./public/uploads`），数据库只记录相对对象 key。该目录必须挂载到云服务器的持久化磁盘；禁止启用 S3、MinIO、Garage、TOS 或任何外部对象存储。
 
-| 模式 | `STORAGE_DRIVER` | 文件去向 | URL 生成 |
-| --- | --- | --- | --- |
-| 本地（默认） | `local` | 写入 `LOCAL_UPLOAD_DIR`（默认 `./public/uploads`） | 默认 `/uploads/<key>` 稳定静态 URL；显式加固时可切换为 `/api/materials/file/<key>` 短期签名 URL |
-| S3 兼容 | `s3` | 上传到 S3/MinIO/Garage bucket | presigned URL（86400 秒有效期） |
-| **灰度共存（生产已上线）** | `local` + `NEW_UPLOAD_DRIVER=s3` | 新上传走 S3，旧文件留 local | 读取时先 stat 本地，存在走 local，不存在 fallback S3 presigned URL |
+| 资源类型 | 浏览器访问路径 | 稳定性规则 |
+| --- | --- | --- |
+| 图片 | `/api/materials/file/<key>?token=...&exp=...` | 受保护读取；缩略图走 `/thumb`，原图可预览 |
+| 视频海报 | `/api/materials/poster/<key>?token=...&exp=...` | 报告、分享、打印/PDF 优先显示海报 |
+| 视频播放 | `/api/materials/video/<base64url-key>?token=...&exp=...` | 无文件扩展名、同源、完整 `200` 单流，不暴露 `.mp4` 或 Range 分段 |
 
-- **local 模式**：文件直接写入磁盘，Next.js 通过静态路径提供访问；如需让外部服务读取素材，`PUBLIC_MEDIA_BASE_URL` 需指向平台可访问的地址。
-- **S3 模式**：使用 AWS SDK 上传文件到 S3 兼容存储，访问时生成 presigned URL；素材删除调用 `DeleteObjectCommand`。
-- **灰度共存模式**：`STORAGE_DRIVER=local` 不变（保护旧文件静态路径），`NEW_UPLOAD_DRIVER=s3` 让新上传走 S3。读取链路自动双路径 fallback，无需迁移旧文件。当前生产用 Garage 单节点（`127.0.0.1:3900`，仅本机绑定），运维细节见 `docs/operations/2026-07-06-object-storage-gray-release.md`。
-- **缺失素材兜底**：local 模式下文件不存在时返回 SVG 占位图；presign API 对已缺失的 key 也返回占位图。
-- **前端兼容**：`usePresignedUrl` hook 自动识别本地路径（`/uploads/...`）、data URL、完整 HTTP URL，仅对 S3 对象 key 调用 presign 接口。
+- **访问控制**：生产设置 `LOCAL_UPLOAD_PUBLIC_ACCESS=protected`，Nginx 仅允许应用使用内部 `/uploads` 映射；外部直链 `/uploads/*` 必须不可访问。
+- **签名续期**：页面通过 `/api/materials/presign` 取得短期签名；不得清洗 `token`、`exp`，缩略图与海报必须继承签名。
+- **企业网络兼容**：禁止将裸 `/uploads/*.mp4` 或带 `.mp4` 的 `/api/materials/file/...` 放进 `<video src>`。企业网关若仍重定向无扩展名单流入口，应保留浏览器网络证据后针对网关规则处理。
+- **缺失素材兜底**：本地文件不存在时返回 SVG 占位图；冻结报告引用仍保留可追溯的素材事实，不得因删除当前关联而让历史报告裂图。
 
 ## 主要目录
 
@@ -298,7 +274,7 @@ src/
   components/                      通用组件和设置组件
   lib/
     server/ai.ts                   AI 调用封装
-    server/storage.ts              local 静态目录 + S3 兼容存储封装
+    server/storage.ts              local 持久化目录与受保护媒体访问封装
     agent-skills.ts                Agent Skill 默认定义
   storage/database/
     supabase-client.ts             云/本地双模式入口
@@ -394,22 +370,16 @@ server {
 
 ### local 文件存储与访问控制
 
-文件存储模式仍然默认是 local，上传文件仍写入 `public/uploads`，不改变本地或内网部署方式。为保证历史报告、导出页面、分享页面和长期留存材料不裂图，默认保留 `/uploads/*` 静态直连：
-
-```bash
-LOCAL_UPLOAD_PUBLIC_ACCESS=public
-```
-
-在更高安全要求环境中，可以显式切换为受保护访问：
+文件存储固定为 local，上传仍写入 `public/uploads`，不改变本地或内网部署方式。生产环境必须启用受保护访问：
 
 ```bash
 LOCAL_UPLOAD_PUBLIC_ACCESS=protected
 LOCAL_MEDIA_SIGNING_SECRET=<long-random-local-media-signing-secret>
 ```
 
-开启 protected 后，业务页面通过 `/api/materials/presign` 获取短期签名 URL，local 模式下签名 URL 指向 `/api/materials/file/<key>?exp=...&token=...`，并由 `/api/materials/file` 校验签名或当前登录用户的素材所属任务访问权；生产环境才会拦截 `/uploads/*` 直连。
+开启 protected 后，业务页面通过 `/api/materials/presign` 获取短期签名 URL：图片使用 `/api/materials/file/<key>?exp=...&token=...`，视频使用无扩展名的 `/api/materials/video/<base64url-key>?exp=...&token=...`。服务端校验签名或当前登录用户的素材所属任务访问权；生产环境拦截 `/uploads/*` 直连。
 
-该开关只影响访问路径，不影响上传写入路径。上传仍写入 `public/uploads`，S3 兼容对象存储仍通过 `STORAGE_DRIVER=s3` 单独切换。
+该开关只影响访问路径，不影响上传写入路径。上传始终写入 `public/uploads`；生产不得切换任何对象存储。
 
 ### AI 内网地址
 

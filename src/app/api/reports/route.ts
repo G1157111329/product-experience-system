@@ -27,6 +27,7 @@ import {
   isFrozenV3MatrixProjection,
   type ReportV3MatrixProjection,
 } from '@/lib/matrix/report-projection-v3-adapter';
+import { freezeReportMediaAtSource } from '@/lib/server/report-media-freeze';
 
 /** Frozen report payload: V2 groups projection or V3 excel-like freeze. */
 type ReportDataMatrixProjection = MatrixReadProjection | (ReportV3MatrixProjection & { projectionVersion?: 'v3' });
@@ -407,20 +408,7 @@ export async function POST(request: NextRequest) {
     .eq('key', `ai_sum_${body.task_id}`)
     .maybeSingle();
 
-  const allMaterials = (materials || []) as Array<Record<string, unknown>>;
-  const materialsByRecordId = groupRowsByField(allMaterials, 'record_id');
-  const materialsByRecipeStepId = groupRowsByField(allMaterials, 'recipe_step_id');
-  const materialsByRecipeId = groupRowsByField(allMaterials, 'recipe_id');
-  const materialById = new Map<string, Record<string, unknown>>();
-  for (const material of allMaterials) {
-    const id = String(material.id || '');
-    if (id) materialById.set(id, material);
-  }
-
-  const recordsWithMaterials = ((rawRecords || []) as Array<Record<string, unknown>>).map((record) => ({
-    ...record,
-    materials: materialsByRecordId.get(String(record.id || '')) || [],
-  }));
+  const taskMaterials = (materials || []) as Array<Record<string, unknown>>;
 
   // 查询食谱/功能及其步骤
   const { data: recipes } = await client.from('recipes').select('*').eq('task_id', body.task_id);
@@ -430,23 +418,59 @@ export async function POST(request: NextRequest) {
     ? await client.from('recipe_steps').select('*').in('recipe_id', recipeIds).order('step_number', { ascending: true })
     : { data: [] };
   const stepsByRecipeId = groupRowsByField((allSteps || []) as Array<Record<string, unknown>>, 'recipe_id');
-  const recipesWithSteps = recipeRows.map((recipe) => {
-    const steps = stepsByRecipeId.get(String(recipe.id || '')) || [];
-    const stepsWithMaterials = steps.map((step) => ({
-      ...step,
-      materials: materialsByRecipeStepId.get(String(step.id || '')) || [],
-    }));
-    const effectMaterials = mergeMaterialsById(
-      materialsByRecipeId.get(String(recipe.id || '')) || [],
+  const { data: taskIssues } = await client.from('issues').select('*').eq('task_id', body.task_id);
+  const issueRows = (taskIssues || []) as Array<Record<string, unknown>>;
+  const issueIds = issueRows.map((issue) => String(issue.id || '')).filter(Boolean);
+  const { data: reEvaluations } = issueIds.length > 0
+    ? await client.from('issue_re_evaluations').select('*').in('issue_id', issueIds).order('created_at', { ascending: false })
+    : { data: [] };
+  const reportSourceRecipes = recipeRows.map((recipe) => ({
+    ...recipe,
+    recipe_steps: stepsByRecipeId.get(String(recipe.id || '')) || [],
+  }));
+  const reportMediaTargets: Array<[string, string[]]> = [
+    ['record', ((rawRecords || []) as Array<Record<string, unknown>>).map((record) => String(record.id || '')).filter(Boolean)],
+    ['recipe', recipeIds],
+    ['recipe_step', ((allSteps || []) as Array<Record<string, unknown>>).map((step) => String(step.id || '')).filter(Boolean)],
+    ['issue', issueIds],
+    ['re_evaluation', ((reEvaluations || []) as Array<Record<string, unknown>>).map((item) => String(item.id || '')).filter(Boolean)],
+  ];
+  const materialLinks = (await Promise.all(reportMediaTargets.map(async ([targetType, targetIds]) => {
+    if (targetIds.length === 0) return [] as Array<Record<string, unknown>>;
+    const { data } = await client
+      .from('material_links')
+      .select('id, material_id, target_type, target_id, binding_order, bound_at, created_at')
+      .eq('target_type', targetType)
+      .in('target_id', targetIds);
+    return (data || []) as Array<Record<string, unknown>>;
+  }))).flat();
+  const linkedMaterialIds = [...new Set(materialLinks.map((link) => String(link.material_id || '')).filter(Boolean))];
+  const { data: linkedMaterials } = linkedMaterialIds.length > 0
+    ? await client.from('materials').select('*').in('id', linkedMaterialIds)
+    : { data: [] };
+  const allMaterials = [...taskMaterials, ...((linkedMaterials || []) as Array<Record<string, unknown>>).filter((linked) => !taskMaterials.some((material) => String(material.id || '') === String(linked.id || '')))];
+  const frozenReportSources = freezeReportMediaAtSource({
+    records: (rawRecords || []) as Array<Record<string, unknown>>,
+    recipes: reportSourceRecipes,
+    issues: issueRows,
+    reEvaluations: (reEvaluations || []) as Array<Record<string, unknown>>,
+    materials: allMaterials,
+    materialLinks,
+  });
+  const materialById = new Map<string, Record<string, unknown>>();
+  for (const material of allMaterials) {
+    const id = String(material.id || '');
+    if (id) materialById.set(id, material);
+  }
+  const recordsWithMaterials = frozenReportSources.records;
+  const recipesWithSteps = frozenReportSources.recipes.map((recipe) => ({
+    ...recipe,
+    effect_materials: mergeMaterialsById(
+      (recipe.effect_materials || []) as Array<Record<string, unknown>>,
       materialById,
       collectProblemPointMaterialIds(recipe.effect_problem_point),
-    );
-    return {
-      ...recipe,
-      recipe_steps: stepsWithMaterials,
-      effect_materials: effectMaterials,
-    };
-  });
+    ),
+  }));
 
   const recipesWithCount = (recipesWithSteps || []).map((recipe: Record<string, unknown>) => {
     const steps = (recipe.recipe_steps || []) as Array<Record<string, unknown>>;
@@ -509,7 +533,8 @@ export async function POST(request: NextRequest) {
     ai_summary: aiSummaryData?.value || null,
     records: recordsWithMaterials || [],
     recipes: recipesWithCount || [],
-    materials: materials || [],
+    issues: frozenReportSources.issues,
+    materials: allMaterials,
     ...(dataMatrixProjection ? { data_matrix_projection: dataMatrixProjection } : {}),
     generatedAt: new Date().toISOString(),
   };
@@ -519,8 +544,9 @@ export async function POST(request: NextRequest) {
     { preserve: body.preserve_review_overrides !== false },
   );
 
-  // The snapshot carries the complete original report facts.  Live issue/retest data is
-  // deliberately not copied here and is overlaid by FrozenReportViewModel at read time.
+  // The snapshot carries the complete original report facts, including issue and
+  // re-evaluation evidence at their source positions. Mutable workflow status is
+  // still overlaid by FrozenReportViewModel at read time.
   let frozenSnapshotJson: Record<string, unknown> = {
     report_type: 'single_report',
     snapshot_status: 'published',

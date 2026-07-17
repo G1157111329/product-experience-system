@@ -17,6 +17,7 @@ export interface FrozenMediaRetentionRepository {
   isAdmin?(actorId: string): Promise<boolean>;
   countActiveLinks(materialId: string): Promise<number>;
   hasFrozenSnapshotReference(materialId: string): Promise<boolean>;
+  retainForFrozenSnapshot(materialId: string): Promise<void>;
   deleteMaterialRow(materialId: string): Promise<void>;
   createCleanupJob(input: { materialId: string; actorId: string; fileKey: string }): Promise<void>;
   completeCleanupJob(input: { materialId: string; actorId: string; fileKey: string }): Promise<void>;
@@ -24,40 +25,54 @@ export interface FrozenMediaRetentionRepository {
 }
 
 export async function assertMaterialMayBePhysicallyDeletedWithRepository(
-  input: { materialId: string; actorId: string },
+  input: { materialId: string; actorId: string; detachMutableReferences?: boolean },
   repository: FrozenMediaRetentionRepository,
 ): Promise<{ fileKey: string }> {
   const material = await repository.findMaterial(input.materialId);
   if (!material) throw new Error('material_not_found');
   const admin = repository.isAdmin ? await repository.isAdmin(input.actorId) : false;
   if (material.createdBy !== input.actorId && !admin) throw new Error('material_not_owner');
-  if (material.hasLegacyReference) throw new Error('material_has_legacy_reference');
-  if (await repository.countActiveLinks(input.materialId) > 0) throw new Error('material_has_active_links');
   if (await repository.hasFrozenSnapshotReference(input.materialId)) throw new Error('material_has_frozen_snapshot_reference');
+  if (!input.detachMutableReferences) {
+    if (material.hasLegacyReference) throw new Error('material_has_legacy_reference');
+    if (await repository.countActiveLinks(input.materialId) > 0) throw new Error('material_has_active_links');
+  }
   return { fileKey: material.fileKey };
 }
 
 export async function deleteMaterialAssetWithRepository(
-  input: { materialId: string; actorId: string },
+  input: { materialId: string; actorId: string; detachMutableReferences?: boolean },
   repository: FrozenMediaRetentionRepository,
   deletePhysicalFile: (fileKey: string) => Promise<void>,
-): Promise<{ cleanupQueued: boolean }> {
+): Promise<{ cleanupQueued: boolean; retainedForFrozenSnapshot: boolean }> {
   const deletion = await repository.transaction(async (tx) => {
+    const material = await tx.findMaterial(input.materialId);
+    if (!material) throw new Error('material_not_found');
+    const admin = tx.isAdmin ? await tx.isAdmin(input.actorId) : false;
+    if (material.createdBy !== input.actorId && !admin) throw new Error('material_not_owner');
+    if (await tx.hasFrozenSnapshotReference(input.materialId)) {
+      if (!input.detachMutableReferences) throw new Error('material_has_frozen_snapshot_reference');
+      await tx.retainForFrozenSnapshot(input.materialId);
+      return { fileKey: material.fileKey, retainedForFrozenSnapshot: true as const };
+    }
     const allowed = await assertMaterialMayBePhysicallyDeletedWithRepository(input, tx);
     await tx.createCleanupJob({ ...input, fileKey: allowed.fileKey });
     await tx.deleteMaterialRow(input.materialId);
-    return allowed;
+    return { ...allowed, retainedForFrozenSnapshot: false as const };
   });
+  if (deletion.retainedForFrozenSnapshot) {
+    return { cleanupQueued: false, retainedForFrozenSnapshot: true };
+  }
   try {
     await deletePhysicalFile(deletion.fileKey);
     await repository.completeCleanupJob({ ...input, fileKey: deletion.fileKey });
-    return { cleanupQueued: false };
+    return { cleanupQueued: false, retainedForFrozenSnapshot: false };
   } catch (error) {
     await repository.recordCleanupFailure({
       ...input, fileKey: deletion.fileKey,
       error: error instanceof Error ? error.message : 'physical_file_delete_failed',
     });
-    return { cleanupQueued: true };
+    return { cleanupQueued: true, retainedForFrozenSnapshot: false };
   }
 }
 
@@ -99,6 +114,22 @@ function repositoryFor(tx: DbTransaction): FrozenMediaRetentionRepository {
       const rows = await tx.select({ id: reportSnapshots.id }).from(reportSnapshots)
         .where(sql`${reportSnapshots.snapshotJson}::text LIKE ${`%${materialId}%`}`).limit(1).execute();
       return rows.length > 0;
+    },
+    async retainForFrozenSnapshot(materialId) {
+      await tx.delete(materialLinks).where(eq(materialLinks.materialId, materialId)).execute();
+      await tx.update(materials).set({
+        taskId: null,
+        projectId: null,
+        recordId: null,
+        recipeId: null,
+        recipeStepId: null,
+        recipeLibraryStepId: null,
+        issueId: null,
+        reEvaluationId: null,
+        comparisonCellId: null,
+        comparisonAssemblyId: null,
+        status: 'frozen_retained',
+      }).where(eq(materials.id, materialId)).execute();
     },
     async deleteMaterialRow(materialId) {
       await tx.delete(materials).where(eq(materials.id, materialId)).execute();
@@ -148,6 +179,10 @@ const databaseRepository: FrozenMediaRetentionRepository = {
     const db = await getDb();
     return repositoryFor(db as unknown as DbTransaction).hasFrozenSnapshotReference(materialId);
   },
+  async retainForFrozenSnapshot(materialId) {
+    const db = await getDb();
+    return db.transaction((tx) => repositoryFor(tx).retainForFrozenSnapshot(materialId));
+  },
   async deleteMaterialRow(materialId) {
     const db = await getDb();
     return repositoryFor(db as unknown as DbTransaction).deleteMaterialRow(materialId);
@@ -171,7 +206,7 @@ export async function assertMaterialMayBePhysicallyDeleted(input: { materialId: 
 }
 
 export async function deleteMaterialAsset(
-  input: { materialId: string; actorId: string },
+  input: { materialId: string; actorId: string; detachMutableReferences?: boolean },
   deletePhysicalFile: (fileKey: string) => Promise<void>,
 ) {
   return deleteMaterialAssetWithRepository(input, databaseRepository, deletePhysicalFile);

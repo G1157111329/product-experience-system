@@ -5,6 +5,7 @@ import { ok, fail, unauthorized, withTrace } from '@/lib/server/api-v1/response'
 import { writeSecurityAudit } from '@/lib/server/security-audit';
 import {
   BINDING_OAUTH_SETTING_KEY,
+  describeWeChatWebsiteOAuthCallback,
   resolveBindingOAuthConfig,
   updateStoredBindingOAuthConfig,
   type StoredBindingOAuthConfig,
@@ -41,10 +42,14 @@ export const GET = withTrace<[NextRequest]>(async (traceId, request) => {
   if (isAuthResponse(admin)) return unauthorized(traceId, 'unauthorized');
   try {
     const stored = await loadStoredConfig(client);
+    const callbackUrl = `${(process.env.PUBLIC_MEDIA_BASE_URL || new URL(request.url).origin).replace(/\/+$/, '')}/api/v1/bindings/oauth/callback`;
     return ok({
-      wechat: publicConfig('wechat', stored),
+      wechat: {
+        ...publicConfig('wechat', stored),
+        ...describeWeChatWebsiteOAuthCallback(callbackUrl),
+      },
       wecom: publicConfig('wecom', stored),
-      callbackUrl: `${(process.env.PUBLIC_MEDIA_BASE_URL || new URL(request.url).origin).replace(/\/+$/, '')}/api/v1/bindings/oauth/callback`,
+      callbackUrl,
     }, traceId);
   } catch (error) {
     return fail(traceId, { message: error instanceof Error ? error.message : '扫码配置读取失败', status: 500 });

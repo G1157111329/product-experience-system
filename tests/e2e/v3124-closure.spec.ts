@@ -109,8 +109,8 @@ test('print export uses the report name as the suggested filename', async ({ pag
   await expect(page).toHaveTitle(title.replace(/\.pdf$/i, '').replace(/[\\/:*?"<>|\r\n\t]+/g, '_'));
 });
 
-test('new data matrix keeps the first level-three item editable without an orphan row', async ({ page }) => {
-  const marker = `E2E三级细项-${Date.now()}`;
+test('new data matrix rejects third-level items and keeps two-level hierarchy', async ({ page }) => {
+  const marker = `E2E两级矩阵-${Date.now()}`;
   const taskResponse = await page.request.post('/api/tasks', {
     data: { task_name: marker, product_category: '通用标准', product: 'E2E', product_model: marker, task_mode: 'single' },
   });
@@ -136,17 +136,18 @@ test('new data matrix keeps the first level-three item editable without an orpha
       data: { level: 3, parentId: level2Id, nodeLabel: '首个三级细项' },
     });
     const level3Payload = await level3Response.json();
-    expect(level3Payload.code, level3Payload.message).toBe(0);
+    expect(level3Response.status()).toBe(422);
+    expect(level3Payload.message).toContain('不能新增三级细项');
 
     const updatedResponse = await page.request.get(`/api/v1/matrices/${matrixId}/v3-projection`);
     const updatedPayload = await updatedResponse.json();
     expect(updatedPayload.data.rows).toHaveLength(1);
-    expect(updatedPayload.data.rows[0].level3NodeId).toBe(level3Payload.data.node.id);
+    expect(updatedPayload.data.rows[0].level3NodeId).toBeNull();
 
     await page.goto(`/tasks/${taskId}?tab=matrix`);
     await expect(page.locator('input[value="默认大类"]')).toBeVisible();
     await expect(page.locator('input[value="默认细项"]')).toBeVisible();
-    await expect(page.locator('input[value="首个三级细项"]')).toBeVisible();
+    await expect(page.locator('input[value="首个三级细项"]')).toHaveCount(0);
     await expect(page.getByText('素材池', { exact: true })).toHaveCount(0);
   } finally {
     if (matrixId) await page.request.post(`/api/v1/matrices/${matrixId}/lifecycle`, { data: { action: 'archive', reason: 'e2e_cleanup' } });
@@ -533,7 +534,10 @@ test('mobile matrix keeps the current row when its pending save fails', async ({
     });
     await page.getByRole('button', { name: '下一行', exact: true }).click();
     await expect(page.getByText('当前行 1 / 2', { exact: true })).toBeVisible();
-    await expect(page.getByText('当前行保存失败，请修复后再切换', { exact: true })).toBeVisible();
+    await expect(page.getByRole('dialog')).toContainText('内容尚未保存');
+    await expect(page.getByRole('dialog')).toContainText('保存失败');
+    await page.getByRole('button', { name: '放弃未保存修改', exact: true }).click();
+    await expect(page.getByText('当前行 2 / 2', { exact: true })).toBeVisible();
   } finally {
     if (matrixId) await page.request.post(`/api/v1/matrices/${matrixId}/lifecycle`, { data: { action: 'archive', reason: 'e2e_cleanup' } });
     await page.request.delete(`/api/tasks/${taskId}`);
@@ -848,4 +852,121 @@ test('no blocked cross-origin media request reaches the browser console', async 
   await page.goto('/reports/golden-report-single');
   await page.waitForTimeout(1200);
   expect(violations).toEqual([]);
+});
+
+test('queued Task10: autosave 500 blocks report generation and keeps the draft', async ({ page }) => {
+  await page.goto('/tasks/golden-task-single?tab=info');
+  let reportPosts = 0;
+  await page.route('**/api/v1/inline-values/report_summary/**', async (route) => {
+    await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ code: 1, message: '任务名称保存失败' }) });
+  });
+  await page.route('**/api/reports', async (route) => {
+    if (route.request().method() === 'POST') reportPosts += 1;
+    await route.continue();
+  });
+  const draft = `未保存报告草稿 ${Date.now()}`;
+  const taskName = page.getByPlaceholder('输入任务名称...');
+  await taskName.fill(draft);
+
+  await page.getByRole('button', { name: '生成报告', exact: true }).first().click();
+  await page.getByRole('button', { name: '确认生成报告', exact: true }).click();
+  await expect(page.getByRole('button', { name: '保存失败，点击重试' })).toBeVisible();
+  expect(reportPosts).toBe(0);
+  await expect(taskName).toHaveValue(draft);
+});
+
+test('queued Task10: slow autosave holds in-app navigation until persistence completes', async ({ page }) => {
+  await page.goto('/tasks/golden-task-single?tab=info');
+  let releaseSave: (() => void) | undefined;
+  const saveReleased = new Promise<void>((resolve) => { releaseSave = resolve; });
+  await page.route('**/api/v1/inline-values/report_summary/**', async (route) => {
+    await saveReleased;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data: {} }) });
+  });
+  const taskName = page.getByPlaceholder('输入任务名称...');
+  await taskName.fill(`慢保存导航 ${Date.now()}`);
+
+  await page.getByRole('button', { name: /五感体验/ }).first().click();
+  await expect(taskName).toBeVisible();
+  releaseSave?.();
+  await expect(taskName).not.toBeVisible();
+});
+
+test('queued Task10: dirty side navigation and browser Back stay on task after save failure', async ({ page }) => {
+  await page.goto('/tasks');
+  await page.goto('/tasks/golden-task-single?tab=info');
+  await page.route('**/api/v1/inline-values/report_summary/**', async (route) => {
+    await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ code: 1, message: '基础信息保存失败' }) });
+  });
+  const taskName = page.getByPlaceholder('输入任务名称...');
+  await taskName.fill(`侧栏与返回保护 ${Date.now()}`);
+  await expect(page.getByText('未保存', { exact: true })).toBeVisible();
+
+  await page.getByRole('link', { name: '报告中心' }).first().click();
+  await expect(page).toHaveURL(/\/tasks\/golden-task-single/);
+  await expect(page.getByRole('dialog', { name: '内容尚未保存' })).toContainText('保存失败');
+  await page.keyboard.press('Escape');
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/tasks\/golden-task-single/);
+  await expect(page.getByRole('dialog', { name: '内容尚未保存' })).toContainText('保存失败');
+});
+
+test('queued Task10: failed recipe and record saves block changing the selected editor', async ({ page }) => {
+  const marker = `Task10 recipe ${Date.now()}`;
+  const createResponse = await page.request.post('/api/recipes', {
+    data: { task_id: 'golden-task-single', name: marker, recipe_type: 'test' },
+  });
+  expect(createResponse.ok()).toBeTruthy();
+  const createdRecipe = (await createResponse.json()).data as { id: string };
+  try {
+    await page.goto('/tasks/golden-task-single?tab=functions');
+    const recipeCards = page.getByRole('button', { name: /打开食谱\/功能/ });
+    await expect(page.getByRole('button', { name: `打开食谱/功能 ${marker}`, exact: true })).toBeVisible();
+    expect(await recipeCards.count()).toBeGreaterThan(1);
+    await page.route('**/api/recipes/**', async (route) => {
+      if (route.request().method() === 'PUT') {
+        await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ code: 1, message: '食谱评价保存失败' }) });
+      } else await route.continue();
+    });
+    const recipeDescription = page.getByPlaceholder('描述该功能/食谱的出品效果、使用感受和关键观察...');
+    await recipeDescription.fill(`食谱失败草稿 ${Date.now()}`);
+    await page.getByRole('button', { name: `打开食谱/功能 ${marker}`, exact: true }).click();
+    await expect(page.getByRole('dialog', { name: '内容尚未保存' })).toContainText('保存失败');
+    await page.getByRole('button', { name: '放弃未保存修改' }).click();
+  } finally {
+    await page.unroute('**/api/recipes/**');
+    await page.request.delete(`/api/recipes/${createdRecipe.id}`);
+  }
+
+  await page.goto('/tasks/golden-task-single?tab=senses');
+  const recordCards = page.locator('[id^="record-"]');
+  await expect(recordCards).toHaveCount(2);
+  await page.route('**/api/v1/inline-values/sensory_record/**', async (route) => {
+    await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ code: 1, message: '检查记录保存失败' }) });
+  });
+  const problemDescription = page.getByPlaceholder('点击输入问题描述...');
+  await problemDescription.fill(`记录失败草稿 ${Date.now()}`);
+  await recordCards.nth(1).click();
+  await expect(page.getByRole('dialog', { name: '内容尚未保存' })).toContainText('保存失败');
+});
+
+test('queued Task10: failed unblurred draft keeps transfer at zero POSTs', async ({ page }) => {
+  await page.goto('/tasks/golden-task-single?tab=info');
+  await page.route('**/api/v1/inline-values/report_summary/**', async (route) => {
+    await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ code: 1, message: '转移前保存失败' }) });
+  });
+  let transferPosts = 0;
+  await page.route('**/api/tasks/golden-task-single/transfer', async (route) => {
+    transferPosts += 1;
+    await route.continue();
+  });
+  await page.getByPlaceholder('输入任务名称...').fill(`转移保护 ${Date.now()}`);
+  await page.getByRole('button', { name: '转移', exact: true }).click();
+  const transferDialog = page.getByRole('dialog', { name: '转移体验计划' });
+  await transferDialog.getByRole('combobox').click();
+  await page.getByRole('option').first().click();
+  await transferDialog.getByRole('button', { name: '确认转移', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: '内容尚未保存' })).toContainText('保存失败');
+  expect(transferPosts).toBe(0);
 });

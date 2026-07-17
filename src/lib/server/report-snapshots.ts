@@ -10,6 +10,24 @@ type ReportSnapshotResolution = {
   resolution: 'anchored' | 'legacy_latest' | 'none';
 };
 
+/**
+ * An anchored report is immutable. A missing or cross-report snapshot is an
+ * integrity failure, not a reason to rebuild the report from newer facts.
+ */
+export class ReportSnapshotIntegrityError extends Error {
+  readonly code = 'REPORT_SNAPSHOT_INTEGRITY';
+  readonly status = 409;
+
+  constructor(reportId: string, snapshotId: string) {
+    super(`Report snapshot integrity error: report ${reportId} references missing or foreign snapshot ${snapshotId}`);
+    this.name = 'ReportSnapshotIntegrityError';
+  }
+}
+
+export function reportSnapshotErrorStatus(error: unknown) {
+  return error instanceof ReportSnapshotIntegrityError ? error.status : 500;
+}
+
 export async function loadLatestReportSnapshot(client: ClientLike, reportId: string) {
   const query = client
     .from('report_snapshots')
@@ -85,11 +103,7 @@ export async function loadAnchoredReportSnapshot(
     };
   const { data, error } = await query.eq('report_id', reportId).maybeSingle();
   if (error) throw new Error(error.message || 'Failed to load anchored report snapshot');
-  if (!data) {
-    throw new Error(
-      `Report snapshot integrity error: report ${reportId} references missing or foreign snapshot ${snapshotId}`,
-    );
-  }
+  if (!data) throw new ReportSnapshotIntegrityError(reportId, snapshotId);
   return { snapshot: data, resolution: 'anchored' };
 }
 

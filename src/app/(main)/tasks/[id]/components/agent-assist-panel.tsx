@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Loader2, Paperclip, Play, Send, Sparkles, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -28,6 +28,8 @@ type AgentAssistPanelProps = {
   taskId: string;
   onClose: () => void;
   embedded?: boolean;
+  autoSubmitPrompt?: string;
+  autoSubmitPromptVersion?: number;
 };
 
 type AgentChatResponse = {
@@ -47,7 +49,13 @@ type AgentApplyResponse = {
   };
 };
 
-export function AgentAssistPanel({ taskId, onClose, embedded = false }: AgentAssistPanelProps) {
+export function AgentAssistPanel({
+  taskId,
+  onClose,
+  embedded = false,
+  autoSubmitPrompt,
+  autoSubmitPromptVersion,
+}: AgentAssistPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'assistant',
@@ -59,13 +67,14 @@ export function AgentAssistPanel({ taskId, onClose, embedded = false }: AgentAss
   const [uploading, setUploading] = useState(false);
   const [applyingIndex, setApplyingIndex] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const lastAutoSubmitPromptVersion = useRef<number | undefined>(undefined);
 
-  const sendMessage = async () => {
-    const question = input.trim();
+  const sendMessage = useCallback(async (prompt?: string) => {
+    const question = (prompt ?? input).trim();
     if (!question || sending) return;
     const nextMessages: ChatMessage[] = [...messages, { role: 'user', content: question }];
     setMessages(nextMessages);
-    setInput('');
+    if (prompt === undefined) setInput('');
     setSending(true);
     try {
       const res = await fetch(`/api/tasks/${taskId}/agent-chat`, {
@@ -93,7 +102,7 @@ export function AgentAssistPanel({ taskId, onClose, embedded = false }: AgentAss
     } finally {
       setSending(false);
     }
-  };
+  }, [input, messages, sending, taskId]);
 
   const applyActions = async (messageIndex: number, actions: AgentAction[]) => {
     if (actions.length === 0 || applyingIndex !== null) return;
@@ -124,6 +133,12 @@ export function AgentAssistPanel({ taskId, onClose, embedded = false }: AgentAss
     }
   };
 
+  useEffect(() => {
+    if (!autoSubmitPrompt || autoSubmitPromptVersion === undefined || lastAutoSubmitPromptVersion.current === autoSubmitPromptVersion) return;
+    lastAutoSubmitPromptVersion.current = autoSubmitPromptVersion;
+    void sendMessage(autoSubmitPrompt);
+  }, [autoSubmitPrompt, autoSubmitPromptVersion, sendMessage]);
+
   const uploadFiles = async (files: File[]) => {
     if (files.length === 0) return;
     setUploading(true);
@@ -150,7 +165,10 @@ export function AgentAssistPanel({ taskId, onClose, embedded = false }: AgentAss
   };
 
   return (
-    <aside className="rounded-lg border bg-card shadow-sm lg:sticky lg:top-4">
+    <aside className={cn(
+      'flex min-h-0 flex-col',
+      embedded ? 'h-full rounded-none border-0 bg-card shadow-none lg:static' : 'rounded-lg border bg-card shadow-sm lg:sticky lg:top-4',
+    )}>
       <div className="flex items-start justify-between gap-3 border-b p-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -166,7 +184,7 @@ export function AgentAssistPanel({ taskId, onClose, embedded = false }: AgentAss
         )}
       </div>
 
-      <div className="flex max-h-[min(700px,calc(90dvh-4rem))] min-h-0 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col">
         <ScrollArea className="min-h-0 flex-1">
           <div className="space-y-3 p-3">
             {messages.map((message, index) => (
@@ -254,6 +272,7 @@ export function AgentAssistPanel({ taskId, onClose, embedded = false }: AgentAss
             onChange={(event) => void uploadFiles(Array.from(event.target.files || []))}
           />
           <Textarea
+            aria-label="AI任务助手输入"
             value={input}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
@@ -278,7 +297,7 @@ export function AgentAssistPanel({ taskId, onClose, embedded = false }: AgentAss
             >
               {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
             </Button>
-            <Button className="flex-1 gap-2" onClick={sendMessage} disabled={sending || !input.trim()}>
+            <Button className="flex-1 gap-2" onClick={() => void sendMessage()} disabled={sending || !input.trim()}>
               {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               发送给AI助手
             </Button>

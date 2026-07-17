@@ -58,15 +58,15 @@ function RecipeCard({ recipe }: { recipe: FunctionEffectRecipe }) {
       <CardHeader className="pb-2">
         <div className="flex flex-wrap items-center gap-2">
           {recipe.recipe_type && (
-            <Badge variant="secondary" className="text-[10px]">{recipe.recipe_type}</Badge>
+            <Badge variant="secondary" className="text-xs">{recipe.recipe_type}</Badge>
           )}
           <span className="text-sm font-semibold">{recipe.name}</span>
           <div className="ml-auto flex flex-wrap items-center gap-1">
-            <Badge variant="outline" className="text-[10px]">{steps.length} 步骤</Badge>
+            <Badge variant="outline" className="text-xs">{steps.length} 步骤</Badge>
             {effectScore && (
-              <Badge className="text-[10px]"><Star className="mr-1 h-3 w-3" />{effectScore}分</Badge>
+              <Badge className="text-xs"><Star className="mr-1 h-3 w-3" />{effectScore}分</Badge>
             )}
-            <Badge variant={totalProblems > 0 ? 'destructive' : 'outline'} className="text-[10px]">
+            <Badge variant={totalProblems > 0 ? 'destructive' : 'outline'} className="text-xs">
               {totalProblems} 问题
             </Badge>
           </div>

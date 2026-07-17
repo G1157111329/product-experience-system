@@ -86,7 +86,7 @@ export function ReportInputPanel({
         </div>
         <div className="rounded-md bg-muted/40 p-2">
           <div className="font-medium">{readiness.stats.recipes}</div>
-          <div className="text-muted-foreground">功能/食谱</div>
+          <div className="text-muted-foreground">食谱/功能</div>
         </div>
         <div className="rounded-md bg-muted/40 p-2">
           <div className="flex items-center gap-1 font-medium">

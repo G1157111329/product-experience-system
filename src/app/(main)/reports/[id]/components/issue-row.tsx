@@ -144,15 +144,15 @@ export function IssueRow({ issue, onStatusClick }: IssueRowProps) {
         onClick={() => setExpanded((v) => !v)}
       >
         {expanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
-        <Badge className={cn('text-[10px] shrink-0', LEVEL_COLORS[issue.level || '三类'] || LEVEL_COLORS['三类'])}>
+        <Badge className={cn('text-xs shrink-0', LEVEL_COLORS[issue.level || '三类'] || LEVEL_COLORS['三类'])}>
           {issue.level || '三类'}
         </Badge>
-        <Badge variant="outline" className="text-[10px] shrink-0">{sourceLabelV2(iss)}</Badge>
+        <Badge variant="outline" className="text-xs shrink-0">{sourceLabelV2(iss)}</Badge>
         <span className="min-w-0 flex-1 text-sm truncate">{issue.title}</span>
         <Button
           variant="ghost"
           size="sm"
-          className={cn('h-6 px-2 text-[11px] shrink-0', statusPresentation.className)}
+          className={cn('h-6 px-2 text-xs shrink-0', statusPresentation.className)}
           onClick={(e) => {
             e.stopPropagation();
             onStatusClick(issue);
@@ -192,7 +192,7 @@ export function IssueRow({ issue, onStatusClick }: IssueRowProps) {
           )}
 
           <div className={cn('mt-3 space-y-2 rounded-md border p-2', isRectified ? 'border-emerald-200 bg-emerald-50/40' : 'bg-muted/20')}>
-              <div className={cn('text-[11px] font-medium', isRectified && 'text-emerald-700')}>整改</div>
+              <div className={cn('text-xs font-medium', isRectified && 'text-emerald-700')}>整改</div>
               {!isRectified && <div className="text-muted-foreground">{statusPresentation.label}</div>}
               {isRectified && (
                 <>
@@ -223,7 +223,7 @@ export function IssueRow({ issue, onStatusClick }: IssueRowProps) {
                 <div className="text-muted-foreground">暂无整改评价记录</div>
               )}
               {reEvalCount > 0 && (
-                <div className="text-[11px] text-muted-foreground">整改复测记录数：{reEvalCount}</div>
+                <div className="text-xs text-muted-foreground">整改复测记录数：{reEvalCount}</div>
               )}
                 </>
               )}

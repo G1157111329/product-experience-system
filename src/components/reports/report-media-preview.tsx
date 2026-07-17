@@ -8,6 +8,8 @@ import {
   isPendingMediaUrl,
   isUnavailableMediaUrl,
   pendingMediaDataUrl,
+  toPlayableVideoSrc,
+  toMediaStorageKey,
 } from '@/lib/use-presigned-url';
 import { cn } from '@/lib/utils';
 import type { ReportMediaItem, ReportMediaRole } from './report-media-grid';
@@ -20,11 +22,6 @@ interface ReportMediaPreviewProps {
   name?: string;
   size?: 'xs' | 'sm' | 'md' | 'lg';
   resolvedUrl?: string;
-}
-
-function storageKey(value: string) {
-  if (!value || /^(https?:|blob:|data:)/i.test(value) || value.startsWith('/api/materials/file/')) return null;
-  return value.replace(/^\/uploads\//, '').replace(/^\/+/, '');
 }
 
 function isVideo(value: string) {
@@ -54,8 +51,9 @@ export function ReportMediaPreview({
   const pending = isPendingMediaUrl(resolvedUrl);
   const unavailable = isUnavailableMediaUrl(resolvedUrl);
   const video = isVideo(media.type) || isVideo(media.url);
-  const key = storageKey(media.url);
-  const derivativeUrl = key
+  const playableVideoUrl = video ? toPlayableVideoSrc(resolvedUrl) : undefined;
+  const key = toMediaStorageKey(media.url);
+  const derivativeUrl = key && (video || resolvedUrl.startsWith('/uploads/'))
     ? `/api/materials/${video ? 'poster' : 'thumb'}/${key}`
     : null;
   const derivativeFailed = derivativeUrl !== null && failedSource === derivativeUrl;
@@ -96,12 +94,20 @@ export function ReportMediaPreview({
                 onError={() => setFailedSource(derivativeUrl)}
               />
             ) : (
-              <div className="h-full w-full bg-muted" />
+              <video
+                src={playableVideoUrl ? `${playableVideoUrl}#t=0.1` : undefined}
+                className="h-full w-full object-cover"
+                preload="metadata"
+                muted
+                playsInline
+                aria-hidden="true"
+                onError={() => setFailedSource(resolvedUrl)}
+              />
             )}
             <span className="absolute inset-0 flex items-center justify-center bg-black/20">
               <Play className="h-7 w-7 fill-white text-white" aria-hidden="true" />
             </span>
-            {media.duration && <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white">{media.duration}</span>}
+            {media.duration && <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white">{media.duration}</span>}
           </>
         ) : (
           // eslint-disable-next-line @next/next/no-img-element

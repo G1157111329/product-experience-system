@@ -16,10 +16,23 @@ export type ResolvedBindingOAuthConfig = {
   source: 'environment' | 'platform' | 'missing';
 };
 
+export type WeChatWebsiteOAuthCallback = {
+  authorizedRedirectDomain: string;
+  callbackPath: string;
+};
+
 type BindingOAuthEnvironment = Partial<Record<
   'WECHAT_APP_ID' | 'WECHAT_APP_SECRET' | 'WECOM_CORP_ID' | 'WECOM_AGENT_ID' | 'WECOM_SECRET',
   string | undefined
 >>;
+
+export function describeWeChatWebsiteOAuthCallback(callbackUrl: string): WeChatWebsiteOAuthCallback {
+  const url = new URL(callbackUrl);
+  return {
+    authorizedRedirectDomain: url.hostname,
+    callbackPath: url.pathname,
+  };
+}
 
 export function resolveBindingOAuthConfig(
   provider: BindingProvider,

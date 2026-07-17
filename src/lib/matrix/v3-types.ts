@@ -163,6 +163,7 @@ export interface V3IssuePoint {
   issueText: string;
   linkedIssueId: string | null;
   status: 'text' | 'converted';
+  createdAt?: string | null;
 }
 
 /** Media bound to a matrix cell via material_links (D/O columns). */
@@ -171,8 +172,11 @@ export interface V3CellMedia {
   materialId: string;
   materialType: string;
   fileName: string | null;
+  /** Immutable storage key retained so frozen reports can re-sign media later. */
+  filePath: string | null;
   fileUrl: string | null;
   thumbnailUrl: string | null;
+  durationSec: number | null;
   bindingMethod: string;
   boundAt: string | null;
 }

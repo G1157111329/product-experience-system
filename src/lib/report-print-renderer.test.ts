@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict';
+import * as React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { ReportPrintDocument } from '@/components/reports/report-section-block-renderer';
 import type { FrozenReportViewModel } from './report-frozen-view';
-import { buildPrintReportViewModel, pdfProfileForPrintModel, printReportMedia, renderPrintReportHtml } from './server/report-print-renderer';
+import { buildPrintReportViewModel, pdfProfileForPrintModel, printReportMedia, printReportMediaOccurrences, renderPrintReportHtml } from './server/report-print-renderer';
 
 const pixel = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+
+globalThis.React = React;
 
 function frozenModel(matrix: FrozenReportViewModel['matrix']): FrozenReportViewModel {
   return {
@@ -121,22 +126,107 @@ for (const [model, expected] of [
 }
 
 const singleRecipeHtml = renderPrintReportHtml(buildPrintReportViewModel(v2));
-const latestRetestIndex = singleRecipeHtml.indexOf('Retest passed');
-const oldestRetestIndex = singleRecipeHtml.indexOf('Oldest retest failed');
-const middleRetestIndex = singleRecipeHtml.indexOf('Middle retest failed');
-assert.equal(latestRetestIndex >= 0 && latestRetestIndex < oldestRetestIndex, true, 'print/PDF pins the latest retest above history');
-assert.equal(oldestRetestIndex < middleRetestIndex, true, 'older print/PDF history is chronological from oldest to newest');
-assert.match(singleRecipeHtml, /2026-07-13T00:00:00\.000Z/, 'print/PDF keeps compact retest timestamps');
+const rectificationProjectionHtml = renderPrintReportHtml(buildPrintReportViewModel(v2, [{
+  id: 'issue-1',
+  improve_plan: 'Replace the seal assembly',
+  responsible_person: 'Li Wei',
+  responsible_dept: 'Quality',
+  plan_complete_date: '2026-07-20',
+  rectificationHistory: [
+    { action_plan: 'Old rectification plan', responsible_person: 'Old owner', plan_complete_date: '2026-07-01', created_at: '2026-07-01T00:00:00.000Z' },
+    { action_plan: 'Latest rectification plan', responsible_person: 'Latest owner', plan_complete_date: '2026-07-21', created_at: '2026-07-02T00:00:00.000Z' },
+  ],
+  latestReEvaluation: { result: 'qualified', description: 'Latest retest passed' },
+}]));
+for (const expectedText of ['Latest rectification plan', 'Latest owner', '2026-07-21', 'Latest retest passed']) {
+  assert.equal(rectificationProjectionHtml.includes(expectedText), true, `print/PDF must render the latest rectification projection: missing ${expectedText}`);
+}
+for (const omittedText of ['Old rectification plan', 'Old owner', '2026-07-01', 'Middle retest failed', 'Oldest retest failed']) {
+  assert.equal(rectificationProjectionHtml.includes(omittedText), false, `print/PDF must not render historical rectification or retest entries: found ${omittedText}`);
+}
+const rectificationProjectionDocumentHtml = renderToStaticMarkup(React.createElement(ReportPrintDocument, {
+  model: buildPrintReportViewModel(v2, [{
+    id: 'issue-1',
+    improve_plan: 'Production rectification plan',
+    responsible_person: 'Production owner',
+    responsible_dept: 'Production quality',
+    plan_complete_date: '2026-07-22',
+    rectificationHistory: [
+      { action_plan: 'Old document rectification plan', responsible_person: 'Old document owner', plan_complete_date: '2026-07-01', created_at: '2026-07-01T00:00:00.000Z' },
+      { action_plan: 'Latest document rectification plan', responsible_person: 'Latest document owner', responsible_dept: 'Latest document quality', plan_complete_date: '2026-07-23', created_at: '2026-07-02T00:00:00.000Z' },
+    ],
+    latestReEvaluation: { result: 'qualified', description: 'Latest projected retest passed' },
+  }]),
+}));
+for (const expectedText of ['Latest document rectification plan', 'Latest document owner / Latest document quality', '2026-07-23', 'Latest projected retest passed']) {
+  assert.equal(rectificationProjectionDocumentHtml.includes(expectedText), true, `print document must render the latest rectification projection while rectifying: missing ${expectedText}`);
+}
+assert.equal(rectificationProjectionDocumentHtml.includes('复测结果：'), true, 'browser print must label the latest retest as a result');
+for (const omittedText of ['Old document rectification plan', 'Old document owner', 'Middle retest failed', 'Oldest retest failed', 'Retest passed']) {
+  assert.equal(rectificationProjectionDocumentHtml.includes(omittedText), false, `print document must omit historical or superseded retests: found ${omittedText}`);
+}
+const metadataOnlyRectificationModel = buildPrintReportViewModel(v2, [{
+  id: 'issue-1',
+  responsible_person: 'Metadata-only owner',
+  plan_complete_date: '2026-07-24',
+}]);
+metadataOnlyRectificationModel.issues[0].liveOverlay.rectification = '';
+const metadataOnlyRectificationHtml = renderToStaticMarkup(React.createElement(ReportPrintDocument, { model: metadataOnlyRectificationModel }));
+for (const expectedText of ['Metadata-only owner', '2026-07-24']) {
+  assert.equal(metadataOnlyRectificationHtml.includes(expectedText), true, `print document must render rectification metadata without a plan: missing ${expectedText}`);
+}
+assert.equal(metadataOnlyRectificationHtml.includes('整改方案：'), false, 'print document must not render an empty rectification plan row');
+const canonicalSummaryModel = frozenModel(null);
+canonicalSummaryModel.summary.text = 'Legacy summary text that must not override the frozen structured summary';
+canonicalSummaryModel.summary.aiSummary = {
+  tag: '建议整改',
+  summary: 'Canonical frozen summary',
+  strengths: ['Stable output'],
+  risks: ['Difficult cleaning'],
+  suggestions: ['Improve detachable structure'],
+};
+const canonicalSummaryHtml = renderPrintReportHtml(buildPrintReportViewModel(canonicalSummaryModel));
+for (const expectedText of ['建议整改', 'Canonical frozen summary', '主要优势', 'Stable output', '主要风险', 'Difficult cleaning', '后续建议', 'Improve detachable structure']) {
+  assert.equal(canonicalSummaryHtml.includes(expectedText), true, `print summary must match the frozen/share summary: missing ${expectedText}`);
+}
+assert.equal(
+  canonicalSummaryHtml.includes('Legacy summary text that must not override the frozen structured summary'),
+  false,
+  'structured frozen summary must be authoritative when it exists',
+);
+assert.doesNotMatch(canonicalSummaryHtml, /<figcaption\b/i, 'print/PDF media must not display material names');
+assert.equal(singleRecipeHtml.includes('Retest passed'), true, 'print/PDF keeps the latest retest');
+assert.equal(singleRecipeHtml.includes('Oldest retest failed'), false, 'print/PDF omits historical retests');
+assert.equal(singleRecipeHtml.includes('Middle retest failed'), false, 'print/PDF omits intermediate retests');
 const printMediaIds = printReportMedia(buildPrintReportViewModel(v2)).map((item) => item.id);
-assert.equal(printMediaIds.includes('reeval-oldest-image'), true, 'print asset preparation includes oldest retest evidence');
-assert.equal(printMediaIds.includes('reeval-middle-image'), true, 'print asset preparation includes intermediate retest evidence');
+assert.equal(printMediaIds.includes('reeval-image'), true, 'print asset preparation includes the latest retest evidence');
+assert.equal(printMediaIds.includes('reeval-oldest-image'), false, 'print asset preparation omits historical retest evidence');
+assert.equal(printMediaIds.includes('reeval-middle-image'), false, 'print asset preparation omits intermediate retest evidence');
 for (const expectedText of ['判断：合格', '食谱效果评价', 'Historic frozen step issue', '问题点', 'recipe-issue.jpg']) {
   assert.equal(singleRecipeHtml.includes(expectedText), true, `single recipe print list is missing ${expectedText}`);
 }
 assert.equal(printReportMedia(buildPrintReportViewModel(v2)).some((item) => item.id === 'recipe-context-media'), true, 'recipe issue context media must be included in print media preparation');
 assert.equal(printReportMedia(buildPrintReportViewModel(v2)).filter((item) => item.id === 'recipe-context-media').length, 1, 'recipe context media enters print preparation exactly once');
 assert.equal(printReportMedia(buildPrintReportViewModel(v2)).filter((item) => item.id === 'recipe-issue-media').length, 1, 'explicit issue media enters print preparation exactly once');
-assert.equal((singleRecipeHtml.match(/data-media-id="recipe-context-media"/g) ?? []).length, 1, 'recipe context media appears in print HTML exactly once across issue and function sections');
+assert.equal((singleRecipeHtml.match(/data-media-id="recipe-context-media"/g) ?? []).length, 1, 'recipe context media is rendered once across issue and function sections');
+
+const duplicateMediaReferences = buildPrintReportViewModel(v2);
+const sharedMedia = duplicateMediaReferences.issues[0].evidence[0];
+duplicateMediaReferences.functionEffects[0].evidence.push({ ...sharedMedia });
+assert.equal(printReportMediaOccurrences(duplicateMediaReferences).filter((item) => item.id === sharedMedia.id).length, 2, 'print preparation visits every cloned media reference');
+assert.equal(printReportMedia(duplicateMediaReferences).filter((item) => item.id === sharedMedia.id).length, 1, 'public print media inventory remains deduplicated');
+
+const legacyMissingStepArrays = JSON.parse(JSON.stringify(v2));
+delete legacyMissingStepArrays.functionEffects[0].steps[0].problemPoints;
+delete legacyMissingStepArrays.functionEffects[0].steps[0].evidence;
+const legacyRecipeIssue = legacyMissingStepArrays.issues.find((issue: { recipe?: unknown }) => issue.recipe);
+assert.ok(legacyRecipeIssue?.recipe, 'fixture must include a recipe issue');
+delete legacyRecipeIssue.recipe.steps[0].problemPoints;
+delete legacyRecipeIssue.recipe.steps[0].evidence;
+assert.doesNotThrow(
+  () => renderPrintReportHtml(buildPrintReportViewModel(legacyMissingStepArrays)),
+  'legacy frozen recipe steps without array fields must remain printable',
+);
 assert.equal(singleRecipeHtml.includes('recipe-issue.jpg'), true, 'explicit issue evidence remains visible in print HTML');
 assert.match(singleRecipeHtml, /data-print-issue-meta/, 'print issue rows must keep level, source, description, and status as separate metadata units');
 assert.match(singleRecipeHtml, /data-print-issue-status/, 'print issue rows must expose a dedicated rectification-status unit');

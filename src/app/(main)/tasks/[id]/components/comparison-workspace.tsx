@@ -567,6 +567,7 @@ export function ComparisonWorkspace({
             onSelectionChange={(ids, materials) => void syncCellMedia(cell.id, ids, materials)}
             selectedPreviewSize="sm"
             compact
+            enableImageEditing
           />
         </div>
 

@@ -26,6 +26,7 @@ export function classifyRecipeEvaluationSaveError(error: unknown): ClassifiedRec
   const message = error instanceof Error ? error.message.toLowerCase() : String(error || '').toLowerCase();
   if (message.includes('recipe not found') || message.includes('recipe update affected zero rows')) return { status: 404, message: '食谱不存在', log: false };
   if (message.includes('invalid evaluation status') || message.includes('material_ids must be an array')) return { status: 400, message: '评价状态格式错误', log: false };
+  if (message.includes('invalid recipe material')) return { status: 400, message: '所选素材不属于当前任务', log: false };
   if (message.includes('invalid or occupied recipe material')) return { status: 409, message: '所选素材不可用于当前食谱，请刷新后重试', log: false };
   return { status: 500, message: '效果评价保存失败', log: true };
 }

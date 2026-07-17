@@ -11,6 +11,8 @@ import {
   requireUser,
 } from '@/lib/server/auth';
 import { createAssemblyFromComparisonTask, findAssemblyForTask } from '@/lib/server/comparison-assembly';
+import { createMatrix } from '@/lib/matrix/design-service';
+import { ensureV3ViewForMatrix } from '@/lib/matrix/bootstrap-v3';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { getDb } from '@/storage/database/pg-db';
@@ -19,6 +21,7 @@ import {
   conversationMessages,
   matrixCellValues,
   matrixColumnDefinitions,
+  matrixHierarchyNodes,
   matrixLeafRows,
   taskMatrices,
 } from '@/storage/database/shared/schema';
@@ -33,6 +36,12 @@ type Row = Record<string, unknown>;
 type Client = ReturnType<typeof getSupabaseClient>;
 
 const MATRIX_CELL_NODE_TYPES = new Set(['item', 'condition', 'process_node', 'metric', 'issue_group']);
+const ROUTE_ADDITIONAL_ALLOWED_ACTION_TYPES = new Set<AgentAction['type']>([
+  'data_matrix_create',
+  'data_matrix_category_create',
+  'comparison_object_create',
+  'comparison_category_create',
+]);
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: taskId } = await params;
@@ -57,7 +66,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const results: AgentActionResult[] = [];
   for (const action of actions) {
     try {
-      if (!isAgentActionAllowed(action.type)) {
+      if (!isAgentActionAllowed(action.type) && !ROUTE_ADDITIONAL_ALLOWED_ACTION_TYPES.has(action.type)) {
         throw new Error('AI助手不允许执行删除或设置类动作');
       }
       const result = await applyAction(client, taskId, action, user);
@@ -187,6 +196,14 @@ async function applyAction(
       return applyStandardItemCreate(client, action, actor.role);
     case 'data_matrix_cell_update':
       return applyDataMatrixCellUpdate(client, taskId, action, actor.id);
+    case 'data_matrix_create':
+      return applyDataMatrixCreate(taskId, action, actor.id);
+    case 'data_matrix_category_create':
+      return applyDataMatrixCategoryCreate(taskId, action, actor.id);
+    case 'comparison_object_create':
+      return applyComparisonObjectCreate(client, taskId, action);
+    case 'comparison_category_create':
+      return applyComparisonCategoryCreate(client, taskId, action);
   }
 }
 
@@ -221,6 +238,86 @@ async function applyStandardItemCreate(client: Client, action: AgentAction, acto
   const { data, error } = await client.from('standard_items').insert(insert).select().single();
   if (error) throw new Error(error.message || '新增标准条目失败');
   return successResult(action, '已新增标准条目', data);
+}
+
+async function applyDataMatrixCreate(taskId: string, action: AgentAction, actorId: string): Promise<AgentActionResult> {
+  const name = requiredString(action.payload.name, '缺少数据矩阵名称');
+  const matrix = await createMatrix(taskId, actorId, {
+    name,
+    description: optionalString(action.payload.description) || undefined,
+  });
+  const view = await ensureV3ViewForMatrix({ matrixId: matrix.id, userId: actorId });
+  return successResult(action, '已新建数据矩阵', { matrix, view_definition_id: view.viewDefinitionId });
+}
+
+async function applyDataMatrixCategoryCreate(taskId: string, action: AgentAction, actorId: string): Promise<AgentActionResult> {
+  const matrixId = requiredString(action.payload.matrix_id, '缺少数据矩阵ID');
+  const label = requiredString(action.payload.label, '缺少数据矩阵分类名称');
+  const level = Number(action.payload.level);
+  if (level !== 1 && level !== 2) throw new Error('数据矩阵分类层级必须为 1 或 2');
+  const parentId = level === 2 ? requiredString(action.payload.parent_id, '二级细项缺少一级分类ID') : null;
+
+  const db = await getDb();
+  const [matrix] = await db.select({ id: taskMatrices.id, taskId: taskMatrices.taskId })
+    .from(taskMatrices).where(eq(taskMatrices.id, matrixId)).limit(1).execute();
+  if (!matrix || matrix.taskId !== taskId) throw new Error('数据矩阵不属于当前任务');
+  await ensureV3ViewForMatrix({ matrixId, userId: actorId });
+
+  const nodes = await db.select().from(matrixHierarchyNodes)
+    .where(eq(matrixHierarchyNodes.matrixId, matrixId)).execute();
+  const parent = parentId ? nodes.find((node) => node.id === parentId) : null;
+  if (level === 2 && (!parent || parent.nodeType !== 'level_1' || parent.archivedAt !== null)) {
+    throw new Error('二级细项必须归属当前数据矩阵的有效一级分类');
+  }
+  const existing = nodes.find((node) =>
+    node.nodeLabel === label
+      && node.parentId === parentId
+      && node.nodeType === `level_${level}`
+      && node.archivedAt === null,
+  );
+  if (existing) return successResult(action, '数据矩阵分类已存在', { node: existing, already_created: true });
+
+  const result = await db.transaction(async (transaction) => {
+    const siblings = nodes.filter((node) => node.parentId === parentId && node.archivedAt === null);
+    const [node] = await transaction.insert(matrixHierarchyNodes).values({
+      matrixId,
+      parentId,
+      level,
+      nodeLabel: label,
+      nodeType: `level_${level}`,
+      sortOrder: Math.max(0, ...siblings.map((sibling) => sibling.sortOrder)) + 1,
+      createdBy: actorId,
+    }).returning().execute();
+
+    const level1NodeId = level === 1 ? node.id : parent!.id;
+    let level2NodeId = level === 2 ? node.id : null;
+    let childNode: typeof node | undefined;
+    if (level === 1) {
+      [childNode] = await transaction.insert(matrixHierarchyNodes).values({
+        matrixId,
+        parentId: node.id,
+        level: 2,
+        nodeLabel: '默认细项',
+        nodeType: 'level_2',
+        sortOrder: 1,
+        createdBy: actorId,
+      }).returning().execute();
+      level2NodeId = childNode.id;
+    }
+    const [maxRow] = await transaction.select({ maxIndex: sql<number>`COALESCE(MAX(${matrixLeafRows.visibleRowIndex}), 0)` })
+      .from(matrixLeafRows).where(eq(matrixLeafRows.matrixId, matrixId)).execute();
+    const [leafRow] = await transaction.insert(matrixLeafRows).values({
+      matrixId,
+      level1NodeId,
+      level2NodeId,
+      level3NodeId: null,
+      visibleRowIndex: Number(maxRow?.maxIndex || 0) + 1,
+      groupRowIndex: 1,
+      status: 'active',
+    }).returning().execute();
+    return { node, childNode, leafRow };
+  });
+  return successResult(action, '已新增数据矩阵分类', result);
 }
 
 async function applyDataMatrixCellUpdate(client: Client, taskId: string, action: AgentAction, actorId: string): Promise<AgentActionResult> {
@@ -259,7 +356,8 @@ async function applyRecipeCreate(client: Client, taskId: string, action: AgentAc
     name,
     recipe_type: optionalString(action.payload.recipe_type) || '食谱',
     effect_status: 'pending',
-    ingredients: optionalString(action.payload.description),
+    ingredients: optionalString(action.payload.ingredients) || optionalString(action.payload.description),
+    effect_description: optionalString(action.payload.effect_description) || optionalString(action.payload.effect),
   }).select().single();
   if (error) throw new Error(error.message || '新建食谱失败');
   return successResult(action, '已新建食谱', data);
@@ -271,6 +369,9 @@ async function applyRecipeUpdate(client: Client, taskId: string, action: AgentAc
   const update: Row = { updated_at: new Date().toISOString() };
   for (const key of ['name', 'ingredients', 'recipe_type', 'effect_description', 'effect_status'] as const) {
     if (action.payload[key] !== undefined) update[key] = optionalString(action.payload[key]);
+  }
+  if (action.payload.effect !== undefined && action.payload.effect_description === undefined) {
+    update.effect_description = optionalString(action.payload.effect);
   }
   if (Object.keys(update).length === 1) throw new Error('没有可更新的食谱字段');
   const { data, error } = await client.from('recipes').update(update).eq('id', recipeId).select().single();
@@ -345,6 +446,54 @@ async function applyComparisonCellUpdate(client: Client, taskId: string, action:
   const data = await upsertComparisonCellByLabels(client, assemblyId, action.payload);
   if (!data) throw new Error('未找到可更新的矩阵单元格');
   return successResult(action, '已更新矩阵单元格', data);
+}
+
+async function applyComparisonObjectCreate(client: Client, taskId: string, action: AgentAction): Promise<AgentActionResult> {
+  const objectName = requiredString(action.payload.object_name || action.payload.name, '缺少对比对象名称');
+  const assemblyId = await ensureTaskAssembly(client, taskId);
+  const { data: existing } = await client.from('comparison_objects').select('*')
+    .eq('assembly_id', assemblyId).eq('object_name', objectName).maybeSingle();
+  if (existing) return successResult(action, '对比对象已存在', { object: existing, already_created: true });
+
+  const { data: latest } = await client.from('comparison_objects').select('sort_order')
+    .eq('assembly_id', assemblyId).order('sort_order', { ascending: false }).maybeSingle();
+  const { data, error } = await client.from('comparison_objects').insert({
+    assembly_id: assemblyId,
+    task_id: taskId,
+    object_name: objectName,
+    object_type: optionalString(action.payload.object_type) || 'product_model',
+    comparison_factor: optionalString(action.payload.comparison_factor),
+    model: optionalString(action.payload.model),
+    brand: optionalString(action.payload.brand),
+    specification: optionalString(action.payload.specification),
+    custom_fields: {},
+    sort_order: Number(latest?.sort_order || 0) + 1,
+  }).select().single();
+  if (error) throw new Error(error.message || '创建对比对象失败');
+  await completeMissingCells(client, assemblyId);
+  return successResult(action, '已新增对比对象', data);
+}
+
+async function applyComparisonCategoryCreate(client: Client, taskId: string, action: AgentAction): Promise<AgentActionResult> {
+  const label = requiredString(action.payload.label || action.payload.node_label, '缺少对比分类名称');
+  const nodeType = action.payload.node_type === 'item' ? 'item' : 'section';
+  const parentId = nodeType === 'item'
+    ? requiredString(action.payload.parent_id, '对比细项缺少分类ID')
+    : null;
+  const assemblyId = await ensureTaskAssembly(client, taskId);
+  if (parentId) {
+    const { data: parent } = await client.from('comparison_item_nodes').select('id, assembly_id, node_type')
+      .eq('id', parentId).maybeSingle();
+    if (!parent || parent.assembly_id !== assemblyId || parent.node_type !== 'section') {
+      throw new Error('对比细项必须归属当前对比矩阵的分类');
+    }
+  }
+  const created = await ensureComparisonNode(client, assemblyId, label, nodeType, parentId);
+  await completeMissingCells(client, assemblyId);
+  return successResult(action, created.created ? '已新增对比分类' : '对比分类已存在', {
+    node: created.node,
+    already_created: !created.created,
+  });
 }
 
 async function applyMaterialAiResultUpdate(client: Client, taskId: string, action: AgentAction): Promise<AgentActionResult> {

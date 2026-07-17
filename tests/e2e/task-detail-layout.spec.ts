@@ -1,6 +1,28 @@
 import { expect, test } from '@playwright/test';
 import { loginForE2E } from './auth-session';
 
+test('task floating AI shows exploration choices and only prefills the draft', async ({ page }) => {
+  const taskAgentRequests: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/agent-chat')) taskAgentRequests.push(request.url());
+  });
+
+  await loginForE2E(page, 'dockeradmin', 'DockerLocal2026');
+  await page.goto('/tasks/golden-task-single');
+  await expect(page.getByText('AI五感体验', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('食谱功能AI探索', { exact: true })).toHaveCount(0);
+
+  await page.getByTestId('task-floating-assistant').click();
+  const entries = page.getByTestId('task-ai-entry-choices');
+  await expect(entries).toBeVisible();
+  await entries.getByRole('button', { name: /AI五感体验/ }).click();
+
+  const prompt = page.getByRole('textbox', { name: 'AI任务助手输入' });
+  await expect(prompt).toHaveValue(/AI五感体验/);
+  await expect(prompt).toHaveValue(/不要直接写入/);
+  expect(taskAgentRequests).toEqual([]);
+});
+
 test.beforeEach(async ({ page }) => {
   await loginForE2E(page, 'dockeradmin', 'DockerLocal2026');
 });

@@ -23,9 +23,13 @@ const nextConfig = {
           "default-src 'self'",
           `script-src 'self' 'unsafe-inline'${isProduction ? '' : " 'unsafe-eval'"}`,
           "style-src 'self' 'unsafe-inline'",
-          "img-src 'self' data: blob: https:",
-          "media-src 'self' blob: https:",
-          "connect-src 'self' https:",
+          // Production entry is HTTP (:5000). Keep https: for future TLS, and
+          // allow http:/data: so same-origin absolute media URLs and loading
+          // placeholders are not blocked by CSP (video must not use data:image
+          // placeholders as src — guarded in MediaThumbnail/PresignedVideo).
+          "img-src 'self' data: blob: https: http:",
+          "media-src 'self' data: blob: https: http:",
+          "connect-src 'self' https: http:",
           "font-src 'self' data:",
           "frame-ancestors 'self'",
           "base-uri 'self'",

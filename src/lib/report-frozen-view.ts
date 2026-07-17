@@ -81,10 +81,13 @@ export type FrozenIssue = {
     inspectionRange?: string;
     inspectionStandard?: string;
     nonStandardContent?: string;
+    descriptionResult?: string;
     checkResult?: string;
     primaryCategory?: string;
     secondaryDetail?: string;
     comparisonDimension?: string;
+    problemPoints?: string[];
+    isNonStandard?: boolean;
   };
   evidence: FrozenMedia[];
   /** Present only for recipe/function whole-judgment issues. */
@@ -224,6 +227,14 @@ function normalizedProblemText(value: unknown): string {
   return text(value).normalize('NFKC').replace(/\s+/g, ' ').toLocaleLowerCase();
 }
 
+function isComparisonOriginIssue(issue: Row) {
+  return Boolean(first(issue.source_assembly_id, issue.sourceAssemblyId, issue.source_cell_id, issue.sourceCellId));
+}
+
+function issueProblemText(issue: Row) {
+  return normalizedProblemText(first(issue.title, issue.description, issue.problem_description));
+}
+
 function failedRecord(record: Row): boolean {
   const result = text(record.evaluation_result).toLowerCase();
   return result.includes('fail') || result.includes('unqualified') || result.includes('not_pass') || result.includes('不合')
@@ -283,7 +294,23 @@ function cleanFrozenFieldValue(value: unknown): string {
   return text(value).replace(/^(?:[:：]\s*)+/, '');
 }
 
-type FrozenFact = Row & { _recipe?: FrozenRecipeContext; _reportable?: boolean };
+type FrozenFact = Row & {
+  _recipe?: FrozenRecipeContext;
+  _reportable?: boolean;
+  _comparisonCellIds?: string[];
+  _comparisonProblemPoints?: string[];
+};
+
+function comparisonCellIds(fact: FrozenFact): string[] {
+  return fact._comparisonCellIds?.length
+    ? fact._comparisonCellIds
+    : [first(fact._comparisonCellId, fact.source_cell_id, fact.sourceCellId)].filter(Boolean);
+}
+
+function comparisonIssueTitle(objectName: string, projectName: string, itemName: string): string {
+  if (!objectName && !projectName && !itemName) return '';
+  return `${objectName || '未命名对象'}（对象）：${projectName || '未命名大类'}（大类）的${itemName || '未命名细项'}（细项）效果不合格`;
+}
 
 function frozenIssueFacts(content: Row, snapshotJson: Row): FrozenFact[] {
   const facts: FrozenFact[] = [
@@ -344,31 +371,67 @@ const comparisonObjectsById = new Map(rows(snapshotJson.objects ?? snapshotJson.
   const comparisonItemsById = new Map(rows(snapshotJson.item_nodes ?? snapshotJson.comparison_item_nodes)
     .map((item) => [text(item.id), item] as const)
     .filter(([id]) => Boolean(id)));
+  const comparisonGroups = new Map<string, {
+    cellIds: string[];
+    objectName: string;
+    projectName: string;
+    itemName: string;
+    effectSummary: string;
+    createdAt: string;
+    problemPoints: string[];
+    materials: Row[];
+  }>();
   for (const cell of rows(snapshotJson.cells ?? snapshotJson.matrix_cells)) {
     const cellId = text(cell.id);
-    const object = comparisonObjectsById.get(first(cell.object_id, cell.objectId));
-    const item = comparisonItemsById.get(first(cell.item_node_id, cell.itemNodeId));
+    const objectId = first(cell.object_id, cell.objectId);
+    const itemId = first(cell.item_node_id, cell.itemNodeId);
+    const object = comparisonObjectsById.get(objectId);
+    const item = comparisonItemsById.get(itemId);
     const parent = item ? comparisonItemsById.get(first(item.parent_id, item.parentId)) : undefined;
     const points = Array.isArray(cell.problem_points) ? cell.problem_points : [];
-    const seenProblemTexts = new Set<string>();
-    points.forEach((rawPoint, index) => {
+    const objectName = first(object?.object_name, object?.name, cell.object_name);
+    const projectName = first(parent?.node_label, parent?.label, item?.project_name, cell.project_name);
+    const itemName = first(item?.node_label, item?.label, cell.item_name);
+    const groupKey = objectId && itemId ? `${objectId}:${itemId}` : cellId;
+    const group = comparisonGroups.get(groupKey) ?? {
+      cellIds: [], objectName, projectName, itemName,
+      effectSummary: first(cell.effect_summary),
+      createdAt: first(cell.created_at, cell.createdAt),
+      problemPoints: [], materials: [],
+    };
+    if (cellId && !group.cellIds.includes(cellId)) group.cellIds.push(cellId);
+    const seenProblemTexts = new Set(group.problemPoints.map(normalizedProblemText));
+    points.forEach((rawPoint) => {
       const point = typeof rawPoint === 'string' ? { text: rawPoint } : isRecord(rawPoint) ? rawPoint : {};
       const pointText = first(point.text, point.issueText);
       const normalizedText = normalizedProblemText(pointText);
       if (!normalizedText || seenProblemTexts.has(normalizedText)) return;
       seenProblemTexts.add(normalizedText);
-      facts.push({
-      id: `comparison-cell:${cellId}:problem:${index}`,
-      _frozenKey: `comparison-cell:${cellId}:problem:${index}`,
-      _sourceKind: 'comparison_cell', _comparisonCellId: cellId,
-      title: pointText, description: first(cell.effect_summary, pointText),
-      source_type: 'recipe_problem',
-      created_at: first(point.created_at, point.createdAt, cell.created_at, cell.createdAt),
-      object_name: first(object?.object_name, object?.name, cell.object_name),
-      project_name: first(parent?.node_label, parent?.label, item?.project_name, cell.project_name),
-      item_name: first(item?.node_label, item?.label, cell.item_name),
-      materials: [...rows(cell.inline_media), ...rows(cell.appendix_media), ...rows(cell.media)],
-      });
+      group.problemPoints.push(pointText);
+      group.createdAt = first(group.createdAt, point.created_at, point.createdAt);
+    });
+    group.materials.push(...rows(cell.inline_media), ...rows(cell.appendix_media), ...rows(cell.media));
+    comparisonGroups.set(groupKey, group);
+  }
+  for (const group of comparisonGroups.values()) {
+    if (group.problemPoints.length === 0) continue;
+    const firstCellId = group.cellIds[0] ?? '';
+    facts.push({
+      id: `comparison-cell:${firstCellId}:problem:0`,
+      _frozenKey: `comparison-cell:${firstCellId}:problem:0`,
+      _sourceKind: 'comparison_cell',
+      _comparisonCellId: firstCellId,
+      _comparisonCellIds: group.cellIds,
+      _comparisonProblemPoints: group.problemPoints,
+      title: comparisonIssueTitle(group.objectName, group.projectName, group.itemName),
+      description: first(group.effectSummary, group.problemPoints[0]),
+      source_type: 'comparison_problem',
+      created_at: group.createdAt,
+      object_name: group.objectName,
+      project_name: group.projectName,
+      item_name: group.itemName,
+      problem_points: group.problemPoints,
+      materials: group.materials,
     });
   }
   return facts;
@@ -388,9 +451,9 @@ function explicitIssueMatchesSource(explicit: FrozenFact, source: FrozenFact) {
     );
     return Boolean(explicitPointId) && explicitPointId === first(source.source_issue_point_id, source.source_cell_id, source.id);
   }
-  const explicitCellId = first(explicit.source_cell_id, explicit.sourceCellId, explicit.source_issue_point_id);
-  if (!explicitCellId) return false;
-  return explicitCellId === first(source.source_cell_id, source.source_issue_point_id, source._comparisonCellId);
+  if (sourceKind !== 'comparison_cell') return false;
+  const explicitCellId = first(explicit.source_cell_id, explicit.sourceCellId);
+  return Boolean(explicitCellId) && comparisonCellIds(source).includes(explicitCellId);
 }
 
 function mergeFrozenSourceWithExplicitIssue(source: FrozenFact, explicit: FrozenFact): FrozenFact {
@@ -414,29 +477,73 @@ function coalesceExplicitIssueFacts(facts: FrozenFact[]): FrozenFact[] {
   const sourceFacts = facts.filter((fact) => text(fact._sourceKind) !== 'explicit_issue');
   const matched = new Set<FrozenFact>();
   const coalesced = sourceFacts.map((source) => {
-    const matches = explicit.filter((issue) => explicitIssueMatchesSource(issue, source));
+    const matches = explicit.filter((issue) => !matched.has(issue) && explicitIssueMatchesSource(issue, source));
     if (matches.length === 0) return source;
     matches.forEach((issue) => matched.add(issue));
     return matches.reduce(mergeFrozenSourceWithExplicitIssue, source);
   });
+
+  // Secondary dedup: comparison-origin issues without a cell-id match may still
+  // duplicate a frozen cell problem by sourceCellId + normalized title.
+  for (const issue of explicit) {
+    if (matched.has(issue)) continue;
+    if (!isComparisonOriginIssue(issue)) continue;
+    const cellId = text(issue.source_cell_id || issue.sourceCellId);
+    if (cellId && coalesced.some((fact) => text(fact._sourceKind) === 'comparison_cell' && comparisonCellIds(fact).includes(cellId))) {
+      matched.add(issue);
+    }
+  }
+
   return [...coalesced, ...explicit.filter((issue) => !matched.has(issue))];
 }
 
-function findFrozenFactForLive(facts: FrozenFact[], live: Row) {
+function findFrozenFactForLive(facts: FrozenFact[], live: Row, consumed: Set<FrozenFact>) {
   const liveIssueId = text(live.id);
   if (liveIssueId) {
-    const linked = facts.find((item) => text(item.linked_issue_id) === liveIssueId);
+    const linked = facts.find((item) => !consumed.has(item) && text(item.linked_issue_id) === liveIssueId);
     if (linked) return linked;
   }
   const recipeId = text(live.recipe_id);
-  if (recipeId) return facts.find((item) => text(item._recipeId) === recipeId);
+  if (recipeId) return facts.find((item) => !consumed.has(item) && text(item._recipeId) === recipeId);
   const recordId = text(live.record_id);
-  if (recordId) return facts.find((item) => text(item._sourceKind) === 'record' && text(item.id) === recordId);
+  if (recordId) return facts.find((item) => !consumed.has(item) && text(item._sourceKind) === 'record' && text(item.id) === recordId);
   const sourceCellId = text(live.source_cell_id);
-  if (sourceCellId) return facts.find((item) => (
-    text(item.id) === sourceCellId || text(item.source_issue_point_id) === sourceCellId || text(item._comparisonCellId) === sourceCellId
+  const liveTitle = issueProblemText(live);
+  if (sourceCellId) return facts.find((item) => !consumed.has(item) && (
+    text(item.id) === sourceCellId
+    || text(item.source_issue_point_id) === sourceCellId
+    || (comparisonCellIds(item).includes(sourceCellId) && (!liveTitle || text(item._sourceKind) === 'comparison_cell'))
   ));
   return undefined;
+}
+
+function comparisonLiveCoveredByFrozenFacts(facts: FrozenFact[], live: Row) {
+  if (!isComparisonOriginIssue(live)) return false;
+  const cellId = first(live.source_cell_id, live.sourceCellId);
+  if (!cellId) return false;
+  return facts.some((fact) => (
+    text(fact._sourceKind) === 'comparison_cell'
+    && comparisonCellIds(fact).includes(cellId)
+  ));
+}
+
+function findUniqueLegacyFunctionFactForLive(
+  facts: FrozenFact[], live: Row, consumed: Set<FrozenFact>, reportId: string,
+): FrozenFact | undefined {
+  if (text(live.source_report_id) !== reportId
+    || text(live.source_type) !== 'recipe_problem'
+    || isComparisonOriginIssue(live)
+    || text(live.recipe_id)) return undefined;
+  const title = issueProblemText(live);
+  if (!title) return undefined;
+  const candidates = facts.filter((fact) => (
+    !consumed.has(fact)
+    && text(fact._sourceKind) === 'explicit_issue'
+    && text(fact.source_type) === 'recipe_problem'
+    && !isComparisonOriginIssue(fact)
+    && issueProblemText(fact) === title
+  ));
+  return candidates.length === 1 ? candidates[0] : undefined;
 }
 
 export function overlayEvidenceWithoutReEvaluations(
@@ -449,9 +556,13 @@ export function overlayEvidenceWithoutReEvaluations(
   return evidence.filter((item) => !ids.has(text(item.id)) && !urls.has(text(item.url)));
 }
 
+export function authoritativeRetestRows(frozenReEvaluations: Row[] = [], liveReEvaluations?: unknown): Row[] {
+  return Array.isArray(liveReEvaluations) ? liveReEvaluations as Row[] : frozenReEvaluations;
+}
+
 function retestSummary(issue: Row | undefined, frozenReEvaluations: Row[] = []): FrozenRetestSummary {
   const byId = new Map<string, Row>();
-  for (const item of [...frozenReEvaluations, ...rows(issue?._reEvaluations)]) {
+  for (const item of authoritativeRetestRows(frozenReEvaluations, issue?._reEvaluations)) {
     const id = first(item.id);
     if (id) byId.set(id, item);
     else byId.set(`anonymous:${byId.size}`, item);
@@ -470,7 +581,7 @@ function retestSummary(issue: Row | undefined, frozenReEvaluations: Row[] = []):
 }
 
 function liveOverlay(issue: Row | undefined, evidence: FrozenMedia[] = [], baseEvidence: FrozenMedia[] = [], frozenReEvaluations: Row[] = []): FrozenIssueLiveOverlay {
-  const rawRetests = [...frozenReEvaluations, ...rows(issue?._reEvaluations)];
+  const rawRetests = authoritativeRetestRows(frozenReEvaluations, issue?._reEvaluations);
   return {
     status: first(issue?.status, issue?.evaluation_result),
     rectification: first(issue?.improve_plan, issue?.rectification, issue?.no_improve_reason),
@@ -484,7 +595,7 @@ function frozenIssue(base: FrozenFact, live: Row | undefined, evidence: FrozenMe
   const isFrozenRecord = text(base._sourceKind) === 'record';
   const sourceKind: FrozenIssue['sourceKind'] = sourceType === 'matrix_problem' || sourceType === 'matrix_issue'
     ? 'matrix'
-    : Boolean(live?.source_assembly_id) || Boolean(base._comparisonCellId)
+    : text(base._sourceKind) === 'comparison_cell' || isComparisonOriginIssue(base) || Boolean(live && isComparisonOriginIssue(live))
       ? 'comparison'
       : isFrozenRecord || sourceType === 'record_fail' || sourceType === 'sensory_problem'
         ? 'sensory'
@@ -492,16 +603,20 @@ function frozenIssue(base: FrozenFact, live: Row | undefined, evidence: FrozenMe
   const standardType = first(base.standard_type, base.standardType, base.standard_category);
   const nonStandard = standardType.includes('非标准');
   const recipe = base._recipe;
+  const sensoryTitle = first(base.check_item, base.item_name, base.title, base.problem_description, base.id);
+  const observedDescription = cleanFrozenFieldValue(first(base.check_result, base.description, base.problem_description));
   return {
     id: first(live?.id, base.id),
     createdAt: first(base._issueCreatedAt, live?.created_at, live?.createdAt, base.created_at, base.createdAt) || null,
     ...(text(live?.id) ? { liveIssueId: text(live?.id) } : {}),
     canManage: false,
-    ...(first(base.source_cell_id, base.source_issue_point_id, base._comparisonCellId) ? {
-      sourceCellId: first(base.source_cell_id, base.source_issue_point_id, base._comparisonCellId),
+    ...(first(base.source_cell_id, base.source_issue_point_id, comparisonCellIds(base)[0]) ? {
+      sourceCellId: first(base.source_cell_id, base.source_issue_point_id, comparisonCellIds(base)[0]),
     } : {}),
-    title: first(base.title, base.check_item, base.problem_description, base.effect_summary, base.id),
-    details: first(base.description, base.problem_description, base.check_requirement, base.check_standard),
+    title: sourceKind === 'sensory' ? sensoryTitle : first(base.title, base.check_item, base.problem_description, base.effect_summary, base.id),
+    details: sourceKind === 'sensory'
+      ? observedDescription
+      : first(base.description, base.problem_description, base.check_requirement, base.check_standard),
     level: normalizeFrozenIssueLevel(base.level, base.problem_level, live?.level, live?.problem_level),
     sourceType,
     sourceKind,
@@ -513,10 +628,15 @@ function frozenIssue(base: FrozenFact, live: Row | undefined, evidence: FrozenMe
       inspectionRange: cleanFrozenFieldValue(first(base.touch_point, base.check_requirement, base.evaluation_prep, base.inspection_range)),
       inspectionStandard: nonStandard ? '' : cleanFrozenFieldValue(first(base.experience_standard, base.check_standard, base.subjective_rating, base.subjective_score)),
       nonStandardContent: nonStandard ? cleanFrozenFieldValue(first(base.check_item, base.problem_description, base.description)) : '',
-      checkResult: cleanFrozenFieldValue(first(base.check_result, base.evaluation_result, base.result, base.inspection_result)),
+      descriptionResult: sourceKind === 'sensory' ? observedDescription : '',
+      checkResult: cleanFrozenFieldValue(first(base.evaluation_result, base.result, base.inspection_result)),
       primaryCategory: cleanFrozenFieldValue(first(base.primary_category, base.level_1, base.level1, base.first_level_category)),
       secondaryDetail: cleanFrozenFieldValue(first(base.secondary_detail, base.level_2, base.second_level_category, base.level_3, base.third_level_category)),
       comparisonDimension: cleanFrozenFieldValue(first(base.comparison_dimension, base.compare_dimension, base.column_label, base.metric_name)),
+      ...(sourceKind === 'comparison' ? {
+        problemPoints: problemTexts(base._comparisonProblemPoints ?? base.problem_points),
+      } : {}),
+      isNonStandard: nonStandard,
     },
     evidence: recipe ? subtractFrozenMedia(evidence, recipe.evidence) : dedupeFrozenMedia(evidence),
     ...(recipe ? { recipe } : {}),
@@ -533,13 +653,23 @@ function buildIssues(
   reportId: string,
 ): FrozenIssue[] {
   const facts = coalesceExplicitIssueFacts(frozenIssueFacts(content, snapshotJson));
+  const hasCanonicalComparisonCells = rows(snapshotJson.cells ?? snapshotJson.matrix_cells).length > 0;
+  const hasCanonicalLiveFunctionIssues = liveIssues.some((issue) => (
+    text(issue.source_type) === 'recipe_problem'
+    && !isComparisonOriginIssue(issue)
+    && (Boolean(text(issue.recipe_id)) || text(issue.source_report_id) === reportId)
+  ));
   const consumed = new Set<FrozenFact>();
   const result: FrozenIssue[] = [];
   for (const live of liveIssues) {
-    const base = findFrozenFactForLive(facts, live);
+    const base = findFrozenFactForLive(facts, live, consumed)
+      ?? findUniqueLegacyFunctionFactForLive(facts, live, consumed, reportId);
     if (base?._sourceKind === 'recipe' && !base._reportable) continue;
     const isCurrentReportLegacyIssue = text(live.source_report_id) === reportId;
-    if (!base && resolution !== 'legacy_latest' && !isCurrentReportLegacyIssue) continue;
+    if (!base) {
+      if (comparisonLiveCoveredByFrozenFacts(facts, live)) continue;
+      if (resolution !== 'legacy_latest' && !isCurrentReportLegacyIssue) continue;
+    }
     const frozenBase = base ?? live as FrozenFact;
     consumed.add(frozenBase);
     const evidence = media(rows(frozenBase.materials));
@@ -548,6 +678,13 @@ function buildIssues(
   for (const fact of facts) {
     if (consumed.has(fact)) continue;
     if (fact._sourceKind === 'recipe' && !fact._reportable) continue;
+    if (hasCanonicalComparisonCells
+      && fact._sourceKind === 'explicit_issue'
+      && isComparisonOriginIssue(fact)) continue;
+    if (hasCanonicalLiveFunctionIssues
+      && fact._sourceKind === 'explicit_issue'
+      && text(fact.source_type) === 'recipe_problem'
+      && !isComparisonOriginIssue(fact)) continue;
     result.push(frozenIssue(fact, undefined, media(rows(fact.materials))));
   }
   return sortFrozenIssues(result);
@@ -591,7 +728,7 @@ export function buildFrozenReportViewModel(
       ? snapshotJson.task
       : input.taskInfo ?? null;
   const internal = options.audience === 'internal';
-  const functionEffects = excludeClaimedRecipeMediaFromEffects(recipes.map(recipeContext), frozenIssues);
+  const functionEffects = recipes.map(recipeContext);
   return {
     snapshotResolution: input.snapshotResolution,
     header: {

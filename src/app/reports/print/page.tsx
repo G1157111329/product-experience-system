@@ -6,30 +6,45 @@ import { Loader2 } from 'lucide-react';
 import { ReportPrintDocument } from '@/components/reports/report-section-block-renderer';
 import { reportFilenameBase } from '@/lib/report-filename';
 import type { FrozenReportViewModel } from '@/lib/report-frozen-view';
-import { mapWithConcurrency, normalizePrintMode, posterStorageKey, signedPosterUrl, uniqueUrls, type PrintMode } from '@/lib/print-assets';
+import { isPrintVideoSource, localPrintMediaUrl, mapWithConcurrency, normalizePrintMode, posterStorageKey, printPresignStorageKey, signedPosterUrl, uniqueUrls, type PrintMode } from '@/lib/print-assets';
 import { resolvePresignBatches } from '@/lib/presign-batches';
 import {
   buildPrintReportViewModel,
-  printReportMedia,
+  printReportMediaOccurrences,
   type PrintMedia,
+  type PrintIssueProjectionInput,
   type PrintReportViewModel,
 } from '@/lib/server/report-print-renderer';
-import { isAllowedMediaSource } from '@/lib/use-presigned-url';
 
 type SharePayload = {
   frozenViewModel?: FrozenReportViewModel;
   siblingReports?: Array<{ id?: string }>;
   siblingFrozenViewModels?: Record<string, FrozenReportViewModel>;
+  liveIssues?: PrintIssueProjectionInput[];
+  siblingIssuesMap?: Record<string, PrintIssueProjectionInput[]>;
+  mergedReportOrder?: string[];
 };
 
 function orderedShareModels(payload: SharePayload): FrozenReportViewModel[] {
   if (!payload.frozenViewModel) return [];
   const siblings = payload.siblingFrozenViewModels ?? {};
-  const order = payload.siblingReports?.map((item) => String(item.id || '')).filter(Boolean) ?? [];
-  return [
-    payload.frozenViewModel,
-    ...order.flatMap((id) => siblings[id] ? [siblings[id]] : []),
-  ];
+  const order = payload.mergedReportOrder?.length
+    ? payload.mergedReportOrder
+    : [
+      String(payload.frozenViewModel?.header.id || ''),
+      ...(payload.siblingReports?.map((item) => String(item.id || '')).filter(Boolean) ?? []),
+    ];
+  const byId = new Map<string, FrozenReportViewModel>([
+    [payload.frozenViewModel.header.id, payload.frozenViewModel],
+    ...Object.entries(siblings),
+  ]);
+  const seen = new Set<string>();
+  return order.flatMap((id) => {
+    const model = byId.get(id);
+    if (!model || seen.has(model.header.id)) return [];
+    seen.add(model.header.id);
+    return [model];
+  });
 }
 
 async function blobToDataUrl(blob: Blob): Promise<string> {
@@ -74,14 +89,17 @@ async function imageUrlToPrintableDataUrl(url: string, mode: PrintMode): Promise
 }
 
 async function presignPaths(paths: string[], reportId: string, shareToken: string | null) {
-  const entries = uniqueUrls(paths).flatMap((path) => {
+  type PrintPathEntry = { path: string; key: string; poster: boolean; localUrl?: string };
+  const entries = uniqueUrls(paths).flatMap<PrintPathEntry>((path) => {
     const posterKey = posterStorageKey(path);
     if (posterKey) return [{ path, key: posterKey, poster: true }];
-    if (isAllowedMediaSource(path) || /^https?:\/\//i.test(path)) return [];
-    return [{ path, key: path, poster: false }];
+    const localUrl = localPrintMediaUrl(path);
+    if (localUrl) return [{ path, key: '', poster: false, localUrl }];
+    const key = printPresignStorageKey(path);
+    return key ? [{ path, key, poster: false }] : [];
   });
-  const objectKeys = uniqueUrls(entries.map((entry) => entry.key));
-  if (objectKeys.length === 0) return {};
+  const objectKeys = uniqueUrls(entries.map((entry) => entry.key).filter(Boolean));
+  if (entries.length === 0) return {};
   const signedByKey = await resolvePresignBatches(objectKeys, async (batch) => {
     try {
       const response = await fetch('/api/materials/presign', {
@@ -97,17 +115,18 @@ async function presignPaths(paths: string[], reportId: string, shareToken: strin
     }
   });
   return Object.fromEntries(entries.map((entry) => {
+    if (entry.localUrl) return [entry.path, entry.localUrl];
     const signed = signedByKey[entry.key];
     return [entry.path, signed ? (entry.poster ? signedPosterUrl(entry.path, signed) : signed) : entry.path];
   }));
 }
 
-async function preparePrintModel(model: FrozenReportViewModel, mode: PrintMode, shareToken: string | null) {
-  const projected = buildPrintReportViewModel(model);
-  const media = printReportMedia(projected);
+async function preparePrintModel(model: FrozenReportViewModel, mode: PrintMode, shareToken: string | null, issueProjections: PrintIssueProjectionInput[] = []) {
+  const projected = buildPrintReportViewModel(model, issueProjections);
+  const media = printReportMediaOccurrences(projected);
   const printableMedia: Array<{ item: PrintMedia; field: 'url' | 'posterUrl'; url: string }> = [];
   for (const item of media) {
-    if (item.type.toLowerCase().includes('video')) {
+    if (isPrintVideoSource(item.type, item.url)) {
       if (item.posterUrl) printableMedia.push({ item, field: 'posterUrl', url: item.posterUrl });
     } else {
       printableMedia.push({ item, field: 'url', url: item.url });
@@ -127,6 +146,12 @@ async function preparePrintModel(model: FrozenReportViewModel, mode: PrintMode, 
     }
   }
   return projected;
+}
+
+async function loadIssueProjections(reportId: string, signal: AbortSignal): Promise<PrintIssueProjectionInput[]> {
+  const response = await fetch(`/api/reports/${encodeURIComponent(reportId)}/issues`, { signal });
+  const payload = await response.json() as { code?: number; data?: PrintIssueProjectionInput[] };
+  return response.ok && payload.code === 0 && Array.isArray(payload.data) ? payload.data : [];
 }
 
 export default function ReportPrintPage() {
@@ -164,11 +189,27 @@ function ReportPrintContent() {
       .then(async (response) => {
         const payload = await response.json();
         if (!response.ok || payload.code !== 0) throw new Error(payload.message || '报告加载失败');
-        const frozenModels = shareToken
-          ? orderedShareModels(payload.data as SharePayload)
-          : payload.data?.frozenViewModel ? [payload.data.frozenViewModel as FrozenReportViewModel] : [];
-        if (frozenModels.length === 0 || frozenModels[0]?.header.id !== reportId) throw new Error('冻结报告不存在或与请求不匹配');
-        return Promise.all(frozenModels.map((model) => preparePrintModel(model, printMode, shareToken)));
+        const sharePayload = payload.data as SharePayload;
+        const frozenModels = orderedShareModels(sharePayload);
+        if (frozenModels.length === 0 || !frozenModels.some((model) => model.header.id === reportId)) throw new Error('冻结报告不存在或与请求不匹配');
+        let issueProjectionsByReport: Map<string, PrintIssueProjectionInput[]>;
+        if (shareToken) {
+          issueProjectionsByReport = new Map(frozenModels.map((model) => [
+            model.header.id,
+            model.header.id === reportId ? sharePayload.liveIssues ?? [] : sharePayload.siblingIssuesMap?.[model.header.id] ?? [],
+          ]));
+        } else {
+          const issueProjectionEntries = await Promise.all(frozenModels.map(async (model) => ([
+            model.header.id,
+            await loadIssueProjections(model.header.id, controller.signal),
+          ] as const)));
+          issueProjectionsByReport = new Map(issueProjectionEntries);
+        }
+        const prepared: PrintReportViewModel[] = [];
+        for (const model of frozenModels) {
+          prepared.push(await preparePrintModel(model, printMode, shareToken, issueProjectionsByReport.get(model.header.id)));
+        }
+        return prepared;
       })
       .then((prepared) => {
         if (controller.signal.aborted) return;

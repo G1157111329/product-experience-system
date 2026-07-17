@@ -983,7 +983,7 @@ export function MatrixInputView({ taskId, taskName }: MatrixInputViewProps) {
           onClearCellFailure={clearCellFailure}
         />
       </div>
-      <div className="px-3 py-1.5 text-[10px] text-muted-foreground">
+      <div className="px-3 py-1.5 text-xs text-muted-foreground">
         {taskName} · {projection.schema.name} · {projection.viewport.totalGroups} 大类 · {projection.viewport.totalRows} 行
       </div>
     </div>

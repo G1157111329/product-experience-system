@@ -297,6 +297,7 @@ export async function getV3MatrixProjection(
     issueText: i.issueText,
     linkedIssueId: i.linkedIssueId,
     status: i.status as V3IssuePoint['status'],
+    createdAt: i.createdAt,
   }));
 
   // Formulas (display metadata only; AST evaluation is Wave 3).
@@ -329,6 +330,7 @@ export async function getV3MatrixProjection(
         fileUrl: materials.fileUrl,
         filePath: materials.filePath,
         thumbnailUrl: materials.thumbnailUrl,
+        durationSec: materials.durationSec,
       })
       .from(materialLinks)
       .innerJoin(materials, eq(materials.id, materialLinks.materialId))
@@ -367,8 +369,10 @@ export async function getV3MatrixProjection(
         materialId: m.materialId,
         materialType: m.materialType,
         fileName: m.fileName,
+        filePath: m.filePath,
         fileUrl,
         thumbnailUrl: m.thumbnailUrl,
+        durationSec: m.durationSec,
         bindingMethod: m.bindingMethod,
         boundAt: m.boundAt,
       };

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessTask, getCurrentUser } from '@/lib/server/auth';
+import { localStoragePathVariants } from '@/lib/material-storage-path';
 import {
   createLocalFileReadStream,
   getLocalContentType,
@@ -15,19 +16,24 @@ import {
 import { Readable } from 'stream';
 
 async function findMaterialByPath(client: ReturnType<typeof getSupabaseClient>, path: string) {
-  const { data: byFilePath } = await client
-    .from('materials')
-    .select('id, file_path, file_url, task_id, recipe_library_step_id')
-    .eq('file_path', path)
-    .maybeSingle();
-  if (byFilePath) return byFilePath;
-
-  const { data: byFileUrl } = await client
-    .from('materials')
-    .select('id, file_path, file_url, task_id, recipe_library_step_id')
-    .eq('file_url', path)
-    .maybeSingle();
-  return byFileUrl;
+  const variants = localStoragePathVariants(path);
+  for (const candidate of variants) {
+    const { data } = await client
+      .from('materials')
+      .select('id, file_path, file_url, task_id, recipe_library_step_id')
+      .eq('file_path', candidate)
+      .maybeSingle();
+    if (data) return data;
+  }
+  for (const candidate of variants) {
+    const { data } = await client
+      .from('materials')
+      .select('id, file_path, file_url, task_id, recipe_library_step_id')
+      .eq('file_url', candidate)
+      .maybeSingle();
+    if (data) return data;
+  }
+  return null;
 }
 
 function parseRange(range: string | null, fileSize: number) {
@@ -104,6 +110,7 @@ export async function GET(
 
   const contentType = getLocalContentType(fileKey);
   const cacheControl = hasValidToken ? 'private, max-age=300' : 'no-store';
+  const forceSingleVideoStream = request.headers.get('x-xp-video-single-stream') === '1';
 
   // S3 streaming path (supports Range for video playback).
   if (useS3) {
@@ -173,7 +180,7 @@ export async function GET(
   try {
     const fileStat = await statLocalFile(fileKey);
 
-    if (isNginxAccelRedirect()) {
+    if (isNginxAccelRedirect() && !forceSingleVideoStream) {
       const encodedKey = fileKey.split('/').map(encodeURIComponent).join('/');
       const internalPath = `${NGINX_UPLOADS_INTERNAL}/${encodedKey}`;
       return new NextResponse(null, {

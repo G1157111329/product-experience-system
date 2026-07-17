@@ -15,7 +15,8 @@ import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
-import { sortReportsByCreatedAtDesc } from '@/lib/report-merge';
+import { buildReportListEntries } from '@/lib/report-merge';
+import { getReportStatusPresentation } from '@/lib/report-status';
 import {
   ActionDock,
   EmptyState,
@@ -100,10 +101,6 @@ function getReportReviewStats(report: Report) {
 function getScorePercent(score: number | undefined) {
   if (score === undefined || !Number.isFinite(score)) return 0;
   return Math.min(100, Math.max(0, score * 10));
-}
-
-function getStatusLabel(status: string) {
-  return status === '草稿' ? '已完成' : status;
 }
 
 function getCompareProductLabel(report: Report) {
@@ -269,8 +266,7 @@ export default function ReportsPage() {
     }
   };
 
-  const grouped: Array<{ key: string; model: string; projectTypes: string[]; reports: Report[] }> = [];
-  const ungrouped: Report[] = sortReportsByCreatedAtDesc(visibleReports);
+  const displayEntries = buildReportListEntries(visibleReports);
 
   const toggleCompare = (id: string) => {
     setCompareResult(null);
@@ -302,7 +298,7 @@ export default function ReportsPage() {
         }
       />
 
-      <FilterBar>
+      <FilterBar sticky={false}>
         <div className="flex w-full rounded-lg border bg-background p-1 sm:w-auto" role="tablist" aria-label="报告范围">
           <Button
             type="button"
@@ -347,9 +343,9 @@ export default function ReportsPage() {
 
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <span>当前显示 {loading ? '-' : visibleReports.length} 份报告</span>
-        {categoryFilter !== 'all' && <Badge variant="outline" className="text-[10px]">品类：{categoryFilter}</Badge>}
-        {keyword.trim() && <Badge variant="outline" className="max-w-full text-[10px]">关键词：{keyword.trim()}</Badge>}
-        {compareIds.length > 0 && <Badge variant="secondary" className="text-[10px]">已选择 {compareIds.length}/2 份用于对比</Badge>}
+        {categoryFilter !== 'all' && <Badge variant="outline" className="text-xs">品类：{categoryFilter}</Badge>}
+        {keyword.trim() && <Badge variant="outline" className="max-w-full text-xs">关键词：{keyword.trim()}</Badge>}
+        {compareIds.length > 0 && <Badge variant="secondary" className="text-xs">已选择 {compareIds.length}/2 份用于对比</Badge>}
       </div>
 
       {/* Content */}
@@ -362,10 +358,11 @@ export default function ReportsPage() {
           description={keyword || categoryFilter !== 'all' ? '调整搜索或筛选条件后再试。' : '在体验计划详情页中生成报告。'}
         />
       ) : (
-        <div className="grid gap-3 xl:grid-cols-2">
-          {/* Grouped reports (merged) */}
-          {grouped.map(group => {
-            const latestReport = group.reports[0];
+        <div className="grid grid-cols-1 gap-3">
+          {displayEntries.map((entry) => {
+            if (entry.kind === 'group') {
+              const group = entry;
+              const latestReport = group.reports[0];
             const groupStats = group.reports.reduce((acc, report) => {
               const stats = getReportReviewStats(report);
               acc.records += stats.records;
@@ -374,27 +371,40 @@ export default function ReportsPage() {
               return acc;
             }, { records: 0, failedRecords: 0, media: 0 });
             return (
-              <Card key={group.key} className="overflow-hidden transition-colors hover:border-primary/30">
+              <Card
+                key={`model-group-${group.model}`}
+                className="cursor-pointer overflow-hidden transition-colors hover:border-primary/30"
+                role="link"
+                tabIndex={0}
+                aria-label={`打开${group.model}最新报告`}
+                onClick={() => router.push(`/reports/${latestReport.id}`)}
+                onKeyDown={(event) => {
+                  if (event.currentTarget === event.target && (event.key === 'Enter' || event.key === ' ')) {
+                    event.preventDefault();
+                    router.push(`/reports/${latestReport.id}`);
+                  }
+                }}
+              >
                 <CardHeader className="border-b bg-muted/20 pb-3">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
                       <CardTitle className="break-words text-base leading-snug sm:text-lg">{group.model}</CardTitle>
                       <div className="flex gap-1 mt-1.5 flex-wrap">
                         {group.projectTypes.map(projectType => (
-                          <Badge key={projectType} variant="outline" className="max-w-full whitespace-normal break-words text-left text-[10px]">{projectType}</Badge>
+                          <Badge key={projectType} variant="outline" className="max-w-full whitespace-normal break-words text-left text-xs">{projectType}</Badge>
                         ))}
-                        {latestReport.product_category && <Badge variant="outline" className="max-w-full whitespace-normal break-words text-left text-[10px]">{latestReport.product_category}</Badge>}
-                        {latestReport.product && <Badge variant="outline" className="max-w-full whitespace-normal break-words text-left text-[10px]">{latestReport.product}</Badge>}
-                        <Badge variant="secondary" className="whitespace-normal text-[10px]">{group.reports.length} 份报告</Badge>
+                        {latestReport.product_category && <Badge variant="outline" className="max-w-full whitespace-normal break-words text-left text-xs">{latestReport.product_category}</Badge>}
+                        {latestReport.product && <Badge variant="outline" className="max-w-full whitespace-normal break-words text-left text-xs">{latestReport.product}</Badge>}
+                        <Badge variant="secondary" className="whitespace-normal text-xs">{group.reports.length} 份报告</Badge>
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       {canManageReport(latestReport) && (
-                        <Button variant="ghost" size="icon" className="h-8 w-8" title="分享" aria-label="分享" onClick={() => openShareDialog(latestReport.id)}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" title="分享" aria-label="分享" onClick={(event) => { event.stopPropagation(); openShareDialog(latestReport.id); }}>
                           <Share2 className="h-3.5 w-3.5" />
                         </Button>
                       )}
-                      <Button variant="outline" size="sm" className="shrink-0 text-xs gap-1" title="打印" onClick={() => handlePrint(latestReport.id)}>
+                      <Button variant="outline" size="sm" className="shrink-0 text-xs gap-1" title="打印" onClick={(event) => { event.stopPropagation(); handlePrint(latestReport.id); }}>
                         <Printer className="h-3 w-3" /> 打印
                       </Button>
                     </div>
@@ -418,16 +428,16 @@ export default function ReportsPage() {
                   <div className="divide-y rounded-md border bg-background">
                     {group.reports.map((r) => (
                       <div key={r.id} className="flex items-center gap-2 px-2.5 py-2 text-sm transition-colors hover:bg-muted/50">
-                        <input type="checkbox" checked={compareIds.includes(r.id)} onChange={() => toggleCompare(r.id)}
+                        <input type="checkbox" checked={compareIds.includes(r.id)} onClick={(event) => event.stopPropagation()} onChange={() => toggleCompare(r.id)}
                           className="h-3.5 w-3.5 shrink-0 rounded border-border" />
                         <button
                           type="button"
                           className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                          onClick={() => router.push(`/reports/${r.id}`)}
+                          onClick={(event) => { event.stopPropagation(); router.push(`/reports/${r.id}`); }}
                         >
                           <span className="min-w-0 flex-1 break-words leading-snug">{r.title}</span>
-                          <Badge variant="outline" className="text-[9px] shrink-0">{r.status === '草稿' ? '已完成' : r.status}</Badge>
-                          <span className="text-[10px] text-muted-foreground shrink-0 hidden sm:inline">
+                          <Badge variant="outline" className="text-[9px] shrink-0">{getReportStatusPresentation(r.status).label}</Badge>
+                          <span className="text-xs text-muted-foreground shrink-0 hidden sm:inline">
                             {formatBeijingTime(r.created_at)}
                           </span>
                           <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -438,37 +448,49 @@ export default function ReportsPage() {
                 </CardContent>
               </Card>
             );
-          })}
+            }
 
-          {/* Ungrouped reports */}
-          {ungrouped.map(r => {
+            const r = entry.report;
             const stats = getReportReviewStats(r);
             const displayTitle = r.product_model || r.title;
             return (
-              <Card key={r.id} className="overflow-hidden transition-colors hover:border-primary/30">
+              <Card
+                key={r.id}
+                className="cursor-pointer overflow-hidden transition-colors hover:border-primary/30"
+                role="link"
+                tabIndex={0}
+                aria-label={`打开报告：${displayTitle}`}
+                onClick={() => router.push(`/reports/${r.id}`)}
+                onKeyDown={(event) => {
+                  if (event.currentTarget === event.target && (event.key === 'Enter' || event.key === ' ')) {
+                    event.preventDefault();
+                    router.push(`/reports/${r.id}`);
+                  }
+                }}
+              >
                 <CardHeader className="border-b bg-muted/20 pb-3">
                   <div className="flex items-start justify-between gap-2">
-                    <button type="button" className="min-w-0 flex-1 text-left" onClick={() => router.push(`/reports/${r.id}`)}>
+                    <button type="button" className="min-w-0 flex-1 text-left" onClick={(event) => { event.stopPropagation(); router.push(`/reports/${r.id}`); }}>
                       <CardTitle className="break-words text-base leading-snug sm:text-lg">{displayTitle}</CardTitle>
                       <div className="mt-1.5 flex flex-wrap gap-1">
-                        {r.project_type && <Badge variant="outline" className="max-w-full whitespace-normal break-words text-left text-[10px]">{r.project_type}</Badge>}
-                        {r.product_category && <Badge variant="outline" className="max-w-full whitespace-normal break-words text-left text-[10px]">{r.product_category}</Badge>}
-                        {r.product && <Badge variant="outline" className="max-w-full whitespace-normal break-words text-left text-[10px]">{r.product}</Badge>}
-                        {r.product_model && <Badge variant="outline" className="max-w-full whitespace-normal break-words text-left text-[10px]">{r.product_model}</Badge>}
-                        <Badge variant="secondary" className="whitespace-normal text-[10px]">1 份报告</Badge>
+                        {r.project_type && <Badge variant="outline" className="max-w-full whitespace-normal break-words text-left text-xs">{r.project_type}</Badge>}
+                        {r.product_category && <Badge variant="outline" className="max-w-full whitespace-normal break-words text-left text-xs">{r.product_category}</Badge>}
+                        {r.product && <Badge variant="outline" className="max-w-full whitespace-normal break-words text-left text-xs">{r.product}</Badge>}
+                        {r.product_model && <Badge variant="outline" className="max-w-full whitespace-normal break-words text-left text-xs">{r.product_model}</Badge>}
+                        <Badge variant="secondary" className="whitespace-normal text-xs">1 份报告</Badge>
                       </div>
                     </button>
                     <div className="flex shrink-0 items-center gap-1">
                       {canManageReport(r) && (
-                        <Button variant="ghost" size="icon" className="h-8 w-8" title="分享" aria-label="分享" onClick={() => openShareDialog(r.id)}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" title="分享" aria-label="分享" onClick={(event) => { event.stopPropagation(); openShareDialog(r.id); }}>
                           <Share2 className="h-3.5 w-3.5" />
                         </Button>
                       )}
-                      <Button variant="outline" size="sm" className="shrink-0 gap-1 text-xs" title="打印" onClick={() => handlePrint(r.id)}>
+                      <Button variant="outline" size="sm" className="shrink-0 gap-1 text-xs" title="打印" onClick={(event) => { event.stopPropagation(); handlePrint(r.id); }}>
                         <Printer className="h-3 w-3" /> 打印
                       </Button>
                       {isAdmin && (
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" title="删除" aria-label="删除" onClick={() => setDeleteId(r.id)}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" title="删除" aria-label="删除" onClick={(event) => { event.stopPropagation(); setDeleteId(r.id); }}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       )}
@@ -495,13 +517,14 @@ export default function ReportsPage() {
                       <input
                         type="checkbox"
                         checked={compareIds.includes(r.id)}
+                        onClick={(event) => event.stopPropagation()}
                         onChange={() => toggleCompare(r.id)}
                         className="h-3.5 w-3.5 shrink-0 rounded border-border"
                       />
-                      <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => router.push(`/reports/${r.id}`)}>
+                      <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={(event) => { event.stopPropagation(); router.push(`/reports/${r.id}`); }}>
                         <span className="min-w-0 flex-1 break-words leading-snug">{r.title}</span>
-                        <Badge variant="outline" className="shrink-0 text-[9px]">{getStatusLabel(r.status)}</Badge>
-                        <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">{formatBeijingTime(r.created_at)}</span>
+                        <Badge variant="outline" className="shrink-0 text-[9px]">{getReportStatusPresentation(r.status).label}</Badge>
+                        <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">{formatBeijingTime(r.created_at)}</span>
                         <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       </button>
                     </div>
@@ -518,7 +541,7 @@ export default function ReportsPage() {
           <div className="flex items-center gap-2">
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium">已选择 {compareIds.length}/2 份体验报告</p>
-              <p className="text-[11px] text-muted-foreground truncate">
+              <p className="text-xs text-muted-foreground truncate">
                 {selectedCompareReports.map(getCompareProductLabel).join(' · ') || '请选择两份报告进行产品体验对比'}
               </p>
             </div>
@@ -572,12 +595,12 @@ export default function ReportsPage() {
                           <CardTitle className="min-w-0 text-sm sm:text-base leading-snug [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden">
                             {productLabel}
                           </CardTitle>
-                          {isWinner && <Badge className="shrink-0 text-[10px]">体验更优</Badge>}
+                          {isWinner && <Badge className="shrink-0 text-xs">体验更优</Badge>}
                         </div>
                         <div className="mt-1 sm:mt-1.5 flex flex-wrap gap-1 sm:gap-1.5">
-                          {r.product_category && <Badge variant="outline" className="max-w-[80px] sm:max-w-[96px] truncate text-[10px]">{r.product_category}</Badge>}
-                          {r.product && <Badge variant="outline" className="max-w-[80px] sm:max-w-[96px] truncate text-[10px]">{r.product}</Badge>}
-                          <Badge variant="outline" className="text-[10px]">{getStatusLabel(r.status)}</Badge>
+                          {r.product_category && <Badge variant="outline" className="max-w-[80px] sm:max-w-[96px] truncate text-xs">{r.product_category}</Badge>}
+                          {r.product && <Badge variant="outline" className="max-w-[80px] sm:max-w-[96px] truncate text-xs">{r.product}</Badge>}
+                          <Badge variant="outline" className="text-xs">{getReportStatusPresentation(r.status).label}</Badge>
                         </div>
                       </div>
                     </div>
@@ -591,15 +614,15 @@ export default function ReportsPage() {
                     <Separator />
                     <div className="grid grid-cols-3 gap-2 sm:gap-3">
                       <div className="rounded-lg bg-muted/40 px-3 py-2 sm:px-4 sm:py-3">
-                        <p className="text-[10px] sm:text-xs text-muted-foreground">检查项</p>
+                        <p className="text-xs sm:text-xs text-muted-foreground">检查项</p>
                         <p className="mt-0.5 sm:mt-1 text-base sm:text-lg font-semibold text-foreground tabular-nums">{stats.records}</p>
                       </div>
                       <div className="rounded-lg bg-muted/40 px-3 py-2 sm:px-4 sm:py-3">
-                        <p className="text-[10px] sm:text-xs text-muted-foreground">不合格</p>
+                        <p className="text-xs sm:text-xs text-muted-foreground">不合格</p>
                         <p className="mt-0.5 sm:mt-1 text-base sm:text-lg font-semibold text-destructive tabular-nums">{stats.failedRecords}</p>
                       </div>
                       <div className="rounded-lg bg-muted/40 px-3 py-2 sm:px-4 sm:py-3">
-                        <p className="text-[10px] sm:text-xs text-muted-foreground">功能问题</p>
+                        <p className="text-xs sm:text-xs text-muted-foreground">功能问题</p>
                         <p className="mt-0.5 sm:mt-1 text-base sm:text-lg font-semibold text-foreground tabular-nums">{stats.recipeProblems}</p>
                       </div>
                     </div>

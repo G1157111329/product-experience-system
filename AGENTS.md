@@ -12,7 +12,7 @@
 - **UI 组件**: shadcn/ui (基于 Radix UI)
 - **Styling**: Tailwind CSS 4
 - **Database**: 本轮生产仅支持自建 PostgreSQL；Supabase PostgreSQL 兼容代码保留，但 `supabase-service-role` 在生产为实验性禁用并 fail closed
-- **File Storage**: 默认 local 模式写入 `public/uploads`；可切换 S3 兼容对象存储 (MinIO / AWS S3 / 火山引擎 TOS / Garage)。生产已上线 **Garage 单节点灰度方案**：`STORAGE_DRIVER=local` 保护旧文件静态路径，`NEW_UPLOAD_DRIVER=s3` 让新上传走 Garage（127.0.0.1:3900），读取链路自动 local-then-S3 双路径 fallback
+- **File Storage**: 生产素材只允许写入服务器本地持久化目录 `public/uploads`；`STORAGE_DRIVER=local`、`NEW_UPLOAD_DRIVER=local`。不得启用 S3、Garage、MinIO 或任何对象存储作为上传、读取或回退路径。
 - **AI/LLM**: 可配置的 Chat Completions 兼容接口；仓库文档不记录具体敏感连接信息
 - **PDF解析**: pdf-parse (本地解析) + xlsx (Excel解析)
 - **Theme**: Teal 主色 / Business 字体 / Cool 阴影
@@ -254,17 +254,12 @@
 | `AUTH_SESSION_SECRET` | 生产会话签名密钥 | `<long-random-session-secret>` |
 | `AI_CONFIG_ENCRYPTION_KEY` | AI API Key 加密密钥 | `<long-random-ai-config-key>` |
 | `SECURITY_SCHEMA_VERIFIED` | 目标库执行并验证安全 schema 后才设为 true | `true` |
-| `STORAGE_DRIVER` | 文件存储驱动（全局读/写控制），默认 local，可切换 s3 | `local` |
-| `NEW_UPLOAD_DRIVER` | **新上传写入驱动（灰度开关）**，默认空=跟随 `STORAGE_DRIVER`；设为 `s3` 时新上传走 S3，旧文件继续从 local 读（双路径 fallback） | `s3` |
+| `STORAGE_DRIVER` | 生产文件存储驱动，必须为 local | `local` |
+| `NEW_UPLOAD_DRIVER` | 生产新上传驱动，必须为 local | `local` |
 | `LOCAL_UPLOAD_DIR` | local 模式文件写入目录 | `./public/uploads` |
 | `LOCAL_PUBLIC_BASE_PATH` | local 静态访问前缀 | `/uploads` |
-| `LOCAL_UPLOAD_PUBLIC_ACCESS` | local 访问模式，默认 public；可显式 protected | `public` |
+| `LOCAL_UPLOAD_PUBLIC_ACCESS` | local 访问模式；生产必须为 protected，禁止公开 `/uploads/*` 直链 | `protected` |
 | `PUBLIC_MEDIA_BASE_URL` | 平台可访问的完整媒体基准地址 | `http://<host>:5000` |
-| `S3_ENDPOINT` | S3 兼容存储端点 | `http://<s3-host>:<port>` |
-| `S3_REGION` | S3 区域 | `<region>` |
-| `S3_BUCKET` | 存储桶名称 | `<bucket-name>` |
-| `S3_ACCESS_KEY` | 存储访问密钥 | `<access-key>` |
-| `S3_SECRET_KEY` | 存储密钥 | `<secret-key>` |
 | `AI_ALLOWED_HOSTS` | 可选 AI 外联主机白名单 | `ai-gateway.internal` |
 | `INITIAL_ADMIN_ACCOUNT` | 生产首次管理员账号，仅初始化时临时配置 | `<account>` |
 | `INITIAL_ADMIN_PASSWORD` | 生产首次管理员强密码，仅初始化时临时配置 | `<strong-password>` |
@@ -337,10 +332,9 @@ NODE_ENV=production PORT=5000 pnpm start
 - `SECURITY_SCHEMA_VERIFIED=true` 只是部署前置声明。生产启动还会只读探测核心表、列、FK/约束、索引和 Drizzle migration journal tag；任何缺失都拒绝启动，探针不会自动执行迁移，也不会输出数据库连接信息。
 - 启动 schema provenance 有两条可信路径：存在 `drizzle.__drizzle_migrations` 时必须逐项匹配要求的 migration tag/timestamp/hash，缺失或过旧即拒绝启动且不得回退；不存在 journal 的 `database-schema.sql` 单体初始化仅在完整核心 manifest 全部通过后允许启动，并记录 `provenance=bootstrap-manifest`。
 - 文件存储默认 local，上传写入 `public/uploads`；服务器部署必须将该目录挂载到持久化磁盘。
-- local 默认保留 `/uploads/*` 静态直连，避免历史报告和分享页长期查看时裂图；更高安全要求环境可显式设置 `LOCAL_UPLOAD_PUBLIC_ACCESS=protected`。
+- local 素材目录必须挂载到持久化磁盘；生产使用 `LOCAL_UPLOAD_PUBLIC_ACCESS=protected`，Nginx 对外 `/uploads/*` 必须返回 404，素材只可经带时效签名的 `/api/materials/file/<key>` 访问。
 - AI 内网、本机或 HTTP 地址不会默认拦截，便于内网优先部署；公网部署建议配置 `AI_ALLOWED_HOSTS` 并配合网络出口 ACL。
-- **对象存储灰度方案（当前生产已上线 Garage 单节点）**：`STORAGE_DRIVER=local` 保持不变以保护旧文件静态路径，`NEW_UPLOAD_DRIVER=s3` 让新上传走 Garage S3（`127.0.0.1:3900`，仅本机绑定，不公网暴露）。读取链路自动 local-then-S3 双路径 fallback（旧 459 文件继续从 `/uploads/` 静态服务，新上传从 S3 presigned URL 读取）。运维文档见 `docs/operations/2026-07-06-object-storage-gray-release.md`。
-- **Garage 部署位置**：二进制 `/usr/local/bin/garage`（v2.1.0），配置 `/etc/garage.toml`（含 inline rpc_secret/admin_token，perms 600 ubuntu:ubuntu），数据 `/var/lib/garage/{meta,data}`（系统盘，**单节点 replication_factor=1 无冗余，必须做每日备份**），systemd 单元 `/etc/systemd/system/garage.service`（enabled，auto-restart）。bucket `xp-experience-media`，key `product-experience-app`（RWO）。
+- **本地受保护媒体（2026-07-17）**：生产 `/home/ubuntu/product-experience-system/public/uploads` 是唯一素材位置。Nginx 的 `/_protected_uploads/` 为 `internal`，应用以 `X-Accel-Redirect` 转发本地文件；`/uploads/` 不得恢复外部 alias。`/api/materials/thumb`、`/api/materials/poster` 必须继承原始 `/api/materials/file` 的 `token` 与 `exp`。浏览器视频必须只用无扩展名的 `/api/materials/video/<base64url-key>?token=...&exp=...`，该入口移除 Range 后返回完整 `200` 单流；不得把带 `.mp4` 的 file 路由、裸 uploads 或 `206` 分段响应交给 `<video>`。
 - **PM2 配置位置**：生产 PM2 用 `/home/ubuntu/product-experience-system/ecosystem.config.cjs` 启动（live 目录，不再依赖 backup-deploy 目录的旧文件）。env 全部写在该文件的 `env: {}` 块，重启用 `pm2 delete product-experience-system && pm2 start ecosystem.config.cjs && pm2 save`。
 - **服务器内存与构建**：生产机仅 1.9G RAM，`next build` 会 OOM。每次服务器构建前必须临时加 4G swap：`sudo fallocate -l 4G /swap-build.img && sudo chmod 600 /swap-build.img && sudo mkswap /swap-build.img && sudo swapon /swap-build.img`，构建完成后再 `sudo swapoff /swap-build.img && sudo rm /swap-build.img`。构建还需带 DATABASE_URL 等 env（page-data 收集阶段会连库），从 PM2 env 导出 source 即可。
 - **数据库在 Docker**：生产机没装 psql，PostgreSQL 跑在 Docker 容器（`172.17.0.1:5433`）。DB 相关操作需通过应用 node 脚本（用 `node_modules/pg`）或进容器执行，不能直接 `psql`。
@@ -365,7 +359,8 @@ NODE_ENV=production PORT=5000 pnpm start
 - 远端 `next build` 可能长时间卡住并导致 `.next/BUILD_ID` 缺失。此时不要重启 PM2 到半构建目录；先停止残留 build 进程，确认 `.next/BUILD_ID` 和 `dist/server.js` 存在，再重启。
 - 如远端构建不可用，可在本地先通过 `pnpm build`，再上传运行时产物 `.next`（不含 cache）和 `dist/server.js` 恢复生产。上传后用 SHA256 对比关键文件。
 - **Agent 发布数据隔离**：Agent 相关发布只能同步应用代码、DDL 迁移和已验证的构建产物；不得打包、导入、覆盖或回填 `agent_conversations`、对话消息、`agent_memory_namespaces`、`agent_binding_sessions`、企微/微信绑定或测试快照。任何 Agent migration 必须是幂等 DDL，禁止携带历史 Agent 问题或对话数据进入生产。
-- 报告详情/打印页的素材问题不能只改 UI：问题点素材必须从 `/api/reports/[id]/issues` 的报告专用聚合链路读取，覆盖 `materials.issue_id`、`record_id`、`comparison_cell_id`、食谱步骤/效果 `material_ids`、`issue_re_evaluations.re_evaluation_id` 等 fallback。打印页应复用该聚合结果，并把问题点素材、整改素材、食谱上下文素材加入预签名与 base64 转换队列，避免 S3 灰度和冻结报告下载时裂图。
+- 报告详情/打印页的素材问题不能只改 UI：问题点素材必须从 `/api/reports/[id]/issues` 的报告专用聚合链路读取，覆盖 `materials.issue_id`、`record_id`、`comparison_cell_id`、食谱步骤/效果 `material_ids`、`issue_re_evaluations.re_evaluation_id` 等 fallback。打印页应复用该聚合结果，并把问题点素材、整改素材、食谱上下文素材加入预签名与 base64 转换队列，避免冻结报告下载时裂图。
+- **公网 HTTPS 阻塞记录（2026-07-17）**：服务器已监听 443 且证书配置有效，但从外部网络对 `https://px.abrdns.com:443` 的 TLS 握手仍被重置，8443 可用。未完成外部 443 握手前，不得将 5000 强制跳转 HTTPS，也不得将 `AUTH_COOKIE_SECURE` 设为 true，否则会破坏现有 30 天登录；云安全组/公网入口修复并通过外部握手验收后再统一切换。
 - **任务录入布局回归边界（2026-07-11）**：任务顶部状态卡是唯一的任务内模块导航，不再恢复桌面/移动端第二套“录入目录”；顶部状态卡不放“问题管理”。食谱/功能问题点保存后直接同步问题管理，不得恢复独立“问题输出—确认”步骤。任务底部是唯一“素材证据”区，数据矩阵内不得再次显示“素材池”。
 - **数据矩阵编辑回归边界（2026-07-11）**：文本/数值/问题点在本地草稿中编辑，只能在失焦或 Enter 后提交；保存不得切换整页 loading 或抢焦点。新增列必须按“层级→主素材→对比/输入→计算→效果素材→效果评价→问题点”分区插入，不能简单追加到末尾；新增三级细项不得让原三级细项输入控件消失。
 - **报告矩阵与问题回归边界（2026-07-11）**：生成普通报告时必须在非归档矩阵中选择“最新且有实质内容”的矩阵，最新空矩阵不能遮蔽更早有效矩阵。数据矩阵问题进入报告问题 Tab，报告详情/打印统一呈现“问题点、可选问题详情、附录素材、整改”。分享令牌页保持匿名只读访问；打印预处理不得对 `data:` 占位图发起网络请求。
@@ -375,7 +370,7 @@ NODE_ENV=production PORT=5000 pnpm start
 - 报告中心具体报告列表必须按报告冻结/生成时间 `reports.created_at` 降序展示；不要让型号合并分组把较新的单份报告挤到后面。
 - **冻结报告、合并与问题呈现边界（2026-07-14）**：报告列表的名称必须完整显示并自然换行；卡片采用稳定的单列信息流，不能因名称长度不同造成同列错位，也不能截断或隐藏名称。仅“前期研究 / 自研 / 改型降本优化”可按相同产品型号合并；ODM/OEM 永不合并。合并时每个任务只取最新冻结报告，成员按冻结/创建时间正序消费；详情、匿名分享、浏览器打印和下载视图都必须读取同一批冻结成员与顺序，不能用实时任务数据重建。
 - **冻结报告问题 Tab 边界（2026-07-14）**：总结 Tab 不显示“管理问题”。问题行统一为“问题等级 + 来源类型 + 问题描述 + 整改状态”，文字与标签垂直居中，点击整行展开；来源类型只能是“食谱/功能”或“五感体验”，不得暴露“功能/食谱效果评价”等原始来源名。五感、单一食谱/功能、对比矩阵、数据矩阵问题必须都进入此统一列表；分享页只读，内部详情仅对已有 `liveIssueId` 的状态按钮打开问题管理的整改弹窗。
-- **冻结问题详情边界（2026-07-14）**：五感体验优先按冻结检查记录归类，标准问题展示检验标准类型、检验要求及范围、检查标准、检查结果与附录素材；非标准只展示描述检查项内容、检查结果与素材。对比矩阵展示对象、项目、细项、问题、素材；数据矩阵展示一级大类、二/三级细项、对比维度、问题、素材；食谱/功能展示名称、食谱/食材或配方参数、默认折叠的步骤、效果评价和证据。历史步骤问题仅允许在冻结报告中阅读，不得恢复任务端步骤问题点的新建、编辑、同步或 AI 识别入口。状态为已整改时才展示整改效果评价和整改素材；复测记录达到 2 条只显示最新一条，并显示“整改复测记录数：N”。
+- **冻结问题详情边界（2026-07-14）**：五感体验优先按冻结检查记录归类，标准问题展示检验标准类型、检验要求及范围、检查标准、检查结果与附录素材；非标准只展示描述检查项内容、检查结果与素材。对比矩阵展示对象、项目、细项、问题、素材；数据矩阵展示一级大类、二/三级细项、对比维度、问题、素材；食谱/功能展示名称、食谱/食材或配方参数、默认折叠的步骤、效果评价和证据。历史步骤问题仅允许在冻结报告中阅读，不得恢复任务端步骤问题点的新建、编辑、同步或 AI 识别入口。状态为已整改时才展示整改效果评价和整改素材；复测记录达到 2 条只显示最新一条，并显示“整改复测记录数：N”。冻结快照仅提供问题事实和历史兜底；报告详情、分享、打印及 PDF 对已关联问题必须以实时复测列表为准，实时列表明确为空时不得显示已删除的冻结复测记录。
 - **功能效果与下载排版边界（2026-07-14）**：功能/食谱整体判断只使用“合格 / 不合格 / 待定”，不得显示数值评分。保留效果预览卡片，下方必须用单食谱列表：食谱名称（步骤数、整体判断、问题数）→ 食谱/食材 → 效果评价及素材 → 默认折叠步骤 → 食谱效果评价及素材 → 问题点及素材。步骤数为 0 时不显示步骤行；打印/下载不得退回把步骤、步骤问题、效果问题和素材拆成多块的旧分割式视图。
 - 部署完成的最小验证：PM2 在线、无残留 `next build` 进程、`curl http://127.0.0.1:5001/login` 返回 200、`curl http://127.0.0.1:5001/api/v1/dictionaries/project_phase_dict` 返回 200 且包含正常中文阶段值、`curl http://127.0.0.1:5001/reports` 返回 200。
 - 外网验收以 `118.25.178.78:5000` 为入口；`5001` 是应用内层端口，不要求公网直接访问。
@@ -428,7 +423,7 @@ INITIAL_ADMIN_PASSWORD=<strong-password>
 1. **响应式布局**: 桌面端左侧导航 + 右侧内容；移动端顶部汉堡菜单 + 底部Tab导航
 2. **任务详情页录入目录**: 当前一级入口为 AI方案 / 对比矩阵 / 数据矩阵 / 五感体验 / 功能效果 / 总结，顶部保留"报告生成"按钮
 3. **素材引用**: 五感体验新增问题点和功能效果新增步骤时均可引用素材库图片（MaterialPicker组件）
-4. **素材上传**: 100MB 限制，仅图片/视频；默认上传至 local `public/uploads`，可切换 S3 兼容对象存储；可关联record_id、recipe_step_id、recipe_library_step_id、recipe_id、issue_id、re_evaluation_id
+4. **素材上传**: 100MB 限制，仅图片/视频；只上传至 local `public/uploads`，可关联record_id、recipe_step_id、recipe_library_step_id、recipe_id、issue_id、re_evaluation_id；选择素材弹窗支持粘贴图片直接上传。
 5. **报告生成**: 包含任务信息+检查记录+问题清单+食谱/功能详细列表+素材附录
 6. **PDF导出**: 通过打印页面(`/reports/print?id=xxx`)实现，浏览器原生打印为PDF，含照片/视频预览图
 7. **数据库**: 本轮生产仅支持自建 PostgreSQL；Supabase service-role 保留兼容代码但生产实验性禁用。生产环境禁止 `allow_all`，必须执行 `database-schema.sql` 和 `scripts/verify-security-schema.sql` 后再设置 `SECURITY_SCHEMA_VERIFIED=true`，且真实启动探针仍须通过
@@ -493,7 +488,7 @@ INITIAL_ADMIN_PASSWORD=<strong-password>
 66. **食谱问题点独立板块**: 功能效果中问题点从效果评价中分离，与"步骤"、"效果/出品效果评价"并列为第三板块；问题点改为结构化列表（文本框+上传素材），支持多条问题点增删；数据存储在 effect_problem_point 字段（JSON数组格式）；步骤中的问题点输入已移除，统一在问题点板块输入
 67. **问题点AI识别**: 问题点板块新增AI识别功能，两层分析逻辑：(1)第一层从步骤描述和效果评价中识别负面情绪语言；(2)第二层以专业产品评价官视角，基于该食谱/功能在互联网中用户普遍期待状态对比实际体验，识别期待与实际的差距；API: POST /api/recipes/[id]/ai-detect-problems
 68. **素材库原生相机**: 移动端拍照和录像调用设备原生相机（input capture="environment"），而非浏览器摄像头(getUserMedia)；桌面端仍使用浏览器摄像头
-69. **素材库图片编辑**: 素材仓库图片新增在线编辑功能，Canvas画布编辑器支持：画笔（颜色/粗细）、箭头（颜色/粗细）、马赛克（手动涂抹，块大小可调）、文字输入（颜色/大小）、裁剪（框选区域确认裁剪）、旋转（90°步进按钮+水平/垂直翻转）；编辑后保存为新素材替换原图
+69. **素材库图片编辑**: 报告录入页及素材库原图预览可打开前端 Canvas 图片编辑器，支持画笔、箭头、马赛克、文字、裁剪、旋转、翻转、格式和尺寸控制（长边上限 1920px）。未冻结素材可覆盖或另存；被冻结报告引用的素材服务端必须拒绝覆盖并强制另存为新素材，保证历史报告不变。
 70. **报告列表型号标签**: 报告中心列表中增加产品型号Badge显示（如有），与品类/项目类型Badge同行
 71. **报告问题点清单分行呈现**: 报告详情页、打印页、分享页的问题清单优化为多行结构化呈现——第一行：等级+标题+状态；第二行：标准/分类（如有）；第三行：问题来源；第四行：整改方案（含责任人、计划完成日期）；第五行：验证结果（如有）
 72. **素材预览放大**: MaterialPicker中已选素材缩略图支持点击放大查看（图片）或播放（视频），使用Dialog全屏预览
@@ -520,7 +515,7 @@ INITIAL_ADMIN_PASSWORD=<strong-password>
 93. **数据矩阵当前 UI 模型 = V2 用户自设计（重要）**: 上述笔记 81–92 描述的是 V1 schema-driven 模型（管理员发布模式 → 任务应用模式实例 → 复用 comparison_assemblies）。**当前任务详情页的「数据矩阵」Tab 实际运行的是 V2 用户自设计模型**（PRD V3.1 §3.4–3.8）：用户在任务内自建矩阵 → 5 步设计器定义基础结构/字段分区/字段与证据/公式与问题规则/预览确认 → 确认后进入录入。V2 使用独立表族（`task_matrices`/`matrix_design_versions`/`matrix_sections`/`matrix_field_definitions`/`matrix_groups`/`matrix_rows`/`matrix_field_values`/`matrix_narratives`，迁移 `0003_task_matrix_model.sql`），**不再复用 comparison_assemblies**。前端入口 `src/app/(main)/tasks/[id]/components/matrix-tab.tsx`，调 `/api/tasks/[id]/matrices` + `/api/matrices/[id]`；桌面端 `matrix-desktop-grid.tsx`、移动端 `matrix-mobile-v2.tsx`、设计器 `matrix-designer.tsx`。V1 schema 路由代码仍保留在仓库，预留给后续「可复用设计库」。功能开关在 `platform_settings.feature_flag_task_matrix`（默认全开：taskMatrixEnabled/matrixRuntimeDesignerEnabled/matrixFormulaEnabled/matrixMobileEnabled/matrixBatchPasteEnabled/matrixReportProjectionEnabled/matrixStructuralRevisionEnabled）。
 94. **矩阵素材与报告/PDF投影**: 既有对比矩阵素材继续绑定 `comparison_matrix_cells.id`；V2 数据矩阵行级证据复用同一素材表与 `/api/comparison-cells/[id]/media`，该接口兼容 `matrix_rows.id` 并把素材写入 `materials.comparison_cell_id`。`projection-v2` 会把行级素材带入 `evidenceMaterials`，报告适配器转成 `evidence.media`；报告中心矩阵 Tab、报告详情模型、分享页和 PDF 导出都必须读取该字段，PDF 渲染前由 `presignReportMediaUrls` 统一签名，避免矩阵图片/视频裂图。
 95. **对比矩阵大类插入边界**: `comparison_item_nodes` 的新增逻辑必须按 `parent_id` 计算插入点。给 A 大类新增条目时，应插入 A 大类已有 summary 之前；给 A 大类新增 summary 时，应追加在 A 大类末尾并仍位于 B 大类 section 之前。前端渲染也要按 parent 分组重排，避免 report snapshot 或任务页矩阵把“大类小结”漂移到最后。
-96. **对象存储灰度方案（当前生产已上线）**: 生产采用 Garage 单节点 S3 + local 双路径灰度，而非一刀切 `STORAGE_DRIVER=s3`。核心机制：`STORAGE_DRIVER=local` 保持不变（保护旧文件继续走 `/uploads/` 静态路径），新增 `NEW_UPLOAD_DRIVER=s3` 独立控制新上传写入目标；读取链路 `generatePresignedUrl` 先 stat 本地，存在走 local，不存在 fallback S3 presigned URL。这样旧 459 个文件零迁移、零回归，新上传逐步进 S3。涉及代码：`src/lib/server/storage.ts`（`isNewUploadS3`/`isS3FallbackAvailable`/`localFileExists` + uploadFile/generatePresignedUrl/deleteFile/readLocalImageAsDataUrl 双路径）、`src/app/api/materials/file/[...key]/route.ts`（S3 流式 + Range）、`src/app/api/materials/poster/[...key]/route.ts`（S3 源下载 + ffmpeg）、`src/app/api/materials/presign/route.ts`（按 path 判断鉴权）、`src/lib/server/report-detail.ts` + `reports/[id]/pdf/route.ts`（PDF 渲染前 presign media URL）。顺带修复 `readLocalImageAsDataUrl` 在 S3 模式返回 null 导致 AI 图片评价失效的 bug（改为 local-then-S3 fallback）。回滚只需把 `NEW_UPLOAD_DRIVER` 改回 `local`。详细运维见 `docs/operations/2026-07-06-object-storage-gray-release.md`。
+96. **本地素材安全方案（当前生产）**: 生产使用 local-only：`STORAGE_DRIVER=local`、`NEW_UPLOAD_DRIVER=local`、`LOCAL_UPLOAD_PUBLIC_ACCESS=protected`。读取链路通过 `/api/materials/presign` 取得短时签名 `/api/materials/file` URL，并以 Nginx internal X-Accel 高效读取同一本地文件；缩略图/视频海报复用同一签名。历史数据无论 `file_path` 存裸 key 或 `/uploads/<key>` 前缀都必须可查，禁止引入 S3/对象存储回退。
 
 ## 代码风格
 
@@ -644,9 +639,9 @@ INITIAL_ADMIN_PASSWORD=<strong-password>
 
 ### 存储模块重构
 
-- **双模式存储**：`src/lib/server/storage.ts` 从纯 S3 模式重构为 local 静态目录 + S3 兼容存储双模式；默认 `STORAGE_DRIVER=local`，文件写入 `LOCAL_UPLOAD_DIR`（默认 `public/uploads`），通过 `LOCAL_PUBLIC_BASE_PATH` 暴露静态路径。
-- **presigned URL 兼容**：`src/lib/use-presigned-url.ts` 新增 `isDirectMediaUrl` / `getStorageKey` 工具函数，正确处理本地路径（`/uploads/...`）、data URL、完整 HTTP URL 三种情况；local public 模式直接使用静态路径，local protected 或 S3 模式按需通过 presign/file 接口获取可访问 URL。
-- **环境变量**：新增 `STORAGE_DRIVER`（local/s3）、`LOCAL_UPLOAD_DIR`、`LOCAL_PUBLIC_BASE_PATH`、`PUBLIC_MEDIA_BASE_URL`；S3 变量保持不变，仅在 S3 模式下使用。
+- **本地受保护存储**：`src/lib/server/storage.ts` 的生产运行模式只允许 local，文件写入 `LOCAL_UPLOAD_DIR`（默认 `public/uploads`），公开静态路径不得作为读取接口。
+- **presigned URL 兼容**：`src/lib/use-presigned-url.ts` 必须正确处理裸 key、`/uploads/...`、`/api/materials/file/...`（保留 `token` / `exp`）和完整同源 URL；缩略图、海报和视频播放均继承签名，不得清洗 token。
+- **环境变量**：生产只使用 `STORAGE_DRIVER=local`、`NEW_UPLOAD_DRIVER=local`、`LOCAL_UPLOAD_DIR`、`LOCAL_UPLOAD_PUBLIC_ACCESS=protected`、`NGINX_UPLOADS_INTERNAL=/_protected_uploads` 与 `PUBLIC_MEDIA_BASE_URL`。
 - **缺失素材兜底**：本地模式文件不存在时返回 SVG 占位图（”素材文件缺失”），前端加载中时显示”正在加载素材”占位。
 
 ### 问题管理导出
@@ -683,7 +678,7 @@ INITIAL_ADMIN_PASSWORD=<strong-password>
 
 ### 数据与素材稳定性约束
 
-- 报告修复不得修改素材外键、删除素材实体或改变 local-then-S3 读取策略。
+- 报告修复不得修改素材外键、删除素材实体或改变本地受保护读取策略。
 - 删除记录、食谱、步骤和问题时只能按既有规则解除素材关联；除非用户明确删除素材，不得级联删除物理文件。
 - 报告快照是冻结数据源。报告中心、分享页、打印页和服务端 PDF 必须消费同一语义字段，不能分别发明 fallback。
 - 附录素材不得使用 `.slice(0, N)` 静默截断。若 UI 需要折叠，必须提供可展开全部素材的入口。
@@ -744,7 +739,7 @@ node_modules/.bin/tsx src/lib/report-print-matrix.test.ts
 - 手机上传的 `.mov` / `.m4v` 在创建 `materials` 记录前，必须规范为带 `faststart` 的 MP4；H.264/AAC 可无损 remux，其他视频或音频编码转为 H.264/AAC、`yuv420p`。不得只移动 moov atom 后继续把 `video/quicktime` 交给 Chromium。
 - 运行时使用 `FFMPEG_BIN`（默认 `ffmpeg`）；本地 Docker 复用 Playwright 镜像已有的 ffmpeg 二进制。不得移除该运行时依赖或将视频规范化改成后台任务，否则浏览器可能先读到未就绪素材。
 - 迁移存量 MOV 时保留原文件作回退，更新 `materials.file_name/file_path/file_url/file_size` 到 MP4，并仅替换冻结快照中的同一素材 key；不得删除素材实体或改变其他冻结内容。
-- 视频验收至少同时验证：`ffprobe` 输出 H.264/AAC、访问 URL 返回 `Content-Type: video/mp4`、`206 Partial Content`、`Accept-Ranges: bytes` 与正确 `Content-Range`。
+- 视频验收至少同时验证：`ffprobe` 输出 H.264/AAC；浏览器播放 URL 必须是无扩展名的同源 `/api/materials/video/<base64url-key>?token=...&exp=...`，返回 `200`、`Content-Type: video/mp4` 和 `X-XP-Video-Transport: single-stream`。底层 `/api/materials/file` 可保留 Range 能力供非视频读取使用，但浏览器 `<video>` 不得走带 `.mp4` 的 URL 或 `206` 分段链路。
 
 ### 2026-07-15 Agent、素材关联、感官量表与批量验收规则
 
@@ -755,7 +750,7 @@ node_modules/.bin/tsx src/lib/report-print-matrix.test.ts
 - AI 模型接入必须保持 Chat Completions 兼容的通用实现；能力差异通过配置化 request options 和响应解析兼容处理，不得按 MiniMax、M3 或任何具体模型名称写分支。AI 输出以中文为准，入库、SSE 与渲染层统一清理 `<think>`、乱码和转义残片；一条用户消息在界面中只能出现一次。
 - 任务内 AI 助手必须先生成结构化操作清单，由用户确认后调用独立执行接口真实写入；可执行范围覆盖五感记录、食谱/功能、食谱步骤、对比矩阵、数据矩阵、问题以及素材关联。冻结报告只读，修改必须回到任务源数据后重新生成。
 - Agent 素材重命名使用 `material_rename` + `naming_mode:"context"`，模型不得自行拼文件名。命名规则固定为：五感相关标准描述、食谱/功能名称、`对比对象*大类*细项`、`数据矩阵一级大类_二级细项`，同名按 `名称1 / 名称2 / ...` 顺序追加数字；只修改展示名，不修改对象 key、文件路径或物理文件。
-- 手机素材上传以文件签名判断真实媒体类型，不能只信任 MIME 或后缀；错误双后缀、空 MIME 和 `application/octet-stream` 必须在真实签名可识别时兼容。视频规范化后仍须通过共享存储层写入，保留 local-then-S3 双路径读取；冻结数据矩阵必须保存稳定 `filePath`，展示 URL 只能运行时重新签名。
+- 手机素材上传以文件签名判断真实媒体类型，不能只信任 MIME 或后缀；错误双后缀、空 MIME 和 `application/octet-stream` 必须在真实签名可识别时兼容。视频规范化后仍须通过本地共享存储层写入；冻结数据矩阵必须保存稳定 `filePath`，展示 URL 只能运行时重新签名。
 
 #### 素材唯一性与多处绑定决策
 
@@ -776,7 +771,7 @@ node_modules/.bin/tsx src/lib/report-print-matrix.test.ts
 #### 素材关联专项验收
 
 - 用同一素材依次绑定记录 A、记录 B、食谱效果、对比矩阵单元格和数据矩阵单元格；刷新后五处都可见，任一处解绑不影响其他四处。
-- 每个绑定位置都显示真实缩略图；图片可打开原图，视频可播放并支持 Range 请求。素材库“未关联/已关联”筛选按“是否存在任一关联”计算，多处绑定不重复显示素材实体。
+- 每个绑定位置都显示真实缩略图；图片可打开原图，视频通过无扩展名同源单流入口播放，避免企业网关将 `.mp4` + Range 识别为下载工具。素材库“未关联/已关联”筛选按“是否存在任一关联”计算，多处绑定不重复显示素材实体。
 - 生成报告前检查不得误报已关联项；生成后报告问题 Tab、功能效果、对比矩阵、数据矩阵、分享页和打印/PDF均能看到相同素材。重新命名素材不能破坏任何关联或历史冻结路径。
 - 只有用户明确执行“删除素材”才允许删除素材实体；解绑、删除记录或修改食谱不得误删被其他目标复用的物理文件。
 
@@ -992,3 +987,65 @@ docker compose -f docker-compose.local.yml ps
 - 打印/下载的功能效果版式参考 `C:/Users/G1157/Desktop/中式-ZDQ-D12S1蒸蛋器产品体验.pdf`：A4 横向、紧凑正文、扁平信息区、单食谱整体成块、步骤与素材保持原位、约 60-80px 横向缩略图。
 - 打印/下载的对比矩阵版式参考 `C:/Users/G1157/Desktop/快炖防溢电炖锅体验报告.pdf`：对比对象等宽、矩阵横向铺满纸张、文字与素材同单元格组织、缩略图横向排列、表格可自然分页但不得拆成卡片。
 - 打印/下载不得重复呈现同一食谱效果素材或同一问题素材；所有素材仍需完整原位呈现，不得用 `+N` 截断。无 live issue 的冻结问题在输出中也显示默认“待整改”。
+
+### 2026-07-15 打印/下载最终版式合同（覆盖同日旧打印实现）
+
+- 数据矩阵以 `docs/数据矩阵.pdf` 为直接版式基准：整张矩阵必须在 A4 横向可打印区内按比例自适应铺满，不允许内部横向滚动、拆卡或依靠裁切隐藏列；一级大类跨明细行合并，所有素材在对应单元格内横向紧凑排列。
+- 对比矩阵不得把“大类 / 细项”压成一个路径单元格。打印投影必须保留冻结快照中的 `section` 与 `summary` 节点，输出顺序固定为“大类横跨整表行 → 细项比较行 → 本大类小结横跨行”；小结缺失属于冻结完整性回归。
+- 功能效果打印按单食谱成块：标题行左侧为“食谱 + 名称”，右侧为步骤数、判断、问题点数；下方依次为食谱/食材、食谱效果评价及原位素材、食谱步骤数、逐步骤明细与步骤素材。不得退化为问题卡片，不得重复评价或重复素材。
+- 浏览器打印组件与服务端 PDF HTML 必须消费同一个 `PrintReportViewModel` 行语义和同一版式合同；修复后同时验证 `/reports/print` 与下载生成的真实 PDF，禁止只验证 DOM 或接口状态码。
+
+### 2026-07-15 在线冻结数据矩阵最终合同（详情页 / 分享页）
+
+- 报告详情与匿名分享必须继续复用同一个 `FrozenReportReader` 和 `ReportDataMatrixReadView`；不得为分享页复制或硬编码另一套矩阵 DOM、列宽或素材规则。
+- 在线冻结数据矩阵以 `docs/数据矩阵.xlsx` 与 `docs/数据矩阵.pdf` 为直接结构基准：整张矩阵在当前内容栏内自适应铺满，保持单张横向表格，不得改成卡片、内部横向滚动或截断列。
+- 一级大类按连续明细行使用 `rowSpan` 纵向合并；二级细项独立成列；其后按冻结列顺序完整呈现输入/对比、计算、效果素材、效果评价和问题点。表头只保留一行列定义。
+- 一级大类分组使用克制的交替底色和清晰单元格线；小结/备注保留为表尾横跨行，不能移到附录或丢失。
+- 效果素材必须在原单元格内全部呈现，使用从左到右的自适应缩略图网格：桌面约 48-52px，窄容器可降至约 32px，并保持图片 4:3、视频 16:9；不得显示 `+N`、单列纵向素材墙或越出单元格。
+- 在线矩阵正文仍遵守最小 12px 字号；窄屏通过收紧单元格 padding、素材尺寸和文本换行适配，不得用 `text-[10px]` 或整体缩放牺牲可读性。
+- 验收必须同时覆盖登录后的报告详情与匿名分享，在桌面和窄屏断言表格右边界不越出视口、页面无水平滚动、一级大类合并、素材数量完整且视频 poster 可见。
+
+### 2026-07-15 列表与素材稳定升序合同
+
+- 除已经存在并明确由用户维护的人工顺序（例如食谱/功能 `sort_order`、矩阵行列显示顺序）外，所有新建列表统一按 `created_at ASC`，时间相同时按稳定 `id ASC`；更早创建的内容靠左或靠上。
+- 五感体验记录必须按创建时间升序显示；任务 API 与前端工作区都必须执行同一稳定排序兜底，不得继续依赖历史 `sort_order` 或数据库未声明顺序。
+- 问题 Tab 固定按来源分组：`五感体验 → 食谱/功能 → 食谱/功能-对比矩阵 → 数据矩阵`；每组内部按问题 `created_at ASC → issue id ASC`。来源记录、食谱或矩阵单元的创建时间不得覆盖真正的问题创建时间。
+- 多素材以 `material_links.binding_order ASC` 为首要顺序；缺失或并列时依次使用 `bound_at/关联时间 ASC → material.created_at ASC → material.id ASC`。初次选择更早的素材靠左，换行后从上到下。
+- 历史 legacy 外键素材没有绑定元数据时按素材 `created_at ASC → id ASC`；新绑定必须保留已有 `binding_order`，不得因重复读取、预签名或冻结转换打乱。
+- 报告生成必须把上述问题顺序和素材顺序冻结进同一快照；详情、匿名分享、浏览器打印与服务端 PDF 只消费同一 `FrozenReportViewModel`/打印投影，不得在各入口分别重新排序。
+
+### 2026-07-16 报告问题、录入删除、移动端媒体与打印合同（最新规则，覆盖冲突旧规则）
+
+- 问题 Tab 固定来源顺序为：`五感体验 → 食谱/功能 → 对比矩阵 → 数据矩阵`；每组内部继续执行 `created_at ASC → issue id ASC`。对比矩阵不得再标记为“食谱/功能”或“食谱/功能-对比矩阵”。
+- 五感体验列表标题固定为“问题描述：{检查项内容}”；展开后的“描述检查项内容”固定展示原始描述/检查记录结果，“检查结果”单独展示。标准类继续展示标准类型、要求范围和检查标准；非标准类不显示这些标准字段。
+- 问题统计必须按最终 `sourceKind` 计算：五感=`sensory`、食谱/功能=`function`、对比矩阵=`comparison`、数据矩阵=`matrix`。未录入食谱/功能问题时，其数量必须为 0；不得仅凭 `source_type=recipe_problem` 将矩阵问题误计为功能问题。
+- 对比矩阵问题按“对象 + 细项/单元格”聚合计数：同一对象同一细项无论问题框内有多少行，只计 1 个问题；不同对象或不同细项分别计数。
+- 对比矩阵列表标题固定为“问题描述：{对象}：{大类}的{细项}效果不合格”。展开按行展示：对象、项目、细项、问题1..问题N、素材；已整改时追加整改效果评价、整改素材；复测记录数大于等于 2 时只展示最新一条，并显示“整改复测记录数：N”。
+- 冻结快照中历史食谱/功能问题只有在当前冻结事实确实存在且可整改时才显示；已被删除、被矩阵事实取代或没有可追溯来源的旧问题不得残留，也不得显示无法点击的整改状态。
+- 对比矩阵存在冻结 `cells` 时，单元格当前 `problem_points` 是唯一问题真源；问题点已清空的单元格不得再由历史 `explicit_issue` 或旧报告实时问题兜底恢复。列表不得出现缺少对象/项目/细项、无整改入口或以 `[对比]` 开头的旧行。
+- 整改弹窗内任意输入、自动保存或状态更新不得改变底层报告当前 Tab；报告 Tab 状态由稳定 report id 与用户操作控制，不得因详情对象刷新或 React key 改变回到“总结”。
+- 素材删除只有服务端真实删除数据库记录、绑定关系和本地文件后才能提示成功；失败必须返回错误并保留 UI 项。禁止“先 Toast 成功、后端实际失败”。
+- 若素材被冻结报告引用，录入页确认删除必须从任务、项目、记录、食谱、问题、复测、矩阵及 `material_links` 中彻底解除并从当前素材库消失，同时将素材标记为 `frozen_retained`，仅为不可变冻结报告保留文件；不得返回 `material_has_frozen_snapshot_reference` 409，也不得物理删除导致历史报告裂图。
+- 删除五感体验记录时必须在同一事务内清理/解除素材、问题、复测及其它关联；存在素材绑定不能成为记录无法删除的理由，任一步失败则整体回滚并明确报错。
+- 手机上传/播放视频必须使用同源平台媒体访问链路，不得依赖裸 `/uploads/*.mp4`；生产继续只使用本地文件夹，不启用 S3。
+- 图片、缩略图和海报统一使用有效签名的 `/api/materials/file/<key>?token=...&exp=...` 或其派生接口；任务素材栏、食谱库、报告预览等任何 `<video>` 只能接收有效签名的无扩展名 `/api/materials/video/<base64url-key>?token=...&exp=...`。该路由在服务端解析原始 key、移除 Range 并强制返回完整 `200` 单流；不得直接接收裸 `/uploads/*.mp4`、带 `.mp4` 的 `/api/materials/file/...` 或移除有效 token。企业网关若仍拦截该同源无扩展名单流入口，先保留浏览器错误证据再针对网关规则处理。
+- 视频稳定性验收必须覆盖任务录入、素材库、冻结详情、匿名分享、打印/PDF：同一有效视频 key 的无扩展名单流响应必须为 `200`、`Content-Type: video/mp4`、`X-XP-Video-Transport: single-stream`，且浏览器网络记录中不得出现企业网关的 `172.* /disable/disable.htm` 重定向。不得以恢复公开 `/uploads`、移除签名或改回 Range 播放作为临时“修复”。
+- 任务录入和冻结报告的 Tab 必须持久化到 URL `?tab=` 并以 `window.history.replaceState` 更新；刷新、整改自动保存、问题投影刷新或冻结模型重载只能保留当前有效 Tab，不能跳回“总结”。
+- 问题管理只能排除真正缺少 `task_id` 的孤儿数据；不得因为关联对象延迟、空 join 或展示上下文暂缺而过滤已有 `task_id` 的项目问题。生产问题排查先核对 `issues.task_id` 与 `experience_tasks.id`，不得先清库或隐匿全部问题。
+- 报告中心的整张报告卡片必须可点击进入详情；分享、打印、删除和对比勾选控件必须 `stopPropagation`，不得因扩大点击区域误触跳转。报告合并仍只限前期研究、自研、改型/降本/优化，同型号每任务取最新冻结报告，详情与打印/PDF按成员创建时间正序消费。
+- 体验计划和报告列表的移动端状态筛选、搜索框应随页面内容自然滚动；不得固定或 sticky 在手机视口中。桌面端可按单独断点规则布局。
+- 全平台自动保存文本框不得在用户持续输入过程中按键级、定时或短 debounce 高频提交；字段值先保存在本地草稿，只能在用户完成当前文本框后触发保存。完成信号包括失焦、Enter、关闭编辑态、切换字段/模块；旧请求不得覆盖用户后续输入。新建五感问题在未输入任何字段且未改变素材选择时关闭，必须直接关闭且不得发起自动保存或提示失败。
+- 对比矩阵严格执行“完成单元格编辑后保存”，不得在文字尚未录完时生成自动报告或提交半成品。五感体验新增/编辑弹窗取消显式保存键：关闭弹窗、完成字段或选择/上传图片视频后自动保存；保存失败必须保留弹窗与草稿并明确提示。
+- 浏览器下载页与服务端 PDF 的总结、问题、矩阵和素材必须与冻结详情/分享页来自同一冻结模型；冻结页/分享页是内容真源，不得从最新任务数据重新计算总结。
+- 打印/PDF 的素材缩略图不显示文件名或素材命名；仅保留图片/视频 poster 本身和必要的语义分组标题。
+- 打印/PDF 使用清晰的层级字号：报告标题、一级章节、二级区块、字段标签、正文/说明依次递减；正文不得小于可读打印基线，避免整页同字号、信息层级不清。
+- 上述合同最终验收必须覆盖生产报告 `8a421115-fb1c-411e-b8a3-1ac07d992be9` 与 `98b72299-ca21-4e62-89a6-64f4150b8803`，并同时检查冻结详情、分享、打印/PDF、整改弹窗、移动端任务/报告列表和手机视频链路。
+
+### 2026-07-16 整改闭环与 Hermes 外部会话补充合同（最新规则）
+
+- 问题整改状态命令必须原子提交；提交成功后，任何可选的来源/报告溯源查询失败都不得把成功写入伪装为 `500`。客户端以服务端返回的主问题记录为准。
+- 整改弹窗只保留当前整改方案、责任人、计划完成时间与当前复测结果；不展示或加载整改历史时间线。审计与复测数据仍按服务端合规要求留存。
+- 打印/PDF 的问题展开统一显示“整改方案、责任人、整改时间、复测结果”；整改方案非空即显示，不以是否“已整改”为前提；展示时只使用最新整改/复测内容。
+- Hermes 是平台内嵌运行时：任务上下文指令必须走“结构化计划 → 用户确认 → 平台执行”闭环，不得回退为只会解释、不能执行的普通聊天；执行完成后留在当前 Hermes 会话。
+- 企业微信官方文本回调在验签、防重放和已绑定身份校验后，必须写入对应 Hermes 会话并保存助手回复；媒体回调继续走既有媒体队列。
+- 个人微信仅支持官方 OAuth 身份绑定及 App ID/App Secret 的加密配置；禁止使用非官方协议监听个人号私聊、伪造机器人或自动收发个人微信消息。

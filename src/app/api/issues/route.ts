@@ -30,7 +30,8 @@ export async function GET(request: NextRequest) {
     if (!scopedAccess) return forbidden();
   }
 
-  let query = client.from('issues').select('*', { count: 'exact' });
+  let query = client.from('issues').select('*, task:experience_tasks(id, task_name, project_number, product_model)', { count: 'exact' });
+  query = query.not('task_id', 'is', null);
   if (!include_archived && !source_report_id) {
     query = query.or('source_type.is.null,source_type.not.like.%_old');
   }
@@ -100,6 +101,21 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  if (body.source_cell_id) {
+    const { data: existingIssues } = await client
+      .from('issues')
+      .select('*')
+      .eq('task_id', body.task_id)
+      .eq('source_cell_id', body.source_cell_id)
+      .eq('title', title)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    const existing = existingIssues?.[0];
+    if (existing) {
+      return NextResponse.json({ code: 0, message: '问题已存在', created: false, data: existing });
+    }
+  }
+
   const { data, error } = await client.from('issues').insert({
     task_id: body.task_id,
     record_id: body.record_id || null,
@@ -114,6 +130,7 @@ export async function POST(request: NextRequest) {
     level: body.level || '二类',
     source: body.source || null,
     source_report_id: body.source_report_id || null,
+    source_cell_id: body.source_cell_id || null,
     source_type: body.source_type || null,
     description: body.description || null,
     is_improve: body.is_improve ?? true,

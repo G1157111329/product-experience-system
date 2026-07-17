@@ -69,7 +69,7 @@ export function MatrixMaterialStagingRail({
         <div className="flex items-center gap-2 min-w-0">
           <Inbox className="h-4 w-4 text-muted-foreground shrink-0" />
           <span className="text-sm font-medium truncate">素材池</span>
-          <Badge variant="secondary" className="text-[10px]">
+          <Badge variant="secondary" className="text-xs">
             {items.length}
           </Badge>
         </div>
@@ -82,7 +82,7 @@ export function MatrixMaterialStagingRail({
           type="button"
           size="sm"
           variant={tab === 'staging' ? 'default' : 'ghost'}
-          className="h-7 text-[11px] flex-1"
+          className="h-7 text-xs flex-1"
           onClick={() => setTab('staging')}
         >
           暂存
@@ -91,7 +91,7 @@ export function MatrixMaterialStagingRail({
           type="button"
           size="sm"
           variant={tab === 'unassigned' ? 'default' : 'ghost'}
-          className="h-7 text-[11px] flex-1"
+          className="h-7 text-xs flex-1"
           onClick={() => setTab('unassigned')}
         >
           待归属

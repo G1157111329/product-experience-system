@@ -146,6 +146,8 @@ void (async () => {
   assert.doesNotMatch(dialogSource, /JSON\.stringify\(\{\s*status:/, 'dialog never sends a status-only mutation');
   assert.match(dialogSource, /setCurrent\(data\.data\)/, 'dialog trusts canonical server data after commands');
   assert.doesNotMatch(dialogSource, /已重开/, 'dialog exposes only the canonical four-state labels');
+  assert.doesNotMatch(dialogSource, /整改历史/, 'dialog retains only the current rectification fields instead of loading a history timeline');
+  assert.doesNotMatch(dialogSource, /\/rectifications/, 'dialog does not request rectification-history data when opened');
 
   console.log('atomic locked issue command tests passed');
 })();

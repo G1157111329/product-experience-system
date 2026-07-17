@@ -1,14 +1,20 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { Bot, ExternalLink, Minus, Trash2, Wrench } from 'lucide-react';
+import { Bot, ExternalLink, Minus, Trash2, WandSparkles } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { HermesChat, type HermesConversation } from './hermes-chat';
+import {
+  getTaskAiEntryPrompt,
+  TASK_AI_ENTRY_OPTIONS,
+  type TaskAiEntryId,
+} from '@/lib/task-ai-entry';
 import { cn } from '@/lib/utils';
 
 type Position = { x: number; y: number };
+type PanelDragStart = { pointerX: number; pointerY: number; x: number; y: number };
 
 export function AgentFloatingAssistant() {
   const { user } = useAuth();
@@ -18,10 +24,14 @@ export function AgentFloatingAssistant() {
   const [hidden, setHidden] = useState(false);
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<Position | null>(null);
+  const [panelPosition, setPanelPosition] = useState<Position | null>(null);
   const [dragging, setDragging] = useState(false);
   const [overDelete, setOverDelete] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [taskEntry, setTaskEntry] = useState<{ id: TaskAiEntryId; version: number } | null>(null);
   const dragStart = useRef<{ pointerX: number; pointerY: number; x: number; y: number; moved: boolean } | null>(null);
+  const panelDragStart = useRef<PanelDragStart | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
   const taskId = useMemo(() => pathname.match(/^\/tasks\/([^/]+)/)?.[1] || null, [pathname]);
   const userKey = user?.id || 'anonymous';
 
@@ -29,6 +39,7 @@ export function AgentFloatingAssistant() {
     const hiddenKey = `hermes-floating-hidden:${userKey}`;
     const conversationKey = `hermes-last-conversation:${userKey}:${taskId || 'global'}`;
     setHidden(sessionStorage.getItem(hiddenKey) === '1');
+    setTaskEntry(null);
     const remembered = localStorage.getItem(conversationKey);
     setConversationId(remembered);
     if (taskId) {
@@ -96,54 +107,129 @@ export function AgentFloatingAssistant() {
     }
   };
 
+  const startPanelDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    if ((event.target as HTMLElement).closest('button, a, input, textarea, select, [role="button"]')) return;
+    const rect = panelRef.current?.getBoundingClientRect();
+    const current = panelPosition || {
+      x: rect?.left ?? Math.max(8, (window.innerWidth - 380) / 2),
+      y: rect?.top ?? Math.max(8, (window.innerHeight - 520) / 2),
+    };
+    setPanelPosition(current);
+    panelDragStart.current = { pointerX: event.clientX, pointerY: event.clientY, ...current };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const movePanelDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    const start = panelDragStart.current;
+    if (!start) return;
+    const panel = panelRef.current;
+    const width = panel?.offsetWidth ?? 380;
+    const height = panel?.offsetHeight ?? 520;
+    setPanelPosition({
+      x: Math.min(window.innerWidth - width - 8, Math.max(8, start.x + event.clientX - start.pointerX)),
+      y: Math.min(window.innerHeight - height - 8, Math.max(8, start.y + event.clientY - start.pointerY)),
+    });
+  };
+
+  const endPanelDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    panelDragStart.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
   if (!ready || hidden || pathname.startsWith('/agent')) return null;
 
   const circleStyle = position ? { left: position.x, top: position.y } : { right: 16, bottom: 24 };
+  const dialogStyle = panelPosition
+    ? { left: panelPosition.x, top: panelPosition.y, transform: 'none' }
+    : { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' };
+  const selectedTaskPrompt = taskEntry ? getTaskAiEntryPrompt(taskEntry.id) : undefined;
 
   return (
     <>
       {open && (
-        <section className="fixed bottom-20 right-4 z-[70] flex h-[520px] w-[min(380px,calc(100vw-1rem))] flex-col overflow-hidden rounded-md border bg-background shadow-xl">
-          <header className="flex h-11 shrink-0 items-center gap-2 border-b px-3">
+        <section
+          ref={panelRef}
+          data-testid="agent-floating-assistant-dialog"
+          className="fixed z-[70] flex h-[520px] w-[min(380px,calc(100vw-1rem))] flex-col overflow-hidden rounded-md border bg-background shadow-xl"
+          style={dialogStyle}
+        >
+          <header
+            data-testid="agent-floating-assistant-drag-handle"
+            className="flex h-11 shrink-0 touch-none select-none items-center gap-2 border-b px-3 cursor-grab"
+            onPointerDown={startPanelDrag}
+            onPointerMove={movePanelDrag}
+            onPointerUp={endPanelDrag}
+            onPointerCancel={endPanelDrag}
+          >
             <Bot className="h-4 w-4 text-primary" />
             <span className="min-w-0 flex-1 truncate text-sm font-medium">AI助手</span>
-            {taskId && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                title="操作当前体验计划"
-                aria-label="操作当前体验计划"
-                onClick={() => router.push(`/agent?mode=actions&task=${encodeURIComponent(taskId)}`)}
-              >
-                <Wrench className="h-3.5 w-3.5" />
-              </Button>
-            )}
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7"
+              className="min-h-11 min-w-11"
               title="打开会话中心"
               aria-label="打开会话中心"
               onClick={() => router.push(conversationId ? `/agent?conversation=${conversationId}` : '/agent')}
             >
               <ExternalLink className="h-3.5 w-3.5" />
             </Button>
-            <Button variant="ghost" size="icon" className="h-7 w-7" title="缩小" aria-label="缩小 AI 助手" onClick={() => setOpen(false)}>
+            <Button variant="ghost" size="icon" className="min-h-11 min-w-11" title="缩小" aria-label="缩小 AI 助手" onClick={() => setOpen(false)}>
               <Minus className="h-3.5 w-3.5" />
             </Button>
           </header>
-          <HermesChat
-            compact
-            conversationId={conversationId}
-            taskId={taskId}
-            onConversationChange={rememberConversation}
-          />
+          {taskId ? (
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="shrink-0 border-b bg-muted/20 px-3 py-2.5" data-testid="task-ai-entry-choices">
+                <p className="text-xs font-medium">默认探索方向</p>
+                <p className="mt-0.5 text-xs leading-5 text-muted-foreground">点击后立即生成探索草案；涉及写入任务的数据操作仍需确认。</p>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  {TASK_AI_ENTRY_OPTIONS.map((entry) => (
+                    <button
+                      key={entry.id}
+                      type="button"
+                      aria-pressed={taskEntry?.id === entry.id}
+                      className={cn(
+                        'flex min-w-0 items-start gap-2 rounded-md border bg-card px-2.5 py-2 text-left transition-colors hover:border-primary/50 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                        taskEntry?.id === entry.id && 'border-primary bg-primary/10',
+                      )}
+                      onClick={() => setTaskEntry({ id: entry.id, version: Date.now() })}
+                    >
+                      <WandSparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+                      <span className="min-w-0">
+                        <span className="block text-xs font-medium">{entry.label}</span>
+                        <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">{entry.description}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="min-h-0 flex-1">
+                <HermesChat
+                  compact
+                  conversationId={conversationId}
+                  taskId={taskId}
+                  initialDraft={selectedTaskPrompt}
+                  initialDraftVersion={taskEntry?.version}
+                  onConversationChange={rememberConversation}
+                />
+              </div>
+            </div>
+          ) : (
+            <HermesChat
+              compact
+              conversationId={conversationId}
+              taskId={taskId}
+              onConversationChange={rememberConversation}
+            />
+          )}
         </section>
       )}
 
       {!open && (
         <button
+          data-testid="task-floating-assistant"
           type="button"
           className={cn(
             'fixed z-[70] flex h-12 w-12 touch-none items-center justify-center rounded-full border border-primary/30 bg-primary text-primary-foreground shadow-lg transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',

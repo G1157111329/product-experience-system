@@ -26,7 +26,7 @@ function needsFaststart(fileName: string): boolean {
 
 export function browserVideoFileName(filePath: string): string {
   const extension = path.extname(filePath).toLowerCase();
-  return extension === '.mov' || extension === '.m4v'
+  return extension !== '.mp4'
     ? `${filePath.slice(0, -extension.length)}.mp4`
     : filePath;
 }
@@ -80,8 +80,6 @@ export function parseVideoStreamsFromFfmpegOutput(output: string): ProbeResult {
  * transcoded only when required.
  */
 export async function prepareVideoForBrowser(filePath: string): Promise<string> {
-  if (!needsFaststart(filePath)) return filePath;
-
   const targetPath = browserVideoFileName(filePath);
   const tempPath = path.join(
     path.dirname(targetPath),

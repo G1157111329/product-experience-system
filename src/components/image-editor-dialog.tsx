@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { capImageOutputDimensions } from '@/lib/image-editor-output';
 import {
   ArrowUpRight, RotateCw, RotateCcw, Crop, Pencil, Type, Grid3x3,
   Check, Undo2, Move, Minus, FlipHorizontal, FlipVertical, ZoomIn, ZoomOut,
@@ -177,8 +178,9 @@ export function ImageEditorDialog({
       setFlipY(false);
       setActions([]);
       setCropRect(null);
-      setOutputWidth(img.width);
-      setOutputHeight(img.height);
+      const output = capImageOutputDimensions({ width: img.width, height: img.height });
+      setOutputWidth(output.width);
+      setOutputHeight(output.height);
     };
     img.src = imageUrl;
   }, [open, imageUrl]);
@@ -435,8 +437,9 @@ export function ImageEditorDialog({
       setActions([]);
       setCropRect(null);
       setTool('move');
-      setOutputWidth(newImg.width);
-      setOutputHeight(newImg.height);
+      const output = capImageOutputDimensions({ width: newImg.width, height: newImg.height });
+      setOutputWidth(output.width);
+      setOutputHeight(output.height);
     };
     newImg.src = url;
   };
@@ -464,8 +467,9 @@ export function ImageEditorDialog({
       for (const action of actions) {
         renderAction(ctx, action, 1);
       }
-      const targetWidth = typeof outputWidth === 'number' && outputWidth > 0 ? Math.round(outputWidth) : workingCanvas.width;
-      const targetHeight = typeof outputHeight === 'number' && outputHeight > 0 ? Math.round(outputHeight) : workingCanvas.height;
+      const requestedWidth = typeof outputWidth === 'number' && outputWidth > 0 ? Math.round(outputWidth) : workingCanvas.width;
+      const requestedHeight = typeof outputHeight === 'number' && outputHeight > 0 ? Math.round(outputHeight) : workingCanvas.height;
+      const { width: targetWidth, height: targetHeight } = capImageOutputDimensions({ width: requestedWidth, height: requestedHeight });
       const canvas = document.createElement('canvas');
       canvas.width = targetWidth;
       canvas.height = targetHeight;
@@ -542,7 +546,7 @@ export function ImageEditorDialog({
               className="h-1 w-24 accent-primary"
               aria-label="图片缩放比例"
             />
-            <span className="w-10 text-right text-[10px] tabular-nums text-muted-foreground">{Math.round(viewportZoom * 100)}%</span>
+            <span className="w-10 text-right text-xs tabular-nums text-muted-foreground">{Math.round(viewportZoom * 100)}%</span>
             <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => setViewportZoom((value) => Math.min(3, Number((value + 0.25).toFixed(2))))} title="放大" aria-label="放大图片">
               <ZoomIn className="h-4 w-4" />
             </Button>
@@ -631,7 +635,7 @@ export function ImageEditorDialog({
                   <Minus className="h-3 w-3 text-muted-foreground" />
                   <input type="range" min={1} max={10} step={1} value={lineWidth}
                     onChange={e => setLineWidth(Number(e.target.value))} className="w-16 h-1 accent-primary" />
-                  <span className="text-[10px] text-muted-foreground w-4">{lineWidth}</span>
+                  <span className="text-xs text-muted-foreground w-4">{lineWidth}</span>
                 </div>
               )}
             </div>

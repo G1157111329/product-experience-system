@@ -70,8 +70,9 @@ export interface InlineTextareaProps extends InlineEditableBaseProps {
 export type InlineEditKeyAction = 'save' | 'cancel' | 'none';
 
 export function getInlineEditKeyAction(key: string, isComposing: boolean, isMultiline: boolean): InlineEditKeyAction {
+  void isMultiline;
   if (key === 'Escape') return 'cancel';
-  if (key === 'Enter' && !isComposing && !isMultiline) return 'save';
+  if (key === 'Enter' && !isComposing) return 'save';
   return 'none';
 }
 
@@ -164,13 +165,17 @@ function useInlineEditableEngine(
   const [draft, setDraft] = useState(value);
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
   const compositionRef = useRef(createCompositionController());
+  const lastAuthoritativeValueRef = useRef(value);
+  const { status, schedule, flush, reset, setStatus } = useDebouncedSave(onSave);
 
   // Resync local draft when authoritative value changes externally.
   useEffect(() => {
-    if (!compositionRef.current.isComposing) setDraft(value);
-  }, [value]);
-
-  const { status, schedule, flush, reset, setStatus } = useDebouncedSave(onSave);
+    const previousAuthoritativeValue = lastAuthoritativeValueRef.current;
+    lastAuthoritativeValueRef.current = value;
+    const draftIsUnfinished = status === 'dirty' || status === 'saving' || status === 'error' || status === 'conflict';
+    if (compositionRef.current.isComposing || draftIsUnfinished) return;
+    setDraft((current) => current === previousAuthoritativeValue ? value : current);
+  }, [status, value]);
 
   const handleChange = (next: string) => {
     setDraft(next);
@@ -327,6 +332,12 @@ function TextareaImpl({
           onBlur={handleBlur}
           onKeyDown={(event) => {
             const action = getInlineEditKeyAction(event.key, event.nativeEvent.isComposing, true);
+            if (action === 'save') {
+              if (event.shiftKey) return;
+              event.preventDefault();
+              flush();
+              event.currentTarget.blur();
+            }
             if (action === 'cancel') {
               event.preventDefault();
               handleCancel();

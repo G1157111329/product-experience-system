@@ -1,6 +1,7 @@
 import { generatePresignedUrl } from './storage';
 import { decryptSecret } from './secret-crypto';
 import { writeSecurityAudit } from './security-audit';
+import { stripAssistantReasoning } from '../assistant-output';
 
 type SupabaseLike = {
   from: (table: string) => {
@@ -37,12 +38,74 @@ export interface ResolvedAIConfig {
   maxTokens: number;
   customApiUrl: string;
   customApiKey: string;
+  requestOptions: AIRequestOptions;
 }
 
 interface ResolveOptions {
   defaultModel?: string;
   defaultTemperature?: number;
   maxTokens?: number;
+}
+
+export type AIRequestOptions = {
+  /** Select the provider's token-limit field while keeping the request portable by default. */
+  tokenField?: 'max_tokens' | 'max_completion_tokens';
+  /** Provider-declared optional request fields, such as structured output or reasoning controls. */
+  extraBody?: Record<string, unknown>;
+};
+
+export type ChatCompletionRequest = {
+  model: string;
+  messages: Array<{ role: 'system' | 'user'; content: MessageContent }>;
+  temperature: number;
+  max_tokens?: number;
+  max_completion_tokens?: number;
+} & Record<string, unknown>;
+
+type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+export interface AIConnectivityProbeInput {
+  apiUrl: string;
+  apiKey: string;
+  model: string;
+  requestOptions?: AIRequestOptions;
+  fetchImpl?: FetchLike;
+  timeoutMs?: number;
+}
+
+const PROTECTED_REQUEST_FIELDS = new Set(['model', 'messages', 'temperature', 'max_tokens', 'max_completion_tokens']);
+
+export function normalizeAIRequestOptions(value: unknown): AIRequestOptions {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const row = value as Record<string, unknown>;
+  const tokenField = row.tokenField === 'max_completion_tokens' ? 'max_completion_tokens'
+    : row.tokenField === 'max_tokens' ? 'max_tokens'
+      : undefined;
+  const rawExtraBody = row.extraBody;
+  const extraBody = rawExtraBody && typeof rawExtraBody === 'object' && !Array.isArray(rawExtraBody)
+    ? Object.fromEntries(Object.entries(rawExtraBody as Record<string, unknown>)
+      .filter(([key, item]) => !PROTECTED_REQUEST_FIELDS.has(key) && item !== undefined))
+    : undefined;
+  return { ...(tokenField ? { tokenField } : {}), ...(extraBody && Object.keys(extraBody).length ? { extraBody } : {}) };
+}
+
+/** Build the portable OpenAI-compatible request shared by every configured model. */
+export function buildChatCompletionRequest(input: {
+  model: string;
+  messages: Array<{ role: 'system' | 'user'; content: MessageContent }>;
+  temperature: number;
+  maxTokens: number;
+  requestOptions?: AIRequestOptions;
+}): ChatCompletionRequest {
+  const options = normalizeAIRequestOptions(input.requestOptions);
+  const request: ChatCompletionRequest = {
+    model: input.model,
+    messages: input.messages,
+    temperature: input.temperature,
+  };
+  request[options.tokenField || 'max_tokens'] = input.maxTokens;
+  Object.assign(request, options.extraBody || {});
+  return request;
 }
 
 const DEFAULT_API_URL = process.env.AI_API_URL || process.env.AI_API_BASE_URL || '';
@@ -65,6 +128,68 @@ export function assertSafeAIEndpoint(apiUrl: string) {
     .filter(Boolean);
   if (allowedHosts.length > 0 && !allowedHosts.includes(hostname)) {
     throw new Error('AI 服务地址不在允许的域名白名单内');
+  }
+}
+
+/**
+ * Performs a minimal OpenAI-compatible chat request before a configuration is persisted.
+ * The caller owns persistence; this helper never writes a configuration or logs credentials.
+ */
+export async function probeAIConfiguration({
+  apiUrl,
+  apiKey,
+  model,
+  requestOptions,
+  fetchImpl = fetch,
+  timeoutMs = 10_000,
+}: AIConnectivityProbeInput): Promise<void> {
+  const endpoint = normalizeChatCompletionsUrl(apiUrl);
+  if (!endpoint || !apiKey.trim() || !model.trim()) {
+    throw new Error('AI connection test failed: endpoint, model, and API key are required');
+  }
+  assertSafeAIEndpoint(endpoint);
+
+  let response: Response;
+  try {
+    response = await fetchImpl(endpoint, {
+      method: 'POST',
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(buildChatCompletionRequest({
+        model,
+        messages: [{ role: 'user', content: 'ping' }],
+        temperature: 0,
+        maxTokens: 1,
+        requestOptions,
+      })),
+    });
+  } catch {
+    throw new Error('AI connection test failed: provider is unreachable or timed out');
+  }
+
+  if (!response.ok) {
+    throw new Error(`AI connection test failed (HTTP ${response.status})`);
+  }
+
+  let result: unknown;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error('AI connection test failed: invalid Chat Completions response');
+  }
+  const firstChoice = (result as { choices?: unknown[] } | null)?.choices?.[0] as {
+    message?: { role?: unknown; content?: unknown };
+  } | undefined;
+  if (
+    !firstChoice
+    || firstChoice.message?.role !== 'assistant'
+    || typeof firstChoice.message.content !== 'string'
+    || !firstChoice.message.content.trim()
+  ) {
+    throw new Error('AI connection test failed: invalid Chat Completions response');
   }
 }
 
@@ -91,6 +216,7 @@ export async function resolveAIConfig(
       maxTokens: normalizePositiveInt(activeModel.max_tokens ?? activeModel.maxTokens, maxTokens),
       customApiUrl: normalizeChatCompletionsUrl(String(activeModel.custom_api_url || activeModel.customApiUrl || DEFAULT_API_URL)),
       customApiKey: decryptSecret(String(activeModel.custom_api_key_encrypted || activeModel.customApiKeyEncrypted || DEFAULT_API_KEY)),
+      requestOptions: normalizeAIRequestOptions(activeModel.request_options ?? activeModel.requestOptions),
     };
   }
 
@@ -109,6 +235,7 @@ export async function resolveAIConfig(
     maxTokens,
     customApiUrl: normalizeChatCompletionsUrl(String(legacyValue.custom_api_url || DEFAULT_API_URL)),
     customApiKey: decryptSecret(String(legacyValue.custom_api_key || DEFAULT_API_KEY)),
+    requestOptions: normalizeAIRequestOptions(legacyValue.request_options ?? legacyValue.requestOptions),
   };
 }
 
@@ -142,12 +269,13 @@ export async function invokeConfiguredAI({
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
+      body: JSON.stringify(buildChatCompletionRequest({
         model,
         messages,
         temperature,
-        max_tokens: aiConfig.maxTokens,
-      }),
+        maxTokens: aiConfig.maxTokens,
+        requestOptions: aiConfig.requestOptions,
+      })),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'network error';
@@ -198,7 +326,13 @@ export async function invokeConfiguredAI({
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({ model, messages: textOnlyMessages, temperature, max_tokens: aiConfig.maxTokens }),
+        body: JSON.stringify(buildChatCompletionRequest({
+          model,
+          messages: textOnlyMessages,
+          temperature,
+          maxTokens: aiConfig.maxTokens,
+          requestOptions: aiConfig.requestOptions,
+        })),
       });
       if (retryRes.ok) {
         const retryResult = await retryRes.json();
@@ -242,7 +376,7 @@ export async function invokeConfiguredAI({
 
 export function extractJsonObject<T extends object>(content: string, fallback: T): T {
   try {
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    const jsonMatch = stripAssistantReasoning(content).match(/\{[\s\S]*\}/);
     if (!jsonMatch) return fallback;
     return { ...fallback, ...JSON.parse(jsonMatch[0]) } as T;
   } catch {

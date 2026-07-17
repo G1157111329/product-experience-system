@@ -8,7 +8,9 @@ export interface VerifiedWecomCallback {
   messageId: string;
   mediaId: string;
   externalUserId: string;
-  mediaType: 'image' | 'video';
+  messageType: 'text' | 'image' | 'video';
+  mediaType?: 'image' | 'video';
+  content: string;
   timestamp: number;
   nonce: string;
 }
@@ -30,6 +32,10 @@ function xmlValue(xml: string, name: string): string {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = xml.match(new RegExp(`<${escaped}>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</${escaped}>`, 'i'));
   return match?.[1]?.trim() ?? '';
+}
+
+function isSupportedMessageType(value: string): value is VerifiedWecomCallback['messageType'] {
+  return value === 'text' || value === 'image' || value === 'video';
 }
 
 function requiredConfig() {
@@ -85,13 +91,19 @@ export function verifyWecomCallback(input: {
   const decrypted = decryptWecomPayload(encrypted);
   if (decrypted.corpId !== expectedCorpId) throw new WecomCallbackError('wecom_corp_mismatch');
   const messageId = xmlValue(decrypted.xml, 'MsgId');
-  const mediaId = xmlValue(decrypted.xml, 'MediaId');
   const externalUserId = xmlValue(decrypted.xml, 'FromUserName');
-  const mediaTypeRaw = xmlValue(decrypted.xml, 'MsgType').toLowerCase();
-  if (!messageId || !mediaId || !externalUserId || !['image', 'video'].includes(mediaTypeRaw)) {
+  const messageType = xmlValue(decrypted.xml, 'MsgType').toLowerCase();
+  if (!messageId || !externalUserId || !isSupportedMessageType(messageType)) {
     throw new WecomCallbackError('wecom_payload_invalid');
   }
-  return { corpId: expectedCorpId, messageId, mediaId, externalUserId, mediaType: mediaTypeRaw as VerifiedWecomCallback['mediaType'], timestamp, nonce: input.nonce };
+  if (messageType === 'text') {
+    const content = xmlValue(decrypted.xml, 'Content');
+    if (!content) throw new WecomCallbackError('wecom_payload_invalid');
+    return { corpId: expectedCorpId, messageId, mediaId: '', externalUserId, messageType, content, timestamp, nonce: input.nonce };
+  }
+  const mediaId = xmlValue(decrypted.xml, 'MediaId');
+  if (!mediaId) throw new WecomCallbackError('wecom_payload_invalid');
+  return { corpId: expectedCorpId, messageId, mediaId, externalUserId, messageType, mediaType: messageType, content: '', timestamp, nonce: input.nonce };
 }
 
 export function verifyWecomChallenge(input: {
@@ -123,6 +135,8 @@ export async function claimWecomCallback(callback: VerifiedWecomCallback, tx: We
 }
 
 export async function enqueueVerifiedWecomCallback(callback: VerifiedWecomCallback) {
+  const mediaType = callback.mediaType;
+  if (!mediaType) throw new WecomCallbackError('wecom_payload_invalid');
   const db = await getDb();
   return db.transaction(async (transaction) => claimWecomCallback(callback, {
     async claim(value) {
@@ -143,7 +157,7 @@ export async function enqueueVerifiedWecomCallback(callback: VerifiedWecomCallba
       const rows = await transaction.insert(wecomMediaIngestJobs).values({
         wecomMsgId: value.messageId,
         wecomMediaId: value.mediaId,
-        mediaType: value.mediaType,
+        mediaType,
         wecomBindingId: bindings[0]?.id ?? null,
         expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString(),
         downloadStatus: 'pending',
@@ -155,13 +169,34 @@ export async function enqueueVerifiedWecomCallback(callback: VerifiedWecomCallba
   }));
 }
 
+async function claimWecomTextReplay(callback: VerifiedWecomCallback) {
+  const db = await getDb();
+  return db.transaction(async (transaction) => {
+    const inserted = await transaction.insert(wecomCallbackReplays).values({
+      messageId: callback.messageId,
+      nonce: callback.nonce,
+      corpId: callback.corpId,
+      messageTimestamp: new Date(callback.timestamp * 1000).toISOString(),
+    }).onConflictDoNothing().returning({ id: wecomCallbackReplays.id }).execute();
+    return inserted.length === 1;
+  });
+}
+
 export async function processWecomCallback(
   input: Parameters<typeof verifyWecomCallback>[0],
   enqueue: (callback: VerifiedWecomCallback) => Promise<unknown> = enqueueVerifiedWecomCallback,
   onDenied?: (denial: { actorUserId: null; targetType: 'wecom_callback'; reason: string }) => Promise<void>,
+  ingestWecomTextMessage?: (message: Pick<VerifiedWecomCallback, 'corpId' | 'externalUserId' | 'messageId' | 'content'>) => Promise<unknown>,
+  claimTextReplay: (callback: VerifiedWecomCallback) => Promise<boolean> = claimWecomTextReplay,
 ) {
   try {
     const verified = verifyWecomCallback(input);
+    if (verified.messageType === 'text') {
+      if (!ingestWecomTextMessage) throw new WecomCallbackError('wecom_text_ingest_unavailable');
+      const claimed = await claimTextReplay(verified);
+      if (!claimed) throw new WecomCallbackError('wecom_replay_detected');
+      return await ingestWecomTextMessage(verified);
+    }
     return await enqueue(verified);
   } catch (error) {
     if (onDenied) {

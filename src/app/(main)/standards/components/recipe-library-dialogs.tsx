@@ -152,7 +152,7 @@ export function RecipeAddDialog({ open, onOpenChange, categories, onAdded }: Rec
                   {addSteps.map((step, idx) => (
                     <div key={idx} className="border rounded-lg p-2 space-y-1">
                       <div className="flex items-center justify-between">
-                        <Badge variant="outline" className="text-[10px]">步骤{step.step_number}</Badge>
+                        <Badge variant="outline" className="text-xs">步骤{step.step_number}</Badge>
                         <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => handleRemoveAddStep(idx)}>
                           <X className="h-3 w-3" />
                         </Button>
@@ -167,7 +167,7 @@ export function RecipeAddDialog({ open, onOpenChange, categories, onAdded }: Rec
                           ))}
                         </div>
                       )}
-                      <label className="inline-flex items-center gap-1 text-[10px] text-primary cursor-pointer hover:underline">
+                      <label className="inline-flex items-center gap-1 text-xs text-primary cursor-pointer hover:underline">
                         <Plus className="h-3 w-3" /> 添加图片
                         <input type="file" accept="image/*,video/*" className="hidden"
                           onChange={e => { const f = e.target.files?.[0]; if (f) handleAddStepImage(idx, f); }} />
@@ -180,7 +180,7 @@ export function RecipeAddDialog({ open, onOpenChange, categories, onAdded }: Rec
                 <Input className="h-7 text-xs" value={addStepOp} onChange={e => setAddStepOp(e.target.value)}
                   placeholder="操作描述 *" onKeyDown={e => { if (e.key === 'Enter' && addStepOp.trim()) handleAddStepInDialog(); }} />
                 <div className="flex items-center gap-2">
-                  <label className="inline-flex items-center gap-1 text-[10px] text-primary cursor-pointer hover:underline shrink-0">
+                  <label className="inline-flex items-center gap-1 text-xs text-primary cursor-pointer hover:underline shrink-0">
                     <Plus className="h-3 w-3" /> 上传图片
                     <input type="file" accept="image/*,video/*" className="hidden"
                       onChange={e => { const f = e.target.files?.[0]; if (f && addStepOp.trim()) handleAddStepWithImage(f); }} />

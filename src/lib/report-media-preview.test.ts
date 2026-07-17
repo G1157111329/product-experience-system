@@ -25,6 +25,11 @@ assert.match(
 );
 assert.match(previewSource, /aspect-\[4\/3\]/);
 assert.match(previewSource, /aspect-video/);
+assert.match(
+  previewSource,
+  /key\s*&&\s*\(video\s*\|\|\s*resolvedUrl\.startsWith\('\/uploads\/'\)\)/,
+  'a resolved S3 or protected image URL must not be replaced with the local-only thumbnail route',
+);
 
 const compatibilitySource = readFileSync(resolve(
   process.cwd(),

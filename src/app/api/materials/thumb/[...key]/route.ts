@@ -3,6 +3,7 @@ import { createReadStream } from 'fs';
 import { mkdir, stat } from 'fs/promises';
 import path from 'path';
 import { canAccessTask, getCurrentUser } from '@/lib/server/auth';
+import { localStoragePathVariants } from '@/lib/material-storage-path';
 import {
   getLocalContentType,
   isLocalUploadPublicAccess,
@@ -54,18 +55,24 @@ function resolveUploadPath(key: string) {
 }
 
 async function findMaterialByPath(client: ReturnType<typeof getSupabaseClient>, filePath: string) {
-  const { data: byFilePath } = await client
-    .from('materials')
-    .select('id, file_path, file_url, task_id, recipe_library_step_id')
-    .eq('file_path', filePath)
-    .maybeSingle();
-  if (byFilePath) return byFilePath;
-  const { data: byFileUrl } = await client
-    .from('materials')
-    .select('id, file_path, file_url, task_id, recipe_library_step_id')
-    .eq('file_url', filePath)
-    .maybeSingle();
-  return byFileUrl;
+  const variants = localStoragePathVariants(filePath);
+  for (const candidate of variants) {
+    const { data } = await client
+      .from('materials')
+      .select('id, file_path, file_url, task_id, recipe_library_step_id')
+      .eq('file_path', candidate)
+      .maybeSingle();
+    if (data) return data;
+  }
+  for (const candidate of variants) {
+    const { data } = await client
+      .from('materials')
+      .select('id, file_path, file_url, task_id, recipe_library_step_id')
+      .eq('file_url', candidate)
+      .maybeSingle();
+    if (data) return data;
+  }
+  return null;
 }
 
 async function ensureCanAccess(request: NextRequest, fileKey: string) {

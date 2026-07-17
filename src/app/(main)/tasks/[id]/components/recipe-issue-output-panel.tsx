@@ -94,7 +94,7 @@ export function RecipeIssueOutputPanel({
             <div key={`${problem.text}-${index}`} className="flex flex-col gap-2 rounded-md border bg-background p-2.5 sm:flex-row sm:items-center">
               <p className="min-w-0 flex-1 text-sm">{problem.text.trim()}</p>
               {existing ? (
-                <Badge variant="secondary" className="w-fit gap-1 text-[11px]">
+                <Badge variant="secondary" className="w-fit gap-1 text-xs">
                   <CheckCircle2 className="h-3 w-3" />已进入问题管理
                 </Badge>
               ) : (

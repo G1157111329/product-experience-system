@@ -1,8 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -35,33 +34,6 @@ export type IssueForRectification = {
   [key: string]: unknown;
 };
 
-type Verification = {
-  id: string;
-  rectification_action_id: string;
-  issue_id: string;
-  result: 'passed' | 'failed' | 'partial';
-  note: string | null;
-  verified_by: string | null;
-  verified_at: string;
-  evidence_refs: unknown;
-};
-
-type RectificationHistoryItem = {
-  id: string;
-  issue_id: string;
-  action_plan: string;
-  responsible_person: string | null;
-  responsible_dept: string | null;
-  plan_complete_date: string | null;
-  actual_complete_date: string | null;
-  status: string;
-  note: string | null;
-  created_by: string | null;
-  created_at: string;
-  updated_at: string;
-  verifications: Verification[];
-};
-
 type IssueRectificationDialogProps = {
   issue: IssueForRectification | null;
   open: boolean;
@@ -78,37 +50,24 @@ const LEVEL_COLORS: Record<string, string> = {
 export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }: IssueRectificationDialogProps) {
   const levelList = useDictLabels('issue_severity_dict');
   const [current, setCurrent] = useState<IssueForRectification | null>(issue);
-  const [rectificationHistory, setRectificationHistory] = useState<RectificationHistoryItem[]>([]);
+  const persistedValuesRef = useRef<Record<string, unknown>>({});
 
   useEffect(() => {
     if (open && issue) {
       setCurrent(issue);
+      persistedValuesRef.current = { ...issue };
     } else if (!open) {
       setCurrent(null);
-      setRectificationHistory([]);
     }
   }, [open, issue]);
 
-  const fetchRectificationHistory = useCallback(async (issueId: string) => {
-    try {
-      const res = await fetch(`/api/issues/${issueId}/rectifications`);
-      const data = await res.json();
-      if (data.code === 0) setRectificationHistory(data.data || []);
-    } catch {
-      /* noop */
-    }
-  }, []);
-
-  useEffect(() => {
-    if (open && current?.id) {
-      fetchRectificationHistory(current.id);
-    } else {
-      setRectificationHistory([]);
-    }
-  }, [open, current?.id, fetchRectificationHistory]);
-
-  const updateField = async (field: string, value: unknown) => {
+  const updateField = (field: string, value: unknown) => {
     if (!current) return;
+    setCurrent((previous) => previous ? { ...previous, [field]: value } : previous);
+  };
+
+  const saveField = async (field: string, value: unknown) => {
+    if (!current || persistedValuesRef.current[field] === value) return;
     try {
       const res = await fetch(`/api/issues/${current.id}`, {
         method: 'PUT',
@@ -117,8 +76,8 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
       });
       const data = await res.json();
       if (data.code === 0) {
-        setCurrent(data.data);
-        onSaved?.(data.data);
+        persistedValuesRef.current = { ...persistedValuesRef.current, [field]: value };
+        setCurrent((previous) => previous ? { ...previous, ...data.data } : data.data);
       } else {
         toast.error(data.message || '保存失败');
       }
@@ -137,9 +96,9 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
       });
       const data = await res.json();
       if (data.code === 0) {
+        persistedValuesRef.current = { ...persistedValuesRef.current, ...data.data };
         setCurrent(data.data);
         onSaved?.(data.data);
-        await fetchRectificationHistory(current.id);
         if (successMessage) toast.success(successMessage);
       } else {
         toast.error(data.message || '保存失败');
@@ -218,7 +177,7 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
                     <button
                       key={l}
                       type="button"
-                      onClick={() => updateField('level', l)}
+                      onClick={() => { updateField('level', l); void saveField('level', l); }}
                       className={cn(
                         'flex-1 whitespace-nowrap px-2 py-1.5 rounded text-xs font-medium border transition-colors',
                         current.level === l ? LEVEL_COLORS[l] + ' border-current' : 'bg-background border-border hover:bg-muted/50'
@@ -285,6 +244,7 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
                 <Textarea
                   value={current.description}
                   onChange={(e) => updateField('description', e.target.value)}
+                  onBlur={(e) => void saveField('description', e.currentTarget.value)}
                   rows={3}
                 />
               </div>
@@ -295,8 +255,9 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
                 <div className="space-y-1.5">
                   <Label>整改方案</Label>
                   <Textarea
-                    value={current.improve_plan || ''}
-                    onChange={(e) => updateField('improve_plan', e.target.value)}
+                  value={current.improve_plan || ''}
+                  onChange={(e) => updateField('improve_plan', e.target.value)}
+                  onBlur={(e) => void saveField('improve_plan', e.currentTarget.value)}
                     rows={2}
                     placeholder="填写整改方案..."
                   />
@@ -307,6 +268,7 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
                     <Input
                       value={current.responsible_person || ''}
                       onChange={(e) => updateField('responsible_person', e.target.value)}
+                      onBlur={(e) => void saveField('responsible_person', e.currentTarget.value)}
                       placeholder="责任人"
                     />
                   </div>
@@ -316,6 +278,7 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
                       type="date"
                       value={current.plan_complete_date ? current.plan_complete_date.slice(0, 10) : ''}
                       onChange={(e) => updateField('plan_complete_date', e.target.value)}
+                      onBlur={(e) => void saveField('plan_complete_date', e.currentTarget.value)}
                     />
                   </div>
                 </div>
@@ -325,6 +288,7 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
                     <Textarea
                       value={current.verification_note || ''}
                       onChange={(e) => updateField('verification_note', e.target.value)}
+                      onBlur={(e) => void saveField('verification_note', e.currentTarget.value)}
                       rows={2}
                     />
                   </div>
@@ -336,54 +300,12 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
                 <Textarea
                   value={current.no_improve_reason || ''}
                   onChange={(e) => updateField('no_improve_reason', e.target.value)}
+                  onBlur={(e) => void saveField('no_improve_reason', e.currentTarget.value)}
                   rows={2}
                   placeholder="说明不整改原因..."
                 />
               </div>
             )}
-
-            {/* 整改历史 — rectification actions + verifications */}
-            <div className="border-t pt-3 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">整改历史</span>
-                <Badge variant="secondary" className="text-xs">{rectificationHistory.length} 次</Badge>
-              </div>
-
-              {rectificationHistory.length === 0 ? (
-                <p className="text-xs text-muted-foreground">暂无整改记录</p>
-              ) : (
-                <div className="space-y-3">
-                  {rectificationHistory.map((action, idx) => (
-                    <div key={action.id} className="border rounded-lg p-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-muted-foreground">
-                          {idx === 0 ? '最新整改' : `第${rectificationHistory.length - idx}次整改`}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {new Date(action.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
-                        </span>
-                      </div>
-                      <div className="text-sm bg-muted/30 p-2 rounded break-all">{action.action_plan}</div>
-                      {action.responsible_person && (
-                        <div className="text-xs text-muted-foreground">责任人: {action.responsible_person}</div>
-                      )}
-                      {action.verifications.length > 0 && (
-                        <div className="space-y-1">
-                          {action.verifications.map((v) => (
-                            <div key={v.id} className="text-xs flex items-center gap-2">
-                              <Badge className={cn('text-xs', v.result === 'passed' ? 'bg-emerald-100 text-emerald-700' : v.result === 'failed' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700')}>
-                                {v.result === 'passed' ? '通过' : v.result === 'failed' ? '不通过' : '部分通过'}
-                              </Badge>
-                              <span className="text-muted-foreground">{v.note || '无验证说明'}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
 
             <IssueRetestPanel
               issueId={current.id}

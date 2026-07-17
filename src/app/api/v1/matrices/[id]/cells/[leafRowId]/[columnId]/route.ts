@@ -14,6 +14,7 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessMatrix, requireUser, isAuthResponse } from '@/lib/server/auth';
 import { ok, fail } from '@/lib/server/api-v1/response';
 import { resolveTraceId } from '@/lib/server/api-v1/trace';
+import { recomputeMatrixFormulas } from '@/lib/matrix/recompute-v3';
 
 export const dynamic = 'force-dynamic';
 
@@ -116,6 +117,10 @@ export async function PUT(
       .returning()
       .execute();
 
+    // Formula cells are materialized server-side. Recompute after every input
+    // change (including clearing a source value) so stale failures/results do
+    // not remain in the grid until the user reopens the formula editor.
+    await recomputeMatrixFormulas(matrixId);
     void hasValue;
     return ok(cell, traceId);
   } catch (err) {

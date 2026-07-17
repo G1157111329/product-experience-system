@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { forbidden, isAuthResponse, requireAdmin, requireUser } from '@/lib/server/auth';
-import { assertSafeAIEndpoint, normalizeChatCompletionsUrl } from '@/lib/server/ai';
-import { encryptSecret, isEncryptedSecret } from '@/lib/server/secret-crypto';
+import { probeAIConfiguration } from '@/lib/server/ai';
+import { decryptSecret, encryptSecret, isEncryptedSecret } from '@/lib/server/secret-crypto';
+import { buildFinalLegacyAIConfig, resolveAIConfigProbeInput } from '@/lib/server/ai-config-save-gate';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
 
 export async function GET(request: NextRequest) {
@@ -53,14 +54,39 @@ export async function PUT(request: NextRequest) {
 
   if (key === 'ai_config' && value && typeof value === 'object') {
     const nextValue = { ...(value as Record<string, unknown>) };
-    const apiUrl = nextValue.custom_api_url || nextValue.customApiUrl;
-    if (apiUrl) assertSafeAIEndpoint(normalizeChatCompletionsUrl(String(apiUrl)));
-    const apiKey = nextValue.custom_api_key || nextValue.customApiKey;
-    if (apiKey) {
-      nextValue.custom_api_key = isEncryptedSecret(apiKey) ? apiKey : encryptSecret(String(apiKey));
-      delete nextValue.customApiKey;
+    const { data: existingSetting, error: existingSettingError } = await client
+      .from('platform_settings')
+      .select('value')
+      .eq('key', 'ai_config')
+      .maybeSingle();
+    if (existingSettingError) return NextResponse.json({ code: 1, message: '读取现有 AI 配置失败' }, { status: 500 });
+    const finalValue = buildFinalLegacyAIConfig({
+      body: nextValue,
+      existing: existingSetting?.value as Record<string, unknown> | null | undefined,
+      encryptNewKey: (secret) => encryptSecret(secret) || '',
+    });
+    try {
+      const probeInput = resolveAIConfigProbeInput({
+        body: finalValue,
+        decryptExistingKey: decryptSecret,
+      });
+      await probeAIConfiguration({
+        ...probeInput,
+        apiKey: isEncryptedSecret(probeInput.apiKey) ? decryptSecret(probeInput.apiKey) : probeInput.apiKey,
+      });
+    } catch {
+      await writeSecurityAudit(client, {
+        request,
+        actor: admin,
+        action: 'platform_setting.ai_config.connectivity_probe',
+        outcome: 'failed',
+        targetType: 'platform_setting',
+        targetId: 'ai_config',
+        metadata: { key: 'ai_config', model: finalValue.model || '' },
+      });
+      return NextResponse.json({ code: 1, message: 'AI 连通性测试失败：请检查调用地址、模型、API Key 和网络后重试' }, { status: 422 });
     }
-    value = nextValue;
+    value = finalValue;
   }
 
   const { error } = await client.from('platform_settings').upsert({

@@ -415,11 +415,11 @@ export function MatrixSchemaSettings({ open, onOpenChange }: MatrixSchemaSetting
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <div className="truncate text-sm font-medium">{schema.name}</div>
-                            <div className="truncate font-mono text-[11px] text-muted-foreground">
+                            <div className="truncate font-mono text-xs text-muted-foreground">
                               {schema.schemaKey}
                             </div>
                           </div>
-                          <Badge variant="outline" className="text-[10px]">
+                          <Badge variant="outline" className="text-xs">
                             {schema.status}
                           </Badge>
                         </div>
@@ -437,12 +437,12 @@ export function MatrixSchemaSettings({ open, onOpenChange }: MatrixSchemaSetting
                               <span className="font-medium">已发布 v{lpv.version_no}</span>
                               <span className="ml-1 text-muted-foreground">（只读）</span>
                             </span>
-                            <Badge variant="secondary" className="text-[10px]">
+                            <Badge variant="secondary" className="text-xs">
                               {lpv.status}
                             </Badge>
                           </button>
                         ) : (
-                          <p className="mt-2 text-[11px] text-muted-foreground">尚未发布版本</p>
+                          <p className="mt-2 text-xs text-muted-foreground">尚未发布版本</p>
                         )}
                       </div>
                     );
@@ -472,12 +472,12 @@ export function MatrixSchemaSettings({ open, onOpenChange }: MatrixSchemaSetting
                         </span>
                         <Badge
                           variant={isDraft ? 'secondary' : 'default'}
-                          className="text-[10px]"
+                          className="text-xs"
                         >
                           {versionDetail.version.status}
                         </Badge>
                       </div>
-                      <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      <p className="mt-0.5 text-xs text-muted-foreground">
                         {isDraft
                           ? '草稿模式：可编辑维度与公式，保存后发布'
                           : '已发布版本为只读，可派生新版本继续编辑'}
@@ -502,7 +502,7 @@ export function MatrixSchemaSettings({ open, onOpenChange }: MatrixSchemaSetting
                       可观测维度（{observedDims.length}）
                     </div>
                     {observedDims.length === 0 ? (
-                      <p className="text-[11px] text-muted-foreground">无可观测维度</p>
+                      <p className="text-xs text-muted-foreground">无可观测维度</p>
                     ) : (
                       <div className="space-y-1.5">
                         {observedDims.map((d) => (
@@ -512,17 +512,17 @@ export function MatrixSchemaSettings({ open, onOpenChange }: MatrixSchemaSetting
                           >
                             <div className="min-w-0">
                               <span className="text-sm">{d.displayName}</span>
-                              <span className="ml-2 font-mono text-[11px] text-muted-foreground">
+                              <span className="ml-2 font-mono text-xs text-muted-foreground">
                                 {d.dimensionKey}
                               </span>
                             </div>
                             <div className="flex shrink-0 items-center gap-1.5">
                               {d.unitCode ? (
-                                <Badge variant="outline" className="text-[10px]">
+                                <Badge variant="outline" className="text-xs">
                                   {d.unitCode}
                                 </Badge>
                               ) : null}
-                              <Badge variant="outline" className="text-[10px]">
+                              <Badge variant="outline" className="text-xs">
                                 #{d.sortOrder}
                               </Badge>
                             </div>
@@ -550,7 +550,7 @@ export function MatrixSchemaSettings({ open, onOpenChange }: MatrixSchemaSetting
                       ) : null}
                     </div>
                     {calculatedDims.length === 0 && !showBuilder ? (
-                      <p className="text-[11px] text-muted-foreground">暂无计算列</p>
+                      <p className="text-xs text-muted-foreground">暂无计算列</p>
                     ) : (
                       <div className="space-y-1.5">
                         {calculatedDims.map((d) => {
@@ -565,26 +565,26 @@ export function MatrixSchemaSettings({ open, onOpenChange }: MatrixSchemaSetting
                               <div className="flex items-center justify-between gap-2">
                                 <div className="min-w-0">
                                   <span className="text-sm">{d.displayName}</span>
-                                  <span className="ml-2 font-mono text-[11px] text-muted-foreground">
+                                  <span className="ml-2 font-mono text-xs text-muted-foreground">
                                     {d.dimensionKey}
                                   </span>
                                 </div>
                                 <div className="flex shrink-0 items-center gap-1.5">
                                   {d.unitCode ? (
-                                    <Badge variant="outline" className="text-[10px]">
+                                    <Badge variant="outline" className="text-xs">
                                       {d.unitCode}
                                     </Badge>
                                   ) : null}
                                   <Badge
                                     variant="secondary"
-                                    className="text-[10px] bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200"
+                                    className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200"
                                   >
                                     calculated
                                   </Badge>
                                 </div>
                               </div>
                               {formula ? (
-                                <div className="mt-1 break-all rounded bg-muted/50 px-1.5 py-1 font-mono text-[11px] text-muted-foreground">
+                                <div className="mt-1 break-all rounded bg-muted/50 px-1.5 py-1 font-mono text-xs text-muted-foreground">
                                   {formula.formulaDsl}
                                 </div>
                               ) : null}

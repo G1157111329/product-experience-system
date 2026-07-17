@@ -25,9 +25,9 @@ export function FrozenReportHeaderMeta({
   ].filter((item): item is [string, string] => Boolean(item[1]));
 
   return <div className="min-w-0 flex-1">
-    <h1 className="truncate text-sm font-semibold sm:text-base">{title || '报告详情'}</h1>
-    {tags.length > 0 && <div className="mt-1 flex flex-wrap items-center gap-1.5">
-      {tags.map(([label, value]) => <Badge key={label} variant="outline" className="text-[10px] font-normal">{label}：{value}</Badge>)}
+    <h1 className="break-words text-2xl font-bold leading-tight tracking-tight text-foreground sm:text-3xl">{title || '报告详情'}</h1>
+    {tags.length > 0 && <div className="mt-3 flex flex-wrap items-center gap-2">
+      {tags.map(([label, value]) => <Badge key={label} variant="outline" className="rounded-full border-border/80 bg-muted/40 px-2.5 py-1 text-xs font-medium text-muted-foreground">{label}：{value}</Badge>)}
     </div>}
   </div>;
 }

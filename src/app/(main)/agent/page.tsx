@@ -7,7 +7,6 @@ import { PageShell } from '@/components/app';
 import { Button } from '@/components/ui/button';
 import { HermesChat, type HermesConversation } from '@/components/agent/hermes-chat';
 import { cn } from '@/lib/utils';
-import { AgentAssistPanel } from '@/app/(main)/tasks/[id]/components/agent-assist-panel';
 
 type TaskOption = { id: string; task_name: string; product_model?: string | null };
 
@@ -135,7 +134,7 @@ export default function AgentPage() {
             {mode === 'actions' ? (
               selectedTaskId ? (
                 <div className="h-full overflow-y-auto p-3">
-                  <AgentAssistPanel taskId={selectedTaskId} embedded onClose={() => undefined} />
+                  <HermesChat taskId={selectedTaskId} onConversationChange={handleConversationCreated} />
                 </div>
               ) : (
                 <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">请选择要操作的体验计划</div>

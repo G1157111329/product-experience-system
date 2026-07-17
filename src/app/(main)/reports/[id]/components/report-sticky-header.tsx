@@ -36,16 +36,16 @@ export function ReportStickyHeader({
     <>
     <header className="sticky top-0 z-40 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="flex items-center gap-3 px-4 py-3">
-        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => router.back()}>
+        <Button variant="ghost" size="icon" className="min-h-11 min-w-11 shrink-0" onClick={() => router.back()} aria-label="返回报告列表">
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <FrozenReportHeaderMeta title={title} productModel={productModel} taskInfo={taskInfo} />
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShareOpen(true)} aria-label="分享报告">
+          <Button variant="ghost" size="icon" className="min-h-11 min-w-11" onClick={() => setShareOpen(true)} aria-label="分享报告">
             <Share2 className="h-4 w-4" />
           </Button>
           {onExport && (
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onExport}>
+            <Button variant="ghost" size="icon" className="min-h-11 min-w-11" onClick={onExport} aria-label="下载报告">
               <Download className="h-4 w-4" />
             </Button>
           )}

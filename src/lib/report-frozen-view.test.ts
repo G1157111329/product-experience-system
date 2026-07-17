@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { buildFrozenReportViewModel, excludeClaimedRecipeMediaFromEffects } from './report-frozen-view';
+import { buildFrozenReportViewModel } from './report-frozen-view';
 
 const frozenRecipe = {
   id: 'recipe-frozen',
@@ -77,8 +77,8 @@ assert.equal(model.summary.text, '冻结总结');
 assert.equal(model.functionEffects[0]?.name, '冷萃咖啡');
 assert.equal(model.functionEffects[0]?.evaluation, '口感偏酸，萃取不稳定。');
 assert.equal(model.functionEffects[0]?.evaluationStatus, 'unqualified');
-assert.deepEqual(model.functionEffects[0]?.evidence, [], 'failed recipe evidence is globally claimed by its issue context');
-assert.deepEqual(model.functionEffects[0]?.steps[0]?.evidence, [], 'failed recipe step evidence is not repeated in the function section');
+assert.deepEqual(model.functionEffects[0]?.evidence.map((item) => item.id), ['original-effect'], 'function effects retain their frozen evidence even when the recipe also has an issue');
+assert.deepEqual(model.functionEffects[0]?.steps[0]?.evidence.map((item) => item.id), ['step-proof'], 'function steps retain their frozen evidence even when the recipe also has an issue');
 assert.deepEqual(model.functionEffects[1]?.evidence.map((item) => item.id), ['qualified-extra-media'], 'a non-issue recipe keeps its function evidence');
 const effectShape = model.functionEffects[0] as unknown as Record<string, unknown>;
 assert.equal(effectShape.score, undefined);
@@ -87,7 +87,7 @@ assert.deepEqual(model.functionEffects[0]?.steps.map((step) => ({
   number: step.stepNumber,
   operation: step.operation,
   evidence: step.evidence.map((item) => item.id),
-})), [{ number: 1, operation: '冷藏萃取 12 小时', evidence: [] }]);
+})), [{ number: 1, operation: '冷藏萃取 12 小时', evidence: ['step-proof'] }]);
 
 assert.deepEqual(model.issues.map((issue) => issue.id), ['issue-frozen-recipe']);
 const issue = model.issues[0]!;
@@ -102,11 +102,6 @@ assert.deepEqual(issue.recipe?.evidence.map((item) => item.id), ['original-effec
 assert.deepEqual(issue.evidence.map((item) => item.id), ['explicit-issue-proof'], 'explicit issue evidence excludes recipe context evidence without losing issue-only media');
 assert.equal(issue.canManage, true, 'an explicitly authorized canonical issue is manageable');
 assert.equal(model.capabilities.canManageIssues, true);
-const browserDefensiveProjection = excludeClaimedRecipeMediaFromEffects([{
-  ...model.functionEffects[0]!,
-  evidence: [...issue.recipe!.evidence, ...issue.evidence],
-}], [issue]);
-assert.deepEqual(browserDefensiveProjection[0]?.evidence, [], 'browser projection also removes explicit issue evidence duplicated in the same function effect');
 assert.equal(issue.liveOverlay.status, 'verified_closed');
 assert.equal(issue.liveOverlay.rectification, '已调整冷萃时间');
 assert.equal(issue.liveOverlay.retest.count, 2);
@@ -311,6 +306,122 @@ assert.equal(comparisonProblemDedup.issues.length, 2, 'identical normalized poin
 assert.deepEqual(comparisonProblemDedup.issues.map((issue) => issue.context.object), ['对象 A', '对象 B']);
 assert.notEqual(comparisonProblemDedup.issues[0]?.sourceCellId, comparisonProblemDedup.issues[1]?.sourceCellId, 'different comparison cells retain independent issue identities');
 
+const comparisonLiveOverlayDedup = buildFrozenReportViewModel({
+  report: { id: 'comparison-live-overlay-dedup', report_type: 'comparison_report', content: {} },
+  snapshot: {
+    snapshot_json: {
+      report_content: {
+        issues: [
+          { id: 'live-a', source_type: 'recipe_problem', source_assembly_id: 'asm-1', source_cell_id: 'cell-a', title: '问题甲' },
+          { id: 'live-b', source_type: 'recipe_problem', source_assembly_id: 'asm-1', source_cell_id: 'cell-a', title: '问题乙' },
+          { id: 'live-a-dup', source_type: 'recipe_problem', source_assembly_id: 'asm-1', source_cell_id: 'cell-a', title: '问题甲' },
+        ],
+      },
+      objects: [{ id: 'object-a', object_name: '对象 A' }],
+      item_nodes: [{ id: 'item-a', node_label: '细项 A' }],
+      cells: [{
+        id: 'cell-a', object_id: 'object-a', item_node_id: 'item-a',
+        problem_points: ['问题甲', '问题乙'],
+      }],
+    },
+  },
+  snapshotResolution: 'anchored',
+  issues: [
+    { id: 'live-a', source_type: 'recipe_problem', source_assembly_id: 'asm-1', source_cell_id: 'cell-a', title: '问题甲', source_report_id: 'comparison-live-overlay-dedup', status: 'open' },
+    { id: 'live-a-dup', source_type: 'recipe_problem', source_assembly_id: 'asm-1', source_cell_id: 'cell-a', title: '问题甲', source_report_id: 'comparison-live-overlay-dedup', status: 'rectifying' },
+    { id: 'live-b', source_type: 'recipe_problem', source_assembly_id: 'asm-1', source_cell_id: 'cell-a', title: '问题乙', source_report_id: 'comparison-live-overlay-dedup', status: 'open' },
+  ],
+}, { audience: 'internal' });
+assert.equal(comparisonLiveOverlayDedup.issues.length, 1, 'one comparison object/item cell is one issue regardless of problem-line count');
+assert.deepEqual(comparisonLiveOverlayDedup.issues[0]?.context.problemPoints, ['问题甲', '问题乙']);
+assert.equal(comparisonLiveOverlayDedup.issues[0]?.liveIssueId, 'live-a');
+assert.deepEqual(comparisonLiveOverlayDedup.issues.map((issue) => issue.sourceKind), ['comparison']);
+assert.equal(
+  comparisonLiveOverlayDedup.issues.every((issue) => issue.sourceCellId === 'cell-a'),
+  true,
+  'the aggregated comparison fact stays bound to its source cell',
+);
+
+const legacyFunctionStatusMerge = buildFrozenReportViewModel({
+  report: { id: 'legacy-function-status', report_type: 'single_report', content: {} },
+  snapshot: { snapshot_json: { report_content: {
+    issues: [{ id: 'old-fact', source_type: 'recipe_problem', title: '薯条食谱效果不合格' }],
+  } } },
+  snapshotResolution: 'anchored',
+  issues: [{
+    id: 'live-function', source_report_id: 'legacy-function-status', source_type: 'recipe_problem',
+    title: '薯条食谱效果不合格', status: 'open',
+  }],
+}, { audience: 'internal', manageableIssueIds: new Set(['live-function']) });
+assert.equal(legacyFunctionStatusMerge.issues.length, 1, 'a unique legacy function fact and its current-report live issue merge instead of duplicating');
+assert.equal(legacyFunctionStatusMerge.issues[0]?.liveIssueId, 'live-function');
+assert.equal(legacyFunctionStatusMerge.issues[0]?.liveOverlay.status, 'open');
+assert.equal(legacyFunctionStatusMerge.issues[0]?.canManage, true);
+
+const staleLegacyFunctionFacts = buildFrozenReportViewModel({
+  report: { id: 'stale-legacy-function', report_type: 'single_report', content: {} },
+  snapshot: { snapshot_json: { report_content: {
+    issues: [
+      { id: 'stale-fact', source_type: 'recipe_problem', title: '旧食谱问题' },
+      { id: 'current-fact', source_type: 'recipe_problem', title: '当前食谱问题' },
+    ],
+  } } },
+  snapshotResolution: 'anchored',
+  issues: [{
+    id: 'current-live', source_report_id: 'stale-legacy-function', source_type: 'recipe_problem',
+    recipe_id: 'current-recipe', title: '当前食谱问题', status: 'open',
+  }],
+}, { audience: 'internal', manageableIssueIds: new Set(['current-live']) });
+assert.deepEqual(
+  staleLegacyFunctionFacts.issues.map((issue) => issue.title),
+  ['当前食谱问题'],
+  'current-report live function issues replace unmatched stale frozen function facts',
+);
+assert.equal(staleLegacyFunctionFacts.issues[0]?.canManage, true);
+
+const staleComparisonFacts = buildFrozenReportViewModel({
+  report: { id: 'stale-comparison-facts', report_type: 'comparison_report', content: {} },
+  snapshot: { snapshot_json: {
+    report_content: { issues: [
+      { id: 'stale-comparison', source_type: 'recipe_problem', source_cell_id: 'stale-cell', title: '旧对比问题' },
+      { id: 'current-comparison', source_type: 'recipe_problem', source_cell_id: 'current-cell', title: '当前对比问题' },
+    ] },
+    cells: [
+      { id: 'stale-cell', object_name: '旧对象', project_name: '旧项目', item_name: '旧细项', problem_points: [] },
+      { id: 'current-cell', object_name: '当前对象', project_name: '当前项目', item_name: '当前细项', problem_points: ['当前问题'] },
+    ],
+  } },
+  snapshotResolution: 'anchored',
+  issues: [
+    { id: 'stale-comparison', source_report_id: 'older-report', source_type: 'recipe_problem', source_cell_id: 'stale-cell', title: '旧对比问题', status: 'open' },
+    { id: 'current-comparison', source_report_id: 'stale-comparison-facts', source_type: 'recipe_problem', source_cell_id: 'current-cell', title: '当前对比问题', status: 'open' },
+  ],
+}, { audience: 'internal', manageableIssueIds: new Set(['current-comparison']) });
+assert.equal(staleComparisonFacts.issues.length, 1, 'comparison cells with cleared problem points must not retain explicit frozen issues');
+assert.equal(staleComparisonFacts.issues[0]?.sourceCellId, 'current-cell');
+assert.equal(staleComparisonFacts.issues[0]?.canManage, true);
+
+const comparisonCrossObjectKeepsPeers = buildFrozenReportViewModel({
+  report: { id: 'comparison-cross-object', report_type: 'comparison_report', content: {} },
+  snapshot: {
+    snapshot_json: {
+      objects: [{ id: 'object-a', object_name: '对象 A' }, { id: 'object-b', object_name: '对象 B' }],
+      item_nodes: [{ id: 'item-a', node_label: '细项 A' }],
+      cells: [
+        { id: 'cell-a', object_id: 'object-a', item_node_id: 'item-a', problem_points: ['同文案'] },
+        { id: 'cell-b', object_id: 'object-b', item_node_id: 'item-a', problem_points: ['同文案'] },
+      ],
+    },
+  },
+  snapshotResolution: 'anchored',
+  issues: [
+    { id: 'live-a', source_type: 'recipe_problem', source_assembly_id: 'asm-1', source_cell_id: 'cell-a', title: '同文案', source_report_id: 'comparison-cross-object', status: 'open' },
+    { id: 'live-b', source_type: 'recipe_problem', source_assembly_id: 'asm-1', source_cell_id: 'cell-b', title: '同文案', source_report_id: 'comparison-cross-object', status: 'open' },
+  ],
+}, { audience: 'internal' });
+assert.equal(comparisonCrossObjectKeepsPeers.issues.length, 2, 'same normalized text across different comparison objects must remain two rows');
+assert.deepEqual(comparisonCrossObjectKeepsPeers.issues.map((issue) => issue.context.object), ['对象 A', '对象 B']);
+
 const readerSource = readFileSync(resolve(process.cwd(), 'src/components/reports/frozen-report-reader.tsx'), 'utf8');
 const printSource = readFileSync(resolve(process.cwd(), 'src/lib/server/report-print-renderer.ts'), 'utf8');
 const reportRouteSource = readFileSync(resolve(process.cwd(), 'src/app/api/reports/route.ts'), 'utf8');
@@ -322,6 +433,7 @@ assert.doesNotMatch(readerSource, />\s*查看整改\s*</, 'the superseded manage
 assert.match(readerSource, /关联缺失，无法进入整改/, 'unlinked frozen facts explain why management is unavailable');
 assert.match(readerSource, /issue\.recipe[\s\S]*items=\{issue\.evidence\}/, 'recipe issue rows render explicit issue evidence in addition to recipe context');
 const detailSource = readFileSync(resolve(process.cwd(), 'src/app/(main)/reports/[id]/page.tsx'), 'utf8');
+assert.match(detailSource, /正在加载体验报告\.\.\.\.\.\./, 'report loading copy must not expose frozen implementation terminology');
 assert.doesNotMatch(detailSource, /fetch\(['"]\/api\/issues['"][\s\S]{0,240}method:\s*['"]POST['"]/, 'opening a frozen report must never create a canonical issue');
 assert.match(detailSource, /fetchFrozenReportProjection/, 'dialog saves refresh the authoritative frozen projection');
 assert.doesNotMatch(detailSource, /const applyIssueUpdate/, 'dialog saves must not patch only the status field');

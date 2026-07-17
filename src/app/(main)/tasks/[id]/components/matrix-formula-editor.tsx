@@ -267,7 +267,7 @@ export function MatrixFormulaEditor({
               </Button>
             </div>
             {compilePreview.ok ? (
-              <p className="text-[11px] text-emerald-600 flex items-center gap-1">
+              <p className="text-xs text-emerald-600 flex items-center gap-1">
                 <Check className="h-3 w-3" />
                 {compilePreview.compiled.displayExpression}
                 <span className="text-muted-foreground">
@@ -275,7 +275,7 @@ export function MatrixFormulaEditor({
                 </span>
               </p>
             ) : (
-              <p className="text-[11px] text-amber-600 flex items-center gap-1">
+              <p className="text-xs text-amber-600 flex items-center gap-1">
                 <AlertCircle className="h-3 w-3" />
                 {expression.trim() === '' || expression.trim() === '='
                   ? '请输入公式'
@@ -356,14 +356,14 @@ export function MatrixFormulaEditor({
           )}
 
           <div className="rounded-md border bg-muted/30 p-2 max-h-28 overflow-y-auto">
-            <p className="text-[10px] text-muted-foreground mb-1">列字母对照（点选时按此映射）</p>
+            <p className="text-xs text-muted-foreground mb-1">列字母对照（点选时按此映射）</p>
             <div className="flex flex-wrap gap-1">
               {columnLetterHints.map((h) => (
                 <Badge
                   key={h.id}
                   variant="outline"
                   className={cn(
-                    'text-[10px] font-mono cursor-default',
+                    'text-xs font-mono cursor-default',
                     h.zone === 'calculation_dimension' && 'border-primary/40',
                   )}
                   title={h.zone}

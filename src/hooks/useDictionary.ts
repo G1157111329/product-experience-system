@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { defaultDict, type DictItem, type DictType } from "@/lib/dictionary-types";
+import {
+  defaultDict,
+  getProjectPhaseSelectionLabels,
+  type DictItem,
+  type DictType,
+} from "@/lib/dictionary-types";
 
 type DictResponse = {
   code: number;
@@ -76,6 +81,7 @@ export function useDictCodes(dictType: DictType): Set<string> {
  */
 export function useDictLabels(dictType: DictType): string[] {
   const { items } = useDictionary(dictType);
+  if (dictType === "project_phase_dict") return getProjectPhaseSelectionLabels();
   return items.map((i) => i.label);
 }
 

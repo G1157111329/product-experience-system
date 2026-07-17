@@ -11,7 +11,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { isPendingMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
+import { isPendingMediaUrl, toPlayableVideoSrc, usePresignedUrls } from '@/lib/use-presigned-url';
 import { toast } from 'sonner';
 import {
   FilterBar,
@@ -259,9 +259,9 @@ function RecipeLibrarySection({ categories, isAdmin }, ref) {
                       {recipe.product_category || '通用'}{recipe.product ? ` - ${recipe.product}` : ''}
                     </div>
                     <div className={cn(pageListMetaClass, 'items-center')}>
-                      <StatusBadge kind="generic" value={`${recipe.recipe_library_steps?.length || 0} 步骤`} className="text-[10px]" />
+                      <StatusBadge kind="generic" value={`${recipe.recipe_library_steps?.length || 0} 步骤`} className="text-xs" />
                       {recipe.ingredients && (
-                        <span className="max-w-full truncate text-[10px] text-muted-foreground leading-none sm:max-w-[240px]">
+                        <span className="max-w-full truncate text-xs text-muted-foreground leading-none sm:max-w-[240px]">
                           {recipe.ingredients}
                         </span>
                       )}
@@ -289,9 +289,9 @@ function RecipeLibrarySection({ categories, isAdmin }, ref) {
                   <div className="mt-3 pt-3 border-t space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-medium">步骤列表</span>
-                      <span className="text-[10px] text-muted-foreground">拖拽步骤可重新排序</span>
+                      <span className="text-xs text-muted-foreground">拖拽步骤可重新排序</span>
                       {recipe.ingredients && (
-                        <span className="text-[10px] text-muted-foreground">食材/参数: {recipe.ingredients}</span>
+                        <span className="text-xs text-muted-foreground">食材/参数: {recipe.ingredients}</span>
                       )}
                     </div>
 
@@ -314,7 +314,7 @@ function RecipeLibrarySection({ categories, isAdmin }, ref) {
                             {editStepId === step.id ? (
                               <div className="space-y-2">
                                 <div className="flex items-center gap-2">
-                                  <Badge variant="outline" className="text-[10px] shrink-0">步骤{step.step_number}</Badge>
+                                  <Badge variant="outline" className="text-xs shrink-0">步骤{step.step_number}</Badge>
                                   <Input className="h-7 text-xs" value={editStepOp} onChange={e => setEditStepOp(e.target.value)} placeholder="操作描述" />
                                 </div>
                                 <div className="flex gap-2">
@@ -334,7 +334,7 @@ function RecipeLibrarySection({ categories, isAdmin }, ref) {
                                       <GripVertical className="h-4 w-4" />
                                     </div>
                                   )}
-                                  <Badge variant="outline" className="text-[10px] shrink-0 mt-0.5">步骤{step.step_number}</Badge>
+                                  <Badge variant="outline" className="text-xs shrink-0 mt-0.5">步骤{step.step_number}</Badge>
                                   <div className="flex-1 min-w-0 text-sm">{step.operation}</div>
                                   {isAdmin && (
                                     <div className="flex gap-1 shrink-0">
@@ -357,9 +357,9 @@ function RecipeLibrarySection({ categories, isAdmin }, ref) {
                                       <div key={mat.id} className="relative group w-16 h-16 rounded border overflow-hidden">
                                         {mat.material_type === 'video' ? (
                                           isPendingVideo ? (
-                                            <div className="flex h-full w-full items-center justify-center bg-muted text-[10px] text-muted-foreground">加载中</div>
+                                            <div className="flex h-full w-full items-center justify-center bg-muted text-xs text-muted-foreground">加载中</div>
                                           ) : (
-                                            <video src={resolvedUrl} className="w-full h-full object-cover" preload="metadata" />
+                                            <video src={toPlayableVideoSrc(resolvedUrl)} className="w-full h-full object-cover" preload="metadata" />
                                           )
                                         ) : (
                                           <img src={resolvedUrl} alt={mat.file_name} className="w-full h-full object-cover" />
@@ -377,7 +377,7 @@ function RecipeLibrarySection({ categories, isAdmin }, ref) {
                                 {/* Upload image button */}
                                 {isAdmin && step.id && (
                                   <div className="pl-8">
-                                    <label className="inline-flex items-center gap-1 text-[10px] text-primary cursor-pointer hover:underline">
+                                    <label className="inline-flex items-center gap-1 text-xs text-primary cursor-pointer hover:underline">
                                       <Plus className="h-3 w-3" /> 添加图片
                                       <input type="file" accept="image/*,video/*" className="hidden"
                                         onChange={e => { const f = e.target.files?.[0]; if (f) handleDetailStepUpload(f, step.id!); }} />
@@ -398,7 +398,7 @@ function RecipeLibrarySection({ categories, isAdmin }, ref) {
                         <Input className="h-7 text-xs" value={detailStepOp} onChange={e => setDetailStepOp(e.target.value)}
                           placeholder="操作描述 *" onKeyDown={e => { if (e.key === 'Enter' && detailStepOp.trim()) handleAddDetailStep(); }} />
                         <div className="flex items-center gap-2">
-                          <label className="inline-flex items-center gap-1 text-[10px] text-primary cursor-pointer hover:underline shrink-0">
+                          <label className="inline-flex items-center gap-1 text-xs text-primary cursor-pointer hover:underline shrink-0">
                             <Plus className="h-3 w-3" /> 上传图片
                             <input type="file" accept="image/*,video/*" className="hidden"
                               onChange={e => { const f = e.target.files?.[0]; if (f) setDetailStepImage(f); }} />
@@ -408,7 +408,7 @@ function RecipeLibrarySection({ categories, isAdmin }, ref) {
                               <div className="w-8 h-8 rounded border overflow-hidden">
                                 <img src={URL.createObjectURL(detailStepImage)} alt="" className="w-full h-full object-cover" />
                               </div>
-                              <span className="text-[10px] text-muted-foreground max-w-[100px] truncate">{detailStepImage.name}</span>
+                              <span className="text-xs text-muted-foreground max-w-[100px] truncate">{detailStepImage.name}</span>
                               <button className="p-0.5" aria-label="移除图片" onClick={() => setDetailStepImage(null)}>
                                 <X className="h-3 w-3 text-muted-foreground" />
                               </button>

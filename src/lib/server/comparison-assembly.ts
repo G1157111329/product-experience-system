@@ -1,4 +1,5 @@
 import type { ClientLike } from './auth';
+import { mergeTargetMaterials } from './report-media-freeze';
 
 /**
  * V2.3 对比组装服务层
@@ -62,6 +63,7 @@ const MAX_INLINE_MEDIA = 5;
 type Row = Record<string, unknown>;
 type SnapshotQuery = PromiseLike<{ data: Row[] | null; error?: { message?: string } | null }> & {
   eq: (field: string, value: unknown) => SnapshotQuery;
+  in: (field: string, values: unknown[]) => SnapshotQuery;
   order: (field: string, options?: { ascending?: boolean }) => SnapshotQuery;
 };
 type SnapshotSingleQuery = SnapshotQuery & {
@@ -101,6 +103,10 @@ function stringArray(value: unknown): string[] {
 
 function rowId(row: Row) {
   return String(row.id || '');
+}
+
+function text(value: unknown) {
+  return value === null || value === undefined ? '' : String(value).trim();
 }
 
 function mediaBuckets(materials: Row[]) {
@@ -175,9 +181,30 @@ export async function buildComparisonReportSnapshot(
   const objects = asRows(objectsResult.data);
   const itemNodes = asRows(nodesResult.data);
   const materials = asRows(materialsResult.data);
+  const cellIds = asRows(cellsResult.data).map(rowId).filter(Boolean);
+  const materialLinksResult = cellIds.length
+    ? await db.from('material_links').select('material_id, target_type, target_id, binding_order, bound_at')
+      .eq('target_type', 'comparison_cell').in('target_id', cellIds).order('binding_order', { ascending: true })
+    : { data: [] as Row[] };
+  const materialLinks = asRows(materialLinksResult.data);
+  const linkedMaterialIds = [...new Set(materialLinks.map((link) => text(link.material_id)).filter(Boolean))];
+  const linkedMaterialsResult = linkedMaterialIds.length
+    ? await db.from('materials').select('*').in('id', linkedMaterialIds)
+    : { data: [] as Row[] };
+  const allMaterials = [
+    ...materials,
+    ...asRows(linkedMaterialsResult.data).filter((linked) => !materials.some((material) => rowId(material) === rowId(linked))),
+  ];
   const materialsByCell = groupRows(materials, 'comparison_cell_id');
   const cells = asRows(cellsResult.data).map((cell) => {
-    const buckets = mediaBuckets(materialsByCell.get(rowId(cell)) || []);
+    const sourceMedia = mergeTargetMaterials({
+      legacy: materialsByCell.get(rowId(cell)) || [],
+      materials: allMaterials,
+      materialLinks,
+      targetType: 'comparison_cell',
+      targetId: rowId(cell),
+    });
+    const buckets = mediaBuckets(sourceMedia);
     return {
       ...cell,
       ...buckets,

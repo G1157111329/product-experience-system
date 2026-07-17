@@ -77,8 +77,8 @@ export function StandardCreateDialog({ open, onOpenChange, categories, onAdded }
                   onClick={() => { setCreateCategory(key); setCreateProductCategory(''); setCreateProduct(''); }}
                 >
                   <div className="flex items-center gap-2">
-                    <span className={cn('text-[10px] px-1.5 py-0.5 rounded', cfg.color)}>{cfg.label}</span>
-                    {key === '食谱功能标准' && <span className="text-[10px] text-muted-foreground">开发中</span>}
+                    <span className={cn('text-xs px-1.5 py-0.5 rounded', cfg.color)}>{cfg.label}</span>
+                    {key === '食谱功能标准' && <span className="text-xs text-muted-foreground">开发中</span>}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">{cfg.desc}</p>
                 </div>

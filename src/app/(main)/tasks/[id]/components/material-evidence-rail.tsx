@@ -17,7 +17,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
-import { getMediaSrc, isPendingMediaUrl, pendingMediaDataUrl, usePresignedUrls } from '@/lib/use-presigned-url';
+import { getMediaSrc, isPendingMediaUrl, pendingMediaDataUrl, toPlayableVideoSrc, usePresignedUrls } from '@/lib/use-presigned-url';
 import type { EvidenceBindingTarget, Material, MaterialEvidenceFilter } from '../types';
 
 type MaterialEvidenceRailProps = {
@@ -97,6 +97,15 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
   useEffect(() => {
     fetchMaterials();
   }, [fetchMaterials]);
+
+  useEffect(() => {
+    const handleTaskMaterialsChanged = ((event: CustomEvent<{ taskId?: string }>) => {
+      if (event.detail?.taskId === taskId) void fetchMaterials();
+    }) as EventListener;
+
+    window.addEventListener('task-materials:changed', handleTaskMaterialsChanged);
+    return () => window.removeEventListener('task-materials:changed', handleTaskMaterialsChanged);
+  }, [fetchMaterials, taskId]);
 
   const filteredMaterials = useMemo(
     () => materials.filter((material) => matchesFilter(material, filter)),
@@ -193,10 +202,10 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
 
     const payload =
       bindingTarget.type === 'record'
-        ? { record_id: bindingTarget.id, recipe_step_id: null, recipe_id: null }
+        ? { record_id: bindingTarget.id }
         : bindingTarget.type === 'recipe_step'
-          ? { recipe_step_id: bindingTarget.id, record_id: null, recipe_id: null }
-          : { recipe_id: bindingTarget.id, record_id: null, recipe_step_id: null };
+          ? { recipe_step_id: bindingTarget.id }
+          : { recipe_id: bindingTarget.id };
 
     await Promise.all(
       selectedIds.map((id) =>
@@ -218,9 +227,11 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
     const confirmed = window.confirm(`确认删除选中的 ${selectedIds.length} 个素材？删除后会从所有已绑定位置移除。`);
     if (!confirmed) return;
 
-    await Promise.all(
-      selectedIds.map((id) => fetch(`/api/materials?id=${id}`, { method: 'DELETE' }))
-    );
+    await Promise.all(selectedIds.map(async (id) => {
+      const response = await fetch(`/api/materials?id=${id}&detach_mutable_references=1`, { method: 'DELETE' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.code !== 0) throw new Error(data.message || '素材删除失败');
+    }));
 
     toast.success(`已删除 ${selectedIds.length} 个素材`);
     setSelectedIds([]);
@@ -326,9 +337,9 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
                   ) : (
                     <>
                       {isPendingVideo ? (
-                        <div className="flex h-full w-full items-center justify-center bg-muted text-[10px] text-muted-foreground">加载中</div>
+                        <div className="flex h-full w-full items-center justify-center bg-muted text-xs text-muted-foreground">加载中</div>
                       ) : (
-                        <video src={resolvedUrl} className="h-full w-full object-cover" muted preload="metadata" />
+                        <video src={toPlayableVideoSrc(resolvedUrl)} className="h-full w-full object-cover" muted preload="metadata" />
                       )}
                       <div className="absolute inset-0 flex items-center justify-center bg-black/20">
                         <Play className="h-5 w-5 fill-white text-white" />
@@ -336,7 +347,7 @@ export function MaterialEvidenceRail({ taskId, bindingTarget, onMaterialsChange,
                     </>
                   )}
                   <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-1.5">
-                    <div className="truncate text-[10px] text-white">{material.file_name}</div>
+                    <div className="truncate text-xs text-white">{material.file_name}</div>
                   </div>
                   <div className="absolute left-1.5 top-1.5 rounded-full bg-background/90 p-1">
                     {selected ? <Check className="h-3.5 w-3.5 text-primary" /> : <Upload className="h-3.5 w-3.5 text-muted-foreground" />}

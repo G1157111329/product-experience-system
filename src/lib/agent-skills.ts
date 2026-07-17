@@ -5,6 +5,7 @@ export const AGENT_SKILL_KEYS = [
   'problem_detection',
   'report_summary',
   'report_product_compare',
+  'task_action_plan',
 ] as const;
 
 export type AgentSkillKey = typeof AGENT_SKILL_KEYS[number];
@@ -40,6 +41,21 @@ export interface NormalizedPresetSuggestions {
 
 export function getDefaultSkillDefinitions(): DefaultSkillDefinition[] {
   return [
+    {
+      skillKey: 'task_action_plan',
+      name: 'Hermes 任务录入与素材关联',
+      description: '基于当前任务四类录入数据，生成需要用户确认的安全写入计划。',
+      systemPrompt: `你是产品体验管理平台的 Hermes 任务协作技能。只输出 JSON：{"reply":"给用户的说明","actions":[...] }。
+你只能基于提供的 ID 与数据提出操作，不能编造 ID，也不能提出删除、配置、权限、冻结、发布、导出操作。所有 actions 只是一份待用户确认的计划，绝不自动执行。
+允许 actions：record_create、record_update、recipe_create、recipe_update、recipe_step_create、recipe_step_update、comparison_matrix_seed、comparison_object_create、comparison_category_create、comparison_cell_update、data_matrix_create、data_matrix_category_create、data_matrix_cell_update、material_rename、material_bind、comparison_cell_material_bind、data_matrix_cell_material_bind、issue_create、issue_update。
+record_create 必须包含 check_item，可带 evaluation_result（合格/不合格/待定）和标准/结果字段；recipe_update 只可修改已有 recipe_id 的名称、食材/参数、效果描述和三态；data_matrix_create 必须包含 name；data_matrix_category_create 必须包含 matrix_id、label 和 level（1 或 2，二级还必须带 parent_id）；comparison_object_create 必须包含 object_name；comparison_category_create 必须包含 label，细项 node_type="item" 还必须带 parent_id；data_matrix_cell_update 必须带 matrix_id、leaf_row_id、column_id；material_bind 只能关联上下文中的素材到记录、食谱、步骤或问题；comparison_cell_material_bind 必须带 material_id 和 comparison_cell_id；data_matrix_cell_material_bind 必须带 material_id、matrix_id、leaf_row_id、column_id，且列必须是图片/素材列。素材整理或重命名时使用 material_rename，payload 必须含 material_id 与 naming_mode:"context"，不得自行填写 file_name；系统会按所属五感标准描述、食谱功能名称、对比矩阵对象*大类*细项或数据矩阵一级大类_二级细项自动命名并追加顺序号。若用户要求修改冻结报告，说明必须回到任务源数据编辑并重新生成报告，不产生报告写入 action。`,
+      userPromptTemplate: `当前任务结构化上下文：
+{{task_snapshot}}
+
+会话：
+{{conversation}}`,
+      outputSchema: { reply: 'string', actions: [{ type: 'safe agent action', payload: 'object' }] },
+    },
     {
       skillKey: 'senses_standard_preset',
       name: '五感体验标准预设',

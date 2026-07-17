@@ -1,13 +1,15 @@
 'use client';
 
 import React, { useEffect, useId, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { evaluationStatusLabel } from '@/lib/evaluation-status';
-import { excludeClaimedRecipeMediaFromEffects, type FrozenIssue, type FrozenMedia, type FrozenRecipeContext, type FrozenReportViewModel } from '@/lib/report-frozen-view';
+import { type FrozenIssue, type FrozenMedia, type FrozenRecipeContext, type FrozenReportViewModel } from '@/lib/report-frozen-view';
 import type { ReportFrozenTabKey } from '@/lib/report-frozen-tabs';
 import { ReportTabBar } from '@/app/(main)/reports/[id]/components/report-tab-bar';
 import { ReportMatrixTab, type MatrixData } from '@/app/(main)/reports/[id]/components/report-matrix-tab';
 import { ReportMediaGrid, type ReportMediaRole } from '@/components/reports/report-media-grid';
 import { ReportSummaryTab } from '@/app/(main)/reports/[id]/components/report-summary-tab';
+import { withActiveTabSearch } from '@/lib/tab-url-state';
 
 const TAB_LABELS: Record<ReportFrozenTabKey, string> = {
   summary: '总结',
@@ -22,7 +24,7 @@ export function resolveFrozenReportTab(
   current: ReportFrozenTabKey,
   reportChanged = false,
 ): ReportFrozenTabKey {
-  if (reportChanged) return tabs.includes('summary') ? 'summary' : tabs[0] ?? 'summary';
+  void reportChanged;
   if (tabs.includes(current)) return current;
   if (tabs.includes('summary')) return 'summary';
   return tabs[0] ?? 'summary';
@@ -80,17 +82,18 @@ function issueStatusLabel(status: string) {
   return ({ open: '\u5f85\u6574\u6539', rectifying: '\u6574\u6539\u4e2d', verified_closed: '\u5df2\u6574\u6539', waived: '\u4e0d\u6574\u6539' }[status] ?? status);
 }
 function issueSourceLabel(kind: FrozenReportViewModel['issues'][number]['sourceKind']) {
-  return ({ sensory: '\u4e94\u611f\u4f53\u9a8c', function: '\u98df\u8c31/\u529f\u80fd', comparison: '\u98df\u8c31/\u529f\u80fd-\u5bf9\u6bd4\u77e9\u9635', matrix: '\u6570\u636e\u77e9\u9635' }[kind]);
+  return ({ sensory: '\u4e94\u611f\u4f53\u9a8c', function: '\u98df\u8c31/\u529f\u80fd', comparison: '\u5bf9\u6bd4\u77e9\u9635', matrix: '\u6570\u636e\u77e9\u9635' }[kind]);
 }
 
 function IssueContextLines({ issue }: { issue: FrozenReportViewModel['issues'][number] }) {
   const context = issue.context ?? { object: '', project: '', item: '' };
+  const isNonStandard = context.isNonStandard === true;
   const lines = issue.sourceKind === 'sensory'
     ? [
-      ['\u68c0\u9a8c\u6807\u51c6\u7c7b\u578b', context.standardType],
+      ...(isNonStandard ? [] : [['\u68c0\u9a8c\u6807\u51c6\u7c7b\u578b', context.standardType]] as [string, string | undefined][]),
       ['\u68c0\u9a8c\u8981\u6c42\u53ca\u8303\u56f4', context.inspectionRange],
-      ['\u68c0\u67e5\u6807\u51c6', context.inspectionStandard],
-      ['\u63cf\u8ff0\u68c0\u67e5\u9879\u5185\u5bb9', context.nonStandardContent],
+      ...(isNonStandard ? [] : [['\u68c0\u67e5\u6807\u51c6', context.inspectionStandard]] as [string, string | undefined][]),
+      ['\u63cf\u8ff0\u68c0\u67e5\u9879\u5185\u5bb9', context.descriptionResult],
       ['\u68c0\u67e5\u7ed3\u679c', context.checkResult],
     ]
     : issue.sourceKind === 'matrix'
@@ -104,7 +107,7 @@ function IssueContextLines({ issue }: { issue: FrozenReportViewModel['issues'][n
         ['\u5bf9\u8c61', context.object],
         ['\u9879\u76ee', context.project],
         ['\u7ec6\u9879', context.item],
-        ['\u95ee\u9898', issue.details || issue.title],
+        ...(context.problemPoints ?? []).map((point, index) => [`\u95ee\u9898${index + 1}`, point] as [string, string]),
       ] : [];
   const visible = lines.filter((line): line is [string, string] => Boolean(line[1]));
   return visible.length > 0 ? (
@@ -152,7 +155,7 @@ function RecipeIssueFacts({ recipe, carrierKey }: { recipe: FrozenRecipeContext;
 
 function FrozenPanel({ model, active, onManageIssue }: { model: FrozenReportViewModel; active: ReportFrozenTabKey; onManageIssue?: (issue: FrozenIssue) => void }) {
   const [expandedIssueIds, setExpandedIssueIds] = useState<Set<string>>(() => new Set());
-  const visibleFunctionEffects = excludeClaimedRecipeMediaFromEffects(model.functionEffects, model.issues);
+  const visibleFunctionEffects = model.functionEffects;
   if (active === 'summary') {
     return <ReportSummaryTab data={{
       aiSummary: model.summary.aiSummary,
@@ -166,7 +169,6 @@ function FrozenPanel({ model, active, onManageIssue }: { model: FrozenReportView
       <div className="space-y-4">
         {model.issues.map((issue) => {
           const latest = issue.liveOverlay.retest.latest;
-          const olderRetests = issue.liveOverlay.retest.history.slice(1);
           const rectified = issue.liveOverlay.status === 'verified_closed';
           const expanded = expandedIssueIds.has(issue.id);
           const StatusElement = issue.canManage && issue.liveIssueId && onManageIssue ? 'button' : 'span';
@@ -193,7 +195,9 @@ function FrozenPanel({ model, active, onManageIssue }: { model: FrozenReportView
               >
                 <span data-issue-field="level" className="inline-flex shrink-0 items-center rounded border px-1.5 py-0.5 text-xs leading-5 text-muted-foreground">{issue.level || '—'}</span>
                 <span data-issue-field="source" className="inline-flex shrink-0 items-center rounded border border-primary/30 bg-primary/5 px-1.5 py-0.5 text-xs leading-5 text-primary">{issueSourceLabel(issue.sourceKind)}</span>
-                <span data-issue-field="description" className="min-w-0 break-words font-medium leading-6">{issue.title}</span>
+                <span data-issue-field="description" className="min-w-0 break-words font-medium leading-6">
+                  {issue.sourceKind === 'sensory' ? `\u95ee\u9898\u63cf\u8ff0\uff1a${issue.title}` : issue.sourceKind === 'comparison' ? `\u95ee\u9898\u63cf\u8ff0\uff1a${issue.title}` : issue.title}
+                </span>
               </button>
               <StatusElement
                 {...statusActionProps}
@@ -207,15 +211,15 @@ function FrozenPanel({ model, active, onManageIssue }: { model: FrozenReportView
               <IssueContextLines issue={issue} />
               {issue.recipe ? <>
                 <RecipeIssueFacts recipe={issue.recipe} carrierKey={model.header.id} />
-                <MediaList items={issue.evidence} role="evidence" label="问题证据" carrierKey={model.header.id} />
+                <MediaList items={issue.evidence} role="evidence" label={issue.sourceKind === 'comparison' ? '素材' : '附件素材'} carrierKey={model.header.id} />
               </> : <>
-                <MediaList items={issue.evidence} role="evidence" label="问题证据" carrierKey={model.header.id} />
+                <MediaList items={issue.evidence} role="evidence" label={issue.sourceKind === 'comparison' ? '素材' : '附件素材'} carrierKey={model.header.id} />
               </>}
-              {rectified && (issue.liveOverlay.rectification || issue.liveOverlay.evidence.length > 0) && (
+              {rectified && (
                 <div className="rounded-md bg-muted/40 p-3 text-sm">
                   <p className="font-medium">整改效果评价</p>
-                  {issue.liveOverlay.rectification && <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{issue.liveOverlay.rectification}</p>}
-                  <div className="mt-2"><MediaList items={issue.liveOverlay.evidence} role="evidence" label="整改证据" carrierKey={model.header.id} /></div>
+                  <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{issue.liveOverlay.rectification || '—'}</p>
+                  <div className="mt-2"><MediaList items={issue.liveOverlay.evidence} role="evidence" label="整改素材" carrierKey={model.header.id} /></div>
                 </div>
               )}
               {latest && (
@@ -227,21 +231,6 @@ function FrozenPanel({ model, active, onManageIssue }: { model: FrozenReportView
                     {(latest.createdAt || latest.createdBy) && <p className="mt-1 text-xs">{[latest.createdAt, latest.createdBy].filter(Boolean).join(' · ')}</p>}
                     <div className="mt-2"><MediaList items={latest.evidence} role="evidence" label="复测证据" carrierKey={model.header.id} /></div>
                   </div>
-                  {olderRetests.length > 0 && (
-                    <details className="rounded-md border bg-background px-3 py-2">
-                      <summary className="cursor-pointer font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">历史复测（{olderRetests.length}）</summary>
-                      <ol className="mt-3 space-y-3 border-t pt-3">
-                        {olderRetests.map((retest) => (
-                          <li key={retest.id} data-content-id={`re-evaluation:${retest.id}`} className="rounded-md bg-muted/20 p-3 text-muted-foreground">
-                            <p>结果：{evaluationStatusLabel(retest.result)}</p>
-                            {retest.description && <p className="mt-1 whitespace-pre-wrap">{retest.description}</p>}
-                            {(retest.createdAt || retest.createdBy) && <p className="mt-1 text-xs">{[retest.createdAt, retest.createdBy].filter(Boolean).join(' · ')}</p>}
-                            <div className="mt-2"><MediaList items={retest.evidence} role="evidence" label="复测证据" carrierKey={model.header.id} /></div>
-                          </li>
-                        ))}
-                      </ol>
-                    </details>
-                  )}
                   {issue.liveOverlay.retest.count >= 2 && <p className="text-muted-foreground">整改复测记录数：{issue.liveOverlay.retest.count}</p>}
                 </div>
               )}
@@ -288,10 +277,19 @@ export function FrozenReportReader({ model, instanceId, onManageIssue }: { model
   const reactId = useId();
   const domPrefix = frozenReaderDomPrefix(model.header.id, instanceId ?? reactId);
   const tabSignature = model.tabs.join('|');
-  const [active, setActive] = useState<ReportFrozenTabKey>(() => resolveFrozenReportTab(model.tabs, 'summary'));
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams.get('tab') as ReportFrozenTabKey | null;
+  const [active, setActive] = useState<ReportFrozenTabKey>(() => resolveFrozenReportTab(model.tabs, requestedTab ?? 'summary'));
   useEffect(() => {
-    setActive((current) => resolveFrozenReportTab(model.tabs, current, true));
+    setActive((current) => resolveFrozenReportTab(model.tabs, current));
   }, [model.header.id, tabSignature, model.tabs]);
+  const changeActiveTab = (key: string) => {
+    const tab = key as ReportFrozenTabKey;
+    setActive(tab);
+    if (typeof window === 'undefined') return;
+    const search = withActiveTabSearch(window.location.search, tab);
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}?${search}`);
+  };
   const tabs = useMemo(() => model.tabs.map((key) => ({
     key,
     label: TAB_LABELS[key],
@@ -300,7 +298,7 @@ export function FrozenReportReader({ model, instanceId, onManageIssue }: { model
 
   return (
     <section data-testid="frozen-report-reader">
-      <ReportTabBar idPrefix={domPrefix} tabs={tabs} active={active} onChange={(key) => setActive(key as ReportFrozenTabKey)} />
+      <ReportTabBar idPrefix={domPrefix} tabs={tabs} active={active} onChange={changeActiveTab} />
       {model.tabs.map((key) => (
         <div
           key={key}

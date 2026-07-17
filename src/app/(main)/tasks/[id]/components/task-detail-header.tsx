@@ -61,7 +61,7 @@ export function TaskDetailHeader({
           className="w-full text-left rounded-lg border bg-primary/5 border-primary/20 p-3 shadow-sm transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <div className="flex flex-wrap items-center gap-2 min-w-0">
-            <Badge className="shrink-0 text-[10px]">{aiSummary.tag || 'AI总结'}</Badge>
+            <Badge className="shrink-0 text-xs">{aiSummary.tag || 'AI总结'}</Badge>
             <span className="text-sm font-medium shrink-0">{aiSummary.satisfaction_score}/10</span>
             <span className="basis-full text-xs text-muted-foreground line-clamp-2 min-w-0 sm:basis-auto sm:truncate">{aiSummary.summary || '点击查看和编辑AI总结'}</span>
             <Pencil className="h-3.5 w-3.5 text-muted-foreground shrink-0 ml-auto" />

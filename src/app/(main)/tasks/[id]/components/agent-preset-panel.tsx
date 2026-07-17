@@ -193,7 +193,7 @@ export function AgentPresetPanel({
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="break-all text-sm font-medium">{item.focus || item.reason || item.standardItemId}</span>
-                        {item.standardCategory && <Badge variant="outline" className="text-[10px]">{item.standardCategory}</Badge>}
+                        {item.standardCategory && <Badge variant="outline" className="text-xs">{item.standardCategory}</Badge>}
                       </div>
                       <p className="mt-1 break-all text-xs leading-relaxed text-muted-foreground">
                         {item.reason || 'AI推荐重点检查'}
@@ -261,7 +261,7 @@ export function AgentPresetPanel({
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="break-all text-sm font-medium">{item.name}</span>
-                            <Badge variant="outline" className="text-[10px]">{item.recipeType || '食谱/功能'}</Badge>
+                            <Badge variant="outline" className="text-xs">{item.recipeType || '食谱/功能'}</Badge>
                           </div>
                           <p className="mt-1 break-all text-xs text-muted-foreground">{item.ingredients || '暂无食材/参数'}</p>
                         </div>
@@ -283,7 +283,7 @@ export function AgentPresetPanel({
                           ) : (
                             item.steps.map((step, index) => (
                               <div key={`${item.name}-${index}`} className="flex gap-2 rounded-md bg-muted/30 p-2 text-xs">
-                                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground">
+                                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground">
                                   {index + 1}
                                 </span>
                                 <span className={cn('min-w-0 flex-1 break-all', !step.operation && 'text-muted-foreground')}>

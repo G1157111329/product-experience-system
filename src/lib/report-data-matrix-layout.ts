@@ -13,6 +13,7 @@ export interface ReportDataMatrixReadMedia {
   name: string;
   type: string;
   url: string;
+  posterUrl?: string;
 }
 
 export interface ReportDataMatrixReadIssue {
@@ -47,6 +48,13 @@ export interface ReportDataMatrixReadLayout {
   summary?: string;
   cards: ReportDataMatrixReadCard[];
   narratives: ReportDataMatrixReadNarrative[];
+}
+
+export interface ReportDataMatrixPrintColumn {
+  id: string;
+  label: string;
+  unit?: string;
+  group: ReportDataMatrixFieldGroup;
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -90,7 +98,7 @@ function fieldGroup(value: UnknownRecord): ReportDataMatrixFieldGroup {
 
 function mediaItem(value: unknown): ReportDataMatrixReadMedia | null {
   const item = record(value);
-  const url = text(item.url || item.fileUrl || item.file_url || item.filePath || item.file_path);
+  const url = text(item.filePath || item.file_path || item.url || item.fileUrl || item.file_url);
   if (!url) return null;
   const name = text(item.name || item.fileName || item.file_name) || '素材';
   return {
@@ -98,6 +106,9 @@ function mediaItem(value: unknown): ReportDataMatrixReadMedia | null {
     name,
     type: text(item.type || item.materialType || item.material_type) || 'image',
     url,
+    ...(text(item.posterUrl || item.poster_url || item.thumbnailUrl || item.thumbnail_url)
+      ? { posterUrl: text(item.posterUrl || item.poster_url || item.thumbnailUrl || item.thumbnail_url) }
+      : {}),
   };
 }
 
@@ -250,4 +261,15 @@ export function dataMatrixReadLayout(projection: unknown): ReportDataMatrixReadL
 
 export function dataMatrixReadCards(projection: unknown): ReportDataMatrixReadCard[] {
   return dataMatrixReadLayout(projection).cards;
+}
+
+/** Keep the complete matrix shape when a frozen report is printed. */
+export function dataMatrixPrintColumns(cards: ReportDataMatrixReadCard[]): ReportDataMatrixPrintColumn[] {
+  const columns = new Map<string, ReportDataMatrixPrintColumn>();
+  for (const card of cards) {
+    for (const field of card.fields) {
+      if (!columns.has(field.id)) columns.set(field.id, { id: field.id, label: field.label, unit: field.unit, group: field.group });
+    }
+  }
+  return [...columns.values()];
 }

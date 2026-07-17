@@ -52,6 +52,7 @@ export function classifyIssueRetestError(error: unknown): ClassifiedIssueRetestE
   if (message.includes('issue not found')) return { status: 404, message: '问题不存在', log: false };
   if (message.includes('invalid retest result')) return { status: 400, message: '复测结果格式错误', log: false };
   if (message.includes('material_ids must be an array')) return { status: 400, message: '素材参数格式错误', log: false };
+  if (message.includes('invalid retest material')) return { status: 400, message: '所选素材不属于该问题任务', log: false };
   if (message.includes('invalid or occupied retest material')) {
     return { status: 409, message: '所选素材不可用于本次复测，请刷新后重试', log: false };
   }

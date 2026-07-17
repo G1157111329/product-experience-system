@@ -56,14 +56,61 @@ export function TaskAuthoringHeader({
 }: TaskAuthoringHeaderProps) {
   const cards: TaskStatusCard[] = [
     { label: '五感体验', value: `${sensesCount} 条记录`, section: 'senses' },
-    { label: '单一食谱功能', value: `${recipeCount} 个功能`, section: 'functions' },
+    { label: '食谱/功能', value: `${recipeCount} 个功能`, section: 'functions' },
     { label: '数据矩阵', value: hasMatrixInstance ? '已创建' : '未创建', section: 'matrix', available: hasMatrixInstance },
     { label: '对比矩阵', value: hasComparisonInstance ? '已创建' : '未创建', section: 'comparison', available: hasComparisonInstance },
     { label: '报告信息', value: hasAiSummary ? '已有总结' : '待生成', section: 'info' },
   ];
 
   return (
-    <section aria-label="任务上下文" className="min-h-24 rounded-lg border bg-card p-4 shadow-sm sm:p-5">
+    <section aria-label="任务上下文" className="rounded-lg border bg-card p-2 shadow-sm md:min-h-24 md:p-5">
+      <div className="flex items-start gap-2 md:hidden" data-testid="mobile-task-context">
+        <Button variant="ghost" size="icon" className="min-h-11 min-w-11 shrink-0" onClick={onBack} aria-label="返回任务列表">
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <details className="md:hidden">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-md px-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <span className="min-w-0 flex-1 truncate text-sm font-semibold">{title}</span>
+            <Badge variant="secondary" className={cn('shrink-0', statusClassName)}>{statusLabel}</Badge>
+            <span className="text-xs text-muted-foreground">任务导航</span>
+          </summary>
+          <div className="mt-2 space-y-3 border-t pt-3">
+            <div>
+              <p className="break-words text-xs text-muted-foreground">{metadata}</p>
+              <p className="mt-1 text-xs text-muted-foreground">问题数：{issueCount}</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" className="min-h-11 min-w-0" onClick={onGenerateSummary} disabled={summarizing}>
+                <Sparkles className="mr-1.5 h-4 w-4" />
+                {summarizing ? '总结中...' : '生成总结'}
+              </Button>
+              <Button className="min-h-11 min-w-0" onClick={onGenerateReport} disabled={generatingReport}>
+                <FileText className="mr-1.5 h-4 w-4" />
+                {generatingReport ? '生成中...' : '生成报告'}
+              </Button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {cards.map((card) => (
+                <button
+                  key={card.label}
+                  type="button"
+                  onClick={() => card.section && onOpenSection(card.section)}
+                  className={cn(
+                    'min-h-11 min-w-0 rounded-md border bg-background p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                    card.available === false && 'border-dashed text-muted-foreground',
+                  )}
+                >
+                  <span className="block truncate text-xs font-medium text-muted-foreground">{card.label}</span>
+                  <span className="mt-1 block truncate text-sm font-semibold">{card.value}</span>
+                </button>
+              ))}
+            </div>
+            {transferAction}
+          </div>
+        </details>
+      </div>
+
+      <div className="hidden md:block">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="flex min-w-0 items-start gap-3">
           <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={onBack} aria-label="返回任务列表">
@@ -109,6 +156,7 @@ export function TaskAuthoringHeader({
             <div className="mt-1 truncate text-sm font-semibold">{card.value}</div>
           </button>
         ))}
+      </div>
       </div>
     </section>
   );

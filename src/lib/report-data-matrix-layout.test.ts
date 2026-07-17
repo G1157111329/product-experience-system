@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { dataMatrixReadLayout } from './report-data-matrix-layout';
+import { dataMatrixPrintColumns, dataMatrixReadLayout } from './report-data-matrix-layout';
 
 const v2 = {
   matrixId: 'matrix-v2',
@@ -71,12 +71,13 @@ const v3 = {
   }],
   cellMedia: {
     'row-v3:primary': [
-      { materialId: 'media-v3', materialType: 'image', fileName: '清透度.jpg', fileUrl: '/uploads/v3.jpg' },
+      { materialId: 'media-v3', materialType: 'image', fileName: '清透度.jpg', filePath: 'materials/task-a/v3.jpg', fileUrl: '/api/materials/file/materials/task-a/v3.jpg?exp=stale' },
       { materialId: '', materialType: 'image', fileName: '无 ID 素材.jpg', fileUrl: '/uploads/no-id.jpg' },
     ],
     'row-v3:media': [
-      { materialId: 'media-v3', materialType: 'image', fileName: '清透度.jpg', fileUrl: '/uploads/v3.jpg' },
+      { materialId: 'media-v3', materialType: 'image', fileName: '清透度.jpg', filePath: 'materials/task-a/v3.jpg', fileUrl: '/api/materials/file/materials/task-a/v3.jpg?exp=stale' },
       { materialId: '', materialType: 'image', fileName: '无 ID 素材.jpg', fileUrl: '/uploads/no-id.jpg' },
+      { materialId: 'video-v3', materialType: 'video', fileName: '运行.mp4', filePath: 'materials/task-a/run.mp4', posterUrl: '/api/materials/poster/materials/task-a/run.mp4' },
     ],
   },
   narratives: [{ blockType: 'summary', content: '整体表现稳定', showInReport: true }],
@@ -113,8 +114,20 @@ assert.deepEqual(v3Layout.cards[0]?.fields.map((field) => [field.label, field.gr
 assert.equal(v3Layout.cards[0]?.fields.find((field) => field.label === '温度')?.value, '0');
 assert.equal(v3Layout.cards[0]?.fields.some((field) => field.value === ''), false);
 assert.deepEqual(v3Layout.cards[0]?.issues.map((issue) => [issue.text, issue.status]), [['果渣偏多', 'open']]);
-assert.deepEqual(v3Layout.cards[0]?.media.map((item) => item.url), ['/uploads/v3.jpg', '/uploads/no-id.jpg']);
-assert.deepEqual(v3Layout.cards[0]?.media.map((item) => item.id), ['media-v3', 'file:/uploads/no-id.jpg|无 ID 素材.jpg']);
+assert.deepEqual(v3Layout.cards[0]?.media.map((item) => item.url), ['materials/task-a/v3.jpg', '/uploads/no-id.jpg', 'materials/task-a/run.mp4']);
+assert.deepEqual(v3Layout.cards[0]?.media.map((item) => item.id), ['media-v3', 'file:/uploads/no-id.jpg|无 ID 素材.jpg', 'video-v3']);
+assert.equal(v3Layout.cards[0]?.media.find((item) => item.id === 'video-v3')?.posterUrl, '/api/materials/poster/materials/task-a/run.mp4');
 assert.deepEqual(v3Layout.narratives.map((item) => item.text), ['整体表现稳定']);
+
+assert.deepEqual(dataMatrixPrintColumns(v3Layout.cards).map((column) => column.label), [
+  '温度',
+  '出汁率',
+  '效果评价',
+]);
+assert.deepEqual(dataMatrixPrintColumns(v3Layout.cards).map((column) => column.group), [
+  'inputs',
+  'calculated',
+  'evaluation',
+]);
 
 console.log('report data matrix read layout tests passed');

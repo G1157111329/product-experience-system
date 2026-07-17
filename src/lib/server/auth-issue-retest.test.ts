@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { canMutateIssueReEvaluation, canMutateIssueRetest, type AuthUser, type ClientLike } from './auth';
+import { canManageIssue, canMutateIssueReEvaluation, canMutateIssueRetest, canReadIssue, type AuthUser, type ClientLike } from './auth';
 
 function fakeClient(rows: Record<string, Record<string, unknown>[]>): ClientLike {
   return {
@@ -28,12 +28,14 @@ async function main() {
       { id: 'issue-owned-task', task_id: 'task-owned', responsible_person: null },
       { id: 'issue-responsible', task_id: 'task-other', responsible_person: '研发小王' },
       { id: 'issue-other', task_id: 'task-other', responsible_person: 'other' },
+      { id: 'issue-report-scoped', task_id: 'task-other', source_report_id: 'report-other', responsible_person: 'other' },
     ],
     experience_tasks: [
       { id: 'task-owned', created_by: 'executor-1', owner_id: 'task-owner-1' },
       { id: 'task-other', created_by: 'someone', owner_id: 'someone' },
     ],
     issue_re_evaluations: [{ id: 'retest-owned', issue_id: 'issue-owned-task' }],
+    reports: [{ id: 'report-other', task_id: 'task-other' }],
   });
 
   assert.equal(await canMutateIssueRetest(client, user('executive_viewer', 'viewer'), 'issue-other'), false);
@@ -48,6 +50,18 @@ async function main() {
   assert.equal(await canMutateIssueReEvaluation(client, user('executor', 'executor-1'), 'retest-owned'), true);
   assert.equal(await canMutateIssueReEvaluation(client, user('executive_viewer', 'viewer'), 'retest-owned'), false);
   assert.equal(await canMutateIssueRetest(client, user('executor', 'executor-1'), 'missing'), false);
+  assert.equal(await canReadIssue(client, user('reviewer', 'reviewer'), 'issue-other'), true);
+  assert.equal(await canReadIssue(client, user('product_manager', 'pm'), 'issue-other'), true);
+  assert.equal(await canReadIssue(client, user('rectification_owner', 'dev-1', '研发小王', 'wang'), 'issue-responsible'), true);
+  assert.equal(await canReadIssue(client, user('executor', 'executor-1'), 'issue-owned-task'), true);
+  assert.equal(await canReadIssue(client, user('executive_viewer', 'viewer'), 'issue-other'), true);
+  assert.equal(await canReadIssue(client, user('executor', 'executor-1'), 'issue-report-scoped'), false);
+  assert.equal(await canManageIssue(client, user('task_owner', 'task-owner-1'), 'issue-owned-task'), true);
+  assert.equal(await canManageIssue(client, user('task_owner', 'task-owner-other'), 'issue-other'), true, 'TASK_EDIT_ALL grants canonical PUT management outside task ownership');
+  assert.equal(await canManageIssue(client, user('executor', 'executor-1'), 'issue-owned-task'), true);
+  assert.equal(await canManageIssue(client, user('rectification_owner', 'dev-1', '研发小王', 'wang'), 'issue-responsible'), false);
+  assert.equal(await canManageIssue(client, user('product_manager', 'pm'), 'issue-other'), false);
+  assert.equal(await canManageIssue(client, user('reviewer', 'reviewer'), 'issue-other'), false);
 
   console.log('issue retest mutation auth passed');
 }

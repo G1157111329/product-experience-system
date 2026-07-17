@@ -1,8 +1,10 @@
 export type TaskEditExecution = 'direct' | 'confirm' | 'blocked';
 
 const DIRECT_ACTIONS = new Set([
+  'record_create',
   'task_create',
   'recipe_create',
+  'recipe_update',
   'recipe_step_create',
   'recipe_step_update',
   'comparison_matrix_seed',
@@ -10,6 +12,8 @@ const DIRECT_ACTIONS = new Set([
   'material_ai_result_update',
   'material_rename',
   'material_bind',
+  'comparison_cell_material_bind',
+  'data_matrix_cell_material_bind',
   'issue_create',
   'issue_update',
   'record_update',

@@ -14,6 +14,7 @@ import { ok, fail, unauthorized, withTrace } from '@/lib/server/api-v1/response'
 import { conversations, conversationMessages } from '@/storage/database/shared/schema';
 import { getV3FeatureFlags } from '@/lib/feature-flags-v3';
 import { executeHermesRun } from '@/lib/server/hermes/runtime';
+import { planHermesTaskActions } from '@/lib/server/hermes/task-action-plan';
 import { canAccessConversationRow } from '@/lib/server/agent-access';
 import { stripAssistantReasoning } from '@/lib/assistant-output';
 
@@ -99,21 +100,29 @@ export const POST = withTrace<[NextRequest, { params: Promise<{ conversationId: 
       .map((m) => `${m.role}: ${m.content ?? ''}`)
       .join('\n');
 
-    const run = await executeHermesRun({
+    const taskPlan = conv.taskId
+      ? await planHermesTaskActions({
+          agentInstanceId: conv.agentInstanceId,
+          conversationId,
+          taskId: conv.taskId,
+          userId: user.id,
+          historyText,
+        })
+      : null;
+    const run = taskPlan?.run ?? await executeHermesRun({
       agentInstanceId: conv.agentInstanceId,
       conversationId,
       trigger: 'manual',
       systemPrompt:
-        '你是产品体验管理平台的AI助手。基于用户消息给出简洁、可执行的建议。不要编造未提供的数据。只输出面向用户的最终答复，不要输出<think>、思考过程或内部推理。',
+        '你是产品体验管理平台的AI助手。基于用户消息给出简洁、可执行的建议。不要编造未提供的数据。所有面向用户的回复必须使用简体中文；仅在必要时保留 ID、文件名、公式和数字。只输出面向用户的最终答复，不要输出<think>、思考过程或内部推理。',
       userPrompt: `对话上下文：\n${historyText}\n\n请回复最新用户消息。`,
       userId: user.id,
-      taskId: conv.taskId ?? undefined,
     });
 
     const assistantContent = stripAssistantReasoning(
-      run.status === 'succeeded' && run.output
+      taskPlan?.reply || (run.status === 'succeeded' && run.output
         ? run.output
-        : `助手暂不可用${run.errorCode ? `（${run.errorCode}）` : ''}，请稍后重试。`,
+        : `助手暂不可用${run.errorCode ? `（${run.errorCode}）` : ''}，请稍后重试。`),
     );
 
     const [assistantMsg] = await db
@@ -127,6 +136,22 @@ export const POST = withTrace<[NextRequest, { params: Promise<{ conversationId: 
       .returning()
       .execute();
 
+    let actionPlanMessage = null;
+    if (taskPlan && taskPlan.actions.length > 0) {
+      const [savedPlan] = await db
+        .insert(conversationMessages)
+        .values({
+          conversationId,
+          role: 'tool',
+          toolName: 'task_action_plan',
+          content: JSON.stringify({ taskId: conv.taskId, actions: taskPlan.actions }),
+          eventSeq: nextSeq + 1,
+        })
+        .returning()
+        .execute();
+      actionPlanMessage = savedPlan;
+    }
+
     await db
       .update(conversations)
       .set({ updatedAt: sql`NOW()` })
@@ -137,6 +162,7 @@ export const POST = withTrace<[NextRequest, { params: Promise<{ conversationId: 
       {
         userMessage: userMsg,
         assistantMessage: assistantMsg,
+        actionPlanMessage,
         runId: run.runId,
         status: run.status,
         errorCode: run.errorCode ?? null,

@@ -115,7 +115,7 @@ export function MatrixToolbar({
       </div>
 
       <div className="ml-auto flex shrink-0 items-center gap-2">
-        <Badge variant="outline" className={cn('gap-1 text-[10px]', badge.className)}>
+        <Badge variant="outline" className={cn('gap-1 text-xs', badge.className)}>
           {badge.label}
         </Badge>
 

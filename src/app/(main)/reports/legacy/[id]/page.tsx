@@ -208,7 +208,7 @@ function ReportPaperSection({
   return (
     <section className={cn('rounded-xl border bg-background p-4 shadow-sm sm:p-5', className)}>
       <div className="mb-4 flex items-start gap-3 border-b pb-3">
-        <span className="rounded-md border bg-muted/30 px-2 py-1 text-[11px] font-semibold tabular-nums text-muted-foreground">
+        <span className="rounded-md border bg-muted/30 px-2 py-1 text-xs font-semibold tabular-nums text-muted-foreground">
           {index}
         </span>
         <div className="min-w-0">
@@ -285,7 +285,7 @@ function AiSummaryBlock({ summary }: { summary?: AiSummaryLike | null }) {
           <ol className="space-y-2">
             {summary.suggestions!.map((item, idx) => (
               <li key={idx} className="flex gap-2 text-sm leading-6 text-muted-foreground">
-                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-foreground">
+                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground">
                   {idx + 1}
                 </span>
                 <span className="break-words">{item}</span>
@@ -321,7 +321,7 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
             .filter(([k]) => !['id', 'selected_standards', 'created_by'].includes(k))
             .map(([key, value]) => (
               <div key={key} className="min-w-0 rounded-md border bg-muted/20 p-2.5">
-                <div className="mb-1 text-[10px] text-muted-foreground">{taskFieldLabels[key] || key}</div>
+                <div className="mb-1 text-xs text-muted-foreground">{taskFieldLabels[key] || key}</div>
                 <div className="break-all font-medium leading-relaxed">
                   {(key === 'created_at' || key === 'updated_at') ? formatBeijingTime(value as string) : String(value || '-')}
                 </div>
@@ -351,23 +351,23 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
             return (
             <div key={issue.id} className="rounded-lg border bg-background p-2.5 space-y-1">
               <div className="flex items-center gap-2">
-                <Badge className={cn('text-[10px] shrink-0', LEVEL_COLORS[issue.level || '二类'] || LEVEL_COLORS['二类'])}>
+                <Badge className={cn('text-xs shrink-0', LEVEL_COLORS[issue.level || '二类'] || LEVEL_COLORS['二类'])}>
                   {issue.level || '二类'}
                 </Badge>
                 {issue.source_type === 'recipe_problem' && (
-                  <Badge variant="outline" className="text-[10px] shrink-0">食谱/功能</Badge>
+                  <Badge variant="outline" className="text-xs shrink-0">食谱/功能</Badge>
                 )}
                 <span className="text-xs flex-1 break-all">{issue.title}</span>
                 <button
                   onClick={() => onStatusClick(issue)}
-                  className={cn('text-[10px] px-1.5 py-0.5 rounded cursor-pointer font-medium transition-colors hover:opacity-80 shrink-0',
+                  className={cn('text-xs px-1.5 py-0.5 rounded cursor-pointer font-medium transition-colors hover:opacity-80 shrink-0',
                     STATUS_COLORS[issue.status] || STATUS_COLORS['待整改'])}
                 >
                   {issue.status || '待整改'}
                 </button>
               </div>
               {issue.description && (
-                <p className="text-[10px] text-muted-foreground pl-1 break-all">{issue.description}</p>
+                <p className="text-xs text-muted-foreground pl-1 break-all">{issue.description}</p>
               )}
               {/* Re-evaluations for recipe_problem issues */}
               {reEvals.length > 0 && (
@@ -377,19 +377,19 @@ function ReportSection({ report, liveIssues, onStatusClick, onPreview }: {
                     return (
                     <div key={re.id} className="rounded bg-muted/30 p-2 space-y-1">
                       <div className="flex items-center gap-1.5">
-                        <Badge variant="secondary" className="text-[10px]">第{idx + 1}次复测</Badge>
+                        <Badge variant="secondary" className="text-xs">第{idx + 1}次复测</Badge>
                         {re.ai_result && (
-                          <Badge variant="outline" className="text-[10px]">评分: {re.ai_result.score}</Badge>
+                          <Badge variant="outline" className="text-xs">评分: {re.ai_result.score}</Badge>
                         )}
-                        <span className="text-[10px] text-muted-foreground ml-auto">
+                        <span className="text-xs text-muted-foreground ml-auto">
                           {new Date(re.created_at).toLocaleDateString('zh-CN')}
                         </span>
                       </div>
                       {re.description && (
-                        <p className="text-[10px] break-all whitespace-pre-wrap">{re.description}</p>
+                        <p className="text-xs break-all whitespace-pre-wrap">{re.description}</p>
                       )}
                       {re.ai_result && re.ai_result.summary && (
-                        <p className="text-[10px] text-muted-foreground break-all">总结: {re.ai_result.summary}</p>
+                        <p className="text-xs text-muted-foreground break-all">总结: {re.ai_result.summary}</p>
                       )}
                       {reMats && reMats.length > 0 && (
                         <MediaGallery materials={reMats} responsive columns={{ mobile: 2, sm: 3 }} onPreview={onPreview} />
@@ -478,14 +478,14 @@ function RecipeEffectSection({ recipes, liveIssues, onIssueClick, onPreview }: {
             className="flex w-full items-center gap-2 p-3 text-left transition-colors hover:bg-muted/30"
           >
             {expanded ? <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
-            <Badge variant="secondary" className="text-[10px] shrink-0">{recipe.recipe_type}</Badge>
+            <Badge variant="secondary" className="text-xs shrink-0">{recipe.recipe_type}</Badge>
             <span className="text-xs font-medium flex-1 min-w-0 truncate">{recipe.name}</span>
             {recipe.effect_score && (
               <Badge className={`text-[9px] shrink-0 ${Number(recipe.effect_score) >= 8 ? 'bg-emerald-600' : Number(recipe.effect_score) >= 6 ? 'bg-blue-600' : Number(recipe.effect_score) >= 4 ? 'bg-amber-600' : 'bg-red-600'} text-white`}>
                 {recipe.effect_score}分
               </Badge>
             )}
-            <span className="text-[10px] text-muted-foreground shrink-0">{totalPoints} 问题</span>
+            <span className="text-xs text-muted-foreground shrink-0">{totalPoints} 问题</span>
           </button>
 
           {/* Always visible: effect evaluation + problem points summary */}
@@ -495,8 +495,8 @@ function RecipeEffectSection({ recipes, liveIssues, onIssueClick, onPreview }: {
                 <div className="flex items-start gap-2">
                   <Star className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
                   <div className="min-w-0 flex-1">
-                    <p className="text-[11px] font-medium text-primary mb-1">效果/出品效果评价</p>
-                    <p className="text-[11px] text-muted-foreground whitespace-pre-wrap break-all">{effectSummary}</p>
+                    <p className="text-xs font-medium text-primary mb-1">效果/出品效果评价</p>
+                    <p className="text-xs text-muted-foreground whitespace-pre-wrap break-all">{effectSummary}</p>
                   </div>
                 </div>
               )}
@@ -508,11 +508,11 @@ function RecipeEffectSection({ recipes, liveIssues, onIssueClick, onPreview }: {
                     return (
                       <div key={`${point.text}-${pointIndex}`} className="space-y-1.5">
                         <p
-                          className={cn('text-[11px] text-amber-600 break-all', linkedIssue && 'cursor-pointer hover:underline')}
+                          className={cn('text-xs text-amber-600 break-all', linkedIssue && 'cursor-pointer hover:underline')}
                           onClick={() => linkedIssue && onIssueClick(linkedIssue)}
                         >
                           {effectPoints.length > 1 ? `问题${pointIndex + 1}: ` : '问题: '}{point.text}
-                          {linkedIssue && <span className="ml-1 text-[10px] text-muted-foreground">[{linkedIssue.status}]</span>}
+                          {linkedIssue && <span className="ml-1 text-xs text-muted-foreground">[{linkedIssue.status}]</span>}
                         </p>
                         {pointMaterials.length > 0 && (
                           <MediaGallery materials={pointMaterials} responsive columns={{ mobile: 2, sm: 2, lg: 3 }} gap="gap-3" onPreview={onPreview} />
@@ -528,7 +528,7 @@ function RecipeEffectSection({ recipes, liveIssues, onIssueClick, onPreview }: {
           {/* Expanded: step-by-step details */}
           {expanded && (recipe.recipe_steps || []).length > 0 && (
             <div className="border-t p-3 space-y-2">
-              <p className="text-[11px] font-medium text-muted-foreground">步骤详情</p>
+              <p className="text-xs font-medium text-muted-foreground">步骤详情</p>
               {(recipe.recipe_steps || []).map((step) => {
                 const problemPoints = getStepProblemPoints(step);
                 const stepMaterials = step.materials || [];
@@ -550,7 +550,7 @@ function RecipeEffectSection({ recipes, liveIssues, onIssueClick, onPreview }: {
                           return (
                           <div key={`${pp.text}-${ppIdx}`} className="space-y-1.5">
                           <p
-                            className={cn('text-[10px] text-amber-600 break-all', linkedIssue && 'cursor-pointer hover:underline')}
+                            className={cn('text-xs text-amber-600 break-all', linkedIssue && 'cursor-pointer hover:underline')}
                             onClick={() => linkedIssue && onIssueClick(linkedIssue)}
                           >
                             {pps.length > 1 && <span className="font-medium">问题{ppIdx + 1}: </span>}
@@ -669,7 +669,7 @@ function MergedIssuesSection({ reports, liveIssuesMap, onIssueClick }: {
             <div key={`${group.key}-${idx}`} className="space-y-2">
               <div className="flex items-center gap-2 border-b pb-1">
                 <span className="text-sm font-semibold">{heading}</span>
-                <Badge variant="secondary" className="text-[10px]">{group.issues.length} 个</Badge>
+                <Badge variant="secondary" className="text-xs">{group.issues.length} 个</Badge>
               </div>
               <div className="space-y-1.5">
                 {group.issues.map(({ issue }) => (
@@ -679,16 +679,16 @@ function MergedIssuesSection({ reports, liveIssuesMap, onIssueClick }: {
                     onClick={() => onIssueClick(issue)}
                     className="flex w-full items-center gap-2 rounded-lg border bg-background p-2 text-left transition-colors hover:bg-muted/30"
                   >
-                    <Badge className={cn('text-[10px] shrink-0', LEVEL_COLORS[issue.level || '二类'] || LEVEL_COLORS['二类'])}>
+                    <Badge className={cn('text-xs shrink-0', LEVEL_COLORS[issue.level || '二类'] || LEVEL_COLORS['二类'])}>
                       {issue.level || '二类'}
                     </Badge>
                     {issue.source_type === 'recipe_problem' ? (
-                      <Badge variant="outline" className="text-[10px] shrink-0">功能</Badge>
+                      <Badge variant="outline" className="text-xs shrink-0">功能</Badge>
                     ) : (
-                      <Badge variant="outline" className="text-[10px] shrink-0">五感</Badge>
+                      <Badge variant="outline" className="text-xs shrink-0">五感</Badge>
                     )}
                     <span className="text-xs flex-1 min-w-0 break-all">{issue.title}</span>
-                    <span className={cn('text-[10px] px-1.5 py-0.5 rounded shrink-0', STATUS_COLORS[issue.status] || STATUS_COLORS['待整改'])}>
+                    <span className={cn('text-xs px-1.5 py-0.5 rounded shrink-0', STATUS_COLORS[issue.status] || STATUS_COLORS['待整改'])}>
                       {issue.status || '待整改'}
                     </span>
                   </button>
@@ -1037,7 +1037,7 @@ export default function ReportDetailPage() {
                 <CardTitle className="text-sm font-medium min-w-0 break-all">
                   {isMerged ? (
                     <>
-                      {rptPhase && <Badge variant="outline" className="text-[10px] mr-1.5">{rptPhase}</Badge>}
+                      {rptPhase && <Badge variant="outline" className="text-xs mr-1.5">{rptPhase}</Badge>}
                       {rpt.title}
                       {rptDate && <span className="text-muted-foreground font-normal ml-2">({rptDate})</span>}
                     </>
@@ -1046,14 +1046,14 @@ export default function ReportDetailPage() {
                   )}
                 </CardTitle>
                 {isMerged && idx > 0 && (
-                  <Badge variant="secondary" className="text-[10px]">{rptType || ''}</Badge>
+                  <Badge variant="secondary" className="text-xs">{rptType || ''}</Badge>
                 )}
               </div>
             </CardHeader>
             <CardContent className="pt-4">
               {idx > 0 && (
                 <div className="border-t border-dashed mb-3 pt-2">
-                  <p className="text-[10px] text-muted-foreground">以下为独立报告内容，与上方报告以分割线区分</p>
+                  <p className="text-xs text-muted-foreground">以下为独立报告内容，与上方报告以分割线区分</p>
                 </div>
               )}
               <ReportSection

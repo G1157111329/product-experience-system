@@ -13,6 +13,7 @@ type SharePayload = {
   frozenViewModel: FrozenReportViewModel;
   siblingReports?: SiblingReport[];
   siblingFrozenViewModels?: Record<string, FrozenReportViewModel>;
+  mergedReportOrder?: string[];
 };
 
 export default function ShareReportPage() {
@@ -48,6 +49,7 @@ export default function ShareReportPage() {
     sharePayload.frozenViewModel,
     sharePayload.siblingReports,
     sharePayload.siblingFrozenViewModels,
+    sharePayload.mergedReportOrder,
   );
   const primary = sharePayload.frozenViewModel;
   const handleExportPDF = () => {

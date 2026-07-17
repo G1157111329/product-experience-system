@@ -1,171 +1,71 @@
-/**
- * Create a V3 excel-like matrix for a task.
- * POST /api/v1/tasks/{id}/matrices
- *
- * Body: { name, description?, view_mode?: 'excel_like_dynamic_matrix' | 'v2_designer' }
- * Default view_mode = excel_like_dynamic_matrix (PRD §13.2).
- */
 import { NextRequest } from 'next/server';
-import { sql } from 'drizzle-orm';
-import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { getDb } from '@/storage/database/pg-db';
-import { canAccessTask, isAuthResponse, requireUser } from '@/lib/server/auth';
-import { writeSecurityAudit } from '@/lib/server/security-audit';
-import { bootstrapV3MatrixView } from '@/lib/matrix/bootstrap-v3';
-import { getV3FeatureFlags } from '@/lib/feature-flags-v3';
-import { ok, fail } from '@/lib/server/api-v1/response';
-import { resolveTraceId } from '@/lib/server/api-v1/trace';
+import { createMatrix, getTaskMatrices } from '@/lib/matrix/design-service';
+import { ensureV3ViewForMatrix } from '@/lib/matrix/bootstrap-v3';
+import {
+  fail,
+  mapErrorStatus,
+  ok,
+  readIdempotentEnvelope,
+  requireTaskContext,
+  resolveMatrixMeta,
+  writeIdempotentEnvelope,
+} from '@/lib/server/api-v1/matrix-api';
 
 export const dynamic = 'force-dynamic';
 
-const inFlightCreates = new Map<string, Promise<void>>();
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const meta = resolveMatrixMeta(request);
+  const { id: taskId } = await params;
 
-function matrixResponseData(matrix: Record<string, unknown>, created: boolean, viewDefinitionId: string | null) {
-  const currentViewDefinitionId = viewDefinitionId
-    ?? (typeof matrix.current_view_definition_id === 'string' ? matrix.current_view_definition_id : null);
-  return {
-    id: matrix.id,
-    taskId: matrix.task_id,
-    name: matrix.name,
-    description: matrix.description,
-    status: matrix.status,
-    viewMode: currentViewDefinitionId ? 'excel_like_dynamic_matrix' : 'v2_designer',
-    currentViewDefinitionId,
-    createdAt: matrix.created_at,
-    created,
-  };
+  const ctx = await requireTaskContext(request, meta, taskId);
+  if (ctx instanceof Response) return ctx;
+
+  try {
+    const matrices = await getTaskMatrices(taskId, ctx.user.id);
+    return ok(meta, matrices);
+  } catch (err) {
+    const e = err as Error & { code?: string };
+    return fail(meta, mapErrorStatus(e.code), e.code || 'MATRIX_LIST_FAILED', e.message || 'list failed');
+  }
 }
 
 export async function POST(
-  req: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const traceId = resolveTraceId(req.headers);
+  const meta = resolveMatrixMeta(request);
   const { id: taskId } = await params;
 
-  const client = getSupabaseClient();
-  const user = await requireUser(req, client);
-  if (isAuthResponse(user)) return fail(traceId, { message: '未认证', status: 401 });
+  const ctx = await requireTaskContext(request, meta, taskId);
+  if (ctx instanceof Response) return ctx;
 
-  if (!(await canAccessTask(client, user, taskId))) {
-    return fail(traceId, { message: '无权访问该任务', status: 403 });
+  const idem = readIdempotentEnvelope(request);
+  if (idem.response) return idem.response;
+
+  const body = (await request.json().catch(() => ({}))) as { name?: string; description?: string };
+  const name = (body.name || '').trim();
+  if (!name) {
+    return fail(meta, 400, 'MX-DESIGN-001', '矩阵名称不能为空');
   }
-
-  const flags = await getV3FeatureFlags();
-  if (!flags.taskMatrixEnabled) {
-    return fail(traceId, { message: '数据矩阵功能未启用', status: 403 });
-  }
-
-  let body: { name?: string; description?: string; view_mode?: string };
-  try {
-    body = await req.json();
-  } catch {
-    return fail(traceId, { message: '请求体不是合法 JSON', status: 400 });
-  }
-
-  if (!body.name?.trim()) {
-    return fail(traceId, { message: '矩阵名称不能为空', status: 400 });
-  }
-
-  const viewMode = body.view_mode === 'v2_designer' ? 'v2_designer' : 'excel_like_dynamic_matrix';
-  const useV3 = viewMode === 'excel_like_dynamic_matrix' && flags.dynamicMatrixExcelLikeViewEnabled;
-
-  const findExisting = async () => client
-    .from('task_matrices')
-    .select('*')
-    .eq('task_id', taskId)
-    .neq('status', 'archived')
-    .order('created_at', { ascending: false })
-    .limit(1);
-  const existingResponse = async (matrix: Record<string, unknown>) => {
-    let viewDefinitionId = typeof matrix.current_view_definition_id === 'string'
-      ? matrix.current_view_definition_id
-      : null;
-    if (!viewDefinitionId) {
-      const db = await getDb();
-      const result = await db.execute(sql`
-        SELECT current_view_definition_id
-        FROM task_matrices
-        WHERE id = ${String(matrix.id)}
-        LIMIT 1
-      `);
-      viewDefinitionId = String((result.rows[0] as Record<string, unknown> | undefined)?.current_view_definition_id || '') || null;
-    }
-    return ok(matrixResponseData(matrix, false, viewDefinitionId), traceId, 'existing');
-  };
-
-  const pending = inFlightCreates.get(taskId);
-  if (pending) await pending;
-
-  let releaseCreate!: () => void;
-  const createLock = new Promise<void>((resolve) => { releaseCreate = resolve; });
-  inFlightCreates.set(taskId, createLock);
 
   try {
-    const existing = await findExisting();
-    if (existing.error) return fail(traceId, { message: existing.error.message, status: 500 });
-    if (existing.data?.[0]) return existingResponse(existing.data[0]);
-
-    const { data, error } = await client
-    .from('task_matrices')
-    .insert({
-      task_id: taskId,
-      name: body.name.trim(),
-      description: body.description?.trim() ?? null,
-      status: useV3 ? 'active' : 'designing',
-      comparability_status: 'not_applicable',
-      created_by: user.id,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    if (error.message?.includes('duplicate') || error.message?.includes('unique')) {
-      return fail(traceId, { message: '该任务中已存在同名矩阵', status: 409 });
-    }
-    return fail(traceId, { message: error.message, status: 500 });
-  }
-
-  let viewDefinitionId: string | null = null;
-  if (useV3) {
-    try {
-      const boot = await bootstrapV3MatrixView({ matrixId: data.id, userId: user.id });
-      viewDefinitionId = boot.viewDefinitionId;
-    } catch (err) {
-      // Roll back the matrix row if bootstrap fails.
-      await client.from('task_matrices').delete().eq('id', data.id);
-      const message = err instanceof Error ? err.message : '初始化 V3 视图失败';
-      return fail(traceId, { message, status: 500 });
-    }
-  }
-
-  await writeSecurityAudit(client, {
-    request: req,
-    actor: user,
-    action: 'task_matrix.created',
-    outcome: 'success',
-    targetType: 'task_matrix',
-    targetId: data.id,
-    metadata: { taskId, name: body.name, viewMode, viewDefinitionId },
-  });
-
-  return ok(
-    {
-      id: data.id,
-      taskId: data.task_id,
-      name: data.name,
-      description: data.description,
-      status: useV3 ? 'active' : data.status,
-      viewMode: useV3 ? 'excel_like_dynamic_matrix' : 'v2_designer',
-      currentViewDefinitionId: viewDefinitionId,
-      createdAt: data.created_at,
-      created: true,
-    },
-    traceId,
-    'created',
-  );
-  } finally {
-    releaseCreate();
-    if (inFlightCreates.get(taskId) === createLock) inFlightCreates.delete(taskId);
+    const matrix = await createMatrix(taskId, ctx.user.id, {
+      name,
+      description: typeof body.description === 'string' ? body.description.trim() : undefined,
+    });
+    await ensureV3ViewForMatrix({ matrixId: matrix.id, userId: ctx.user.id });
+    writeIdempotentEnvelope(idem.key, 201, {
+      trace_id: meta.traceId,
+      request_id: meta.requestId,
+      data: matrix,
+      error: null,
+    });
+    return ok(meta, matrix, 201);
+  } catch (err) {
+    const e = err as Error & { code?: string };
+    return fail(meta, mapErrorStatus(e.code), e.code || 'MATRIX_CREATE_FAILED', e.message || 'create failed');
   }
 }

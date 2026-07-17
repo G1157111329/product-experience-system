@@ -105,5 +105,5 @@ export default function ReportDetailPage() {
 }
 
 function LoadingState() {
-  return <div className="p-6 text-center text-sm text-muted-foreground"><Loader2 className="mx-auto h-6 w-6 animate-spin" /><p className="mt-2">正在加载冻结报告...</p></div>;
+  return <div className="p-6 text-center text-sm text-muted-foreground"><Loader2 className="mx-auto h-6 w-6 animate-spin" /><p className="mt-2">正在加载体验报告......</p></div>;
 }

@@ -7,6 +7,7 @@ import {
   isPendingMediaUrl,
   isUnavailableMediaUrl,
   pendingMediaDataUrl,
+  toPlayableVideoSrc,
   unavailableMediaDataUrl,
   usePresignedUrls,
 } from '@/lib/use-presigned-url';
@@ -44,6 +45,18 @@ function getInitialMediaUrl(material: Material): string {
 export function resolveGalleryMediaUrl(material: Material, resolvedUrl?: string): string {
   if (!resolvedUrl) return getInitialMediaUrl(material);
   return resolvedUrl;
+}
+
+export function resolveGalleryVideoSrc(url: string, origin?: string): string | undefined {
+  return toPlayableVideoSrc(url, origin);
+}
+
+export function resolveGalleryPreviewUrl(material: Material, resolvedUrl: string, origin?: string): string {
+  const previewUrl = isPendingMediaUrl(resolvedUrl)
+    ? (material.file_path || material.file_url || resolvedUrl)
+    : resolvedUrl;
+  if (material.material_type !== 'video') return previewUrl;
+  return toPlayableVideoSrc(previewUrl, origin) || unavailableMediaDataUrl;
 }
 
 function MediaThumbnail({
@@ -104,13 +117,13 @@ function MediaThumbnail({
       onKeyUp={handleKeyUp}
     >
       {unavailable ? (
-        <div className="flex h-full w-full items-center justify-center bg-muted px-2 text-center text-[10px] text-muted-foreground">
+        <div className="flex h-full w-full items-center justify-center bg-muted px-2 text-center text-xs text-muted-foreground">
           素材不可用
         </div>
       ) : type === 'video' && !isImagePlaceholder && !isPendingVideo ? (
         <>
           <video
-            src={url}
+            src={resolveGalleryVideoSrc(url)}
             className="h-full w-full object-cover"
             muted
             preload="metadata"
@@ -126,7 +139,7 @@ function MediaThumbnail({
           </div>
         </>
       ) : isPendingVideo ? (
-        <div className="flex h-full w-full items-center justify-center bg-muted text-[10px] text-muted-foreground">
+        <div className="flex h-full w-full items-center justify-center bg-muted text-xs text-muted-foreground">
           加载中
         </div>
       ) : (
@@ -207,7 +220,7 @@ export function MediaGallery({
       <div className={cn('grid min-w-0', gridCols, gap, className)}>
         {materials.map((mat) => {
           const resolvedUrl = resolveGalleryMediaUrl(mat, presignedMap.get(mat.id));
-          const previewUrl = isPendingMediaUrl(resolvedUrl) ? (mat.file_path || mat.file_url || resolvedUrl) : resolvedUrl;
+          const previewUrl = resolveGalleryPreviewUrl(mat, resolvedUrl);
           const pending = isPendingMediaUrl(resolvedUrl);
           const unavailable = isUnavailableMediaUrl(resolvedUrl);
           return (

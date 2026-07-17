@@ -24,6 +24,7 @@ import { ImageEditorDialog, type SaveMode } from '@/components/image-editor-dial
 import { PageShell } from '@/components/app';
 import { MediaGallery } from '@/components/app/media-gallery';
 import { buildReportReadiness } from '@/lib/report-readiness';
+import { hasMaterialSelectionChanged, shouldCloseSensesDraftWithoutSaving } from '@/lib/senses-draft-autosave';
 import { formatAiSummaryText, parseAiSummaryText } from '@/lib/report-content-rules';
 import { waitForPendingInlineSavesOrThrow } from '@/lib/inline-save-registry';
 import { useUnsavedNavigationGuard } from '@/hooks/use-unsaved-navigation-guard';
@@ -44,6 +45,7 @@ import { DeletionImpactDialog } from '@/components/deletion-impact-dialog';
 import { loadDeletionImpact } from '@/lib/deletion-impact-ui';
 import { useDeletionFlowController } from '@/hooks/use-deletion-flow-controller';
 import { assertSuccessfulSortResponse, persistOptimisticSort } from '@/lib/persisted-sort';
+import { withActiveTabSearch } from '@/lib/tab-url-state';
 
 /* ─── Types ─── */
 interface RecipeLibRef {
@@ -91,6 +93,10 @@ function summaryToForm(summary: AiTaskSummary) {
 }
 
 type TaskDetailTab = 'info' | 'materials' | 'senses' | 'functions' | 'comparison' | 'matrix';
+
+function isTaskDetailTab(value: string | null): value is TaskDetailTab {
+  return value === 'info' || value === 'materials' || value === 'senses' || value === 'functions' || value === 'comparison' || value === 'matrix';
+}
 
 async function loadRecipesForTask(taskId: string): Promise<Recipe[]> {
   const res = await fetch(`/api/recipes?task_id=${taskId}`);
@@ -148,12 +154,23 @@ export default function TaskDetailPage() {
   const id = params.id as string;
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<TaskDetailTab>('info');
+  const [activeTab, setActiveTab] = useState<TaskDetailTab>(() => {
+    const requestedTab = searchParams.get('tab');
+    return isTaskDetailTab(requestedTab) ? requestedTab : 'info';
+  });
   const unsavedNavigation = useUnsavedNavigationGuard();
   const { attemptNavigation } = unsavedNavigation;
+  const persistActiveTab = useCallback((section: TaskDetailTab) => {
+    if (typeof window === 'undefined') return;
+    const search = withActiveTabSearch(window.location.search, section);
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}?${search}`);
+  }, []);
   const changeActiveTab = useCallback((section: TaskDetailTab) => {
-    void attemptNavigation(() => setActiveTab(section));
-  }, [attemptNavigation]);
+    void attemptNavigation(() => {
+      setActiveTab(section);
+      persistActiveTab(section);
+    });
+  }, [attemptNavigation, persistActiveTab]);
   const [evidenceBindingTarget, setEvidenceBindingTarget] = useState<EvidenceBindingTarget | null>(null);
   const [generateConfirmOpen, setGenerateConfirmOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
@@ -208,10 +225,8 @@ export default function TaskDetailPage() {
   }, [activeTab, fetchReportRecipes]);
   useEffect(() => {
     const tab = searchParams.get('tab');
-    if (tab === 'info' || tab === 'materials' || tab === 'senses' || tab === 'functions' || tab === 'comparison' || tab === 'matrix') {
-      changeActiveTab(tab);
-    }
-  }, [changeActiveTab, searchParams]);
+    if (isTaskDetailTab(tab)) setActiveTab(tab);
+  }, [searchParams]);
   const [hasMatrixInstance, setHasMatrixInstance] = useState(false);
   const [hasComparisonInstance, setHasComparisonInstance] = useState(false);
   const refreshMatrixHeaderStatus = useCallback(async () => {
@@ -743,6 +758,16 @@ function MaterialsTab({ taskId }: { taskId: string }) {
       if (data.code === 0) {
         toast.success(overwrite ? '图片已覆盖保存，原关联保持不变' : '编辑副本已保存');
         fetchMaterials();
+      } else if (overwrite && res.status === 409 && data.save_mode === 'save_new') {
+        const copyData = new FormData();
+        copyData.append('file', editedFile);
+        copyData.append('task_id', taskId);
+        if (editingImage?.name) copyData.append('copy_source_file_name', editingImage.name);
+        const copyResponse = await fetch('/api/materials/upload', { method: 'POST', body: copyData });
+        const copyPayload = await copyResponse.json().catch(() => ({}));
+        if (!copyResponse.ok || copyPayload.code !== 0) throw new Error(copyPayload.message || '另存编辑副本失败');
+        toast.info('原图已被冻结报告引用，已另存为新图片');
+        fetchMaterials();
       } else {
         toast.error(data.message || '保存失败');
       }
@@ -940,6 +965,9 @@ function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, task
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [savingRecord, setSavingRecord] = useState(false);
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
+  const selectedMaterialIdsRef = useRef<string[]>([]);
+  const sensesDraftDirtyRef = useRef(false);
+  const sensesSaveInFlightRef = useRef<Promise<boolean> | null>(null);
   const [, setSelectedMaterials] = useState<Material[]>([]);
   const [initialMaterialIds, setInitialMaterialIds] = useState<string[]>([]);
   const [recordMaterials, setRecordMaterials] = useState<Record<string, Material[]>>({});
@@ -953,6 +981,8 @@ function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, task
   // ── Edit mode ──
   const [editRecordId, setEditRecordId] = useState<string | null>(null);
   const [editRecordData, setEditRecordData] = useState<CheckRecord | null>(null);
+  const editRecordIdRef = useRef<string | null>(null);
+  const editRecordDataRef = useRef<CheckRecord | null>(null);
 
   // ── Dynamic options from platform_settings ──
   const [phaseOptions, setPhaseOptions] = useState<string[]>(defaultPhaseOptions);
@@ -1142,8 +1172,12 @@ function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, task
     setFuzzyKeyword('');
     setFuzzyResults([]);
     setSelectedMaterialIds([]);
+    selectedMaterialIdsRef.current = [];
+    sensesDraftDirtyRef.current = false;
     setSelectedMaterials([]);
     setInitialMaterialIds([]);
+    editRecordIdRef.current = null;
+    editRecordDataRef.current = null;
   };
 
   // ── Populate forms from existing record (for editing) ──
@@ -1188,11 +1222,14 @@ function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, task
   const handleEditRecord = (record: CheckRecord) => {
     setEditRecordId(record.id);
     setEditRecordData(record);
+    editRecordIdRef.current = record.id;
+    editRecordDataRef.current = record;
     populateFormsFromRecord(record);
     // Pre-select existing materials for this record
     const existingMats = recordMaterials[record.id] || [];
     const existingIds = existingMats.map(m => m.id);
     setSelectedMaterialIds(existingIds);
+    selectedMaterialIdsRef.current = existingIds;
     setInitialMaterialIds(existingIds);
     setSelectedMaterials(existingMats);
     setAddDialogOpen(true);
@@ -1228,13 +1265,19 @@ function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, task
     }
   }, [editRecordId, formCategory, categoryForm.selectedItemId, categoryItems, records]);
 
-  const handleAdd = async () => {
-    if (savingRecord) return;
+  const persistSensesDraft = async ({
+    closeAfterSave = false,
+    materialIds = selectedMaterialIdsRef.current,
+  }: {
+    closeAfterSave?: boolean;
+    materialIds?: string[];
+  } = {}): Promise<boolean> => {
     setSavingRecord(true);
     try {
+      const activeRecordId = editRecordIdRef.current;
       // ── EDIT mode: update existing record ──
-      if (editRecordId) {
-        const rec = editRecordData;
+      if (activeRecordId) {
+        const rec = editRecordDataRef.current;
         let body: Record<string, unknown> = { evaluation_result: evaluationResult };
 
         if (formCategory === '通用标准') {
@@ -1295,34 +1338,43 @@ function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, task
           };
         }
 
-        const res = await fetch(`/api/records/${editRecordId}`, {
+        const res = await fetch(`/api/records/${activeRecordId}`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
         });
         const data = await res.json();
         if (data.code === 0) {
           // Link newly selected materials
-          for (const matId of selectedMaterialIds) {
-            await fetch('/api/materials', {
+          for (const matId of materialIds) {
+            const materialResponse = await fetch('/api/materials', {
               method: 'PUT', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id: matId, record_id: editRecordId }),
+              body: JSON.stringify({ id: matId, record_id: activeRecordId }),
             });
+            const materialData = await materialResponse.json().catch(() => ({}));
+            if (!materialResponse.ok || materialData.code !== 0) throw new Error(materialData.message || '素材关联自动保存失败');
           }
           // Unlink materials that were deselected (existed initially but not in current selection)
-          const removedIds = initialMaterialIds.filter(id => !selectedMaterialIds.includes(id));
+          const removedIds = initialMaterialIds.filter(id => !materialIds.includes(id));
           for (const matId of removedIds) {
-            await fetch('/api/materials', {
+            const materialResponse = await fetch('/api/materials', {
               method: 'PUT', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id: matId, record_id: null, unlink_target_id: editRecordId }),
+              body: JSON.stringify({ id: matId, record_id: null, unlink_target_id: activeRecordId }),
             });
+            const materialData = await materialResponse.json().catch(() => ({}));
+            if (!materialResponse.ok || materialData.code !== 0) throw new Error(materialData.message || '素材解除关联自动保存失败');
           }
-          setAddDialogOpen(false);
-          resetForms();
-          setEditRecordId(null);
-          setEditRecordData(null);
+          setInitialMaterialIds(materialIds);
+          selectedMaterialIdsRef.current = materialIds;
+          sensesDraftDirtyRef.current = false;
           onRefresh();
-          toast.success('问题点已更新');
+          if (closeAfterSave) {
+            setAddDialogOpen(false);
+            resetForms();
+            setEditRecordId(null);
+            setEditRecordData(null);
+          }
+          return true;
         }
-        return;
+        throw new Error(data.message || '五感体验自动保存失败');
       }
 
       // ── ADD mode: create new record ──
@@ -1382,22 +1434,52 @@ function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, task
       const data = await res.json();
       if (data.code === 0) {
         const recordId = data.data?.id;
-        if (recordId && selectedMaterialIds.length > 0) {
-          for (const matId of selectedMaterialIds) {
-            await fetch('/api/materials', {
+        if (recordId && materialIds.length > 0) {
+          for (const matId of materialIds) {
+            const materialResponse = await fetch('/api/materials', {
               method: 'PUT', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ id: matId, record_id: recordId }),
             });
+            const materialData = await materialResponse.json().catch(() => ({}));
+            if (!materialResponse.ok || materialData.code !== 0) throw new Error(materialData.message || '素材关联自动保存失败');
           }
         }
-        setAddDialogOpen(false);
-        resetForms();
+        if (recordId) {
+          setEditRecordId(recordId);
+          setEditRecordData(data.data || null);
+          editRecordIdRef.current = recordId;
+          editRecordDataRef.current = data.data || null;
+        }
+        setInitialMaterialIds(materialIds);
+        selectedMaterialIdsRef.current = materialIds;
+        sensesDraftDirtyRef.current = false;
         onRefresh();
         onStatusUpdate();
-        toast.success('问题点已添加');
+        if (closeAfterSave) {
+          setAddDialogOpen(false);
+          resetForms();
+          setEditRecordId(null);
+          setEditRecordData(null);
+        }
+        return true;
       }
+      throw new Error(data.message || '五感体验自动保存失败');
+    } catch (error) {
+      toast.error(error instanceof Error ? `自动保存失败：${error.message}` : '五感体验自动保存失败');
+      return false;
     } finally {
       setSavingRecord(false);
+    }
+  };
+
+  const handleAdd = async (options: { closeAfterSave?: boolean; materialIds?: string[] } = {}): Promise<boolean> => {
+    if (sensesSaveInFlightRef.current) await sensesSaveInFlightRef.current;
+    const request = persistSensesDraft(options);
+    sensesSaveInFlightRef.current = request;
+    try {
+      return await request;
+    } finally {
+      if (sensesSaveInFlightRef.current === request) sensesSaveInFlightRef.current = null;
     }
   };
 
@@ -1416,6 +1498,54 @@ function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, task
     if (formCategory === '感官评价标准') return !!(sensoryForm.sensory_dimension && sensoryForm.score);
     if (formCategory === '非标准') return !!nonStandardForm.description;
     return false;
+  };
+
+  const handleSensesFieldCompletion = () => {
+    if (sensesDraftDirtyRef.current && isFormValid()) void handleAdd();
+  };
+
+  const handleSensesFieldKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
+    event.preventDefault();
+    target.blur();
+  };
+
+  const handleSensesMaterialSelectionChange = (ids: string[], materials: Material[]) => {
+    const selectionChanged = hasMaterialSelectionChanged(selectedMaterialIdsRef.current, ids);
+    setSelectedMaterialIds(ids);
+    selectedMaterialIdsRef.current = ids;
+    setSelectedMaterials(materials);
+    if (!selectionChanged) return;
+    sensesDraftDirtyRef.current = true;
+    if (isFormValid()) void handleAdd({ materialIds: ids });
+  };
+
+  const closeSensesDialogWithoutSaving = () => {
+    setAddDialogOpen(false);
+    resetForms();
+    setEditRecordId(null);
+    setEditRecordData(null);
+  };
+
+  const handleSensesDialogOpenChange = (open: boolean) => {
+    if (open) {
+      setAddDialogOpen(true);
+      return;
+    }
+    if (shouldCloseSensesDraftWithoutSaving({ draftDirty: sensesDraftDirtyRef.current, formValid: isFormValid() })) {
+      closeSensesDialogWithoutSaving();
+      return;
+    }
+    if (!isFormValid()) {
+      toast.error('自动保存失败：请先完成当前五感体验的必填字段');
+      return;
+    }
+    void (async () => {
+      const saved = await handleAdd({ closeAfterSave: true });
+      if (!saved) return;
+    })();
   };
 
   // Group records by standard_category then sensory_dimension
@@ -1652,7 +1782,7 @@ function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, task
           <Label>检查结果</Label>
           <Textarea placeholder="描述检查结果" value={generalForm.problem_description} onChange={(e) => setGeneralForm({ ...generalForm, problem_description: e.target.value })} rows={2} />
         </div>
-        <MaterialPicker taskId={taskId} recordId={editRecordId || undefined} selectedIds={selectedMaterialIds} initialMaterials={editRecordId ? (recordMaterials[editRecordId] || []) : undefined} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
+        <MaterialPicker taskId={taskId} recordId={editRecordId || undefined} selectedIds={selectedMaterialIds} initialMaterials={editRecordId ? (recordMaterials[editRecordId] || []) : undefined} onSelectionChange={handleSensesMaterialSelectionChange} enableImageEditing />
         <div className="space-y-1.5">
           <Label>检查结果 *</Label>
           <div className="flex gap-2">
@@ -1669,7 +1799,7 @@ function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, task
             ))}
           </div>
         </div>
-        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid() || savingRecord}>{savingRecord ? (editRecordId ? '保存中...' : '添加中...') : (editRecordId ? '保存' : '添加')}</Button>
+        {savingRecord && <p role="status" className="text-center text-xs text-muted-foreground">自动保存中...</p>}
       </div>
     );
 
@@ -1771,7 +1901,7 @@ function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, task
           <Label>检查结果</Label>
           <Textarea placeholder="描述检查结果" value={categoryForm.problem_description} onChange={(e) => setCategoryForm({ ...categoryForm, problem_description: e.target.value })} rows={2} />
         </div>
-        <MaterialPicker taskId={taskId} recordId={editRecordId || undefined} selectedIds={selectedMaterialIds} initialMaterials={editRecordId ? (recordMaterials[editRecordId] || []) : undefined} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
+        <MaterialPicker taskId={taskId} recordId={editRecordId || undefined} selectedIds={selectedMaterialIds} initialMaterials={editRecordId ? (recordMaterials[editRecordId] || []) : undefined} onSelectionChange={handleSensesMaterialSelectionChange} enableImageEditing />
         <div className="space-y-1.5">
           <Label>检查结果 *</Label>
           <div className="flex gap-2">
@@ -1788,7 +1918,7 @@ function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, task
             ))}
           </div>
         </div>
-        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid() || savingRecord}>{savingRecord ? (editRecordId ? '保存中...' : '添加中...') : (editRecordId ? '保存' : '添加')}</Button>
+        {savingRecord && <p role="status" className="text-center text-xs text-muted-foreground">自动保存中...</p>}
       </div>
     );
 
@@ -1848,7 +1978,7 @@ function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, task
           <Label>结果描述</Label>
           <Textarea placeholder="描述评价结果" value={sensoryForm.result_description} onChange={(e) => setSensoryForm({ ...sensoryForm, result_description: e.target.value })} rows={2} />
         </div>
-        <MaterialPicker taskId={taskId} recordId={editRecordId || undefined} selectedIds={selectedMaterialIds} initialMaterials={editRecordId ? (recordMaterials[editRecordId] || []) : undefined} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
+        <MaterialPicker taskId={taskId} recordId={editRecordId || undefined} selectedIds={selectedMaterialIds} initialMaterials={editRecordId ? (recordMaterials[editRecordId] || []) : undefined} onSelectionChange={handleSensesMaterialSelectionChange} enableImageEditing />
         <div className="space-y-1.5">
           <Label>检查结果 *</Label>
           <div className="flex gap-2">
@@ -1865,7 +1995,7 @@ function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, task
             ))}
           </div>
         </div>
-        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid() || savingRecord}>{savingRecord ? (editRecordId ? '保存中...' : '添加中...') : (editRecordId ? '保存' : '添加')}</Button>
+        {savingRecord && <p role="status" className="text-center text-xs text-muted-foreground">自动保存中...</p>}
       </div>
     );
 
@@ -1892,7 +2022,7 @@ function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, task
           <Textarea placeholder="描述检查结果（可选）" value={nonStandardForm.problem_description}
             onChange={(e) => setNonStandardForm({ ...nonStandardForm, problem_description: e.target.value })} rows={2} />
         </div>
-        <MaterialPicker taskId={taskId} recordId={editRecordId || undefined} selectedIds={selectedMaterialIds} initialMaterials={editRecordId ? (recordMaterials[editRecordId] || []) : undefined} onSelectionChange={(ids, mats) => { setSelectedMaterialIds(ids); setSelectedMaterials(mats); }} />
+        <MaterialPicker taskId={taskId} recordId={editRecordId || undefined} selectedIds={selectedMaterialIds} initialMaterials={editRecordId ? (recordMaterials[editRecordId] || []) : undefined} onSelectionChange={handleSensesMaterialSelectionChange} enableImageEditing />
         <div className="space-y-1.5">
           <Label>检查结果 *</Label>
           <div className="flex gap-2">
@@ -1909,7 +2039,7 @@ function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, task
             ))}
           </div>
         </div>
-        <Button onClick={handleAdd} className="w-full" disabled={!isFormValid() || savingRecord}>{savingRecord ? (editRecordId ? '保存中...' : '添加中...') : (editRecordId ? '保存' : '添加')}</Button>
+        {savingRecord && <p role="status" className="text-center text-xs text-muted-foreground">自动保存中...</p>}
       </div>
     );
 
@@ -2079,10 +2209,17 @@ function SensesTab({ taskId, records, focusedRecordId, taskProductCategory, task
       </div>
 
       {/* Add/Edit dialog */}
-      <Dialog open={addDialogOpen} onOpenChange={(v) => { setAddDialogOpen(v); if (!v) { resetForms(); setEditRecordId(null); } }}>
+      <Dialog open={addDialogOpen} onOpenChange={handleSensesDialogOpenChange}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editRecordId ? '编辑问题点' : '新增问题点'}</DialogTitle></DialogHeader>
-          <div className="mt-2">{renderAddForm()}</div>
+          <div
+            className="mt-2"
+            onChangeCapture={() => { sensesDraftDirtyRef.current = true; }}
+            onBlurCapture={handleSensesFieldCompletion}
+            onKeyDownCapture={handleSensesFieldKeyDown}
+          >
+            {renderAddForm()}
+          </div>
         </DialogContent>
       </Dialog>
     </div>
@@ -2682,6 +2819,7 @@ function FunctionsTab({
                   setStepMaterialIds(prev => [...new Set([...prev, ...ids])]);
                   setStepMaterials(mats);
                 }}
+                enableImageEditing
               />
             </div>
             <Button onClick={handleAddStep} className="w-full" disabled={!newStep.operation || savingStep}>{savingStep ? '保存中...' : '保存步骤'}</Button>
@@ -2711,6 +2849,7 @@ function FunctionsTab({
                   setEditStepMaterialIds(ids);
                   setEditStepMaterials(mats);
                 }}
+                enableImageEditing
               />
             </div>
             <Button onClick={handleSaveEditStep} className="w-full" disabled={!editStepForm.operation || savingEditStep}>{savingEditStep ? '保存中...' : '保存修改'}</Button>

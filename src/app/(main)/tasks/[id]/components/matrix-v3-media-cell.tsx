@@ -204,6 +204,7 @@ export function MatrixV3MediaCell({
             : ids;
           void handleSelectionChange(filtered);
         }}
+        enableImageEditing
       />
     </div>
     <preview.PreviewComponent />

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { stripAssistantReasoning } from '@/lib/assistant-output';
+import { AGENT_ACTION_LABELS, type AgentAction } from '@/lib/agent-actions';
 
 export type HermesConversation = {
   id: string;
@@ -19,6 +20,8 @@ export type HermesMessage = {
   id: string;
   role: 'user' | 'assistant' | 'tool' | 'system';
   content?: string | null;
+  toolCallId?: string | null;
+  toolName?: string | null;
   eventSeq?: number;
   createdAt?: string;
 };
@@ -27,6 +30,8 @@ type HermesChatProps = {
   conversationId?: string | null;
   taskId?: string | null;
   compact?: boolean;
+  initialDraft?: string;
+  initialDraftVersion?: number;
   onConversationChange?: (conversation: HermesConversation) => void;
 };
 
@@ -34,6 +39,38 @@ function sanitizeMessage(message: HermesMessage): HermesMessage {
   return message.role === 'assistant'
     ? { ...message, content: stripAssistantReasoning(message.content) }
     : message;
+}
+
+function readTaskActionPlan(message: HermesMessage): { taskId: string; actions: AgentAction[] } | null {
+  if (message.role !== 'tool' || message.toolName !== 'task_action_plan' || !message.content) return null;
+  try {
+    const value = JSON.parse(message.content) as { taskId?: unknown; actions?: unknown };
+    if (typeof value.taskId !== 'string' || !Array.isArray(value.actions)) return null;
+    return { taskId: value.taskId, actions: value.actions as AgentAction[] };
+  } catch {
+    return null;
+  }
+}
+
+type TaskActionPlanResult = {
+  taskId: string;
+  results: Array<{ id?: string; status?: string; message?: string }>;
+  partial: boolean;
+};
+
+function readTaskActionPlanResult(message: HermesMessage): TaskActionPlanResult | null {
+  if (message.role !== 'tool' || !['task_action_plan_applied', 'task_action_plan_partial'].includes(message.toolName || '') || !message.content) return null;
+  try {
+    const value = JSON.parse(message.content) as { taskId?: unknown; results?: unknown };
+    if (typeof value.taskId !== 'string' || !Array.isArray(value.results)) return null;
+    return {
+      taskId: value.taskId,
+      results: value.results as TaskActionPlanResult['results'],
+      partial: message.toolName === 'task_action_plan_partial',
+    };
+  } catch {
+    return null;
+  }
 }
 
 function mergeMessages(current: HermesMessage[], incoming: HermesMessage[]) {
@@ -46,6 +83,8 @@ export function HermesChat({
   conversationId,
   taskId,
   compact = false,
+  initialDraft,
+  initialDraftVersion,
   onConversationChange,
 }: HermesChatProps) {
   const [activeConversationId, setActiveConversationId] = useState(conversationId || null);
@@ -55,6 +94,7 @@ export function HermesChat({
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [applyingPlanId, setApplyingPlanId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -62,6 +102,10 @@ export function HermesChat({
     setActiveConversationId(conversationId || null);
     setMessages([]);
   }, [conversationId]);
+
+  useEffect(() => {
+    if (initialDraft && initialDraftVersion) setInput(initialDraft);
+  }, [initialDraft, initialDraftVersion]);
 
   const loadMessages = useCallback(async (id: string) => {
     setLoading(true);
@@ -96,12 +140,16 @@ export function HermesChat({
           role: HermesMessage['role'];
           content?: string | null;
           eventSeq?: number;
+          toolCallId?: string | null;
+          toolName?: string | null;
         };
         setMessages((current) => mergeMessages(current, [{
           id: data.messageId,
           role: data.role,
           content: data.content,
           eventSeq: data.eventSeq,
+          toolCallId: data.toolCallId,
+          toolName: data.toolName,
         }]));
       } catch {
         // Ignore malformed provider events; the next history refresh remains authoritative.
@@ -142,8 +190,6 @@ export function HermesChat({
     setSending(true);
     setError(null);
     setInput('');
-    const temporaryId = `pending-${Date.now()}`;
-    setMessages((current) => [...current, { id: temporaryId, role: 'user', content, eventSeq: Number.MAX_SAFE_INTEGER - 1 }]);
     try {
       const id = await ensureConversation();
       const response = await fetch(`/api/v1/agent/conversations/${id}/messages`, {
@@ -153,18 +199,39 @@ export function HermesChat({
       });
       const json = await response.json();
       if (json.code !== 0) throw new Error(json.message || '发送失败');
-      const returned = [json.data?.userMessage, json.data?.assistantMessage]
+      const returned = [json.data?.userMessage, json.data?.assistantMessage, json.data?.actionPlanMessage]
         .filter(Boolean) as HermesMessage[];
-      setMessages((current) => mergeMessages(
-        current.filter((message) => message.id !== temporaryId),
-        returned,
-      ));
+      setMessages((current) => mergeMessages(current, returned));
     } catch (sendError) {
-      setMessages((current) => current.filter((message) => message.id !== temporaryId));
       setInput(content);
       setError(sendError instanceof Error ? sendError.message : '发送失败');
     } finally {
       setSending(false);
+    }
+  };
+
+  const applyPlan = async (message: HermesMessage) => {
+    const plan = readTaskActionPlan(message);
+    if (!plan || plan.actions.length === 0 || applyingPlanId) return;
+    setApplyingPlanId(message.id);
+    setError(null);
+    try {
+      const response = await fetch(`/api/tasks/${plan.taskId}/agent-actions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actions: plan.actions, actionPlanMessageId: message.id }),
+      });
+      const json = await response.json();
+      if (!response.ok && response.status !== 207) throw new Error(json.message || '操作未完成');
+      const planStatus = json.data?.actionPlanStatus as HermesMessage['toolName'] | undefined;
+      if (!planStatus || !Array.isArray(json.data?.results)) throw new Error(json.message || '操作结果不完整');
+      setMessages((current) => current.map((item) => item.id === message.id
+        ? { ...item, toolName: planStatus, content: JSON.stringify({ taskId: plan.taskId, results: json.data.results }) }
+        : item));
+    } catch (applyError) {
+      setError(applyError instanceof Error ? applyError.message : '操作执行失败');
+    } finally {
+      setApplyingPlanId(null);
     }
   };
 
@@ -210,19 +277,41 @@ export function HermesChat({
           </div>
         ) : (
           <div className="space-y-3">
-            {messages.filter((message) => message.role === 'user' || message.role === 'assistant').map((message) => (
-              <div
-                key={message.id}
-                className={cn(
-                  'max-w-[88%] whitespace-pre-wrap rounded-md px-3 py-2 text-sm leading-6',
-                  message.role === 'user'
-                    ? 'ml-auto bg-primary text-primary-foreground'
-                    : 'border bg-muted/30 text-foreground',
-                )}
-              >
-                {message.content || ''}
-              </div>
-            ))}
+            {messages.map((message) => {
+              const plan = readTaskActionPlan(message);
+              const planResult = readTaskActionPlanResult(message);
+              if (plan) return (
+                <div key={message.id} className="space-y-2 rounded-md border bg-muted/20 p-2.5">
+                  <p className="text-xs font-medium">待确认的平台操作（{plan.actions.length} 项）</p>
+                  <div className="space-y-1.5">
+                    {plan.actions.map((action) => (
+                      <div key={action.id} className="rounded border bg-background px-2 py-1.5 text-xs">
+                        <span className="font-medium">{action.title || AGENT_ACTION_LABELS[action.type]}</span>
+                        {action.description && <span className="mt-0.5 block text-muted-foreground">{action.description}</span>}
+                      </div>
+                    ))}
+                  </div>
+                  <Button size="sm" className="w-full" disabled={applyingPlanId === message.id} onClick={() => void applyPlan(message)}>
+                    {applyingPlanId === message.id ? '正在写入…' : '确认并写入当前任务'}
+                  </Button>
+                </div>
+              );
+              if (planResult) return (
+                <div key={message.id} className="space-y-1.5 rounded-md border bg-muted/20 p-2.5 text-xs">
+                  <p className="font-medium">{planResult.partial ? '操作已部分写入' : '操作已写入当前任务'}</p>
+                  {planResult.results.map((result, index) => (
+                    <p key={`${result.id || 'result'}-${index}`} className={result.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'}>
+                      {result.message || (result.status === 'failed' ? '操作失败' : '操作完成')}
+                    </p>
+                  ))}
+                </div>
+              );
+              if (message.role !== 'user' && message.role !== 'assistant') return null;
+              return <div key={message.id} className={cn(
+                'max-w-[88%] whitespace-pre-wrap rounded-md px-3 py-2 text-sm leading-6',
+                message.role === 'user' ? 'ml-auto bg-primary text-primary-foreground' : 'border bg-muted/30 text-foreground',
+              )}>{message.content || ''}</div>;
+            })}
             {sending && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />

@@ -222,7 +222,7 @@ export default function StandardDetailPage() {
             <Input type="number" min={1} max={5} placeholder="1-5分" value={sensoryForm.subjective_score} onChange={(e) => setSensoryForm({ ...sensoryForm, subjective_score: e.target.value })} />
             <Input placeholder="如：1分-十分不满意-描述..." value={sensoryForm.subjective_rating} onChange={(e) => setSensoryForm({ ...sensoryForm, subjective_rating: e.target.value })} />
           </div>
-          <p className="text-[10px] text-muted-foreground">格式示例：1分-十分不满意-豆浆口感差，存在较多细小颗粒</p>
+          <p className="text-xs text-muted-foreground">格式示例：1分-十分不满意-豆浆口感差，存在较多细小颗粒</p>
         </div>
         <Button onClick={handleAddSensory} className="w-full" disabled={!sensoryForm.sensory_dimension}>添加</Button>
       </div>
@@ -240,25 +240,25 @@ export default function StandardDetailPage() {
           {category === '通用标准' && (
             <>
               <div className="flex items-center gap-2 flex-wrap">
-                {item.sensory_dimension && <Badge className={cn('text-[10px]', sensoryColors[item.sensory_dimension] || 'bg-muted')}>{item.sensory_dimension}</Badge>}
-                {item.test_phase && <span className="text-[10px] text-muted-foreground bg-background px-1.5 py-0.5 rounded">{item.test_phase}</span>}
-                {item.experience_flow && <span className="text-[10px] text-muted-foreground bg-background px-1.5 py-0.5 rounded">{item.experience_flow}</span>}
+                {item.sensory_dimension && <Badge className={cn('text-xs', sensoryColors[item.sensory_dimension] || 'bg-muted')}>{item.sensory_dimension}</Badge>}
+                {item.test_phase && <span className="text-xs text-muted-foreground bg-background px-1.5 py-0.5 rounded">{item.test_phase}</span>}
+                {item.experience_flow && <span className="text-xs text-muted-foreground bg-background px-1.5 py-0.5 rounded">{item.experience_flow}</span>}
                 <span className="text-sm font-medium">{item.touch_point || item.check_item}</span>
               </div>
               {item.check_requirement && <p className="text-xs text-muted-foreground">{item.check_requirement}</p>}
               {item.experience_standard && <p className="text-xs text-muted-foreground">标准: {item.experience_standard}</p>}
               <div className="flex items-center gap-2">
-                {item.check_tool && <span className="text-[10px] text-muted-foreground">工具: {item.check_tool}</span>}
-                {item.problem_level && <Badge variant="secondary" className="text-[10px] h-4">{item.problem_level}</Badge>}
+                {item.check_tool && <span className="text-xs text-muted-foreground">工具: {item.check_tool}</span>}
+                {item.problem_level && <Badge variant="secondary" className="text-xs h-4">{item.problem_level}</Badge>}
               </div>
             </>
           )}
           {category === '品类标准' && (
             <>
               <div className="flex items-center gap-2 flex-wrap">
-                {item.sensory_dimension && <Badge className={cn('text-[10px]', sensoryColors[item.sensory_dimension] || 'bg-muted')}>{item.sensory_dimension}</Badge>}
-                {item.check_dimension && <span className="text-[10px] text-muted-foreground bg-background px-1.5 py-0.5 rounded">{item.check_dimension}</span>}
-                {item.sub_check_dimension && <span className="text-[10px] text-muted-foreground bg-background px-1.5 py-0.5 rounded">{item.sub_check_dimension}</span>}
+                {item.sensory_dimension && <Badge className={cn('text-xs', sensoryColors[item.sensory_dimension] || 'bg-muted')}>{item.sensory_dimension}</Badge>}
+                {item.check_dimension && <span className="text-xs text-muted-foreground bg-background px-1.5 py-0.5 rounded">{item.check_dimension}</span>}
+                {item.sub_check_dimension && <span className="text-xs text-muted-foreground bg-background px-1.5 py-0.5 rounded">{item.sub_check_dimension}</span>}
                 <span className="text-sm font-medium">{item.check_item}</span>
               </div>
               {item.check_requirement && <p className="text-xs text-muted-foreground">{item.check_requirement}</p>}
@@ -268,7 +268,7 @@ export default function StandardDetailPage() {
           {category === '感官评价标准' && (
             <>
               <div className="flex items-center gap-2 flex-wrap">
-                {item.sensory_dimension && <Badge className={cn('text-[10px]', sensoryColors[item.sensory_dimension] || 'bg-muted')}>{item.sensory_dimension}</Badge>}
+                {item.sensory_dimension && <Badge className={cn('text-xs', sensoryColors[item.sensory_dimension] || 'bg-muted')}>{item.sensory_dimension}</Badge>}
                 <span className="text-sm font-medium">主观满意度</span>
               </div>
               {item.evaluation_prep && <p className="text-xs text-muted-foreground">准备: {item.evaluation_prep}</p>}
@@ -394,7 +394,7 @@ export default function StandardDetailPage() {
         <Card key={group}>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Badge className="text-[10px] bg-muted">{group}</Badge>
+              <Badge className="text-xs bg-muted">{group}</Badge>
               <span className="text-muted-foreground">{items.length} 项</span>
             </CardTitle>
           </CardHeader>

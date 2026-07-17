@@ -18,8 +18,8 @@ function encrypted(xml: string) {
   return Buffer.concat([cipher.update(padded), cipher.final()]).toString('base64');
 }
 
-function signedBody(now = 1_800_000_000, mediaType = 'image', mediaId = 'media-1') {
-  const ciphertext = encrypted(`<xml><ToUserName><![CDATA[corp-123]]></ToUserName><FromUserName><![CDATA[user-a]]></FromUserName><CreateTime>1800000000</CreateTime><MsgType><![CDATA[${mediaType}]]></MsgType>${mediaId ? `<MediaId><![CDATA[${mediaId}]]></MediaId>` : ''}<MsgId>msg-1</MsgId></xml>`);
+function signedBody(now = 1_800_000_000, mediaType = 'image', mediaId = 'media-1', content = '') {
+  const ciphertext = encrypted(`<xml><ToUserName><![CDATA[corp-123]]></ToUserName><FromUserName><![CDATA[user-a]]></FromUserName><CreateTime>1800000000</CreateTime><MsgType><![CDATA[${mediaType}]]></MsgType>${mediaId ? `<MediaId><![CDATA[${mediaId}]]></MediaId>` : ''}${content ? `<Content><![CDATA[${content}]]></Content>` : ''}<MsgId>msg-1</MsgId></xml>`);
   const timestamp = String(now);
   const nonce = 'nonce-1';
   const signature = createHash('sha1').update([token, timestamp, nonce, ciphertext].sort().join('')).digest('hex');
@@ -104,7 +104,7 @@ async function main() {
   await assert.rejects(() => processWecomCallback(signedBody(), async () => { rejectedEnqueues += 1; }), /corp/i);
   process.env.WECOM_CORP_ID = configuredCorp;
   assert.equal(rejectedEnqueues, 0, 'every rejected callback must stop before enqueue');
-  for (const [mediaType, mediaId] of [['file', 'media-file'], ['voice', 'media-voice'], ['text', '']] as const) {
+  for (const [mediaType, mediaId] of [['file', 'media-file'], ['voice', 'media-voice']] as const) {
     let unsupportedEnqueues = 0;
     const audits: Array<Record<string, unknown>> = [];
     await assert.rejects(() => processWecomCallback(
@@ -115,6 +115,16 @@ async function main() {
     assert.equal(unsupportedEnqueues, 0, `${mediaType} never reaches the ingest queue`);
     assert.equal(audits.length, 1, `${mediaType} rejection is audited`);
   }
+  const ingested: Array<Record<string, string>> = [];
+  const textResult = await processWecomCallback(
+    signedBody(1_800_000_000, 'text', '', '保存到 Hermes 会话'),
+    async () => { throw new Error('text must not enter media queue'); },
+    undefined,
+    async (message) => { ingested.push(message); return { accepted: true, conversationId: 'conversation-1' }; },
+    async () => true,
+  );
+  assert.equal((textResult as { conversationId?: string }).conversationId, 'conversation-1');
+  assert.equal(ingested[0]?.content, '保存到 Hermes 会话');
   await assert.rejects(() => processWecomCallback(
     { ...signedBody(), signature: 'bad' },
     async () => { throw new Error('enqueue must not run'); },
