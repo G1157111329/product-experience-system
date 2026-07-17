@@ -3,6 +3,7 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessRecipe, canAccessTask, canReadReport, forbidden, isAuthResponse, isRecipeContextInTask, requireUser } from '@/lib/server/auth';
 import { createIssueOccurrence } from '@/lib/server/issue-lifecycle';
 import { normalizeIssueStatus } from '@/lib/server/issue-state-machine';
+import { buildIssueManagementRows } from '@/lib/issue-management-projection';
 
 export async function GET(request: NextRequest) {
   const client = getSupabaseClient();
@@ -19,6 +20,7 @@ export async function GET(request: NextRequest) {
   const recipe_id = searchParams.get('recipe_id');
   const recipe_step_id = searchParams.get('recipe_step_id');
   const include_archived = searchParams.get('include_archived') === '1';
+  const canonical = searchParams.get('canonical') === '1';
   const limit = Math.min(500, Math.max(1, parseInt(searchParams.get('limit') || '100', 10)));
   const offset = Math.max(0, parseInt(searchParams.get('offset') || '0', 10) || 0);
   let scopedAccess = false;
@@ -58,6 +60,29 @@ export async function GET(request: NextRequest) {
 
   const { data, error, count } = await query.order('created_at', { ascending: false }).range(offset, offset + limit - 1);
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
+
+  if (canonical) {
+    const issueRows = (data || []) as Record<string, unknown>[];
+    const taskIds = Array.from(new Set(issueRows.map((issue) => String(issue.task_id || '')).filter(Boolean)));
+    const { data: reports } = taskIds.length > 0
+      ? await client
+        .from('reports')
+        .select('id, task_id, title, report_type, status, product_model, created_at, content, snapshot_id')
+        .in('task_id', taskIds)
+        .order('created_at', { ascending: false })
+      : { data: [] };
+    const reportRows = (reports || []) as Record<string, unknown>[];
+    const snapshotIds = Array.from(new Set(reportRows.map((report) => String(report.snapshot_id || '')).filter(Boolean)));
+    const { data: snapshots } = snapshotIds.length > 0
+      ? await client.from('report_snapshots').select('id, snapshot_json').in('id', snapshotIds)
+      : { data: [] };
+    const projected = buildIssueManagementRows({
+      issues: issueRows,
+      reports: reportRows,
+      snapshots: (snapshots || []) as Record<string, unknown>[],
+    });
+    return NextResponse.json({ code: 0, message: 'success', data: { list: projected, total: projected.length, limit, offset } });
+  }
 
   return NextResponse.json({ code: 0, message: 'success', data: { list: data, total: count, limit, offset } });
 }

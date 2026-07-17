@@ -12,5 +12,10 @@ assert.match(source, /unreported-record:\$\{issue\.task\.id\}/, 'sensory issues 
 assert.match(source, /项目：\$\{issue\.task\.project_number/, 'unarchived group labels must expose the real project');
 assert.match(source, /任务：\$\{issue\.task\.task_name\}/, 'unarchived group labels must expose the real task');
 assert.doesNotMatch(source, /issue\.source_report_id \|\| 'no-report'/, 'all unreported issues must not collapse into one misleading non-standard group');
+const fetchIssuesSource = source.slice(source.indexOf('const fetchIssues'), source.indexOf('const handleStatusChange'));
+assert.doesNotMatch(fetchIssuesSource, /userTaskIds/, 'issue management must not truncate a user task list before the server applies access control');
+assert.doesNotMatch(fetchIssuesSource, /\/api\/tasks\?pageSize=200/, 'issue management must not depend on the tasks API page-size cap');
+assert.doesNotMatch(fetchIssuesSource, /params\.set\('task_ids'/, 'issue management must let the issues API apply the authoritative task scope');
+assert.match(fetchIssuesSource, /new URLSearchParams\(\{ canonical: '1', limit: '500' \}\)/, 'issue management must request the canonical issue projection');
 
 console.log('issues page grouping contract passed');

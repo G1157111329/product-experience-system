@@ -1,6 +1,6 @@
 import { dataMatrixPrintColumns, dataMatrixReadLayout, type ReportDataMatrixReadCard, type ReportDataMatrixReadNarrative } from '@/lib/report-data-matrix-layout';
-import { evaluationStatusLabel } from '@/lib/evaluation-status';
-import { frozenMediaDedupeKey, normalizeFrozenIssueLevel, type FrozenIssue, type FrozenMedia, type FrozenRecipeContext, type FrozenReportViewModel } from '@/lib/report-frozen-view';
+import { evaluationStatusLabel, normalizeEvaluationStatus } from '@/lib/evaluation-status';
+import { frozenMediaDedupeKey, normalizeFrozenIssueLevel, type FrozenIssue, type FrozenMedia, type FrozenRecipeContext, type FrozenReportViewModel, type FrozenRetestSummary } from '@/lib/report-frozen-view';
 import { PRINT_GOLDEN_YELLOW, PRINT_GOLDEN_YELLOW_INK, PRINT_GOLDEN_YELLOW_SOFT, PRINT_TYPOGRAPHY } from '@/lib/report-print-theme';
 import { isPrintVideoSource } from '@/lib/print-assets';
 
@@ -100,7 +100,7 @@ function rectificationProjection(input: PrintIssueProjectionInput | undefined): 
   const responsible = [text(latest.responsible_person || input.responsible_person), text(latest.responsible_dept || input.responsible_dept)].filter(Boolean).join(' / ');
   const latestRetest = input.latestReEvaluation && typeof input.latestReEvaluation === 'object' ? input.latestReEvaluation as PrintIssueProjectionInput : {};
   const retestResult = text(latestRetest.result || latestRetest.evaluation_result || latestRetest.conclusion);
-  const retestDescription = text(latestRetest.description || latestRetest.evaluation_description || latestRetest.verification_note || input.verification_note);
+  const retestDescription = text(latestRetest.description || latestRetest.evaluation_description || latestRetest.verification_note);
   return {
     plan: text(latest.action_plan || latest.improve_plan || latest.rectification || input.improve_plan || input.rectification || input.no_improve_reason),
     responsible,
@@ -177,6 +177,28 @@ function mediaFromUnknown(value: unknown): PrintMedia[] {
   return dedupeMedia(projected);
 }
 
+function hasLiveRetestProjection(input: PrintIssueProjectionInput | undefined): boolean {
+  return Boolean(input && (
+    Object.prototype.hasOwnProperty.call(input, 'latestReEvaluation')
+    || Object.prototype.hasOwnProperty.call(input, 'reEvaluationCount')
+  ));
+}
+
+function projectedRetestSummary(input: PrintIssueProjectionInput | undefined, frozen: FrozenRetestSummary): FrozenRetestSummary {
+  if (!hasLiveRetestProjection(input)) return frozen;
+  const latest = record(input?.latestReEvaluation);
+  if (Object.keys(latest).length === 0) return { count: Math.max(0, Number(input?.reEvaluationCount) || 0), latest: null, history: [] };
+  const row = {
+    id: text(latest.id, 'latest-retest'),
+    result: normalizeEvaluationStatus(latest.result || latest.evaluation_result || latest.conclusion),
+    description: text(latest.description || latest.evaluation_description || latest.conclusion),
+    createdAt: text(latest.created_at) || null,
+    createdBy: text(latest.created_by_name || latest.created_by || latest.creator_name) || null,
+    evidence: mediaFromUnknown(latest.materials),
+  };
+  return { count: Math.max(1, Number(input?.reEvaluationCount) || 0), latest: row, history: [row] };
+}
+
 function textList(value: unknown): string[] {
   return Array.isArray(value)
     ? value.map((item) => typeof item === 'string' ? item.trim() : text(record(item).text || record(item).value)).filter(Boolean)
@@ -212,23 +234,27 @@ function cloneFrozenModelParts(model: FrozenReportViewModel, issueProjections: P
     })),
   });
   const projectionsById = new Map(issueProjections.map((item) => [text(item.id), item]));
-  const issues: PrintIssue[] = model.issues.map((issue) => ({
-    ...issue,
-    evidence: cloneMedia(issue.evidence),
-    liveOverlay: {
-      ...issue.liveOverlay,
-      evidence: cloneMedia(issue.liveOverlay.evidence),
-      retest: {
-        ...issue.liveOverlay.retest,
-        latest: issue.liveOverlay.retest.latest
-          ? { ...issue.liveOverlay.retest.latest, evidence: cloneMedia(issue.liveOverlay.retest.latest.evidence) }
-          : null,
-        history: issue.liveOverlay.retest.history.map((retest) => ({ ...retest, evidence: cloneMedia(retest.evidence) })),
+  const issues: PrintIssue[] = model.issues.map((issue) => {
+    const projection = projectionsById.get(issue.liveIssueId || issue.id);
+    const frozenRetest = {
+      ...issue.liveOverlay.retest,
+      latest: issue.liveOverlay.retest.latest
+        ? { ...issue.liveOverlay.retest.latest, evidence: cloneMedia(issue.liveOverlay.retest.latest.evidence) }
+        : null,
+      history: issue.liveOverlay.retest.history.map((retest) => ({ ...retest, evidence: cloneMedia(retest.evidence) })),
+    };
+    return {
+      ...issue,
+      evidence: cloneMedia(issue.evidence),
+      liveOverlay: {
+        ...issue.liveOverlay,
+        evidence: cloneMedia(issue.liveOverlay.evidence),
+        retest: projectedRetestSummary(projection, frozenRetest),
       },
-    },
-    ...(issue.recipe ? { recipe: cloneRecipe(issue.recipe) } : {}),
-    rectificationProjection: rectificationProjection(projectionsById.get(issue.liveIssueId || issue.id)),
-  }));
+      ...(issue.recipe ? { recipe: cloneRecipe(issue.recipe) } : {}),
+      rectificationProjection: rectificationProjection(projection),
+    };
+  });
   const claimedByRecipe = new Map<string, Set<string>>();
   for (const issue of issues) {
     if (!issue.recipe) continue;

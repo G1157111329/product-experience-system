@@ -652,8 +652,14 @@ function buildIssues(
   resolution: BuildFrozenReportViewInput['snapshotResolution'],
   reportId: string,
 ): FrozenIssue[] {
-  const facts = coalesceExplicitIssueFacts(frozenIssueFacts(content, snapshotJson));
   const hasCanonicalComparisonCells = rows(snapshotJson.cells ?? snapshotJson.matrix_cells).length > 0;
+  const rawFacts = frozenIssueFacts(content, snapshotJson);
+  // A comparison snapshot is its own canonical source. Historical explicit
+  // issue rows are retained in report_content for audit compatibility, but
+  // must never revive removed cells or split one current cell into many rows.
+  const facts = coalesceExplicitIssueFacts(hasCanonicalComparisonCells
+    ? rawFacts.filter((fact) => !(text(fact._sourceKind) === 'explicit_issue' && isComparisonOriginIssue(fact)))
+    : rawFacts);
   const hasCanonicalLiveFunctionIssues = liveIssues.some((issue) => (
     text(issue.source_type) === 'recipe_problem'
     && !isComparisonOriginIssue(issue)

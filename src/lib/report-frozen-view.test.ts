@@ -401,6 +401,26 @@ assert.equal(staleComparisonFacts.issues.length, 1, 'comparison cells with clear
 assert.equal(staleComparisonFacts.issues[0]?.sourceCellId, 'current-cell');
 assert.equal(staleComparisonFacts.issues[0]?.canManage, true);
 
+const removedComparisonCellFacts = buildFrozenReportViewModel({
+  report: { id: 'removed-comparison-cell-facts', report_type: 'comparison_report', content: {} },
+  snapshot: { snapshot_json: {
+    report_content: { issues: [
+      { id: 'removed-comparison', source_type: 'recipe_problem', source_cell_id: 'removed-cell', title: '已删除单元格旧问题' },
+      { id: 'retained-comparison', source_type: 'recipe_problem', source_cell_id: 'retained-cell', title: '保留单元格当前问题' },
+    ] },
+    cells: [
+      { id: 'retained-cell', object_name: '当前对象', project_name: '当前项目', item_name: '当前细项', problem_points: ['当前问题'] },
+    ],
+  } },
+  snapshotResolution: 'anchored',
+  issues: [
+    { id: 'removed-comparison', source_report_id: 'older-report', source_type: 'recipe_problem', source_cell_id: 'removed-cell', title: '已删除单元格旧问题', status: 'open' },
+    { id: 'retained-comparison', source_report_id: 'removed-comparison-cell-facts', source_type: 'recipe_problem', source_cell_id: 'retained-cell', title: '保留单元格当前问题', status: 'open' },
+  ],
+}, { audience: 'internal', manageableIssueIds: new Set(['retained-comparison']) });
+assert.equal(removedComparisonCellFacts.issues.length, 1, 'a comparison cell removed from the frozen snapshot must not be revived by an old issue row');
+assert.equal(removedComparisonCellFacts.issues[0]?.sourceCellId, 'retained-cell');
+
 const comparisonCrossObjectKeepsPeers = buildFrozenReportViewModel({
   report: { id: 'comparison-cross-object', report_type: 'comparison_report', content: {} },
   snapshot: {

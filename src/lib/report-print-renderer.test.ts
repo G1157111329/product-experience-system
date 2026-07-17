@@ -144,6 +144,15 @@ for (const expectedText of ['Latest rectification plan', 'Latest owner', '2026-0
 for (const omittedText of ['Old rectification plan', 'Old owner', '2026-07-01', 'Middle retest failed', 'Oldest retest failed']) {
   assert.equal(rectificationProjectionHtml.includes(omittedText), false, `print/PDF must not render historical rectification or retest entries: found ${omittedText}`);
 }
+const deletedRetestHtml = renderPrintReportHtml(buildPrintReportViewModel(v2, [{
+  id: 'issue-1',
+  reEvaluationCount: 0,
+  latestReEvaluation: null,
+  verification_note: 'This historical note is not a current retest',
+}]));
+for (const omittedText of ['Retest passed', 'Middle retest failed', 'Oldest retest failed', 'This historical note is not a current retest', '最新整改复测：']) {
+  assert.equal(deletedRetestHtml.includes(omittedText), false, `deleted retests must not fall back to frozen or issue-note content: found ${omittedText}`);
+}
 const rectificationProjectionDocumentHtml = renderToStaticMarkup(React.createElement(ReportPrintDocument, {
   model: buildPrintReportViewModel(v2, [{
     id: 'issue-1',
