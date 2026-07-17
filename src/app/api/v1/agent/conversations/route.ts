@@ -6,7 +6,7 @@
  * If agentInstanceId omitted, resolves/creates a default active instance.
  */
 import { NextRequest } from 'next/server';
-import { sql, eq, and, desc, isNull, or } from 'drizzle-orm';
+import { sql, eq, and, desc } from 'drizzle-orm';
 import { getDb } from '@/storage/database/pg-db';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { canAccessTask, requireUser, isAuthResponse } from '@/lib/server/auth';
@@ -23,7 +23,7 @@ interface CreateConversationBody {
   projectId?: string;
 }
 
-async function resolveOrCreateAgentInstance(userId: string, isAdmin: boolean, preferredId?: string): Promise<string | null> {
+async function resolveOrCreateAgentInstance(userId: string, preferredId?: string): Promise<string | null> {
   const db = await getDb();
   if (preferredId) {
     const rows = await db
@@ -35,7 +35,7 @@ async function resolveOrCreateAgentInstance(userId: string, isAdmin: boolean, pr
     if (
       rows[0]
       && rows[0].status === 'active'
-      && (isAdmin || !rows[0].boundUserId || rows[0].boundUserId === userId)
+      && rows[0].boundUserId === userId
     ) {
       return rows[0].id;
     }
@@ -47,7 +47,7 @@ async function resolveOrCreateAgentInstance(userId: string, isAdmin: boolean, pr
     .where(and(
       eq(agentInstances.tenantId, 'default'),
       eq(agentInstances.status, 'active'),
-      isAdmin ? sql`TRUE` : or(isNull(agentInstances.boundUserId), eq(agentInstances.boundUserId, userId)),
+      eq(agentInstances.boundUserId, userId),
     ))
     .limit(1)
     .execute();
@@ -67,6 +67,7 @@ async function resolveOrCreateAgentInstance(userId: string, isAdmin: boolean, pr
       name: '默认任务助手',
       status: 'active',
       modelConfigId: models[0]?.id ?? null,
+      boundUserId: userId,
       description: 'Wave 5 自动创建',
       createdBy: userId,
     })
@@ -101,7 +102,6 @@ export const POST = withTrace<[NextRequest]>(async (traceId, req) => {
 
   const agentInstanceId = await resolveOrCreateAgentInstance(
     user.id,
-    user.role === 'admin',
     typeof body.agentInstanceId === 'string' ? body.agentInstanceId : undefined,
   );
   if (!agentInstanceId) {
@@ -181,6 +181,7 @@ export const GET = withTrace<[NextRequest]>(async (traceId, req) => {
       title: conversations.title,
       status: conversations.status,
       lastEventId: conversations.lastEventId,
+      wecomUserId: conversations.wecomUserId,
       createdAt: conversations.createdAt,
       updatedAt: conversations.updatedAt,
     })
@@ -190,5 +191,11 @@ export const GET = withTrace<[NextRequest]>(async (traceId, req) => {
     .limit(200)
     .execute();
 
-  return ok({ items: rows }, traceId);
+  return ok({
+    items: rows.map((row) => ({
+      ...row,
+      channel: row.wecomUserId ? 'external_chat' : (row.taskId ? 'task' : 'platform'),
+      channelLabel: row.wecomUserId ? '微信/企微' : (row.taskId ? '体验任务' : '平台对话'),
+    })),
+  }, traceId);
 });

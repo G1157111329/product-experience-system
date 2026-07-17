@@ -109,3 +109,29 @@ test('drops incomplete matrix structure actions before confirmation', () => {
 
   assert.deepEqual(actions, []);
 });
+
+test('normalizes material_organize for WeChat inbox claim and context rename', () => {
+  const actions = normalizeAgentActions([
+    {
+      action: 'material_organize',
+      payload: {
+        material_ids: ['11111111-1111-4111-8111-111111111111'],
+        naming_mode: 'context',
+        bind_target: {
+          target_type: 'recipe',
+          target_id: '22222222-2222-4222-8222-222222222222',
+        },
+      },
+    },
+    {
+      action: 'material_organize',
+      payload: { material_ids: [] },
+    },
+  ]);
+
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0]?.type, 'material_organize');
+  assert.equal(actions[0]?.payload.material_id, '11111111-1111-4111-8111-111111111111');
+  assert.equal(actions[0]?.payload.naming_mode, 'context');
+  assert.equal(actions[0]?.payload.recipe_id, '22222222-2222-4222-8222-222222222222');
+});

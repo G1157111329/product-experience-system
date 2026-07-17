@@ -9,6 +9,7 @@ export const AGENT_ACTION_TYPES = [
   'material_ai_result_update',
   'material_rename',
   'material_bind',
+  'material_organize',
   'comparison_cell_material_bind',
   'data_matrix_cell_material_bind',
   'issue_create',
@@ -60,6 +61,7 @@ export const AGENT_ACTION_LABELS: Record<AgentActionType, string> = {
   material_ai_result_update: '整理素材内容',
   material_rename: '重命名素材',
   material_bind: '绑定素材',
+  material_organize: '整理素材入库',
   comparison_cell_material_bind: '绑定对比矩阵单元格素材',
   data_matrix_cell_material_bind: '绑定数据矩阵单元格素材',
   issue_create: '新增问题点',
@@ -99,7 +101,15 @@ function normalizeRisk(value: unknown, fallback: AgentActionRisk): AgentActionRi
 }
 
 function fallbackRisk(type: AgentActionType): AgentActionRisk {
-  if (type.endsWith('_update') || type === 'comparison_cell_update' || type === 'material_rename' || type === 'material_bind' || type === 'comparison_cell_material_bind' || type === 'data_matrix_cell_material_bind') return 'medium';
+  if (
+    type.endsWith('_update')
+    || type === 'comparison_cell_update'
+    || type === 'material_rename'
+    || type === 'material_bind'
+    || type === 'material_organize'
+    || type === 'comparison_cell_material_bind'
+    || type === 'data_matrix_cell_material_bind'
+  ) return 'medium';
   return 'low';
 }
 
@@ -159,6 +169,9 @@ function hasExecutablePlanPayload(type: AgentActionType, payload: Record<string,
     return hasUsableText(payload.label || payload.node_label)
       && (payload.node_type !== 'item' || hasUuid(payload.parent_id));
   }
+  if (type === 'material_organize') {
+    return hasUuid(payload.material_id);
+  }
   if (type === 'comparison_cell_material_bind') {
     return hasUuid(payload.material_id) && hasUuid(payload.comparison_cell_id);
   }
@@ -216,9 +229,38 @@ function normalizeActionPayload(type: AgentActionType, payload: Record<string, u
     copyAlias('column_id', 'columnId');
     copyAlias('value_text', 'value');
   }
-  if (type === 'material_rename') {
+  if (type === 'material_rename' || type === 'material_organize') {
     copyAlias('naming_mode', '命名方式', 'rename_mode');
     if (normalized.auto_name === true || normalized.context_name === true) normalized.naming_mode = 'context';
+    if (type === 'material_organize' && normalized.naming_mode === undefined) normalized.naming_mode = 'context';
+    copyAlias('material_id', 'materialId');
+    if (normalized.material_id === undefined && Array.isArray(normalized.material_ids)) {
+      const firstId = normalized.material_ids.find((item) => typeof item === 'string' && UUID_PATTERN.test(item));
+      if (typeof firstId === 'string') normalized.material_id = firstId;
+    }
+    const bindTarget = asRecord(normalized.bind_target ?? normalized.bindTarget);
+    const bindTargetType = String(bindTarget.target_type || bindTarget.targetType || '');
+    const bindTargetId = bindTarget.target_id ?? bindTarget.targetId;
+    if (normalized.record_id === undefined && (hasUuid(bindTarget.record_id) || (bindTargetType === 'record' && hasUuid(bindTargetId)))) {
+      normalized.record_id = bindTarget.record_id ?? bindTargetId;
+    }
+    if (normalized.recipe_id === undefined && (hasUuid(bindTarget.recipe_id) || (bindTargetType === 'recipe' && hasUuid(bindTargetId)))) {
+      normalized.recipe_id = bindTarget.recipe_id ?? bindTargetId;
+    }
+    if (normalized.recipe_step_id === undefined && (hasUuid(bindTarget.recipe_step_id) || (bindTargetType === 'recipe_step' && hasUuid(bindTargetId)))) {
+      normalized.recipe_step_id = bindTarget.recipe_step_id ?? bindTargetId;
+    }
+    if (normalized.issue_id === undefined && (hasUuid(bindTarget.issue_id) || (bindTargetType === 'issue' && hasUuid(bindTargetId)))) {
+      normalized.issue_id = bindTarget.issue_id ?? bindTargetId;
+    }
+    if (normalized.comparison_cell_id === undefined && (hasUuid(bindTarget.comparison_cell_id) || (bindTargetType === 'comparison_cell' && hasUuid(bindTargetId)))) {
+      normalized.comparison_cell_id = bindTarget.comparison_cell_id ?? bindTargetId;
+    }
+    copyAlias('record_id', 'recordId');
+    copyAlias('recipe_id', 'recipeId');
+    copyAlias('recipe_step_id', 'recipeStepId');
+    copyAlias('issue_id', 'issueId');
+    copyAlias('comparison_cell_id', 'comparisonCellId');
   }
   return normalized;
 }
@@ -247,6 +289,10 @@ export function summarizeAgentAction(action: AgentAction): string {
         : String(payload.file_name || payload.material_id || action.description || '');
     case 'material_bind':
       return String(payload.material_id || action.description || '');
+    case 'material_organize':
+      return payload.naming_mode === 'context'
+        ? `整理并按场景命名：${String(payload.material_id || '')}`
+        : String(payload.material_id || action.description || '');
     case 'comparison_cell_material_bind':
       return [payload.material_id, payload.comparison_cell_id].filter(Boolean).join(' / ');
     case 'data_matrix_cell_material_bind':

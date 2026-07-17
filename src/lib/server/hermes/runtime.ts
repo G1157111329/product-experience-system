@@ -16,12 +16,13 @@ import { getDb } from '@/storage/database/pg-db';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { resolveAIConfig, invokeConfiguredAI, type MessageContent } from '@/lib/server/ai';
 import { agentRuns } from '@/storage/database/shared/schema';
+import { applyHermesPlatformContract } from './hermes-platform-contract';
 
 // Reasoning-capable providers may spend a substantial part of the completion
 // budget before emitting the user-visible JSON action plan.
 export const HERMES_RUN_MAX_TOKENS = 6400;
 
-export type HermesTrigger = 'manual' | 'matrix_summary' | 'report_draft' | 'wecom_ingest';
+export type HermesTrigger = 'manual' | 'matrix_summary' | 'report_draft' | 'wecom_ingest' | 'ilink_ingest';
 
 export interface HermesRunInput {
   agentInstanceId: string;
@@ -149,6 +150,8 @@ export async function executeHermesRun(input: HermesRunInput): Promise<HermesRun
     modelSnapshot = { captured: false, reason: 'resolve_failed' };
   }
 
+  const systemPrompt = applyHermesPlatformContract(input.systemPrompt);
+
   const [runRow] = await db
     .insert(agentRuns)
     .values({
@@ -159,7 +162,7 @@ export async function executeHermesRun(input: HermesRunInput): Promise<HermesRun
       trigger: input.trigger,
       status: 'running',
       modelConfigSnapshot: modelSnapshot,
-      inputSummary: truncate(`SYSTEM:\n${input.systemPrompt}\n\nUSER:\n${input.userPrompt}`),
+      inputSummary: truncate(`SYSTEM:\n${systemPrompt}\n\nUSER:\n${input.userPrompt}`),
       traceId,
       startedAt: sql`NOW()`,
     })
@@ -169,7 +172,7 @@ export async function executeHermesRun(input: HermesRunInput): Promise<HermesRun
 
   // 2. Invoke the model. On any error, classify and mark the run failed.
   const messages: Array<{ role: 'system' | 'user'; content: MessageContent }> = [
-    { role: 'system', content: input.systemPrompt },
+    { role: 'system', content: systemPrompt },
     { role: 'user', content: input.userPrompt },
   ];
 

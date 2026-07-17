@@ -1864,3 +1864,29 @@ export const agentBindingSessions = pgTable("agent_binding_sessions", {
   foreignKey({ columns: [table.platformUserId], foreignColumns: [platformUsers.id], name: "abs_platform_user_fkey" }).onDelete("cascade"),
   foreignKey({ columns: [table.agentInstanceId], foreignColumns: [agentInstances.id], name: "abs_agent_fkey" }).onDelete("set null"),
 ]);
+
+/** Per-user iLink Bot credential. QR scanning creates a bot identity, never a
+ * scriptable ordinary WeChat account. */
+export const ilinkBotAccounts = pgTable("ilink_bot_accounts", {
+  id: varchar({ length: 36 }).default(sql`gen_random_uuid()`).primaryKey().notNull(),
+  platformUserId: varchar("platform_user_id", { length: 36 }).notNull(),
+  agentInstanceId: varchar("agent_instance_id", { length: 36 }).notNull(),
+  botAccountId: varchar("bot_account_id", { length: 200 }).notNull(),
+  ownerWeixinUserId: varchar("owner_weixin_user_id", { length: 200 }).notNull(),
+  tokenEncrypted: text("token_encrypted").notNull(),
+  baseUrl: text("base_url").default('https://ilinkai.weixin.qq.com').notNull(),
+  syncBuffer: text("sync_buffer"),
+  status: varchar({ length: 20 }).default('active').notNull(),
+  lastError: text("last_error"),
+  boundBy: varchar("bound_by", { length: 36 }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+  unique("ilink_bot_accounts_platform_user_key").on(table.platformUserId),
+  unique("ilink_bot_accounts_bot_account_key").on(table.botAccountId),
+  index("iba_agent_idx").using("btree", table.agentInstanceId.asc().nullsLast().op("text_ops")),
+  index("iba_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
+  foreignKey({ columns: [table.platformUserId], foreignColumns: [platformUsers.id], name: "iba_platform_user_fkey" }).onDelete("cascade"),
+  foreignKey({ columns: [table.agentInstanceId], foreignColumns: [agentInstances.id], name: "iba_agent_fkey" }).onDelete("restrict"),
+  foreignKey({ columns: [table.boundBy], foreignColumns: [platformUsers.id], name: "iba_bound_by_fkey" }).onDelete("set null"),
+]);

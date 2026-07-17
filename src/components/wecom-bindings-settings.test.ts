@@ -22,3 +22,18 @@ test('personal WeChat configuration explains official website OAuth callback req
   assert.match(source, /wecomCorpId: bindingProvider === 'wecom' \? wecomCorpId\.trim\(\) \|\| null : null/);
   assert.match(source, /bindingProvider === 'wecom' && <div className="space-y-1">/);
 });
+
+test('binding settings expose a separate recommended WeCom AI Bot gateway configuration', () => {
+  assert.match(source, /wecomBotGateway/);
+  assert.match(source, /企微 AI Bot（推荐）/);
+  assert.match(source, /Bot ID/);
+  assert.match(source, /绑定主体 CorpId/);
+  assert.match(source, /WebSocket 网关/);
+});
+
+test('platform users are selected from the approved user list instead of typed as raw IDs', () => {
+  assert.match(source, /fetch\('\/api\/auth\/users'/);
+  assert.match(source, /handlePlatformUserChange/);
+  assert.match(source, /aria-label="选择平台用户"/);
+  assert.doesNotMatch(source, /placeholder="platform_users\.id"/);
+});

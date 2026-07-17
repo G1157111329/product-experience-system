@@ -65,7 +65,11 @@ export const POST = withTrace<[NextRequest]>(async (traceId, request) => {
     const agents = await db
       .select({ id: agentInstances.id, status: agentInstances.status })
       .from(agentInstances)
-      .where(and(eq(agentInstances.id, agentInstanceId), eq(agentInstances.status, 'active')))
+      .where(and(
+        eq(agentInstances.id, agentInstanceId),
+        eq(agentInstances.status, 'active'),
+        eq(agentInstances.boundUserId, platformUserId),
+      ))
       .limit(1)
       .execute();
     if (agents.length === 0) return fail(traceId, { message: 'Agent 实例不存在或未启用', status: 409 });

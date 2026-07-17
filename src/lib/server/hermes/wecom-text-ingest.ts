@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { getDb } from '@/storage/database/pg-db';
 import {
   agentInstances,
@@ -6,129 +6,135 @@ import {
   conversations,
   wecomBindings,
 } from '@/storage/database/shared/schema';
-import { executeHermesRun } from './runtime';
+import { dispatchHermesTurn } from './hermes-turn';
+import {
+  formatOngoingTaskListReply,
+  isOngoingTaskListIntent,
+  type OngoingTaskSummary,
+} from './workspace-skills';
 
-export type WecomTextMessage = {
-  corpId: string;
+export type WecomTextMessage = { corpId: string; externalUserId: string; messageId: string; content: string };
+export type IlinkPersonalTextMessage = {
+  agentInstanceId: string;
+  platformUserId: string;
   externalUserId: string;
   messageId: string;
   content: string;
 };
-
 export type WecomTextIngestResult = {
   accepted: boolean;
   conversationId?: string;
+  reply?: string;
   reason?: 'binding_not_found' | 'agent_not_found';
 };
 
-/**
- * Persists a verified official WeCom text message in its bound Hermes
- * conversation. Delivery of the assistant reply remains WeCom-channel work;
- * this boundary intentionally records it without impersonating a personal
- * WeChat account or sending through an unofficial transport.
- */
+/** @deprecated use formatOngoingTaskListReply — kept for contract tests */
+export function buildOngoingTaskListReply(content: string, tasks: OngoingTaskSummary[]): string | null {
+  if (!isOngoingTaskListIntent(content)) return null;
+  return formatOngoingTaskListReply(tasks);
+}
+
+/** Accepts only an active, exactly scoped WeCom binding. */
 export async function ingestWecomTextMessage(message: WecomTextMessage): Promise<WecomTextIngestResult> {
   const content = message.content.trim().slice(0, 4000);
   if (!content) return { accepted: false, reason: 'binding_not_found' };
-
   const db = await getDb();
-  const bindings = await db
-    .select()
-    .from(wecomBindings)
-    .where(and(
-      eq(wecomBindings.provider, 'wecom'),
-      eq(wecomBindings.wecomUserId, message.externalUserId),
-      eq(wecomBindings.wecomCorpId, message.corpId),
-      eq(wecomBindings.status, 'active'),
-    ))
-    .limit(1)
-    .execute();
+  const bindings = await db.select().from(wecomBindings).where(and(
+    eq(wecomBindings.provider, 'wecom'),
+    eq(wecomBindings.wecomUserId, message.externalUserId),
+    eq(wecomBindings.wecomCorpId, message.corpId),
+    eq(wecomBindings.status, 'active'),
+  )).limit(1).execute();
   const binding = bindings[0];
   if (!binding) return { accepted: false, reason: 'binding_not_found' };
+  if (!binding.agentInstanceId) return { accepted: false, reason: 'agent_not_found' };
 
-  const agentInstanceId = binding.agentInstanceId || await resolveDefaultAgentInstanceId();
-  if (!agentInstanceId) return { accepted: false, reason: 'agent_not_found' };
-
-  const conversation = await findOrCreateExternalConversation({
-    agentInstanceId,
+  const agents = await db.select({ id: agentInstances.id }).from(agentInstances).where(and(
+    eq(agentInstances.id, binding.agentInstanceId),
+    eq(agentInstances.boundUserId, binding.platformUserId),
+    eq(agentInstances.status, 'active'),
+  )).limit(1).execute();
+  if (!agents[0]) return { accepted: false, reason: 'agent_not_found' };
+  return ingestResolvedExternalTextMessage({
+    agentInstanceId: agents[0].id,
     platformUserId: binding.platformUserId,
     externalUserId: message.externalUserId,
+    messageId: message.messageId,
+    content,
+    inboundToolName: 'wecom_inbound_text',
+    trigger: 'wecom_ingest',
   });
-  const last = await db
-    .select({ eventSeq: conversationMessages.eventSeq })
-    .from(conversationMessages)
+}
+
+/** iLink QR authorisation is bound to one platform user and one assistant. */
+export async function ingestIlinkPersonalTextMessage(message: IlinkPersonalTextMessage): Promise<WecomTextIngestResult> {
+  const content = message.content.trim().slice(0, 4000);
+  if (!content) return { accepted: false, reason: 'binding_not_found' };
+  return ingestResolvedExternalTextMessage({
+    ...message,
+    content,
+    inboundToolName: 'ilink_inbound_text',
+    trigger: 'ilink_ingest',
+  });
+}
+
+async function ingestResolvedExternalTextMessage(input: {
+  agentInstanceId: string;
+  platformUserId: string;
+  externalUserId: string;
+  messageId: string;
+  content: string;
+  inboundToolName: string;
+  trigger: 'wecom_ingest' | 'ilink_ingest';
+}): Promise<WecomTextIngestResult> {
+  const db = await getDb();
+  const conversation = await findOrCreateExternalConversation(input);
+
+  const last = await db.select({ eventSeq: conversationMessages.eventSeq }).from(conversationMessages)
     .where(eq(conversationMessages.conversationId, conversation.id))
-    .orderBy(desc(conversationMessages.eventSeq))
-    .limit(1)
-    .execute();
+    .orderBy(desc(conversationMessages.eventSeq)).limit(1).execute();
   const eventSeq = (last[0]?.eventSeq ?? 0) + 1;
   await db.insert(conversationMessages).values({
     conversationId: conversation.id,
     role: 'user',
-    content,
-    toolName: 'wecom_inbound_text',
-    toolCallId: message.messageId,
+    content: input.content,
+    toolName: input.inboundToolName,
+    toolCallId: input.messageId,
     eventSeq,
   }).execute();
 
-  const run = await executeHermesRun({
-    agentInstanceId,
+  const turn = await dispatchHermesTurn({
+    agentInstanceId: input.agentInstanceId,
     conversationId: conversation.id,
-    trigger: 'wecom_ingest',
-    systemPrompt: '你是产品体验管理平台的 AI 助手。回复必须使用简体中文，简洁、准确，不编造未提供的数据。不要输出思考过程。',
-    userPrompt: `企业微信用户消息：\n${content}`,
-    userId: binding.platformUserId,
+    platformUserId: input.platformUserId,
+    content: input.content,
+    userEventSeq: eventSeq,
+    messageId: input.messageId,
+    trigger: input.trigger,
   });
-  if (run.status === 'succeeded' && run.output) {
-    await db.insert(conversationMessages).values({
-      conversationId: conversation.id,
-      role: 'assistant',
-      content: run.output.slice(0, 4000),
-      toolName: 'wecom_inbound_reply_pending_delivery',
-      eventSeq: eventSeq + 1,
-    }).execute();
-  }
-  await db.update(conversations).set({ updatedAt: sql`NOW()` }).where(eq(conversations.id, conversation.id)).execute();
-  return { accepted: true, conversationId: conversation.id };
+
+  return {
+    accepted: true,
+    conversationId: conversation.id,
+    reply: turn.reply || undefined,
+  };
 }
 
-async function resolveDefaultAgentInstanceId() {
+async function findOrCreateExternalConversation(input: Pick<IlinkPersonalTextMessage, 'agentInstanceId' | 'platformUserId' | 'externalUserId'>) {
   const db = await getDb();
-  const agents = await db
-    .select({ id: agentInstances.id })
-    .from(agentInstances)
-    .where(and(eq(agentInstances.tenantId, 'default'), eq(agentInstances.status, 'active')))
-    .orderBy(agentInstances.createdAt)
-    .limit(1)
-    .execute();
-  return agents[0]?.id ?? null;
-}
-
-async function findOrCreateExternalConversation(input: {
-  agentInstanceId: string;
-  platformUserId: string;
-  externalUserId: string;
-}) {
-  const db = await getDb();
-  const existing = await db
-    .select()
-    .from(conversations)
-    .where(and(
-      eq(conversations.agentInstanceId, input.agentInstanceId),
-      eq(conversations.platformUserId, input.platformUserId),
-      eq(conversations.wecomUserId, input.externalUserId),
-      eq(conversations.status, 'active'),
-    ))
-    .orderBy(desc(conversations.updatedAt))
-    .limit(1)
-    .execute();
+  const existing = await db.select().from(conversations).where(and(
+    eq(conversations.agentInstanceId, input.agentInstanceId),
+    eq(conversations.platformUserId, input.platformUserId),
+    eq(conversations.wecomUserId, input.externalUserId),
+    eq(conversations.status, 'active'),
+  )).orderBy(desc(conversations.updatedAt)).limit(1).execute();
   if (existing[0]) return existing[0];
   const created = await db.insert(conversations).values({
     tenantId: 'default',
     agentInstanceId: input.agentInstanceId,
     platformUserId: input.platformUserId,
     wecomUserId: input.externalUserId,
-    title: '企业微信会话',
+    title: '外部聊天会话',
     status: 'active',
   }).returning().execute();
   return created[0]!;

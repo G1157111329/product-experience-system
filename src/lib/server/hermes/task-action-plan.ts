@@ -36,9 +36,8 @@ export async function planHermesTaskActions(input: PlanInput): Promise<HermesTas
   const context = await loadTaskContext(client, input.taskId);
   const skill = await getActiveSkillVersion(client, 'task_action_plan');
   const snapshot = renderContext(context);
-  const systemPrompt = typeof skill?.version?.system_prompt === 'string'
-    ? skill.version.system_prompt
-    : buildSystemPrompt();
+  // Platform capability catalog is code-owned; DB skill may only customize the user template.
+  const systemPrompt = buildSystemPrompt();
   const userPrompt = renderPromptTemplate(
     typeof skill?.version?.user_prompt_template === 'string'
       ? skill.version.user_prompt_template
@@ -74,11 +73,12 @@ export async function planHermesTaskActions(input: PlanInput): Promise<HermesTas
 }
 
 async function loadTaskContext(client: Client, taskId: string) {
-  const [taskResult, recordsResult, recipesResult, materialsResult, issuesResult] = await Promise.all([
+  const [taskResult, recordsResult, recipesResult, materialsResult, inboxResult, issuesResult] = await Promise.all([
     client.from('experience_tasks').select('*').eq('id', taskId).maybeSingle(),
     client.from('check_records').select('*').eq('task_id', taskId).order('sort_order', { ascending: true }),
     client.from('recipes').select('*').eq('task_id', taskId).order('sort_order', { ascending: true }),
     client.from('materials').select('*').eq('task_id', taskId).order('created_at', { ascending: false }).limit(60),
+    client.from('materials').select('*').is('task_id', null).order('created_at', { ascending: false }).limit(30),
     client.from('issues').select('*').eq('task_id', taskId).order('created_at', { ascending: false }).limit(60),
   ]);
   const recipes = rows(recipesResult.data);
@@ -96,10 +96,18 @@ async function loadTaskContext(client: Client, taskId: string) {
     : null;
   const matrices = rows((await client.from('task_matrices').select('id, name, status').eq('task_id', taskId).order('created_at', { ascending: false }).limit(1)).data);
   const matrix = matrices[0]?.id ? await getV3MatrixProjection(string(matrices[0].id)) : null;
+  const taskOwner = string((taskResult.data as Row | null)?.created_by);
+  const inboxMaterials = rows(inboxResult.data).filter((item) => {
+    const owner = string(item.created_by);
+    const path = string(item.file_path);
+    return owner && owner === taskOwner && /ilink-inbox|wecom-inbox|wecom\//i.test(path);
+  });
   return {
     task: taskResult.data as Row | null,
     records: rows(recordsResult.data), recipes, steps,
-    materials: rows(materialsResult.data), issues: rows(issuesResult.data),
+    materials: rows(materialsResult.data),
+    inboxMaterials,
+    issues: rows(issuesResult.data),
     comparison: comparison ? { assembly, objects: rows(comparison[0].data), nodes: rows(comparison[1].data), cells: rows(comparison[2].data) } : null,
     matrix,
   };
@@ -122,6 +130,8 @@ function renderContext(context: Awaited<ReturnType<typeof loadTaskContext>>) {
     ]),
     '素材：',
     ...context.materials.slice(0, 60).map((item) => `- material_id=${string(item.id)}；名称=${string(item.file_name)}；类型=${string(item.material_type)}`),
+    '微信/企微待入库素材（可用 material_organize）：',
+    ...context.inboxMaterials.slice(0, 30).map((item) => `- material_id=${string(item.id)}；名称=${string(item.file_name)}；类型=${string(item.material_type)}；来源=inbox`),
     '问题：',
     ...context.issues.slice(0, 40).map((item) => `- issue_id=${string(item.id)}；${string(item.title)}；${string(item.status)}`),
   ];
@@ -144,10 +154,12 @@ function renderContext(context: Awaited<ReturnType<typeof loadTaskContext>>) {
 }
 
 function buildSystemPrompt() {
-  return `你是产品体验管理平台的 Hermes 任务协作技能。只输出 JSON：{"reply":"给用户的说明","actions":[...] }。
-你只能基于提供的 ID 与数据提出操作，不能编造 ID，也不能提出删除、配置、权限、冻结、发布、导出操作。所有 actions 只是一份待用户确认的计划，绝不自动执行。所有 reply、操作标题和操作说明必须使用简体中文；仅在必要时保留 ID、文件名、公式和数字。
-允许 actions：record_create、record_update、recipe_create、recipe_update、recipe_step_create、recipe_step_update、comparison_matrix_seed、comparison_object_create、comparison_category_create、comparison_cell_update、data_matrix_create、data_matrix_category_create、data_matrix_cell_update、material_rename、material_bind、comparison_cell_material_bind、data_matrix_cell_material_bind、issue_create、issue_update。
-record_create 必须包含 check_item，可带 evaluation_result（合格/不合格/待定）和标准/结果字段；recipe_update 只可修改已有 recipe_id 的名称、食材/参数、效果描述和三态；data_matrix_create 必须包含 name；data_matrix_category_create 必须包含 matrix_id、label 和 level（1 或 2，二级还必须带 parent_id）；comparison_object_create 必须包含 object_name；comparison_category_create 必须包含 label，细项 node_type="item" 还必须带 parent_id；data_matrix_cell_update 必须带 matrix_id、leaf_row_id、column_id；material_bind 只能关联上下文中的素材到记录、食谱、步骤或问题；comparison_cell_material_bind 必须带 material_id 和 comparison_cell_id；data_matrix_cell_material_bind 必须带 material_id、matrix_id、leaf_row_id、column_id，且列必须是图片/素材列。素材整理或重命名时使用 material_rename，payload 必须含 material_id 与 naming_mode:"context"，不得自行填写 file_name；系统会按所属五感标准描述、食谱功能名称、对比矩阵对象*大类*细项或数据矩阵一级大类_二级细项自动命名并追加顺序号。若用户要求修改冻结报告，说明必须回到任务源数据编辑并重新生成报告，不产生报告写入 action。`;
+  return `你是产品体验管理平台 Hermes 任务协作技能。只输出 JSON：{"reply":"给用户的说明","actions":[...] }。
+操作系统：只能基于本平台当前体验计划上下文中的 ID 与数据提出可确认的 actions，不得用网页手工录入或平台外流程代替写入。
+不能编造 ID，也不能提出删除、配置、权限、冻结、发布、导出操作。所有 actions 只是待用户确认的计划，绝不自动执行。
+reply、操作标题和说明必须使用简体中文；不要输出思考过程。若用户只是征求体验观点且无落库意图，reply 可简短给观点并说明需要落库时再确认操作（可不产出 actions）。
+允许 actions：record_create、record_update、recipe_create、recipe_update、recipe_step_create、recipe_step_update、comparison_matrix_seed、comparison_object_create、comparison_category_create、comparison_cell_update、data_matrix_create、data_matrix_category_create、data_matrix_cell_update、material_rename、material_bind、material_organize、comparison_cell_material_bind、data_matrix_cell_material_bind、issue_create、issue_update、material_ai_result_update。
+record_create 必须包含 check_item，可带 evaluation_result（合格/不合格/待定）和标准/结果字段；recipe_update 只可修改已有 recipe_id 的名称、食材/参数、效果描述和三态；data_matrix_create 必须包含 name；data_matrix_category_create 必须包含 matrix_id、label 和 level（1 或 2，二级还必须带 parent_id）；comparison_object_create 必须包含 object_name；comparison_category_create 必须包含 label，细项 node_type="item" 还必须带 parent_id；data_matrix_cell_update 必须带 matrix_id、leaf_row_id、column_id；material_bind 只能关联上下文中的素材到记录、食谱、步骤或问题；comparison_cell_material_bind 必须带 material_id 和 comparison_cell_id；data_matrix_cell_material_bind 必须带 material_id、matrix_id、leaf_row_id、column_id，且列必须是图片/素材列。微信/企微回传的待入库素材使用 material_organize：payload 必须含 material_id，可选 record_id/recipe_id/recipe_step_id/issue_id/comparison_cell_id，默认 naming_mode:"context"。素材整理或重命名时使用 material_rename，payload 必须含 material_id 与 naming_mode:"context"，不得自行填写 file_name；系统会按所属五感标准描述、食谱功能名称、对比矩阵对象*大类*细项或数据矩阵一级大类_二级细项自动命名并追加顺序号。若用户要求修改冻结报告，说明必须回到任务源数据编辑并重新生成报告，不产生报告写入 action。禁止引导用户去网页手工录入代替平台执行。`;
 }
 
 function rows(value: unknown): Row[] { return Array.isArray(value) ? value as Row[] : []; }

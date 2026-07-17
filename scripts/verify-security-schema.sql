@@ -16,7 +16,7 @@ BEGIN
     'matrix_view_definitions','matrix_hierarchy_nodes','matrix_leaf_rows','matrix_column_definitions','matrix_cell_values','matrix_cell_styles',
     'matrix_formula_definitions_v3','matrix_formula_runs_v3','matrix_narrative_blocks','matrix_issue_points',
     'issues','issue_re_evaluations','rectification_actions','verifications',
-    'agent_instances','agent_memory_namespaces','conversations','conversation_messages','agent_runs','agent_suggestion_blocks','wecom_bindings','wecom_media_ingest_jobs','wecom_callback_replays'
+    'agent_instances','agent_memory_namespaces','conversations','conversation_messages','agent_runs','agent_suggestion_blocks','wecom_bindings','wecom_media_ingest_jobs','wecom_callback_replays','ilink_bot_accounts'
   ]) required(name) WHERE to_regclass('public.' || required.name) IS NULL LIMIT 1;
   IF missing_name IS NOT NULL THEN RAISE EXCEPTION 'startup schema manifest missing table: %', missing_name; END IF;
 
@@ -30,7 +30,7 @@ BEGIN
     'rectification_actions.issue_id','verifications.rectification_action_id','agent_instances.bound_user_id','agent_memory_namespaces.namespace_key',
     'conversations.platform_user_id','conversation_messages.event_seq','agent_runs.trace_id','agent_suggestion_blocks.target_entity_id',
     'wecom_bindings.wecom_user_id','wecom_media_ingest_jobs.wecom_media_id','wecom_media_ingest_jobs.download_status','materials.created_by',
-    'wecom_callback_replays.message_id','wecom_callback_replays.nonce','wecom_callback_replays.corp_id','wecom_callback_replays.message_timestamp','wecom_callback_replays.received_at'
+    'wecom_callback_replays.message_id','wecom_callback_replays.nonce','wecom_callback_replays.corp_id','wecom_callback_replays.message_timestamp','wecom_callback_replays.received_at','ilink_bot_accounts.platform_user_id','ilink_bot_accounts.agent_instance_id','ilink_bot_accounts.bot_account_id','ilink_bot_accounts.owner_weixin_user_id','ilink_bot_accounts.token_encrypted','ilink_bot_accounts.status'
   ]) required(name)
   WHERE NOT EXISTS (SELECT 1 FROM information_schema.columns columns WHERE columns.table_schema='public' AND columns.table_name=split_part(required.name,'.',1) AND columns.column_name=split_part(required.name,'.',2)) LIMIT 1;
   IF missing_name IS NOT NULL THEN RAISE EXCEPTION 'startup schema manifest missing column: %', missing_name; END IF;
@@ -236,10 +236,12 @@ BEGIN
       ('0023_security_schema_probe_rpc',1784217603000::bigint,'6c22403e51c7c903a0bb359814f59f565593de25c524528c208dd9013a3fa451'),
       ('0024_material_owner_and_wecom_replay',1784217604000::bigint,'8a9bb3153598f2306d161f426a792e68c10eb8d6b5b7bc63f476aef05e03bc43'),
       ('0025_frozen_media_reference_guard',1784217605000::bigint,'93430b992f24e3526b79a72aa2ef0a36c1a499ba265e9170ffe692010bd89365'),
-      ('0026_recipe_material_authoritative_links',1784217606000::bigint,'06da19b5ccdcf62791d0e74c3691403d09ad906cee369ca00a1a5e6b1b78b390')
+      ('0026_recipe_material_authoritative_links',1784217606000::bigint,'06da19b5ccdcf62791d0e74c3691403d09ad906cee369ca00a1a5e6b1b78b390'),
+      ('0027_ilink_personal_bot_accounts',1784217607000::bigint,'a74ca83029d629f309fd6309a4d805f757b8295fe899260ae6f29b48531c4588'),
+      ('0028_ilink_agent_run_trigger',1784217608000::bigint,'0a93d89bee5461417a9b2826faea4757d408b431b94d65608cf7847c74f5760d')
     ) required(tag,applied_at,expected_hash)
     WHERE NOT EXISTS (SELECT 1 FROM drizzle.__drizzle_migrations migrations WHERE migrations.created_at=required.applied_at AND migrations.hash=required.expected_hash) LIMIT 1;
     IF missing_tag IS NOT NULL THEN RAISE EXCEPTION 'startup schema manifest missing or mismatched migration tag/hash: %', missing_tag; END IF;
-    RAISE NOTICE 'startup schema provenance: drizzle-journal head=0026_recipe_material_authoritative_links';
+    RAISE NOTICE 'startup schema provenance: drizzle-journal head=0028_ilink_agent_run_trigger';
   END IF;
 END $$;

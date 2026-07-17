@@ -24,3 +24,9 @@ test('floating AI dialog opens centered and exposes its established header as a 
   assert.match(source, /onPointerMove=\{movePanelDrag\}/);
   assert.match(source, /onPointerUp=\{endPanelDrag\}/);
 });
+
+test('floating assistant prefers WeChat/WeCom external conversation history when opening globally', () => {
+  assert.match(source, /channel === 'external_chat'/);
+  assert.match(source, /\/api\/v1\/agent\/conversations'/);
+  assert.match(source, /pickPreferred/);
+});

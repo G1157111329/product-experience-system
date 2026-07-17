@@ -1,4 +1,3 @@
-import { NextRequest } from 'next/server';
 import type { AuthUser } from './auth';
 
 type SupabaseClientLike = {
@@ -7,12 +6,19 @@ type SupabaseClientLike = {
   };
 };
 
+/** Duck-typed request so Hermes custom server can audit without importing next/server. */
+export type SecurityAuditRequestLike = {
+  headers: { get(name: string): string | null };
+  method?: string;
+  nextUrl?: { pathname?: string };
+};
+
 export type SecurityAuditOutcome = 'success' | 'failed' | 'denied';
 
 export interface SecurityAuditInput {
   action: string;
   outcome: SecurityAuditOutcome;
-  request?: NextRequest;
+  request?: SecurityAuditRequestLike;
   actor?: AuthUser | null;
   actorUserId?: string | null;
   actorAccount?: string | null;
@@ -21,7 +27,7 @@ export interface SecurityAuditInput {
   metadata?: Record<string, unknown>;
 }
 
-function getIpAddress(request?: NextRequest) {
+function getIpAddress(request?: SecurityAuditRequestLike) {
   if (!request) return null;
   return request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
     || request.headers.get('x-real-ip')

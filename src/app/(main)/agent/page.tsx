@@ -84,7 +84,8 @@ export default function AgentPage() {
                   >
                     <span className="block truncate text-sm font-medium">{conversation.title || '未命名对话'}</span>
                     <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                      {conversation.taskId ? '体验任务对话' : '平台对话'}
+                      {conversation.channelLabel
+                        || (conversation.wecomUserId ? '微信/企微' : conversation.taskId ? '体验任务对话' : '平台对话')}
                     </span>
                   </button>
                 ))}

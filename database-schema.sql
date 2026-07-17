@@ -2203,7 +2203,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   conversation_id VARCHAR(36) REFERENCES conversations(id) ON DELETE SET NULL,
   memory_namespace_id VARCHAR(36),
   trigger VARCHAR(40) NOT NULL DEFAULT 'manual' CHECK (trigger IN (
-    'manual','matrix_summary','report_draft','wecom_ingest','material_bind_suggestion'
+    'manual','matrix_summary','report_draft','wecom_ingest','ilink_ingest','material_bind_suggestion'
   )),
   status VARCHAR(20) NOT NULL DEFAULT 'running' CHECK (status IN ('running','succeeded','failed')),
   model_config_snapshot JSONB,
@@ -2529,6 +2529,27 @@ CREATE TABLE IF NOT EXISTS wecom_callback_replays (
   CONSTRAINT wecom_callback_replays_corp_nonce_timestamp_key UNIQUE(corp_id, nonce, message_timestamp)
 );
 CREATE INDEX IF NOT EXISTS wecom_callback_replays_received_at_idx ON wecom_callback_replays(received_at);
+
+-- Per-user iLink Bot credentials. QR scanning creates a separate bot identity;
+-- it does not authorize control of an ordinary personal WeChat account.
+CREATE TABLE IF NOT EXISTS ilink_bot_accounts (
+  id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+  platform_user_id VARCHAR(36) NOT NULL REFERENCES platform_users(id) ON DELETE CASCADE,
+  agent_instance_id VARCHAR(36) NOT NULL REFERENCES agent_instances(id) ON DELETE RESTRICT,
+  bot_account_id VARCHAR(200) NOT NULL UNIQUE,
+  owner_weixin_user_id VARCHAR(200) NOT NULL,
+  token_encrypted TEXT NOT NULL,
+  base_url TEXT NOT NULL DEFAULT 'https://ilinkai.weixin.qq.com',
+  sync_buffer TEXT,
+  status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK(status IN ('pending','active','expired','revoked')),
+  last_error TEXT,
+  bound_by VARCHAR(36) REFERENCES platform_users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(platform_user_id)
+);
+CREATE INDEX IF NOT EXISTS iba_agent_idx ON ilink_bot_accounts(agent_instance_id);
+CREATE INDEX IF NOT EXISTS iba_status_idx ON ilink_bot_accounts(status);
 
 DO $$
 BEGIN

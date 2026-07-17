@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   describeWeChatWebsiteOAuthCallback,
   resolveBindingOAuthConfig,
@@ -33,5 +34,10 @@ const callback = describeWeChatWebsiteOAuthCallback(
 );
 assert.equal(callback.authorizedRedirectDomain, 'experience.example.com');
 assert.equal(callback.callbackPath, '/api/v1/bindings/oauth/callback');
+
+const source = readFileSync('src/lib/server/binding-oauth-config.ts', 'utf8');
+assert.match(source, /wecomBot/);
+assert.match(source, /WECOM_BOT_ID/);
+assert.match(source, /WECOM_BINDING_CORP_ID/);
 
 console.log('binding oauth config tests passed');

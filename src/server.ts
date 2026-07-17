@@ -6,6 +6,8 @@ import next from 'next';
 import { applyNoStorePageHeaders, isHtmlPageRequest } from './lib/server/page-cache';
 import { validateProductionStartupSecurity } from './lib/server/startup-security';
 import { startMaterialCleanupWorker } from './lib/server/material-cleanup-worker';
+import { startWecomBotGateway } from './lib/server/wecom-bot-gateway';
+import { startIlinkPersonalBotGateway } from './lib/server/ilink-personal-bot-gateway';
 import {
   createLocalFileReadStream,
   getLocalContentType,
@@ -194,6 +196,8 @@ async function startServer() {
   }
   await app.prepare();
   const stopCleanupWorker = !dev ? startMaterialCleanupWorker() : async () => undefined;
+  const stopWecomBotGateway = await startWecomBotGateway();
+  const stopIlinkPersonalBotGateway = await startIlinkPersonalBotGateway();
   const server = createServer(async (req, res) => {
     try {
       if (await tryServeNextStatic(req, res)) return;
@@ -225,7 +229,9 @@ async function startServer() {
       }`,
     );
   });
-  const shutdown = () => { void stopCleanupWorker().finally(() => server.close()); };
+  const shutdown = () => {
+    void Promise.all([stopCleanupWorker(), Promise.resolve(stopWecomBotGateway()), Promise.resolve(stopIlinkPersonalBotGateway())]).finally(() => server.close());
+  };
   process.once('SIGTERM', shutdown);
   process.once('SIGINT', shutdown);
 }

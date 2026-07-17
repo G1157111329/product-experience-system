@@ -14,6 +14,9 @@ export type HermesConversation = {
   taskId?: string | null;
   status?: string;
   updatedAt?: string;
+  wecomUserId?: string | null;
+  channel?: 'external_chat' | 'task' | 'platform';
+  channelLabel?: string;
 };
 
 export type HermesMessage = {

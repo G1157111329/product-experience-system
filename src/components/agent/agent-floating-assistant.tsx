@@ -42,14 +42,36 @@ export function AgentFloatingAssistant() {
     setTaskEntry(null);
     const remembered = localStorage.getItem(conversationKey);
     setConversationId(remembered);
+
+    const pickPreferred = (items: Array<{ id?: string; wecomUserId?: string | null; channel?: string }>) => {
+      if (!Array.isArray(items) || items.length === 0) return null;
+      const external = items.find((item) => item.wecomUserId || item.channel === 'external_chat');
+      return external?.id || items[0]?.id || null;
+    };
+
     if (taskId) {
       void fetch(`/api/v1/agent/conversations?task_id=${encodeURIComponent(taskId)}`, { cache: 'no-store' })
         .then((response) => response.json())
         .then((json) => {
-          const latest = Array.isArray(json.data?.items) ? json.data.items[0] : null;
-          if (latest?.id) {
-            setConversationId(latest.id);
-            localStorage.setItem(conversationKey, latest.id);
+          const items = Array.isArray(json.data?.items) ? json.data.items : [];
+          const preferred = pickPreferred(items);
+          if (preferred) {
+            setConversationId(preferred);
+            localStorage.setItem(conversationKey, preferred);
+          } else if (!remembered) {
+            setConversationId(null);
+          }
+        })
+        .catch(() => undefined);
+    } else {
+      void fetch('/api/v1/agent/conversations', { cache: 'no-store' })
+        .then((response) => response.json())
+        .then((json) => {
+          const items = Array.isArray(json.data?.items) ? json.data.items : [];
+          const preferred = pickPreferred(items);
+          if (preferred) {
+            setConversationId(preferred);
+            localStorage.setItem(conversationKey, preferred);
           } else if (!remembered) {
             setConversationId(null);
           }

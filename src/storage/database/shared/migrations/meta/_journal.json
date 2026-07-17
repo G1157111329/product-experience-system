@@ -28,6 +28,8 @@
     { "idx": 23, "version": "7", "when": 1784217603000, "tag": "0023_security_schema_probe_rpc", "breakpoints": true },
     { "idx": 24, "version": "7", "when": 1784217604000, "tag": "0024_material_owner_and_wecom_replay", "breakpoints": true },
     { "idx": 25, "version": "7", "when": 1784217605000, "tag": "0025_frozen_media_reference_guard", "breakpoints": true },
-    { "idx": 26, "version": "7", "when": 1784217606000, "tag": "0026_recipe_material_authoritative_links", "breakpoints": true }
+    { "idx": 26, "version": "7", "when": 1784217606000, "tag": "0026_recipe_material_authoritative_links", "breakpoints": true },
+    { "idx": 27, "version": "7", "when": 1784217607000, "tag": "0027_ilink_personal_bot_accounts", "breakpoints": true },
+    { "idx": 28, "version": "7", "when": 1784217608000, "tag": "0028_ilink_agent_run_trigger", "breakpoints": true }
   ]
 }

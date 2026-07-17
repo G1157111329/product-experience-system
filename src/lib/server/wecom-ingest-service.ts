@@ -33,7 +33,7 @@ export async function findActiveBinding(wecomUserId: string, wecomCorpId?: strin
     )
     .execute();
   if (!wecomCorpId) return rows[0] ?? null;
-  return rows.find((r) => r.wecomCorpId === wecomCorpId) ?? rows[0] ?? null;
+  return rows.find((r) => r.wecomCorpId === wecomCorpId) ?? null;
 }
 
 export async function enqueueWecomMediaJob(input: WecomIngestEnqueueInput) {

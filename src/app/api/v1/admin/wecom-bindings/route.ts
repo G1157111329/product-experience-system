@@ -3,9 +3,9 @@
  * PRD V3.1.2.4 §12 — Admin CRUD for WeCom user bindings.
  */
 import { NextRequest } from 'next/server';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { getDb } from '@/storage/database/pg-db';
-import { wecomBindings } from '@/storage/database/shared/schema';
+import { agentInstances, wecomBindings } from '@/storage/database/shared/schema';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { requireAdmin, isAuthResponse } from '@/lib/server/auth';
 import { ok, fail, unauthorized, withTrace } from '@/lib/server/api-v1/response';
@@ -50,12 +50,26 @@ export const POST = withTrace<[NextRequest]>(async (traceId, req) => {
 
   const platformUserId = String(body.platformUserId || body.platform_user_id || '').trim();
   const wecomUserId = String(body.wecomUserId || body.wecom_user_id || '').trim();
-  if (!platformUserId || !wecomUserId) {
-    return fail(traceId, { message: 'platformUserId 与 wecomUserId 必填', status: 400 });
+  const agentInstanceId = String(body.agentInstanceId || body.agent_instance_id || '').trim();
+  if (!platformUserId || !wecomUserId || !agentInstanceId) {
+    return fail(traceId, { message: 'platformUserId、wecomUserId 与 agentInstanceId 必填', status: 400 });
   }
 
   try {
     const db = await getDb();
+    const agents = await db
+      .select({ id: agentInstances.id })
+      .from(agentInstances)
+      .where(and(
+        eq(agentInstances.id, agentInstanceId),
+        eq(agentInstances.status, 'active'),
+        eq(agentInstances.boundUserId, platformUserId),
+      ))
+      .limit(1)
+      .execute();
+    if (agents.length === 0) {
+      return fail(traceId, { message: '只能绑定该平台账号名下的已启用 AI 助手', status: 409 });
+    }
     const [row] = await db
       .insert(wecomBindings)
       .values({
@@ -65,9 +79,7 @@ export const POST = withTrace<[NextRequest]>(async (traceId, req) => {
           ? String(body.wecomCorpId || body.wecom_corp_id)
           : null,
         provider: body.provider === 'wechat' ? 'wechat' : 'wecom',
-        agentInstanceId: body.agentInstanceId || body.agent_instance_id
-          ? String(body.agentInstanceId || body.agent_instance_id)
-          : null,
+        agentInstanceId,
         projectScope: (body.projectScope ?? body.project_scope ?? null) as unknown,
         status: 'active',
         boundBy: admin.id,
@@ -76,9 +88,7 @@ export const POST = withTrace<[NextRequest]>(async (traceId, req) => {
         target: [wecomBindings.wecomUserId, wecomBindings.wecomCorpId],
         set: {
           platformUserId,
-          agentInstanceId: body.agentInstanceId || body.agent_instance_id
-            ? String(body.agentInstanceId || body.agent_instance_id)
-            : null,
+          agentInstanceId,
           status: 'active',
           boundBy: admin.id,
           updatedAt: sql`NOW()`,

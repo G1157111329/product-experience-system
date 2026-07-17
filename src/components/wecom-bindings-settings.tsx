@@ -5,6 +5,7 @@
  * Lists / creates / revokes wecom_bindings via /api/v1/admin/wecom-bindings.
  */
 import { useCallback, useEffect, useState } from 'react';
+import Image from 'next/image';
 import { KeyRound, Loader2, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -43,12 +44,51 @@ type OAuthProviderConfig = {
 type OAuthConfigResponse = {
   wechat: OAuthProviderConfig;
   wecom: OAuthProviderConfig;
+  wecomBot: WecomBotConfig;
+  wecomBotGateway: WecomBotGatewayStatus;
   callbackUrl: string;
+};
+
+type WecomBotConfig = {
+  botId: string;
+  bindingCorpId: string;
+  websocketUrl: string;
+  dmPolicy: 'pairing' | 'allowlist' | 'disabled';
+  groupPolicy: 'allowlist' | 'disabled';
+  secretConfigured: boolean;
+  ready: boolean;
+  source: 'environment' | 'platform' | 'missing';
+};
+
+type WecomBotGatewayStatus = {
+  state: 'disabled' | 'connecting' | 'connected' | 'error';
+  detail?: string;
+  updatedAt: string;
+};
+
+type IlinkBotAccount = {
+  id: string;
+  platformUserId: string;
+  agentInstanceId: string;
+  botAccountId: string;
+  ownerWeixinUserId: string;
+  status: 'pending' | 'active' | 'expired' | 'revoked';
+  lastError: string | null;
+  updatedAt: string;
 };
 
 type AgentInstance = {
   id: string;
   name: string;
+  status: string;
+  boundUserId: string | null;
+};
+
+type PlatformUser = {
+  id: string;
+  account: string;
+  name: string | null;
+  role: string;
   status: string;
 };
 
@@ -61,6 +101,7 @@ export function WecomBindingsSettings({
 }) {
   const [items, setItems] = useState<BindingRow[]>([]);
   const [agents, setAgents] = useState<AgentInstance[]>([]);
+  const [platformUsers, setPlatformUsers] = useState<PlatformUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [platformUserId, setPlatformUserId] = useState('');
@@ -74,16 +115,28 @@ export function WecomBindingsSettings({
   const [oauthAgentId, setOauthAgentId] = useState('');
   const [oauthSecret, setOauthSecret] = useState('');
   const [oauthSaving, setOauthSaving] = useState(false);
+  const [botId, setBotId] = useState('');
+  const [botBindingCorpId, setBotBindingCorpId] = useState('');
+  const [botSecret, setBotSecret] = useState('');
+  const [botWebsocketUrl, setBotWebsocketUrl] = useState('wss://openws.work.weixin.qq.com');
+  const [botDmPolicy, setBotDmPolicy] = useState<WecomBotConfig['dmPolicy']>('pairing');
+  const [botGroupPolicy, setBotGroupPolicy] = useState<WecomBotConfig['groupPolicy']>('disabled');
+  const [botSaving, setBotSaving] = useState(false);
+  const [ilinkAccounts, setIlinkAccounts] = useState<IlinkBotAccount[]>([]);
+  const [ilinkQr, setIlinkQr] = useState<{ qrcode: string; qrCodeDataUrl: string; expiresAt: string } | null>(null);
+  const [ilinkStarting, setIlinkStarting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [res, configRes, agentsRes] = await Promise.all([
+      const [res, configRes, agentsRes, ilinkRes, usersRes] = await Promise.all([
         fetch('/api/v1/admin/wecom-bindings?limit=200', { cache: 'no-store' }),
         fetch('/api/v1/admin/wecom-bindings/config', { cache: 'no-store' }),
         fetch('/api/v1/admin/agent-instances?status=active', { cache: 'no-store' }),
+        fetch('/api/v1/admin/ilink-bots', { cache: 'no-store' }),
+        fetch('/api/auth/users', { cache: 'no-store' }),
       ]);
-      const [json, configJson, agentsJson] = await Promise.all([res.json(), configRes.json(), agentsRes.json()]);
+      const [json, configJson, agentsJson, ilinkJson, usersJson] = await Promise.all([res.json(), configRes.json(), agentsRes.json(), ilinkRes.json(), usersRes.json()]);
       if (json.code === 0) {
         setItems((json.data?.items ?? []) as BindingRow[]);
       } else {
@@ -91,6 +144,8 @@ export function WecomBindingsSettings({
       }
       if (configJson.code === 0) setOauthConfig(configJson.data as OAuthConfigResponse);
       if (agentsJson.code === 0) setAgents((agentsJson.data?.items ?? []) as AgentInstance[]);
+      if (ilinkJson.code === 0) setIlinkAccounts((ilinkJson.data?.items ?? []) as IlinkBotAccount[]);
+      if (usersJson.code === 0) setPlatformUsers((usersJson.data ?? []) as PlatformUser[]);
     } catch {
       toast.error('加载失败');
     } finally {
@@ -108,6 +163,40 @@ export function WecomBindingsSettings({
     setOauthAgentId(config?.agentId || '');
     setOauthSecret('');
   }, [oauthConfig, oauthProvider]);
+
+  useEffect(() => {
+    const config = oauthConfig?.wecomBot;
+    setBotId(config?.botId || '');
+    setBotBindingCorpId(config?.bindingCorpId || '');
+    setBotSecret('');
+    setBotWebsocketUrl(config?.websocketUrl || 'wss://openws.work.weixin.qq.com');
+    setBotDmPolicy(config?.dmPolicy || 'pairing');
+    setBotGroupPolicy(config?.groupPolicy || 'disabled');
+  }, [oauthConfig]);
+
+  useEffect(() => {
+    if (!ilinkQr) return;
+    const timer = window.setInterval(() => {
+      void fetch(`/api/v1/admin/ilink-bots/qr?qrcode=${encodeURIComponent(ilinkQr.qrcode)}`, { cache: 'no-store' })
+        .then((response) => response.json())
+        .then((json) => {
+          if (json.code === 0 && json.data?.status === 'confirmed') {
+            window.clearInterval(timer);
+            setIlinkQr(null);
+            toast.success('iLink Bot 授权成功');
+            void load();
+          }
+        })
+        .catch(() => undefined);
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [ilinkQr, load]);
+
+  const handlePlatformUserChange = (userId: string) => {
+    setPlatformUserId(userId);
+    setAgentInstanceId('');
+    setIlinkQr(null);
+  };
 
   const handleSaveOauthConfig = async () => {
     if (!oauthAppId.trim() || (oauthProvider === 'wecom' && !oauthAgentId.trim())) {
@@ -145,9 +234,94 @@ export function WecomBindingsSettings({
     }
   };
 
+  const handleSaveWecomBotConfig = async () => {
+    if (!botId.trim() || !botBindingCorpId.trim()) {
+      toast.error('请填写 Bot ID 与绑定主体 CorpId');
+      return;
+    }
+    if (!botSecret.trim() && !oauthConfig?.wecomBot.secretConfigured) {
+      toast.error('首次配置请填写 Bot Secret');
+      return;
+    }
+    setBotSaving(true);
+    try {
+      const response = await fetch('/api/v1/admin/wecom-bindings/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          configKind: 'wecom_bot',
+          botId: botId.trim(),
+          bindingCorpId: botBindingCorpId.trim(),
+          secret: botSecret,
+          websocketUrl: botWebsocketUrl.trim(),
+          dmPolicy: botDmPolicy,
+          groupPolicy: botGroupPolicy,
+        }),
+      });
+      const json = await response.json();
+      if (json.code !== 0) {
+        toast.error(json.message || '企微 AI Bot 配置保存失败');
+        return;
+      }
+      setOauthConfig((current) => current ? { ...current, wecomBot: json.data as WecomBotConfig } : current);
+      setBotSecret('');
+      toast.success('企微 AI Bot 配置已保存');
+    } catch {
+      toast.error('企微 AI Bot 配置保存失败');
+    } finally {
+      setBotSaving(false);
+    }
+  };
+
+  const handleStartIlinkQr = async () => {
+    if (!platformUserId.trim()) {
+      toast.error('请先选择平台账号');
+      return;
+    }
+    setIlinkStarting(true);
+    try {
+      let selectedAgentInstanceId = agentInstanceId;
+      if (!selectedAgentInstanceId) {
+        const assistantResponse = await fetch('/api/v1/admin/ilink-bots/assistant', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platformUserId }),
+        });
+        const assistantJson = await assistantResponse.json();
+        if (assistantJson.code !== 0 || !assistantJson.data?.agent?.id) {
+          return toast.error(assistantJson.message || '个人 AI 助手创建失败');
+        }
+        const createdAgent = assistantJson.data.agent as AgentInstance;
+        selectedAgentInstanceId = createdAgent.id;
+        setAgents((previous) => previous.some((agent) => agent.id === createdAgent.id) ? previous : [...previous, createdAgent]);
+        setAgentInstanceId(createdAgent.id);
+      }
+      const response = await fetch('/api/v1/admin/ilink-bots/qr', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platformUserId: platformUserId.trim(), agentInstanceId: selectedAgentInstanceId }),
+      });
+      const json = await response.json();
+      if (json.code !== 0) return toast.error(json.message || 'iLink 二维码创建失败');
+      setIlinkQr(json.data);
+    } catch {
+      toast.error('iLink 二维码创建失败');
+    } finally {
+      setIlinkStarting(false);
+    }
+  };
+
+  const handleRevokeIlink = async (account: IlinkBotAccount) => {
+    if (!window.confirm(`确认撤销平台账号 ${account.platformUserId} 的 iLink 授权？该用户需要重新扫码才能恢复。`)) return;
+    const response = await fetch(`/api/v1/admin/ilink-bots?platformUserId=${encodeURIComponent(account.platformUserId)}`, { method: 'DELETE' });
+    const json = await response.json();
+    if (json.code !== 0) return toast.error(json.message || '撤销失败');
+    toast.success('iLink 授权已撤销');
+    await load();
+  };
+
   const handleCreate = async () => {
-    if (!platformUserId.trim() || !wecomUserId.trim()) {
-      toast.error(`请填写平台用户 ID 与${bindingProvider === 'wecom' ? '企微 UserId' : '微信 OpenId'}`);
+    if (!platformUserId.trim() || !wecomUserId.trim() || !agentInstanceId) {
+      toast.error(!agentInstanceId
+        ? '请选择该平台账号的 AI 助手'
+        : `请填写平台用户 ID 与${bindingProvider === 'wecom' ? '企微 UserId' : '微信 OpenId'}`);
       return;
     }
     setSaving(true);
@@ -207,6 +381,106 @@ export function WecomBindingsSettings({
           </DialogDescription>
         </DialogHeader>
 
+        <details className="rounded-md border px-3 py-2" open={!oauthConfig?.wecomBot.ready}>
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium">
+            <KeyRound className="h-4 w-4" />
+            企微 AI Bot（推荐）
+            <Badge variant={oauthConfig?.wecomBot.ready ? 'default' : 'secondary'} className="ml-auto text-xs">
+              {oauthConfig?.wecomBot.ready ? '已配置' : '待配置'}
+            </Badge>
+          </summary>
+          <div className="mt-3 space-y-3">
+            <p className="text-xs text-muted-foreground">用于消息与素材录入；平台以绑定主体和企微 UserId 路由到各自的个人 AI 助手，默认只接受配对私聊。</p>
+            {oauthConfig?.wecomBotGateway && (
+              <p className="text-xs text-muted-foreground">
+                网关状态：{({ disabled: '未连接', connecting: '连接中', connected: '已连接', error: '异常' } as const)[oauthConfig.wecomBotGateway.state]}
+                {oauthConfig.wecomBotGateway.detail ? `（${oauthConfig.wecomBotGateway.detail}）` : ''}
+              </p>
+            )}
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label className="text-xs">Bot ID</Label>
+                <Input value={botId} onChange={(event) => setBotId(event.target.value)} className="h-8" autoComplete="off" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">绑定主体 CorpId</Label>
+                <Input value={botBindingCorpId} onChange={(event) => setBotBindingCorpId(event.target.value)} className="h-8" autoComplete="off" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Bot Secret</Label>
+              <Input type="password" value={botSecret} onChange={(event) => setBotSecret(event.target.value)} placeholder={oauthConfig?.wecomBot.secretConfigured ? '已保存，留空表示不修改' : '首次配置必填'} className="h-8" autoComplete="new-password" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">WebSocket 网关</Label>
+              <Input value={botWebsocketUrl} onChange={(event) => setBotWebsocketUrl(event.target.value)} className="h-8" autoComplete="off" />
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label className="text-xs">私聊策略</Label>
+                <select value={botDmPolicy} onChange={(event) => setBotDmPolicy(event.target.value as WecomBotConfig['dmPolicy'])} className="h-8 w-full rounded-md border bg-background px-2 text-sm">
+                  <option value="pairing">仅已绑定用户</option>
+                  <option value="allowlist">白名单</option>
+                  <option value="disabled">关闭</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">群聊策略</Label>
+                <select value={botGroupPolicy} onChange={(event) => setBotGroupPolicy(event.target.value as WecomBotConfig['groupPolicy'])} className="h-8 w-full rounded-md border bg-background px-2 text-sm">
+                  <option value="disabled">关闭</option>
+                  <option value="allowlist">白名单</option>
+                </select>
+              </div>
+            </div>
+            <Button size="sm" onClick={() => void handleSaveWecomBotConfig()} disabled={botSaving}>
+              {botSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
+              保存企微 AI Bot 配置
+            </Button>
+          </div>
+        </details>
+
+        <details className="rounded-md border px-3 py-2" open>
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium">
+            <KeyRound className="h-4 w-4" />
+            个人微信 iLink Bot（每人独立）
+            <Badge variant="secondary" className="ml-auto text-xs">扫码授权</Badge>
+          </summary>
+          <div className="mt-3 space-y-3">
+            <p className="text-xs text-muted-foreground">选择平台账号及其个人 AI 助手后，由该用户自己的微信扫码。扫码产生独立 Bot 身份；仅扫码用户可私聊并录入素材。</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label className="text-xs">平台用户</Label>
+                <select value={platformUserId} onChange={(event) => handlePlatformUserChange(event.target.value)} className="h-8 w-full rounded-md border bg-background px-2 text-sm" aria-label="选择平台用户">
+                  <option value="">请选择平台用户</option>
+                  {platformUsers.map((user) => <option key={user.id} value={user.id}>{user.name || user.account}（{user.account}）</option>)}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">个人 AI 助手</Label>
+                <select value={agentInstanceId} onChange={(event) => setAgentInstanceId(event.target.value)} className="h-8 w-full rounded-md border bg-background px-2 text-sm">
+                  <option value="">请选择该账号的助手</option>
+                  {agents.filter((agent) => agent.boundUserId === platformUserId.trim()).map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
+                </select>
+              </div>
+            </div>
+            {platformUserId && agents.every((agent) => agent.boundUserId !== platformUserId) && <p role="status" className="text-xs text-muted-foreground">该用户尚无个人助手；生成授权时将自动创建，管理员本人也适用。</p>}
+            <Button size="sm" onClick={() => void handleStartIlinkQr()} disabled={ilinkStarting || !platformUserId}>
+              {ilinkStarting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
+              生成 iLink 扫码授权
+            </Button>
+            {ilinkQr && <div className="rounded-md border p-3 text-center">
+              <Image src={ilinkQr.qrCodeDataUrl} alt="iLink 扫码授权" width={224} height={224} unoptimized className="mx-auto h-56 w-56" />
+              <p className="mt-2 text-xs text-muted-foreground">请用目标用户自己的微信扫码并在手机确认。二维码有效至 {new Date(ilinkQr.expiresAt).toLocaleTimeString()}。</p>
+            </div>}
+            <div className="space-y-2">
+              {ilinkAccounts.length === 0 ? <p className="text-xs text-muted-foreground">尚无 iLink 授权。</p> : ilinkAccounts.map((account) => <div key={account.id} className="flex items-center justify-between gap-2 rounded border px-2 py-1.5 text-xs">
+                <span className="min-w-0 truncate">用户 {account.platformUserId} · Bot {account.botAccountId} · {account.status}</span>
+                {account.status === 'active' && <Button size="sm" variant="ghost" className="h-7 text-destructive" onClick={() => void handleRevokeIlink(account)}>撤销授权</Button>}
+              </div>)}
+            </div>
+          </div>
+        </details>
+
         <details className="rounded-md border px-3 py-2" open={!oauthConfig?.[oauthProvider]?.ready}>
           <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium">
             <KeyRound className="h-4 w-4" />
@@ -234,7 +508,7 @@ export function WecomBindingsSettings({
               </div>}
             </div>
             {oauthProvider === 'wechat' && <div className="space-y-2 rounded bg-muted px-2 py-2 text-xs text-muted-foreground">
-              <p>个人微信仅配置微信开放平台网站应用 OAuth，不包含个人号机器人、消息监听或企业微信字段。</p>
+              <p>个人微信网站应用 OAuth 仅用于账号身份绑定；聊天与素材入口请使用上方“个人微信 iLink Bot”。iLink 扫码生成独立机器人身份，与本页 OAuth 不是同一条通道。</p>
               <div className="grid gap-2 sm:grid-cols-2">
                 <div className="space-y-1">
                   <Label className="text-xs">授权回调域名</Label>
@@ -284,13 +558,11 @@ export function WecomBindingsSettings({
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="space-y-1">
-              <Label className="text-xs">平台用户 ID</Label>
-              <Input
-                value={platformUserId}
-                onChange={(e) => setPlatformUserId(e.target.value)}
-                placeholder="platform_users.id"
-                className="h-8"
-              />
+              <Label className="text-xs">平台用户</Label>
+              <select value={platformUserId} onChange={(event) => handlePlatformUserChange(event.target.value)} className="h-8 w-full rounded-md border bg-background px-2 text-sm" aria-label="选择平台用户">
+                <option value="">请选择平台用户</option>
+                {platformUsers.map((user) => <option key={user.id} value={user.id}>{user.name || user.account}（{user.account}）</option>)}
+              </select>
             </div>
             <div className="space-y-1">
               <Label className="text-xs">{bindingProvider === 'wecom' ? '企微 UserId' : '微信 OpenId'}</Label>
@@ -305,8 +577,10 @@ export function WecomBindingsSettings({
           <div className="space-y-1">
             <Label className="text-xs">选择 AI 助手</Label>
             <select value={agentInstanceId} onChange={(event) => setAgentInstanceId(event.target.value)} className="h-8 w-full rounded-md border bg-background px-2 text-sm">
-              <option value="">使用平台默认助手</option>
-              {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
+              <option value="" disabled>请选择该平台账号的 AI 助手</option>
+              {agents
+                .filter((agent) => agent.boundUserId === platformUserId.trim())
+                .map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
             </select>
           </div>
           {bindingProvider === 'wecom' && <div className="space-y-1">

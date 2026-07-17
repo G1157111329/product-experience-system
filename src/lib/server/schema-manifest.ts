@@ -109,6 +109,8 @@ export const REQUIRED_MIGRATIONS = [
   ['0024_material_owner_and_wecom_replay', 1784217604000, '8a9bb3153598f2306d161f426a792e68c10eb8d6b5b7bc63f476aef05e03bc43'],
   ['0025_frozen_media_reference_guard', 1784217605000, '93430b992f24e3526b79a72aa2ef0a36c1a499ba265e9170ffe692010bd89365'],
   ['0026_recipe_material_authoritative_links', 1784217606000, '06da19b5ccdcf62791d0e74c3691403d09ad906cee369ca00a1a5e6b1b78b390'],
+  ['0027_ilink_personal_bot_accounts', 1784217607000, 'a74ca83029d629f309fd6309a4d805f757b8295fe899260ae6f29b48531c4588'],
+  ['0028_ilink_agent_run_trigger', 1784217608000, '0a93d89bee5461417a9b2826faea4757d408b431b94d65608cf7847c74f5760d'],
 ] as const;
 
 const fk = (name: string, table: string, columns: string[], targetTable: string, targetColumns = ['id'], onDelete?: RequiredForeignKey['onDelete']): RequiredForeignKey => ({ name, table, columns, targetTable, targetColumns, onDelete });
@@ -154,6 +156,7 @@ export const REQUIRED_SCHEMA_MANIFEST: RequiredSchemaObject[] = [
   { migrationTag: '0006_hermes_agent_tables', table: 'conversations', columns: ['id', 'agent_instance_id', 'platform_user_id', 'task_id', 'status'], foreignKeys: [fk('conv_agent_fkey', 'conversations', ['agent_instance_id'], 'agent_instances')], indexes: [idx('conv_user_idx', 'conversations', ['platform_user_id'])] },
   { migrationTag: '0006_hermes_agent_tables', table: 'conversation_messages', columns: ['id', 'conversation_id', 'event_seq', 'role'], foreignKeys: [fk('cm_conv_fkey', 'conversation_messages', ['conversation_id'], 'conversations')], indexes: [idx('cm_conv_seq_idx', 'conversation_messages', ['conversation_id', 'event_seq'])] },
   { migrationTag: '0006_hermes_agent_tables', table: 'agent_runs', columns: ['id', 'agent_instance_id', 'conversation_id', 'status', 'trace_id'], foreignKeys: [fk('ar_instance_fkey', 'agent_runs', ['agent_instance_id'], 'agent_instances')], indexes: [idx('ar_trace_idx', 'agent_runs', ['trace_id'])] },
+  { migrationTag: '0028_ilink_agent_run_trigger', table: 'agent_runs', columns: ['id', 'trigger'], constraints: [{ name: 'agent_runs_trigger_check', table: 'agent_runs', definitionIncludes: ['ilink_ingest', 'wecom_ingest'] }] },
   { migrationTag: '0006_hermes_agent_tables', table: 'agent_suggestion_blocks', columns: ['id', 'agent_run_id', 'status', 'target_entity_type', 'target_entity_id'], foreignKeys: [fk('asb_run_fkey', 'agent_suggestion_blocks', ['agent_run_id'], 'agent_runs')], indexes: [idx('asb_target_idx', 'agent_suggestion_blocks', ['target_entity_type', 'target_entity_id'])] },
   { migrationTag: '0011_agent_qr_binding', table: 'wecom_bindings', columns: ['id', 'platform_user_id', 'wecom_user_id', 'agent_instance_id'], foreignKeys: [fk('wb_platform_user_fkey', 'wecom_bindings', ['platform_user_id'], 'platform_users')], indexes: [idx('wb_wecom_user_idx', 'wecom_bindings', ['wecom_user_id'])] },
   { migrationTag: '0006_hermes_agent_tables', table: 'wecom_media_ingest_jobs', columns: ['id', 'wecom_binding_id', 'wecom_media_id', 'download_status'], indexes: [idx('wmij_status_idx', 'wecom_media_ingest_jobs', ['download_status'])] },
@@ -162,6 +165,7 @@ export const REQUIRED_SCHEMA_MANIFEST: RequiredSchemaObject[] = [
     { name: 'wecom_callback_replays.corp_nonce_timestamp unique', table: 'wecom_callback_replays', columns: ['corp_id', 'nonce', 'message_timestamp'], unique: true, matchName: false },
     idx('wecom_callback_replays_received_at_idx', 'wecom_callback_replays', ['received_at']),
   ] },
+  { migrationTag: '0027_ilink_personal_bot_accounts', table: 'ilink_bot_accounts', columns: ['id', 'platform_user_id', 'agent_instance_id', 'bot_account_id', 'owner_weixin_user_id', 'token_encrypted', 'status'], foreignKeys: [fk('iba_platform_user_fkey', 'ilink_bot_accounts', ['platform_user_id'], 'platform_users'), fk('iba_agent_fkey', 'ilink_bot_accounts', ['agent_instance_id'], 'agent_instances')], indexes: [idx('iba_agent_idx', 'ilink_bot_accounts', ['agent_instance_id']), idx('iba_status_idx', 'ilink_bot_accounts', ['status'])] },
   { migrationTag: '0023_security_schema_probe_rpc', table: 'security_audit_logs', columns: ['id', 'action', 'outcome', 'metadata', 'created_at'], indexes: [idx('security_audit_logs_action_idx', 'security_audit_logs', ['action'])] },
 ];
 

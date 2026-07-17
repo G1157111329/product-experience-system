@@ -2,7 +2,23 @@ import assert from 'node:assert/strict';
 import { isAgentActionAllowed } from './agent-action-policy';
 import { AGENT_ACTION_TYPES } from './agent-actions';
 
-for (const action of ['recipe_create', 'recipe_step_create', 'recipe_step_update', 'comparison_cell_update', 'material_bind', 'comparison_cell_material_bind', 'data_matrix_cell_material_bind', 'issue_create', 'issue_update', 'standard_item_create', 'record_update']) {
+for (const action of [
+  'recipe_create',
+  'recipe_step_create',
+  'recipe_step_update',
+  'comparison_cell_update',
+  'material_bind',
+  'material_organize',
+  'comparison_cell_material_bind',
+  'data_matrix_cell_material_bind',
+  'data_matrix_create',
+  'comparison_object_create',
+  'issue_create',
+  'issue_update',
+  'standard_item_create',
+  'record_update',
+  'task_create',
+]) {
   assert.equal(isAgentActionAllowed(action), true, `${action} should be allowed`);
 }
 
@@ -17,10 +33,12 @@ for (const required of [
   'recipe_create',
   'recipe_step_create',
   'material_bind',
+  'material_organize',
   'comparison_cell_material_bind',
   'data_matrix_cell_material_bind',
   'comparison_cell_update',
   'data_matrix_cell_update',
+  'data_matrix_create',
   'record_update',
   'standard_item_create',
   'issue_create',

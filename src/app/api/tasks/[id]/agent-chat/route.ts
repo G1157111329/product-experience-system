@@ -101,20 +101,27 @@ function buildAgentSystemPrompt() {
 6. material_ai_result_update: { "material_id": "素材ID", "summary": "图片/视频内容整理", "tags": ["标签"] }
 7. material_rename: { "material_id": "素材ID", "file_name": "新素材名称" }
 8. material_bind: { "material_id": "素材ID", "record_id | recipe_id | recipe_step_id | issue_id": "绑定目标ID" }
-9. comparison_cell_material_bind: { "material_id": "素材ID", "comparison_cell_id": "对比矩阵单元格ID" }
-10. data_matrix_cell_material_bind: { "material_id": "素材ID", "matrix_id": "数据矩阵ID", "leaf_row_id": "行ID", "column_id": "图片/素材列ID" }
-9. issue_create: { "title": "问题标题", "description": "描述", "level": "一类|二类|三类" }
-10. issue_update: { "issue_id": "问题ID", "title|description|level|status|improve_plan|responsible_person|verification_note": "新值" }
-11. record_update: { "record_id": "体验记录ID", "actual_result|problem_description|evaluation_result|experience_standard|check_standard": "新值" }
-12. task_create: { "task_name": "计划名称", "product_category|product|product_model|project_type|project_phase|organizer|test_purpose|task_mode": "可选值" }
-13. standard_item_create: { "standard_id": "标准ID", "check_item": "检查条目", "check_requirement|experience_standard|check_standard|sensory_dimension|experience_flow|touch_point|problem_level": "可选值" }
-14. data_matrix_cell_update: { "matrix_id": "数据矩阵ID", "leaf_row_id": "行ID", "column_id": "列ID", "value_text|value_number|display_text": "录入值" }
+9. material_organize: { "material_id": "微信/企微待入库素材ID", "naming_mode": "context", "record_id|recipe_id|recipe_step_id|issue_id|comparison_cell_id": "可选绑定目标" }
+10. comparison_cell_material_bind: { "material_id": "素材ID", "comparison_cell_id": "对比矩阵单元格ID" }
+11. data_matrix_cell_material_bind: { "material_id": "素材ID", "matrix_id": "数据矩阵ID", "leaf_row_id": "行ID", "column_id": "图片/素材列ID" }
+12. issue_create: { "title": "问题标题", "description": "描述", "level": "一类|二类|三类" }
+13. issue_update: { "issue_id": "问题ID", "title|description|level|status|improve_plan|responsible_person|verification_note": "新值" }
+14. record_update: { "record_id": "体验记录ID", "actual_result|problem_description|evaluation_result|experience_standard|check_standard": "新值" }
+15. record_create: { "check_item": "检查项", "evaluation_result": "合格|不合格|待定" }
+16. task_create: { "task_name": "计划名称", "product_category|product|product_model|project_type|project_phase|organizer|test_purpose|task_mode": "可选值" }
+17. standard_item_create: { "standard_id": "标准ID", "check_item": "检查条目", "check_requirement|experience_standard|check_standard|sensory_dimension|experience_flow|touch_point|problem_level": "可选值" }
+18. data_matrix_cell_update: { "matrix_id": "数据矩阵ID", "leaf_row_id": "行ID", "column_id": "列ID", "value_text|value_number|display_text": "录入值" }
+19. data_matrix_create: { "name": "矩阵名称" }
+20. data_matrix_category_create: { "matrix_id": "矩阵ID", "label": "分类名", "level": 1 }
+21. comparison_object_create: { "object_name": "对象名" }
+22. comparison_category_create: { "label": "大类或细项名", "node_type": "section|item", "parent_id": "细项必填" }
 
 规则：
 - 不得生成删除、设置、配置或用户管理动作；覆盖已有步骤、重命名素材必须标记 medium 或 high。
 - 如果上下文没有足够 ID，不要编造 ID；可以给 reply 提醒用户先选择或补充信息，actions 返回空数组。
 - 对比矩阵允许通过对象名和对比项名称创建或更新，系统会在用户确认后补齐矩阵单元格。
 - 素材内容整理只基于上下文里已有文件名、AI结果和用户描述，不要声称看到了没有提供的图片细节。
+- 微信/企微回传素材先用 material_organize 入库当前任务，再按场景命名或绑定。
 - 一次最多输出 8 个动作。`;
 }
 
