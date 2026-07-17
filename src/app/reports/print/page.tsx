@@ -184,6 +184,7 @@ function ReportPrintContent() {
   const searchParams = useSearchParams();
   const reportId = searchParams.get('id');
   const shareToken = searchParams.get('share_token');
+  const autoClose = searchParams.get('autoclose') === '1';
   const printMode = normalizePrintMode(searchParams.get('mode'));
   const [models, setModels] = useState<PrintReportViewModel[]>([]);
   const [error, setError] = useState('');
@@ -239,13 +240,21 @@ function ReportPrintContent() {
   useEffect(() => {
     if (models.length === 0) return;
     let cancelled = false;
+    const closeAfterPrint = () => {
+      if (autoClose) window.close();
+    };
+    window.addEventListener('afterprint', closeAfterPrint, { once: true });
     const firstFrame = requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         if (!cancelled) window.print();
       });
     });
-    return () => { cancelled = true; cancelAnimationFrame(firstFrame); };
-  }, [models]);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(firstFrame);
+      window.removeEventListener('afterprint', closeAfterPrint);
+    };
+  }, [autoClose, models]);
 
   if (error) return <div className="p-10 text-center text-sm text-red-700">{error}</div>;
   if (models.length === 0) return <LoadingState />;

@@ -4,12 +4,12 @@ import { useState } from 'react';
 import { Play } from 'lucide-react';
 import { ImagePreview } from '@/components/image-preview';
 import {
+  buildMediaDerivativeUrl,
   isAllowedMediaSource,
   isPendingMediaUrl,
   isUnavailableMediaUrl,
   pendingMediaDataUrl,
   toPlayableVideoSrc,
-  toMediaStorageKey,
 } from '@/lib/use-presigned-url';
 import { cn } from '@/lib/utils';
 import type { ReportMediaItem, ReportMediaRole } from './report-media-grid';
@@ -52,15 +52,13 @@ export function ReportMediaPreview({
   const unavailable = isUnavailableMediaUrl(resolvedUrl);
   const video = isVideo(media.type) || isVideo(media.url);
   const playableVideoUrl = video ? toPlayableVideoSrc(resolvedUrl) : undefined;
-  const key = toMediaStorageKey(media.url);
-  const derivativeUrl = key && (video || resolvedUrl.startsWith('/uploads/'))
-    ? `/api/materials/${video ? 'poster' : 'thumb'}/${key}`
-    : null;
+  const derivativeUrl = buildMediaDerivativeUrl(resolvedUrl, video ? 'poster' : 'thumb');
   const derivativeFailed = derivativeUrl !== null && failedSource === derivativeUrl;
   const thumbnailUrl = derivativeUrl && !derivativeFailed ? derivativeUrl : resolvedUrl;
   const mediaFailed = !video && failedSource === resolvedUrl;
   const canPreview = !pending && !unavailable && !mediaFailed;
-  const aspect = video ? '16/9' : '4/3';
+  const aspect = '4/3';
+  const compactVideoLabel = role === 'matrix' || role === 'share-paper-compact';
 
   return (
     <>
@@ -75,7 +73,7 @@ export function ReportMediaPreview({
         onClick={() => canPreview && setPreviewUrl(resolvedUrl)}
         className={cn(
           'group relative block min-w-0 w-full overflow-hidden rounded-lg border bg-muted/30 text-left disabled:cursor-default',
-          video ? 'aspect-video' : 'aspect-[4/3]',
+          'aspect-[4/3]',
         )}
       >
         {pending || unavailable || mediaFailed ? (
@@ -107,6 +105,7 @@ export function ReportMediaPreview({
             <span className="absolute inset-0 flex items-center justify-center bg-black/20">
               <Play className="h-7 w-7 fill-white text-white" aria-hidden="true" />
             </span>
+            <span data-testid="report-media-video-label" className={cn('absolute inset-x-0 bottom-0 bg-slate-900/70 py-0.5 text-center font-bold tracking-wide text-white', compactVideoLabel ? 'text-[6px]' : 'text-[8px]')}>VIDEO</span>
             {media.duration && <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white">{media.duration}</span>}
           </>
         ) : (

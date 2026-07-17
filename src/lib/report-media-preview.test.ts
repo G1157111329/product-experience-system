@@ -24,11 +24,12 @@ assert.match(
   'a final media load failure must not remain interactive',
 );
 assert.match(previewSource, /aspect-\[4\/3\]/);
-assert.match(previewSource, /aspect-video/);
+assert.doesNotMatch(previewSource, /aspect-video/);
+assert.match(previewSource, /report-media-video-label/, 'frozen and share video thumbnails must use the same VIDEO label as print');
 assert.match(
   previewSource,
-  /key\s*&&\s*\(video\s*\|\|\s*resolvedUrl\.startsWith\('\/uploads\/'\)\)/,
-  'a resolved S3 or protected image URL must not be replaced with the local-only thumbnail route',
+  /buildMediaDerivativeUrl\(resolvedUrl, video \? 'poster' : 'thumb'\)/,
+  'a protected video poster must retain the resolved signed media authorization',
 );
 
 const compatibilitySource = readFileSync(resolve(

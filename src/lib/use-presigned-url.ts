@@ -80,9 +80,12 @@ export function buildMediaDerivativeUrl(
   }
 
   const filePrefix = '/api/materials/file/';
+  const videoPrefix = '/api/materials/video/';
   const uploadPrefix = '/uploads/';
   const rawKey = pathname.startsWith(filePrefix)
     ? decodePathSegments(pathname.slice(filePrefix.length))
+    : pathname.startsWith(videoPrefix)
+      ? decodeOpaqueVideoStreamKey(pathname.slice(videoPrefix.length))
     : pathname.startsWith(uploadPrefix)
       ? decodePathSegments(pathname.slice(uploadPrefix.length))
       : !pathname.startsWith('/')
@@ -92,7 +95,7 @@ export function buildMediaDerivativeUrl(
 
   const encodedKey = encodeStorageKey(rawKey);
   if (!encodedKey) return null;
-  return `/api/materials/${derivative}/${encodedKey}${pathname.startsWith(filePrefix) ? search : ''}`;
+  return `/api/materials/${derivative}/${encodedKey}${pathname.startsWith(filePrefix) || pathname.startsWith(videoPrefix) ? search : ''}`;
 }
 
 function toLocalVideoUrl(pathname: string): string | undefined {

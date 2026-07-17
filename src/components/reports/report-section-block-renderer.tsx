@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useState, type CSSProperties } from 'react';
+import { Fragment, createContext, useContext, useState, type CSSProperties } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { pendingMediaDataUrl, toPublicMediaUrl, usePresignedUrls } from '@/lib/use-presigned-url';
 import { cn } from '@/lib/utils';
@@ -708,6 +708,8 @@ function PrintMediaThumbs({ media }: { media?: ReportDetailMediaItem[] }) {
   );
 }
 
+const InteractivePaperMediaContext = createContext(false);
+
 function PaperVideoPoster({ item, compact = false }: { item: PrintMedia; compact?: boolean }) {
   const [posterFailed, setPosterFailed] = useState(false);
   const width = compact ? 34 : 86;
@@ -726,8 +728,16 @@ function PaperVideoPoster({ item, compact = false }: { item: PrintMedia; compact
 }
 
 function PaperMedia({ items, density = 'standard' }: { items: PrintMedia[]; density?: 'standard' | 'compact' }) {
+  const interactiveMedia = useContext(InteractivePaperMediaContext);
   if (items.length === 0) return null;
   const compact = density === 'compact';
+  if (interactiveMedia) {
+    return <ReportMediaGrid
+      items={items}
+      role={compact ? 'share-paper-compact' : 'share-paper'}
+      className={compact ? 'mt-1' : 'mt-2'}
+    />;
+  }
   const width = compact ? 38 : 92;
   const imageWidth = compact ? 34 : 86;
   const imageHeight = compact ? 26 : 64;
@@ -853,7 +863,6 @@ const paperCellStyle: CSSProperties = { border: '1px solid #d1d5db', padding: '5
 const paperSectionTitleStyle: CSSProperties = { margin: '0 0 8px', fontSize: `${PRINT_TYPOGRAPHY.sectionTitle}px`, lineHeight: 1.4, color: PRINT_GOLDEN_YELLOW_INK, letterSpacing: '.04em', borderBottom: `2px solid ${PRINT_GOLDEN_YELLOW}`, paddingBottom: '5px' };
 const paperIssueMetaStyle: CSSProperties = { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '5px', marginBottom: '8px', paddingBottom: '7px', borderBottom: '1px solid #e5e7eb' };
 const paperIssueChipStyle: CSSProperties = { border: '1px solid #d1d5db', borderRadius: '999px', padding: '1px 6px', color: '#374151', fontSize: '10px', lineHeight: 1.35 };
-
 function printEvaluationStatusChipStyle(status: unknown): CSSProperties {
   const label = evaluationStatusLabel(status);
   if (label === '合格') return { ...paperIssueChipStyle, borderColor: '#86efac', background: '#f0fdf4', color: '#15803d' };
@@ -885,7 +894,7 @@ function paperIssueLevel(level: string) {
   return normalizeFrozenIssueLevel(level);
 }
 
-export function ReportPrintDocument({ model }: { model: PrintReportViewModel }) {
+export function ReportPrintDocument({ model, interactiveMedia = false }: { model: PrintReportViewModel; interactiveMedia?: boolean }) {
   const task = model.summary.taskInfo ?? {};
   const productInfo = [
     ['单号', task.project_number], ['产品型号', task.product_model ?? model.header.productModel], ['产品', task.product],
@@ -899,6 +908,7 @@ export function ReportPrintDocument({ model }: { model: PrintReportViewModel }) 
   ];
   const summary = printSummaryContent(model.summary);
   return (
+    <InteractivePaperMediaContext.Provider value={interactiveMedia}>
     <article data-testid="report-print-document" data-report-id={model.sourceReportId} style={{ maxWidth: '1180px', margin: '0 auto', color: '#1f2937', fontSize: `${PRINT_TYPOGRAPHY.body}px`, lineHeight: 1.62 }}>
       <style>{`@page { size: ${model.page.paper} ${model.page.orientation}; margin: 12mm; } @media print { [data-testid="report-print-document"] + [data-testid="report-print-document"] { break-before: page; } }`}</style>
       <header style={{ borderTop: `4px solid ${PRINT_GOLDEN_YELLOW}`, borderBottom: '1px solid #94a3b8', padding: '12px 0 10px', marginBottom: '16px' }}><p style={{ margin: '0 0 3px', color: PRINT_GOLDEN_YELLOW_INK, fontSize: `${PRINT_TYPOGRAPHY.meta}px`, fontWeight: 700, letterSpacing: '.12em' }}>PRODUCT EXPERIENCE REPORT</p><h1 style={{ margin: '0 0 4px', fontSize: `${PRINT_TYPOGRAPHY.title}px`, lineHeight: 1.3, color: '#0f172a', letterSpacing: '.01em' }}>{model.header.title}</h1></header>
@@ -965,5 +975,6 @@ export function ReportPrintDocument({ model }: { model: PrintReportViewModel }) 
       {model.matrix && <PaperMatrix matrix={model.matrix} />}
       {model.dataMatrix && <PaperMatrix matrix={model.dataMatrix} />}
     </article>
+    </InteractivePaperMediaContext.Provider>
   );
 }

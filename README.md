@@ -253,7 +253,9 @@ docker compose -f docker-compose.local.yml down -v
 
 - **访问控制**：生产设置 `LOCAL_UPLOAD_PUBLIC_ACCESS=protected`，Nginx 仅允许应用使用内部 `/uploads` 映射；外部直链 `/uploads/*` 必须不可访问。
 - **签名续期**：页面通过 `/api/materials/presign` 取得短期签名；不得清洗 `token`、`exp`，缩略图与海报必须继承签名。
-- **企业网络兼容**：禁止将裸 `/uploads/*.mp4` 或带 `.mp4` 的 `/api/materials/file/...` 放进 `<video src>`。企业网关若仍重定向无扩展名单流入口，应保留浏览器网络证据后针对网关规则处理。
+- **企业网络兼容**：禁止将裸 `/uploads/*.mp4` 或带 `.mp4` 的 `/api/materials/file/...` 放进 `<video src>`。企业网关若仍将同源 `/api/materials/video/<base64url-key>` 重定向到 `172.* /disable/disable.htm`，这是“禁用下载/网盘”网络策略，后续 CORS/PNA 报错只是重定向的次生结果，不应通过修改 CORS、恢复公开 `/uploads`、移除签名或伪装媒体绕过。
+- **网络管理员放行项**：放行平台主机的 `/api/materials/video/*`、`/api/materials/poster/*` 及 `video/mp4` 响应；不得将上述请求重定向至内部拦截页。放行后现有签名、无扩展名单流与海报链路即可播放，无需额外业务代码改动。
+- **跨端视频展示**：冻结报告、匿名分享和浏览器打印中，视频海报必须继承原视频的 `token`/`exp`；同角色视频缩略图与图片均使用 `4:3` 外框，并显示底部 `VIDEO` 标识。
 - **缺失素材兜底**：本地文件不存在时返回 SVG 占位图；冻结报告引用仍保留可追溯的素材事实，不得因删除当前关联而让历史报告裂图。
 
 ## 主要目录

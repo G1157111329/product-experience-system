@@ -10,7 +10,7 @@ import {
 } from '@/lib/use-presigned-url';
 import { ReportMediaPreview } from './report-media-preview';
 
-export type ReportMediaRole = 'primary' | 'evidence' | 'function-evidence' | 'appendix' | 'compact' | 'matrix';
+export type ReportMediaRole = 'primary' | 'evidence' | 'function-evidence' | 'appendix' | 'compact' | 'matrix' | 'share-paper' | 'share-paper-compact';
 
 export interface ReportMediaItem {
   id: string;
@@ -23,18 +23,20 @@ export interface ReportMediaItem {
 export interface ReportMediaPresentation {
   limit: number;
   imageAspect: '4/3';
-  videoAspect: '16/9';
+  videoAspect: '4/3';
   minWidth: number;
   maxWidth: number | null;
 }
 
 const PRESENTATIONS: Record<ReportMediaRole, ReportMediaPresentation> = {
-  primary: { limit: 6, imageAspect: '4/3', videoAspect: '16/9', minWidth: 112, maxWidth: null },
-  evidence: { limit: 4, imageAspect: '4/3', videoAspect: '16/9', minWidth: 80, maxWidth: 80 },
-  'function-evidence': { limit: 10, imageAspect: '4/3', videoAspect: '16/9', minWidth: 96, maxWidth: 96 },
-  appendix: { limit: 4, imageAspect: '4/3', videoAspect: '16/9', minWidth: 80, maxWidth: 80 },
-  compact: { limit: 2, imageAspect: '4/3', videoAspect: '16/9', minWidth: 80, maxWidth: 80 },
-  matrix: { limit: Number.MAX_SAFE_INTEGER, imageAspect: '4/3', videoAspect: '16/9', minWidth: 64, maxWidth: 64 },
+  primary: { limit: 6, imageAspect: '4/3', videoAspect: '4/3', minWidth: 112, maxWidth: null },
+  evidence: { limit: 4, imageAspect: '4/3', videoAspect: '4/3', minWidth: 80, maxWidth: 80 },
+  'function-evidence': { limit: 10, imageAspect: '4/3', videoAspect: '4/3', minWidth: 96, maxWidth: 96 },
+  appendix: { limit: 4, imageAspect: '4/3', videoAspect: '4/3', minWidth: 80, maxWidth: 80 },
+  compact: { limit: 2, imageAspect: '4/3', videoAspect: '4/3', minWidth: 80, maxWidth: 80 },
+  matrix: { limit: Number.MAX_SAFE_INTEGER, imageAspect: '4/3', videoAspect: '4/3', minWidth: 64, maxWidth: 64 },
+  'share-paper': { limit: Number.MAX_SAFE_INTEGER, imageAspect: '4/3', videoAspect: '4/3', minWidth: 92, maxWidth: 92 },
+  'share-paper-compact': { limit: Number.MAX_SAFE_INTEGER, imageAspect: '4/3', videoAspect: '4/3', minWidth: 38, maxWidth: 38 },
 };
 
 export function mediaPresentation(role: ReportMediaRole): ReportMediaPresentation {
