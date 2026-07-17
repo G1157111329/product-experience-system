@@ -10,6 +10,6 @@ assert.equal(
   'print media must retain the protected uploads prefix for server-side lookup',
 );
 assert.doesNotMatch(printPage, /localPrintMediaUrl/, 'fast print must not bypass protected media signing with a bare /uploads URL');
-assert.match(printPage, /fetch\('\/api\/materials\/presign'/, 'fast print must request a signed report-scoped media URL');
+assert.match(printPage, /fetchWithTimeout\('\/api\/materials\/presign'/, 'fast print must request a signed report-scoped media URL');
 
 console.log('fast print protected media contract passed');

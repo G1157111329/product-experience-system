@@ -25,6 +25,23 @@ type SharePayload = {
   mergedReportOrder?: string[];
 };
 
+const PRINT_REQUEST_TIMEOUT_MS = 10_000;
+
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}) {
+  const controller = new AbortController();
+  const parentSignal = init.signal;
+  const abort = () => controller.abort();
+  if (parentSignal?.aborted) controller.abort();
+  parentSignal?.addEventListener('abort', abort, { once: true });
+  const timeout = window.setTimeout(abort, PRINT_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timeout);
+    parentSignal?.removeEventListener('abort', abort);
+  }
+}
+
 function orderedShareModels(payload: SharePayload): FrozenReportViewModel[] {
   if (!payload.frozenViewModel) return [];
   const siblings = payload.siblingFrozenViewModels ?? {};
@@ -59,7 +76,7 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
 async function imageUrlToPrintableDataUrl(url: string, mode: PrintMode): Promise<string> {
   if (url.startsWith('data:')) return url;
   try {
-    const response = await fetch(url);
+    const response = await fetchWithTimeout(url);
     if (!response.ok) return url;
     const blob = await response.blob();
     if (mode === 'high') return blobToDataUrl(blob);
@@ -100,7 +117,7 @@ async function presignPaths(paths: string[], reportId: string, shareToken: strin
   if (entries.length === 0) return {};
   const signedByKey = await resolvePresignBatches(objectKeys, async (batch) => {
     try {
-      const response = await fetch('/api/materials/presign', {
+      const response = await fetchWithTimeout('/api/materials/presign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ paths: batch, report_id: reportId, share_token: shareToken || undefined }),
@@ -133,7 +150,7 @@ async function preparePrintModel(model: FrozenReportViewModel, mode: PrintMode, 
   const signed = await presignPaths(sourceUrls, projected.sourceReportId, shareToken);
   for (const entry of printableMedia) entry.item[entry.field] = signed[entry.url] ?? entry.url;
 
-  if (mode !== 'text') {
+  if (mode === 'high') {
     const printableUrls = uniqueUrls(printableMedia.map((entry) => entry.item[entry.field] || ''));
     const converted = await mapWithConcurrency(printableUrls, 4, async (url) => imageUrlToPrintableDataUrl(url, mode));
     const convertedByUrl = new Map(printableUrls.map((url, index) => [url, converted[index]]));
@@ -146,7 +163,7 @@ async function preparePrintModel(model: FrozenReportViewModel, mode: PrintMode, 
 }
 
 async function loadIssueProjections(reportId: string, signal: AbortSignal): Promise<PrintIssueProjectionInput[]> {
-  const response = await fetch(`/api/reports/${encodeURIComponent(reportId)}/issues`, { signal });
+  const response = await fetchWithTimeout(`/api/reports/${encodeURIComponent(reportId)}/issues`, { signal });
   const payload = await response.json() as { code?: number; data?: PrintIssueProjectionInput[] };
   return response.ok && payload.code === 0 && Array.isArray(payload.data) ? payload.data : [];
 }
@@ -182,7 +199,7 @@ function ReportPrintContent() {
     const endpoint = shareToken
       ? `/api/reports/share?token=${encodeURIComponent(shareToken)}`
       : `/api/reports/${encodeURIComponent(reportId)}/detail`;
-    void fetch(endpoint, { signal: controller.signal })
+    void fetchWithTimeout(endpoint, { signal: controller.signal })
       .then(async (response) => {
         const payload = await response.json();
         if (!response.ok || payload.code !== 0) throw new Error(payload.message || '报告加载失败');

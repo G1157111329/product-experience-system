@@ -211,9 +211,10 @@ const printMediaIds = printReportMedia(buildPrintReportViewModel(v2)).map((item)
 assert.equal(printMediaIds.includes('reeval-image'), true, 'print asset preparation includes the latest retest evidence');
 assert.equal(printMediaIds.includes('reeval-oldest-image'), false, 'print asset preparation omits historical retest evidence');
 assert.equal(printMediaIds.includes('reeval-middle-image'), false, 'print asset preparation omits intermediate retest evidence');
-for (const expectedText of ['判断：合格', '食谱效果评价', 'Historic frozen step issue', '问题点', 'recipe-issue.jpg']) {
+for (const expectedText of ['（合格）', '食谱效果评价', 'Historic frozen step issue', '问题点', 'recipe-issue.jpg']) {
   assert.equal(singleRecipeHtml.includes(expectedText), true, `single recipe print list is missing ${expectedText}`);
 }
+assert.equal(singleRecipeHtml.includes('判断：合格'), false, 'print/PDF must use the current status label instead of the retired judgment prefix');
 assert.equal(printReportMedia(buildPrintReportViewModel(v2)).some((item) => item.id === 'recipe-context-media'), true, 'recipe issue context media must be included in print media preparation');
 assert.equal(printReportMedia(buildPrintReportViewModel(v2)).filter((item) => item.id === 'recipe-context-media').length, 1, 'recipe context media enters print preparation exactly once');
 assert.equal(printReportMedia(buildPrintReportViewModel(v2)).filter((item) => item.id === 'recipe-issue-media').length, 1, 'explicit issue media enters print preparation exactly once');

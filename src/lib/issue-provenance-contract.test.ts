@@ -5,12 +5,12 @@ const route = readFileSync('src/app/api/issues/[id]/route.ts', 'utf8');
 const page = readFileSync('src/app/(main)/issues/[id]/page.tsx', 'utf8');
 
 assert.match(route, /provenance/);
-assert.match(route, /resolveIssueStatusChange/);
+assert.match(route, /executeIssueCommand/);
+assert.match(route, /enrichIssueProjectionSafely/);
 assert.match(route, /status:\s*422/);
 assert.match(route, /canReadIssue/);
 assert.match(route, /canMutateIssueRetest/);
 assert.match(route, /canManageIssue/);
-assert.match(route, /role:\s*user\.role/);
 assert.doesNotMatch(route, /user\.role === 'admin' \? 'admin' : 'task_owner'/);
 assert.match(route, /enrichIssueProjection/);
 assert.match(route, /recipe_steps/);

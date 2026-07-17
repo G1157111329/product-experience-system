@@ -40,10 +40,22 @@ const summary = {
 };
 const text = formatAiSummaryText(summary);
 
-assert.match(text, /^总结\n整体稳定/m);
-assert.match(text, /^主要优势\n• 加热均匀/m);
+assert.match(text, /^整体稳定$/m);
+assert.match(text, /^• 加热均匀$/m);
 assert.doesNotMatch(text, /满意度|评分|得分|分数|\/10/);
-assert.deepEqual(parseAiSummaryText(text, summary), summary);
+assert.deepEqual(parseAiSummaryText(text, summary), {
+  ...summary,
+  summary: text,
+  strengths: [],
+  risks: [],
+  historical_position: '',
+  suggestions: [],
+});
+
+const compactText = formatAiSummaryText(summary);
+assert.doesNotMatch(compactText, /^(总结|主要优势|主要风险|历史表现|后续建议)$/m, 'AI总结编辑框不应只显示固定分组标题');
+assert.match(compactText, /^整体稳定$/m);
+assert.match(compactText, /^• 加热均匀$/m);
 
 const freeText = parseAiSummaryText('没有标签的自由编辑内容', summary);
 assert.equal(freeText.summary, '没有标签的自由编辑内容');

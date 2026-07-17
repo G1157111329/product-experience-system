@@ -43,21 +43,12 @@ export function selectEffectEvaluationText(recipe: EffectEvaluationSource) {
 
 export function formatAiSummaryText(summary: AiSummaryContent) {
   return [
-    '总结',
     withoutScoreLines(summary.summary || ''),
-    '',
-    '主要优势',
     ...withoutScoreItems(summary.strengths).map((item) => `• ${item}`),
-    '',
-    '主要风险',
     ...withoutScoreItems(summary.risks).map((item) => `• ${item}`),
-    '',
-    '历史表现',
     withoutScoreLines(summary.historical_position || ''),
-    '',
-    '后续建议',
     ...withoutScoreItems(summary.suggestions).map((item) => `• ${item}`),
-  ].join('\n').trim();
+  ].filter(Boolean).join('\n\n').trim();
 }
 
 function textList(value: string) {

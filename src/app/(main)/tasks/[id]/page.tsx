@@ -612,7 +612,7 @@ export default function TaskDetailPage() {
                 rows={16}
                 value={summaryForm.text}
                 onChange={(e) => setSummaryForm({ text: e.target.value })}
-                placeholder={'总结：\n满意度：\n主要优势：\n主要风险：\n历史表现：\n后续建议：'}
+                placeholder={'请输入总结内容；可分行书写，使用“• ”分点。'}
               />
             </div>
             <div className="flex flex-col-reverse sm:flex-row gap-2 justify-end pt-2 border-t">
