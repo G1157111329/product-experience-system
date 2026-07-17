@@ -41,7 +41,7 @@ test('matrix evidence is a compact horizontal strip that stays inside the paper 
   assert.match(source, /overflow:\s*'hidden'/);
 });
 
-test('function effects use the frozen recipe report hierarchy without duplicate evaluation media', () => {
+test('function effects use the frozen recipe report hierarchy', () => {
   assert.match(source, /data-testid="print-function-card"/);
   assert.match(source, /data-testid="print-function-metrics"/);
   assert.match(source, /data-testid="print-function-step"/);

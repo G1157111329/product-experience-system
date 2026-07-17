@@ -218,7 +218,9 @@ assert.equal(singleRecipeHtml.includes('判断：合格'), false, 'print/PDF mus
 assert.equal(printReportMedia(buildPrintReportViewModel(v2)).some((item) => item.id === 'recipe-context-media'), true, 'recipe issue context media must be included in print media preparation');
 assert.equal(printReportMedia(buildPrintReportViewModel(v2)).filter((item) => item.id === 'recipe-context-media').length, 1, 'recipe context media enters print preparation exactly once');
 assert.equal(printReportMedia(buildPrintReportViewModel(v2)).filter((item) => item.id === 'recipe-issue-media').length, 1, 'explicit issue media enters print preparation exactly once');
-assert.equal((singleRecipeHtml.match(/data-media-id="recipe-context-media"/g) ?? []).length, 1, 'recipe context media is rendered once across issue and function sections');
+const singleRecipePrintModel = buildPrintReportViewModel(v2);
+assert.equal(singleRecipePrintModel.functionEffects[0]?.evidence.some((item) => item.id === 'recipe-context-media'), true, 'a function card must retain its frozen evidence even when the issue section references the same recipe');
+assert.equal((singleRecipeHtml.match(/data-media-id="recipe-context-media"/g) ?? []).length, 2, 'recipe context media is rendered in both its issue context and owning function card');
 
 const duplicateMediaReferences = buildPrintReportViewModel(v2);
 const sharedMedia = duplicateMediaReferences.issues[0].evidence[0];

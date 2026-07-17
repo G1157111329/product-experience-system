@@ -1,6 +1,6 @@
 import { dataMatrixPrintColumns, dataMatrixReadLayout, type ReportDataMatrixReadCard, type ReportDataMatrixReadNarrative } from '@/lib/report-data-matrix-layout';
 import { evaluationStatusLabel, normalizeEvaluationStatus } from '@/lib/evaluation-status';
-import { frozenMediaDedupeKey, normalizeFrozenIssueLevel, type FrozenIssue, type FrozenMedia, type FrozenRecipeContext, type FrozenReportViewModel, type FrozenRetestSummary } from '@/lib/report-frozen-view';
+import { normalizeFrozenIssueLevel, type FrozenIssue, type FrozenMedia, type FrozenRecipeContext, type FrozenReportViewModel, type FrozenRetestSummary } from '@/lib/report-frozen-view';
 import { PRINT_GOLDEN_YELLOW, PRINT_GOLDEN_YELLOW_INK, PRINT_GOLDEN_YELLOW_SOFT, PRINT_TYPOGRAPHY } from '@/lib/report-print-theme';
 import { isPrintVideoSource } from '@/lib/print-assets';
 
@@ -255,26 +255,7 @@ function cloneFrozenModelParts(model: FrozenReportViewModel, issueProjections: P
       rectificationProjection: rectificationProjection(projection),
     };
   });
-  const claimedByRecipe = new Map<string, Set<string>>();
-  for (const issue of issues) {
-    if (!issue.recipe) continue;
-    const keys = claimedByRecipe.get(issue.recipe.recipeId) ?? new Set<string>();
-    [...issue.recipe.evidence, ...issue.recipe.steps.flatMap((step) => step.evidence), ...issue.evidence]
-      .forEach((item) => keys.add(frozenMediaDedupeKey(item)));
-    claimedByRecipe.set(issue.recipe.recipeId, keys);
-  }
-  const functionEffects = model.tabs.includes('function_effect') ? model.functionEffects.map(cloneRecipe).map((effect) => {
-    const claimed = claimedByRecipe.get(effect.recipeId);
-    if (!claimed) return effect;
-    return {
-      ...effect,
-      evidence: effect.evidence.filter((item) => !claimed.has(frozenMediaDedupeKey(item))),
-      steps: effect.steps.map((step) => ({
-        ...step,
-        evidence: step.evidence.filter((item) => !claimed.has(frozenMediaDedupeKey(item))),
-      })),
-    };
-  }) : [];
+  const functionEffects = model.tabs.includes('function_effect') ? model.functionEffects.map(cloneRecipe) : [];
   return {
     header: { ...model.header },
     summary: {
@@ -603,7 +584,7 @@ function renderFunctions(model: PrintReportViewModel) {
       const historicalProblems = step.problemPoints.length
         ? `<p class="issues"><b>步骤问题点：</b>${escapeHtml(step.problemPoints.join('；'))}</p>`
         : '';
-      return `<div class="function-step" data-function-step="${escapeHtml(step.id)}"><div class="function-step-copy"><b>步骤 ${escapeHtml(step.stepNumber ?? index + 1)}</b><span>${escapeHtml(step.operation)}</span>${historicalProblems}</div>${renderMedia(step.evidence, { compact: true })}</div>`;
+      return `<div class="function-step" data-function-step="${escapeHtml(step.id)}"><div class="function-step-copy"><b>步骤 ${escapeHtml(step.stepNumber ?? index + 1)}</b><span>${escapeHtml(step.operation)}</span>${historicalProblems}</div>${renderMedia(step.evidence)}</div>`;
     }).join('');
     const relatedIssueCount = model.issues.filter((issue) => issue.recipe?.recipeId === effect.recipeId).length;
     const parameters = effect.parameters
@@ -612,7 +593,7 @@ function renderFunctions(model: PrintReportViewModel) {
     const ingredients = [effect.formula, parameters].filter(Boolean).join('；');
     const evaluationStatus = evaluationStatusLabel(effect.evaluationStatus);
     const statusClass = evaluationStatus === '合格' ? 'function-status-qualified' : evaluationStatus === '不合格' ? 'function-status-unqualified' : 'function-status-pending';
-    return `<article class="function-card" data-function-effect="${escapeHtml(effect.recipeId)}"><header class="function-header"><h3><span class="function-kicker">食谱</span>${escapeHtml(effect.name)}</h3><div class="function-metrics"><span>步骤数：${effect.steps.length}</span><span class="function-status ${statusClass}">${escapeHtml(evaluationStatus)}</span><span>问题点：${relatedIssueCount}</span></div></header>${ingredients ? `<p class="function-ingredients"><b>食谱/食材：</b>${escapeHtml(ingredients)}</p>` : ''}<div class="function-evaluation"><b>效果评价</b><p>${escapeHtml(effect.evaluation || '—')}</p>${renderMedia(effect.evidence, { compact: true })}</div>${effect.steps.length ? `<div class="function-steps"><h4>食谱步骤：${effect.steps.length}步</h4>${steps}</div>` : ''}</article>`;
+    return `<article class="function-card" data-function-effect="${escapeHtml(effect.recipeId)}"><header class="function-header"><h3><span class="function-kicker">食谱</span>${escapeHtml(effect.name)}</h3><div class="function-metrics"><span>步骤数：${effect.steps.length}</span><span class="function-status ${statusClass}">${escapeHtml(evaluationStatus)}</span><span>问题点：${relatedIssueCount}</span></div></header>${ingredients ? `<p class="function-ingredients"><b>食谱/食材：</b>${escapeHtml(ingredients)}</p>` : ''}<div class="function-evaluation"><b>效果评价</b><p>${escapeHtml(effect.evaluation || '—')}</p>${renderMedia(effect.evidence)}</div>${effect.steps.length ? `<div class="function-steps"><h4>食谱步骤：${effect.steps.length}步</h4>${steps}</div>` : ''}</article>`;
   }).join('')}</section>`;
 }
 

@@ -957,7 +957,7 @@ export function ReportPrintDocument({ model }: { model: PrintReportViewModel }) 
           <div style={{ padding: '8px 10px' }}>
             {effect.formula && <p style={{ margin: '0 0 6px', whiteSpace: 'pre-wrap' }}><b>食谱/食材：</b>{effect.formula}</p>}
             {parameters && <p style={{ margin: '0 0 6px' }}><b>食谱参数：</b>{parameters}</p>}
-            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '7px' }}><p style={{ margin: 0 }}><b style={{ color: PRINT_GOLDEN_YELLOW_INK }}>食谱效果评价</b></p><p style={{ margin: '3px 0 0', whiteSpace: 'pre-wrap' }}>{effect.evaluation || '—'}</p><PaperMedia items={effect.evidence} density="compact" /></div>
+            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '7px' }}><p style={{ margin: 0 }}><b style={{ color: PRINT_GOLDEN_YELLOW_INK }}>食谱效果评价</b></p><p style={{ margin: '3px 0 0', whiteSpace: 'pre-wrap' }}>{effect.evaluation || '—'}</p><PaperMedia items={effect.evidence} /></div>
             {effect.steps.length > 0 && <div style={{ marginTop: '9px' }}><p style={{ margin: '0 0 5px', fontWeight: 700 }}>食谱步骤：{effect.steps.length}步</p>{effect.steps.map((step, index) => <div key={step.id} data-testid="print-function-step" style={{ padding: '6px 8px', borderTop: '1px solid #e2e8f0', breakInside: 'avoid' }}><p style={{ margin: 0 }}><b>步骤 {step.stepNumber ?? index + 1}</b>　{step.operation}</p>{step.problemPoints.length > 0 && <p style={{ margin: '3px 0 0', color: '#991b1b' }}><b>步骤问题点：</b>{step.problemPoints.join('；')}</p>}<PaperMedia items={step.evidence} /></div>)}</div>}
           </div>
         </article>;
