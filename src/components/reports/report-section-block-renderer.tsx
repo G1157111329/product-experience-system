@@ -693,12 +693,12 @@ function PrintMediaThumbs({ media }: { media?: ReportDetailMediaItem[] }) {
   return (
     <div data-testid="print-inline-media-item" style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '5px' }}>
       {media.map((item) => (
-        <div key={`${item.id}-${item.url}`} style={{ width: '58px', fontSize: '8px', color: '#4b5563' }}>
+        <div key={`${item.id}-${item.url}`} style={{ width: '72px', fontSize: '8px', color: '#4b5563' }}>
           {isImageType(item.type) ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={item.url} alt={item.name} style={{ width: '58px', height: '46px', objectFit: 'cover', borderRadius: '3px', border: '1px solid #e5e7eb' }} />
+            <img src={item.url} alt={item.name} style={{ width: '72px', height: '54px', objectFit: 'cover', borderRadius: '3px', border: '1px solid #e5e7eb' }} />
           ) : (
-            <div style={{ width: '58px', height: '46px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '3px', border: '1px solid #e5e7eb', background: '#f3f4f6' }}>
+            <div style={{ width: '72px', height: '54px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '3px', border: '1px solid #e5e7eb', background: '#f3f4f6' }}>
               {isVideoType(item.type) ? '视频' : '素材'}
             </div>
           )}
@@ -710,10 +710,18 @@ function PrintMediaThumbs({ media }: { media?: ReportDetailMediaItem[] }) {
 
 const InteractivePaperMediaContext = createContext(false);
 
-function PaperVideoPoster({ item, compact = false }: { item: PrintMedia; compact?: boolean }) {
+type PaperMediaDensity = 'standard' | 'comfortable' | 'compact';
+
+function paperMediaSize(density: PaperMediaDensity) {
+  if (density === 'compact') return { width: 34, height: 26 };
+  if (density === 'comfortable') return { width: 72, height: 54 };
+  return { width: 96, height: 72 };
+}
+
+function PaperVideoPoster({ item, density = 'standard' }: { item: PrintMedia; density?: PaperMediaDensity }) {
   const [posterFailed, setPosterFailed] = useState(false);
-  const width = compact ? 34 : 86;
-  const height = compact ? 26 : 64;
+  const { width, height } = paperMediaSize(density);
+  const compact = density === 'compact';
   return (
     <div data-testid="paper-video-poster" style={{ position: 'relative', width: `${width}px`, height: `${height}px`, maxWidth: '100%', overflow: 'hidden', background: '#e5e7eb' }}>
       {item.posterUrl && !posterFailed ? (
@@ -727,7 +735,7 @@ function PaperVideoPoster({ item, compact = false }: { item: PrintMedia; compact
   );
 }
 
-function PaperMedia({ items, density = 'standard' }: { items: PrintMedia[]; density?: 'standard' | 'compact' }) {
+function PaperMedia({ items, density = 'standard' }: { items: PrintMedia[]; density?: PaperMediaDensity }) {
   const interactiveMedia = useContext(InteractivePaperMediaContext);
   if (items.length === 0) return null;
   const compact = density === 'compact';
@@ -738,15 +746,14 @@ function PaperMedia({ items, density = 'standard' }: { items: PrintMedia[]; dens
       className={compact ? 'mt-1' : 'mt-2'}
     />;
   }
-  const width = compact ? 38 : 92;
-  const imageWidth = compact ? 34 : 86;
-  const imageHeight = compact ? 26 : 64;
+  const { width: imageWidth, height: imageHeight } = paperMediaSize(density);
+  const width = imageWidth + 4;
   return (
     <div data-testid="paper-media-grid" data-density={density} style={{ display: 'flex', maxWidth: '100%', overflow: 'hidden', flexWrap: 'wrap', alignItems: 'flex-start', gap: compact ? '3px' : '6px', marginTop: compact ? '2px' : '6px' }}>
       {items.map((item) => (
         <figure key={`${item.id}:${item.url}`} data-media-id={item.id} style={{ flex: `0 0 ${width}px`, width: `${width}px`, maxWidth: '100%', boxSizing: 'border-box', margin: 0, border: '1px solid #d1d5db', borderRadius: '4px', padding: compact ? '1px' : '2px', overflow: 'hidden', breakInside: 'avoid' }}>
           {isVideoType(item.type, item.url) ? (
-            <PaperVideoPoster item={item} compact={compact} />
+            <PaperVideoPoster item={item} density={density} />
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={item.url} alt={item.name} style={{ width: `${imageWidth}px`, height: `${imageHeight}px`, maxWidth: '100%', objectFit: 'cover', display: 'block', background: '#f3f4f6' }} />
@@ -945,11 +952,11 @@ export function ReportPrintDocument({ model, interactiveMedia = false }: { model
             {parameters && <p><b>食谱参数：</b>{parameters}</p>}
             {recipe.steps.length > 0 && <div><p><b>食谱步骤：</b>{recipe.steps.length}步</p>{recipe.steps.map((step, index) => <div key={step.id}><b>步骤 {step.stepNumber ?? index + 1}</b> {step.operation}{step.problemPoints.length > 0 && <p><b>步骤问题点：</b>{step.problemPoints.join('；')}</p>}<PaperMedia items={step.evidence} /></div>)}</div>}
             <p><b>食谱效果评价：</b>{recipe.evaluation}（{evaluationStatusLabel(recipe.evaluationStatus)}）</p>
-            <PaperMedia items={issueMedia} />
+            <PaperMedia items={issueMedia} density="comfortable" />
             <p><b>问题：</b>{issue.details || issue.title}</p>
-          </> : <><p><b>问题：</b>{issue.details || issue.title}</p><PaperMedia items={issueMedia} /></>}
-          {(rectification.plan || rectification.responsible || rectification.time || rectification.retest || issue.liveOverlay.rectification || issue.liveOverlay.evidence.length > 0) && <div data-testid="print-issue-rectification">{(rectification.plan || issue.liveOverlay.rectification) && <p><b>整改方案：</b>{rectification.plan || issue.liveOverlay.rectification}</p>}{rectification.responsible && <p><b>责任人：</b>{rectification.responsible}</p>}{rectification.time && <p><b>整改时间：</b>{rectification.time}</p>}{rectification.retest && <p><b>复测结果：</b>{rectification.retest}</p>}{issue.liveOverlay.evidence.length > 0 && <><p><b>整改素材：</b></p><PaperMedia items={issue.liveOverlay.evidence} /></>}</div>}
-          {latest && <div><b>整改复测：</b>{evaluationStatusLabel(latest.result)} {latest.description}<PaperMedia items={latest.evidence} />{issue.liveOverlay.retest.count >= 2 && <p>整改复测记录数：{issue.liveOverlay.retest.count}</p>}</div>}
+          </> : <><p><b>问题：</b>{issue.details || issue.title}</p><PaperMedia items={issueMedia} density="comfortable" /></>}
+          {(rectification.plan || rectification.responsible || rectification.time || rectification.retest || issue.liveOverlay.rectification || issue.liveOverlay.evidence.length > 0) && <div data-testid="print-issue-rectification">{(rectification.plan || issue.liveOverlay.rectification) && <p><b>整改方案：</b>{rectification.plan || issue.liveOverlay.rectification}</p>}{rectification.responsible && <p><b>责任人：</b>{rectification.responsible}</p>}{rectification.time && <p><b>整改时间：</b>{rectification.time}</p>}{rectification.retest && <p><b>复测结果：</b>{rectification.retest}</p>}{issue.liveOverlay.evidence.length > 0 && <><p><b>整改素材：</b></p><PaperMedia items={issue.liveOverlay.evidence} density="comfortable" /></>}</div>}
+          {latest && <div><b>整改复测：</b>{evaluationStatusLabel(latest.result)} {latest.description}<PaperMedia items={latest.evidence} density="comfortable" />{issue.liveOverlay.retest.count >= 2 && <p>整改复测记录数：{issue.liveOverlay.retest.count}</p>}</div>}
         </article>;
       })}</section>}
       {model.functionEffects.length > 0 && <section style={{ marginTop: '18px' }}><h2 style={paperSectionTitleStyle}>功能效果</h2>{model.functionEffects.map((effect) => {

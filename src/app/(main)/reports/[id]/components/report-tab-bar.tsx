@@ -21,7 +21,7 @@ export function ReportTabBar({ idPrefix = 'report', tabs, active, onChange }: Re
   };
 
   return (
-    <nav role="tablist" aria-label="报告内容" className="flex items-center gap-1 overflow-x-auto bg-muted/30 px-4 py-2">
+    <nav role="tablist" aria-label="报告内容" className="flex items-center gap-1 overflow-x-auto scroll-smooth snap-x bg-muted/30 px-4 py-2 scrollbar-none">
       {tabs.map((tab, index) => (
         <button
           key={tab.key}
@@ -40,7 +40,7 @@ export function ReportTabBar({ idPrefix = 'report', tabs, active, onChange }: Re
             if (event.key === 'End') { event.preventDefault(); onChange(tabs[tabs.length - 1].key); tabRefs.current[tabs.length - 1]?.focus(); }
           }}
           className={cn(
-            'relative flex min-h-11 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+            'relative flex min-h-11 snap-start items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
             active === tab.key
               ? 'bg-primary text-primary-foreground shadow-sm ring-1 ring-primary/25'
               : 'text-muted-foreground hover:bg-background/50 hover:text-foreground'

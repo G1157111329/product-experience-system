@@ -86,7 +86,7 @@ export function ReportSummaryTab({ data }: { data: ReportSummaryData | null }) {
               <FileText className="h-4 w-4 text-primary" />
               <span className="text-sm font-semibold">产品信息</span>
             </div>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
               {productInfoItems.map((item) => (
                 <div key={item.label} className="min-w-0">
                   <p className="text-xs text-muted-foreground">{item.label}</p>
@@ -157,7 +157,7 @@ export function ReportSummaryTab({ data }: { data: ReportSummaryData | null }) {
         {overviewStats.map((s) => (
           <Card key={s.label}>
             <CardContent className="p-3 text-center">
-              <p className={cn('text-2xl font-bold', s.color)}>{s.value}</p>
+              <p className={cn('text-xl font-bold sm:text-2xl', s.color)}>{s.value}</p>
               <p className="text-xs text-muted-foreground">{s.label}</p>
             </CardContent>
           </Card>

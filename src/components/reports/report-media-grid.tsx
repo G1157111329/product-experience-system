@@ -29,14 +29,14 @@ export interface ReportMediaPresentation {
 }
 
 const PRESENTATIONS: Record<ReportMediaRole, ReportMediaPresentation> = {
-  primary: { limit: 6, imageAspect: '4/3', videoAspect: '4/3', minWidth: 112, maxWidth: null },
+  primary: { limit: 6, imageAspect: '4/3', videoAspect: '4/3', minWidth: 120, maxWidth: 160 },
   evidence: { limit: 4, imageAspect: '4/3', videoAspect: '4/3', minWidth: 80, maxWidth: 80 },
   'function-evidence': { limit: 10, imageAspect: '4/3', videoAspect: '4/3', minWidth: 96, maxWidth: 96 },
-  appendix: { limit: 4, imageAspect: '4/3', videoAspect: '4/3', minWidth: 80, maxWidth: 80 },
-  compact: { limit: 2, imageAspect: '4/3', videoAspect: '4/3', minWidth: 80, maxWidth: 80 },
+  appendix: { limit: 8, imageAspect: '4/3', videoAspect: '4/3', minWidth: 72, maxWidth: 72 },
+  compact: { limit: 3, imageAspect: '4/3', videoAspect: '4/3', minWidth: 72, maxWidth: 72 },
   matrix: { limit: Number.MAX_SAFE_INTEGER, imageAspect: '4/3', videoAspect: '4/3', minWidth: 64, maxWidth: 64 },
   'share-paper': { limit: Number.MAX_SAFE_INTEGER, imageAspect: '4/3', videoAspect: '4/3', minWidth: 92, maxWidth: 92 },
-  'share-paper-compact': { limit: Number.MAX_SAFE_INTEGER, imageAspect: '4/3', videoAspect: '4/3', minWidth: 38, maxWidth: 38 },
+  'share-paper-compact': { limit: Number.MAX_SAFE_INTEGER, imageAspect: '4/3', videoAspect: '4/3', minWidth: 34, maxWidth: 38 },
 };
 
 export function mediaPresentation(role: ReportMediaRole): ReportMediaPresentation {

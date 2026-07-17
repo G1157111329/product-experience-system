@@ -2,7 +2,8 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Printer } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { ReportPrintDocument } from '@/components/reports/report-section-block-renderer';
 import { reportFilenameBase } from '@/lib/report-filename';
 import type { FrozenReportViewModel } from '@/lib/report-frozen-view';
@@ -188,6 +189,7 @@ function ReportPrintContent() {
   const printMode = normalizePrintMode(searchParams.get('mode'));
   const [models, setModels] = useState<PrintReportViewModel[]>([]);
   const [error, setError] = useState('');
+  const [documentTitle, setDocumentTitle] = useState('报告');
 
   useEffect(() => {
     if (!reportId) {
@@ -229,7 +231,9 @@ function ReportPrintContent() {
       .then((prepared) => {
         if (controller.signal.aborted) return;
         setModels(prepared);
-        document.title = reportFilenameBase(prepared[0]?.header.title || '报告');
+        const title = prepared[0]?.header.title || '报告';
+        setDocumentTitle(title);
+        document.title = reportFilenameBase(title);
       })
       .catch((loadError) => {
         if (!controller.signal.aborted) setError(loadError instanceof Error ? loadError.message : '报告加载失败');
@@ -259,8 +263,21 @@ function ReportPrintContent() {
   if (error) return <div className="p-10 text-center text-sm text-red-700">{error}</div>;
   if (models.length === 0) return <LoadingState />;
   return (
-    <main data-testid="print-report-ready" data-print-mode={printMode} className={printMode === 'text' ? 'print-text-mode bg-white p-5' : 'bg-white p-5'}>
-      {models.map((model) => <ReportPrintDocument key={model.sourceReportId} model={model} />)}
+    <main data-testid="print-report-ready" data-print-mode={printMode} className={printMode === 'text' ? 'print-text-mode min-h-screen bg-slate-100 print:bg-white' : 'min-h-screen bg-slate-100 print:bg-white'}>
+      <header className="print:hidden sticky top-0 z-50 border-b bg-white/95 px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/80">
+        <div className="mx-auto flex max-w-[1180px] items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="break-words text-base font-semibold text-foreground">{documentTitle}</h1>
+            <p className="text-xs text-muted-foreground">打印 / 保存为 PDF</p>
+          </div>
+          <Button data-testid="print-action-button" size="sm" onClick={() => window.print()}>
+            <Printer className="mr-1 h-4 w-4" />打印 / 保存 PDF
+          </Button>
+        </div>
+      </header>
+      <div className={`mx-auto max-w-[1180px] bg-white p-4 shadow-sm sm:p-6 print:shadow-none ${models.length > 0 ? 'mt-3 sm:mt-4' : ''}`}>
+        {models.map((model) => <ReportPrintDocument key={model.sourceReportId} model={model} />)}
+      </div>
       <style>{`@media print { body { margin: 0; background: #fff; } .print-text-mode img { display: none !important; } }`}</style>
     </main>
   );

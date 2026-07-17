@@ -78,19 +78,25 @@ export default function ShareReportPage() {
     window.print();
   };
 
+  const shareDate = new Date().toLocaleDateString('zh-CN');
   return (
     <main data-testid="share-print-report-view" className="min-h-screen bg-slate-100 px-3 py-4 sm:px-6 sm:py-6">
-      <div className="mx-auto max-w-[1230px] rounded-lg bg-white px-4 py-5 shadow-sm sm:px-6 lg:px-8">
-      <header data-testid="share-readonly-header" className="mb-5 flex items-center justify-between gap-4 border-b border-slate-300 pb-3">
-        <p className="text-sm font-bold text-slate-700">产品体验管理平台 · 匿名只读分享</p>
-        {primary.capabilities.canExport && <Button data-testid="share-download-button" size="sm" className="print:hidden" onClick={() => void handleDownloadReport()}><Download className="mr-1 h-4 w-4" />下载报告</Button>}
-      </header>
-      {printModels.map((model) => (
-        <section key={model.sourceReportId} data-testid={`share-report-${model.sourceReportId}`} className="border-b border-slate-200 py-2 last:border-b-0">
-          <ReportPrintDocument model={model} interactiveMedia />
-        </section>
-      ))}
-      <footer className="border-t pt-4 text-center text-xs text-muted-foreground">产品体验管理平台 · 分享报告（仅查看）</footer>
+      <div className="mx-auto max-w-[1180px] rounded-xl bg-white shadow-sm sm:rounded-2xl">
+        <header data-testid="share-readonly-header" className="flex flex-col gap-3 border-b border-slate-300 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-5">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">产品体验管理平台 · 匿名只读分享</p>
+            <h1 className="mt-1 break-words text-lg font-semibold text-foreground sm:text-xl">{primary.header.title}</h1>
+          </div>
+          {primary.capabilities.canExport && <Button data-testid="share-download-button" size="sm" className="print:hidden shrink-0" onClick={() => void handleDownloadReport()}><Download className="mr-1 h-4 w-4" />下载报告</Button>}
+        </header>
+        <div className="px-4 py-5 sm:px-6 sm:py-7">
+          {printModels.map((model) => (
+            <section key={model.sourceReportId} data-testid={`share-report-${model.sourceReportId}`} className="border-b border-slate-200 py-2 last:border-b-0">
+              <ReportPrintDocument model={model} interactiveMedia />
+            </section>
+          ))}
+        </div>
+        <footer className="border-t px-4 py-4 text-center text-xs text-muted-foreground sm:px-6">产品体验管理平台 · 分享报告（仅查看） · {shareDate}</footer>
       </div>
     </main>
   );
