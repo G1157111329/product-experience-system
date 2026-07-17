@@ -284,7 +284,7 @@ export function MaterialPicker({
 
         const newMaterial = data.data as Material;
         uploadedCount += 1;
-        setMaterials((prev) => [...prev, newMaterial]);
+        setMaterials((prev) => [newMaterial, ...prev]);
         setSelectedMaterialMap((prev) => ({ ...prev, [newMaterial.id]: newMaterial }));
 
         if (onSelect && !onSelectionChange) {

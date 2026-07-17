@@ -32,7 +32,6 @@ assert.equal(
 
 const summary = {
   tag: '良好',
-  satisfaction_score: 8,
   summary: '整体稳定',
   strengths: ['加热均匀', '操作清晰'],
   risks: ['水量偏少'],
@@ -41,8 +40,9 @@ const summary = {
 };
 const text = formatAiSummaryText(summary);
 
-assert.match(text, /^总结：整体稳定/m);
-assert.match(text, /^满意度：8\/10/m);
+assert.match(text, /^总结\n整体稳定/m);
+assert.match(text, /^主要优势\n• 加热均匀/m);
+assert.doesNotMatch(text, /满意度|评分|得分|分数|\/10/);
 assert.deepEqual(parseAiSummaryText(text, summary), summary);
 
 const freeText = parseAiSummaryText('没有标签的自由编辑内容', summary);

@@ -26,6 +26,7 @@ type RetestRecord = {
 type IssueRetestPanelProps = {
   issueId: string;
   taskId: string;
+  defaultCollapsed?: boolean;
   onIssueUpdated?: (issue: Record<string, unknown>) => void;
 };
 
@@ -76,9 +77,10 @@ function ResultControl({ value, onChange, disabled = false }: {
   );
 }
 
-export function IssueRetestPanel({ issueId, taskId, onIssueUpdated }: IssueRetestPanelProps) {
+export function IssueRetestPanel({ issueId, taskId, defaultCollapsed = false, onIssueUpdated }: IssueRetestPanelProps) {
   const [records, setRecords] = useState<RetestRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const [description, setDescription] = useState('');
   const [result, setResult] = useState<EvaluationStatus>('pending');
   const [materialIds, setMaterialIds] = useState<string[]>([]);
@@ -158,6 +160,7 @@ export function IssueRetestPanel({ issueId, taskId, onIssueUpdated }: IssueRetes
   useEffect(() => {
     const controller = new AbortController();
     void load(controller.signal);
+    setCollapsed(defaultCollapsed);
     abortAiRequest();
     abortMutation();
     setDescription('');
@@ -171,7 +174,7 @@ export function IssueRetestPanel({ issueId, taskId, onIssueUpdated }: IssueRetes
       abortAiRequest(false);
       abortMutation(false);
     };
-  }, [abortAiRequest, abortMutation, load]);
+  }, [abortAiRequest, abortMutation, defaultCollapsed, load]);
 
   const fillAiSummary = async (target: 'new' | 'edit', recordId?: string) => {
     const currentDescription = target === 'new' ? description : editDescription;
@@ -399,12 +402,20 @@ export function IssueRetestPanel({ issueId, taskId, onIssueUpdated }: IssueRetes
 
   return (
     <section className="border-t pt-3 space-y-3" aria-label="整改复测">
-      <div className="flex items-center justify-between">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between text-left"
+        aria-expanded={!collapsed}
+        aria-label={collapsed ? '展开整改复测' : '收起整改复测'}
+        onClick={() => setCollapsed((current) => !current)}
+      >
         <span className="text-sm font-medium">整改复测</span>
-        <Badge variant="secondary" className="text-xs">{records.length} 次</Badge>
-      </div>
+        <span className="flex items-center gap-1.5"><Badge variant="secondary" className="text-xs">{records.length} 次</Badge><ChevronDown className={cn('h-4 w-4 transition-transform', !collapsed && 'rotate-180')} /></span>
+      </button>
 
-      <div className="rounded-lg border bg-primary/5 p-3 space-y-3">
+      {!collapsed && (
+        <>
+          <div className="rounded-lg border bg-primary/5 p-3 space-y-3">
         <div className="flex items-center gap-2"><Plus className="h-4 w-4 text-primary" /><span className="text-sm font-medium">新增复测</span></div>
         <ResultControl value={result} onChange={setResult} disabled={saving} />
         <div className="space-y-1.5">
@@ -422,7 +433,7 @@ export function IssueRetestPanel({ issueId, taskId, onIssueUpdated }: IssueRetes
         </Button>
       </div>
 
-      {loading ? <div className="flex justify-center py-3"><Loader2 className="h-4 w-4 animate-spin" /></div> : records.length > 0 ? (
+          {loading ? <div className="flex justify-center py-3"><Loader2 className="h-4 w-4 animate-spin" /></div> : records.length > 0 ? (
         <div className="space-y-3">
           {renderRecord(records[0], true)}
           {records.length > 1 && (
@@ -435,7 +446,9 @@ export function IssueRetestPanel({ issueId, taskId, onIssueUpdated }: IssueRetes
             </details>
           )}
         </div>
-      ) : <p className="text-xs text-muted-foreground">暂无复测记录</p>}
+          ) : <p className="text-xs text-muted-foreground">暂无复测记录</p>}
+        </>
+      )}
     </section>
   );
 }

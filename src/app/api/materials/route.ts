@@ -152,7 +152,7 @@ export async function GET(request: NextRequest) {
 
   query = scope.comparison_cell_id
     ? query.order('media_display_order', { ascending: true }).order('id', { ascending: true }).limit(limit)
-    : query.order('created_at', { ascending: true }).order('id', { ascending: true }).limit(limit);
+    : query.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit);
   const { data: legacyData, error } = await query;
   if (error) return NextResponse.json({ code: 1, message: '查询失败' }, { status: 500 });
 

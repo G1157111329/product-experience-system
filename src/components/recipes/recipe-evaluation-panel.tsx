@@ -300,6 +300,7 @@ export function RecipeEvaluationPanel({
           key={`${recipe.id}:${issue.id}`}
           issueId={issue.id}
           taskId={taskId}
+          defaultCollapsed
           onIssueUpdated={(updated) => {
             if (typeof updated.id === 'string') setIssue({ id: updated.id, status: typeof updated.status === 'string' ? updated.status : null });
           }}

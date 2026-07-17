@@ -854,6 +854,13 @@ const paperSectionTitleStyle: CSSProperties = { margin: '0 0 8px', fontSize: `${
 const paperIssueMetaStyle: CSSProperties = { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '5px', marginBottom: '8px', paddingBottom: '7px', borderBottom: '1px solid #e5e7eb' };
 const paperIssueChipStyle: CSSProperties = { border: '1px solid #d1d5db', borderRadius: '999px', padding: '1px 6px', color: '#374151', fontSize: '10px', lineHeight: 1.35 };
 
+function printEvaluationStatusChipStyle(status: unknown): CSSProperties {
+  const label = evaluationStatusLabel(status);
+  if (label === '合格') return { ...paperIssueChipStyle, borderColor: '#86efac', background: '#f0fdf4', color: '#15803d' };
+  if (label === '不合格') return { ...paperIssueChipStyle, borderColor: '#fecaca', background: '#fef2f2', color: '#b91c1c' };
+  return { ...paperIssueChipStyle, borderColor: '#cbd5e1', background: '#f8fafc', color: '#475569' };
+}
+
 function paperDate(value: unknown) {
   if (!value) return '';
   const date = new Date(String(value));
@@ -944,13 +951,13 @@ export function ReportPrintDocument({ model }: { model: PrintReportViewModel }) 
           <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', padding: '8px 10px', borderBottom: '1px solid #cbd5e1', background: '#f8fafc', breakAfter: 'avoid' }}>
             <h3 style={{ margin: 0, minWidth: 0, fontSize: '13px', color: '#111827' }}><span style={{ marginRight: '6px', color: PRINT_GOLDEN_YELLOW_INK }}>食谱</span>{effect.name}</h3>
             <div data-testid="print-function-metrics" style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: '4px' }}>
-              {['步骤数：' + effect.steps.length, '判断：' + evaluationStatusLabel(effect.evaluationStatus), '问题点：' + problemCount].map((label) => <span key={label} style={paperIssueChipStyle}>{label}</span>)}
+              <span style={paperIssueChipStyle}>步骤数：{effect.steps.length}</span><span style={printEvaluationStatusChipStyle(effect.evaluationStatus)}>{evaluationStatusLabel(effect.evaluationStatus)}</span><span style={paperIssueChipStyle}>问题点：{problemCount}</span>
             </div>
           </header>
           <div style={{ padding: '8px 10px' }}>
             {effect.formula && <p style={{ margin: '0 0 6px', whiteSpace: 'pre-wrap' }}><b>食谱/食材：</b>{effect.formula}</p>}
             {parameters && <p style={{ margin: '0 0 6px' }}><b>食谱参数：</b>{parameters}</p>}
-            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '7px' }}><p style={{ margin: 0 }}><b style={{ color: PRINT_GOLDEN_YELLOW_INK }}>食谱效果评价</b></p><p style={{ margin: '3px 0 0', whiteSpace: 'pre-wrap' }}>{effect.evaluation || '—'}</p><PaperMedia items={effect.evidence} /></div>
+            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '7px' }}><p style={{ margin: 0 }}><b style={{ color: PRINT_GOLDEN_YELLOW_INK }}>食谱效果评价</b></p><p style={{ margin: '3px 0 0', whiteSpace: 'pre-wrap' }}>{effect.evaluation || '—'}</p><PaperMedia items={effect.evidence} density="compact" /></div>
             {effect.steps.length > 0 && <div style={{ marginTop: '9px' }}><p style={{ margin: '0 0 5px', fontWeight: 700 }}>食谱步骤：{effect.steps.length}步</p>{effect.steps.map((step, index) => <div key={step.id} data-testid="print-function-step" style={{ padding: '6px 8px', borderTop: '1px solid #e2e8f0', breakInside: 'avoid' }}><p style={{ margin: 0 }}><b>步骤 {step.stepNumber ?? index + 1}</b>　{step.operation}</p>{step.problemPoints.length > 0 && <p style={{ margin: '3px 0 0', color: '#991b1b' }}><b>步骤问题点：</b>{step.problemPoints.join('；')}</p>}<PaperMedia items={step.evidence} /></div>)}</div>}
           </div>
         </article>;

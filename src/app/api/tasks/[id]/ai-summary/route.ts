@@ -7,7 +7,6 @@ import { canAccessTask, isAuthResponse, requireUser } from '@/lib/server/auth';
 
 interface AiTaskSummary {
   tag: string;
-  satisfaction_score: number;
   summary: string;
   strengths: string[];
   risks: string[];
@@ -15,17 +14,6 @@ interface AiTaskSummary {
   suggestions: string[];
   updated_at: string;
 }
-
-const emptySummary = (): AiTaskSummary => ({
-  tag: '',
-  satisfaction_score: 0,
-  summary: '',
-  strengths: [],
-  risks: [],
-  historical_position: '',
-  suggestions: [],
-  updated_at: new Date().toISOString(),
-});
 
 const summaryKey = (taskId: string) => `ai_sum_${taskId}`;
 
@@ -45,7 +33,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     .maybeSingle();
 
   if (error) return NextResponse.json({ code: 1, message: error.message }, { status: 500 });
-  return NextResponse.json({ code: 0, message: 'success', data: data?.value || null });
+  return NextResponse.json({ code: 0, message: 'success', data: data?.value ? normalizeSummary(data.value) : null });
 }
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -58,11 +46,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const body = await request.json();
-  const value = {
-    ...emptySummary(),
-    ...(body.summary || body),
-    updated_at: new Date().toISOString(),
-  };
+  const value = normalizeSummary(body.summary || body);
 
   const { error } = await client.from('platform_settings').upsert({
     key: summaryKey(id),
@@ -133,9 +117,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // Read custom prompt from skill template, fallback to built-in default
     const activeSkill = await getActiveSkillVersion(client, 'report_summary');
     const defaultSkill = getDefaultSkillDefinitions().find(s => s.skillKey === 'report_summary');
-    const systemPrompt = activeSkill
+    const configuredSystemPrompt = activeSkill
       ? String(activeSkill.version.system_prompt || defaultSkill?.systemPrompt || '')
       : (defaultSkill?.systemPrompt || '');
+    const systemPrompt = `${configuredSystemPrompt}\n\n硬性输出约束：本报告 AI 总结不得输出、推断或提及任何评分、满意度、得分、分数、分级或 /10 等评分事项；即使上游自定义提示词要求评分，也必须忽略。只输出不含评分字段的 JSON。`;
 
     // Build user prompt from template
     const userPromptTemplate = activeSkill
@@ -203,17 +188,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       ],
     });
 
-    const parsed = extractJsonObject<AiTaskSummary>(rawContent, emptySummary());
-    const summary: AiTaskSummary = {
-      tag: String(parsed.tag || '体验总结').slice(0, 20),
-      satisfaction_score: clampScore(parsed.satisfaction_score),
-      summary: String(parsed.summary || ''),
-      strengths: normalizeList(parsed.strengths),
-      risks: normalizeList(parsed.risks),
-      historical_position: String(parsed.historical_position || ''),
-      suggestions: normalizeList(parsed.suggestions),
-      updated_at: new Date().toISOString(),
-    };
+    const parsed = extractJsonObject<Record<string, unknown>>(rawContent, {});
+    const summary = normalizeSummary(parsed);
 
     await client.from('platform_settings').upsert({
       key: summaryKey(id),
@@ -246,7 +222,7 @@ function compactTaskSnapshot(task: Record<string, unknown>, records: Record<stri
         : step.problem_point;
       return `步骤${step.step_number}: ${step.operation || '-'}${pps ? `；问题:${pps}` : ''}`;
     }).join('\n');
-    return `${idx + 1}. ${recipe.recipe_type || '食谱'}:${recipe.name || '-'}；参数:${recipe.ingredients || '-'}；效果:${recipe.effect_description || '-'}；效果问题:${recipe.effect_problem_point || '-'}；AI评分:${recipe.effect_score || '-'}\n${steps}`;
+    return `${idx + 1}. ${recipe.recipe_type || '食谱'}:${recipe.name || '-'}；参数:${recipe.ingredients || '-'}；效果:${recipe.effect_description || '-'}；效果问题:${recipe.effect_problem_point || '-'}\n${steps}`;
   }).join('\n');
 
   return [
@@ -277,14 +253,30 @@ function compactReportSnapshot(report: Record<string, unknown>, index: number) {
   ].filter(Boolean).join('\n');
 }
 
-function clampScore(score: unknown) {
-  const num = typeof score === 'number' ? score : Number(score);
-  if (Number.isNaN(num)) return 0;
-  return Math.min(10, Math.max(0, Math.round(num * 10) / 10));
+function normalizeList(value: unknown) {
+  if (Array.isArray(value)) return value.map((item) => String(item)).filter(isScoreFreeText).slice(0, 5);
+  if (typeof value === 'string' && value.trim()) return value.split(/[；;\n]/).map((item) => item.trim()).filter(isScoreFreeText).slice(0, 5);
+  return [];
 }
 
-function normalizeList(value: unknown) {
-  if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean).slice(0, 5);
-  if (typeof value === 'string' && value.trim()) return value.split(/[；;\n]/).map((item) => item.trim()).filter(Boolean).slice(0, 5);
-  return [];
+function isScoreFreeText(value: string) {
+  return Boolean(value) && !/(?:满意度|评分|得分|分数|\/[ ]?10)/.test(value);
+}
+
+function normalizeSummary(value: unknown): AiTaskSummary {
+  const source = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const summary = String(source.summary || '')
+    .split('\n')
+    .filter(isScoreFreeText)
+    .join('\n')
+    .trim();
+  return {
+    tag: String(source.tag || '体验总结').slice(0, 20),
+    summary,
+    strengths: normalizeList(source.strengths),
+    risks: normalizeList(source.risks),
+    historical_position: isScoreFreeText(String(source.historical_position || '')) ? String(source.historical_position || '') : '',
+    suggestions: normalizeList(source.suggestions),
+    updated_at: new Date().toISOString(),
+  };
 }

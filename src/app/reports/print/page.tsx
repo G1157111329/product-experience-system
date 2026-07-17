@@ -6,7 +6,7 @@ import { Loader2 } from 'lucide-react';
 import { ReportPrintDocument } from '@/components/reports/report-section-block-renderer';
 import { reportFilenameBase } from '@/lib/report-filename';
 import type { FrozenReportViewModel } from '@/lib/report-frozen-view';
-import { isPrintVideoSource, localPrintMediaUrl, mapWithConcurrency, normalizePrintMode, posterStorageKey, printPresignStorageKey, signedPosterUrl, uniqueUrls, type PrintMode } from '@/lib/print-assets';
+import { isPrintVideoSource, mapWithConcurrency, normalizePrintMode, posterStorageKey, printPresignStorageKey, signedPosterUrl, uniqueUrls, type PrintMode } from '@/lib/print-assets';
 import { resolvePresignBatches } from '@/lib/presign-batches';
 import {
   buildPrintReportViewModel,
@@ -89,12 +89,10 @@ async function imageUrlToPrintableDataUrl(url: string, mode: PrintMode): Promise
 }
 
 async function presignPaths(paths: string[], reportId: string, shareToken: string | null) {
-  type PrintPathEntry = { path: string; key: string; poster: boolean; localUrl?: string };
+  type PrintPathEntry = { path: string; key: string; poster: boolean };
   const entries = uniqueUrls(paths).flatMap<PrintPathEntry>((path) => {
     const posterKey = posterStorageKey(path);
     if (posterKey) return [{ path, key: posterKey, poster: true }];
-    const localUrl = localPrintMediaUrl(path);
-    if (localUrl) return [{ path, key: '', poster: false, localUrl }];
     const key = printPresignStorageKey(path);
     return key ? [{ path, key, poster: false }] : [];
   });
@@ -115,7 +113,6 @@ async function presignPaths(paths: string[], reportId: string, shareToken: strin
     }
   });
   return Object.fromEntries(entries.map((entry) => {
-    if (entry.localUrl) return [entry.path, entry.localUrl];
     const signed = signedByKey[entry.key];
     return [entry.path, signed ? (entry.poster ? signedPosterUrl(entry.path, signed) : signed) : entry.path];
   }));

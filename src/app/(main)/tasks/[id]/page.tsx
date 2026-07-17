@@ -65,7 +65,6 @@ interface TaskDetail {
 
 interface AiTaskSummary {
   tag: string;
-  satisfaction_score: number;
   summary: string;
   strengths: string[];
   risks: string[];
@@ -409,7 +408,6 @@ export default function TaskDetailPage() {
       const payload: AiTaskSummary = {
         ...parseAiSummaryText(summaryForm.text, aiSummary || {
           tag: '',
-          satisfaction_score: 0,
           summary: '',
           strengths: [],
           risks: [],
@@ -657,7 +655,6 @@ function AiSummaryContent({
           >
             <div className="flex flex-wrap items-center gap-2">
               <Badge className="text-xs">{aiSummary.tag || 'AI总结'}</Badge>
-              <span className="text-sm font-medium">{aiSummary.satisfaction_score}/10</span>
               <span className="basis-full text-xs text-muted-foreground line-clamp-2 sm:basis-auto sm:flex-1">
                 {aiSummary.summary || '点击查看和编辑AI总结'}
               </span>
