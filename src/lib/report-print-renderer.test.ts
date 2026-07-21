@@ -128,7 +128,6 @@ for (const [model, expected] of [
 const singleRecipeHtml = renderPrintReportHtml(buildPrintReportViewModel(v2));
 const rectificationProjectionHtml = renderPrintReportHtml(buildPrintReportViewModel(v2, [{
   id: 'issue-1',
-  improve_plan: 'Replace the seal assembly',
   responsible_person: 'Li Wei',
   responsible_dept: 'Quality',
   plan_complete_date: '2026-07-20',
@@ -144,6 +143,15 @@ for (const expectedText of ['Latest rectification plan', 'Latest owner', '2026-0
 for (const omittedText of ['Old rectification plan', 'Old owner', '2026-07-01', 'Middle retest failed', 'Oldest retest failed']) {
   assert.equal(rectificationProjectionHtml.includes(omittedText), false, `print/PDF must not render historical rectification or retest entries: found ${omittedText}`);
 }
+const liveRectificationPlanHtml = renderPrintReportHtml(buildPrintReportViewModel(v2, [{
+  id: 'issue-1',
+  improve_plan: 'Add a sticker prompt',
+  rectificationHistory: [
+    { action_plan: 'Start rectification', created_at: '2026-07-01T00:00:00.000Z' },
+  ],
+}]));
+assert.equal(liveRectificationPlanHtml.includes('Add a sticker prompt'), true, 'print/PDF must use the current issue rectification plan after it is saved');
+assert.equal(liveRectificationPlanHtml.includes('Start rectification'), false, 'print/PDF must not retain a superseded rectification action plan');
 const deletedRetestHtml = renderPrintReportHtml(buildPrintReportViewModel(v2, [{
   id: 'issue-1',
   reEvaluationCount: 0,
@@ -156,7 +164,6 @@ for (const omittedText of ['Retest passed', 'Middle retest failed', 'Oldest rete
 const rectificationProjectionDocumentHtml = renderToStaticMarkup(React.createElement(ReportPrintDocument, {
   model: buildPrintReportViewModel(v2, [{
     id: 'issue-1',
-    improve_plan: 'Production rectification plan',
     responsible_person: 'Production owner',
     responsible_dept: 'Production quality',
     plan_complete_date: '2026-07-22',

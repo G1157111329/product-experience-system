@@ -38,7 +38,7 @@ interface TransitionRule {
 
 const TRANSITIONS: Record<IssueTransition, TransitionRule> = {
   triage: {
-    from: ['open'],
+    from: ['open', 'rectifying', 'verified_closed', 'waived'],
     to: 'open',
     allowedRoles: ['task_owner', 'product_manager', 'admin'],
   },
@@ -49,7 +49,7 @@ const TRANSITIONS: Record<IssueTransition, TransitionRule> = {
     requiredFields: ['responsible_person'],
   },
   start_rectify: {
-    from: ['open', 'rectifying'],
+    from: ['open', 'rectifying', 'verified_closed', 'waived'],
     to: 'rectifying',
     allowedRoles: ['rectification_owner', 'task_owner', 'admin'],
   },
@@ -60,17 +60,17 @@ const TRANSITIONS: Record<IssueTransition, TransitionRule> = {
     requiredFields: ['verification_note'],
   },
   return_to_rectifying: {
-    from: ['verified_closed', 'rectifying'],
+    from: ['open', 'rectifying', 'verified_closed', 'waived'],
     to: 'rectifying',
     allowedRoles: ['rectification_owner', 'task_owner', 'reviewer', 'admin'],
   },
   verify: {
-    from: ['rectifying'],
+    from: ['open', 'rectifying', 'verified_closed', 'waived'],
     to: 'verified_closed',
     allowedRoles: ['reviewer', 'task_owner', 'product_manager', 'admin'],
   },
   waive: {
-    from: ['open', 'rectifying', 'verified_closed'],
+    from: ['open', 'rectifying', 'verified_closed', 'waived'],
     to: 'waived',
     allowedRoles: ['task_owner', 'product_manager', 'admin'],
     requiredFields: ['no_improve_reason'],

@@ -102,7 +102,7 @@ function rectificationProjection(input: PrintIssueProjectionInput | undefined): 
   const retestResult = text(latestRetest.result || latestRetest.evaluation_result || latestRetest.conclusion);
   const retestDescription = text(latestRetest.description || latestRetest.evaluation_description || latestRetest.verification_note);
   return {
-    plan: text(latest.action_plan || latest.improve_plan || latest.rectification || input.improve_plan || input.rectification || input.no_improve_reason),
+    plan: text(input.improve_plan || input.rectification || input.no_improve_reason || latest.action_plan || latest.improve_plan || latest.rectification),
     responsible,
     time: text(latest.actual_complete_date || latest.plan_complete_date || input.actual_complete_date || input.plan_complete_date || input.due_at),
     retest: [retestResult ? evaluationStatusLabel(retestResult) : '', retestDescription].filter(Boolean).join('：'),

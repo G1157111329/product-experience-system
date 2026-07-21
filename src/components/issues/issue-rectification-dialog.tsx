@@ -78,6 +78,7 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
       if (data.code === 0) {
         persistedValuesRef.current = { ...persistedValuesRef.current, [field]: value };
         setCurrent((previous) => previous ? { ...previous, ...data.data } : data.data);
+        onSaved?.(data.data);
       } else {
         toast.error(data.message || '保存失败');
       }
@@ -110,14 +111,10 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
 
   const updateImproveFlag = async (willImprove: boolean) => {
     if (!current) return;
-    const currentStatus = normalizeIssueStatus(current.status);
     if (willImprove) {
-      if (currentStatus === 'waived' || currentStatus === 'rectifying') return;
-      const command = currentStatus === 'verified_closed'
-        ? { transition: 'return_to_rectifying', status: 'rectifying' }
-        : { transition: 'start_rectify', status: 'rectifying' };
       await runCommand({
-        ...command,
+        transition: 'start_rectify',
+        status: 'rectifying',
         is_improve: true,
         improve_plan: current.improve_plan || '开始整改',
         responsible_person: current.responsible_person,
@@ -137,18 +134,12 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
 
   const markAsPending = async () => {
     if (!current) return;
-    if (normalizeIssueStatus(current.status) !== 'open') {
-      toast.error('当前状态不能直接返回待整改');
-      return;
-    }
-    await runCommand({ transition: 'triage', status: 'open' }, '已保持为待整改');
+    await runCommand({ transition: 'triage', status: 'open', is_improve: true }, '已保存为待整改');
   };
 
   // 直接标记为整改完成（verified_closed），用户手动确认。
   const markAsRectified = async () => {
     if (!current) return;
-    const currentStatus = normalizeIssueStatus(current.status);
-    if (currentStatus !== 'rectifying') return;
     await runCommand({
       transition: 'verify',
       status: 'verified_closed',
@@ -193,33 +184,33 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
                 <div className="grid grid-cols-2 gap-1 sm:grid-cols-4">
                   <button
                     type="button"
-                    disabled={currentStatus !== 'open'}
                     onClick={() => void markAsPending()}
+                    aria-pressed={currentStatus === 'open'}
                     className={cn(
                       'min-h-9 rounded border px-2 py-1.5 text-xs font-medium transition-colors',
-                      currentStatus === 'open' ? 'border-current text-foreground' : 'bg-background border-border hover:bg-muted/50',
+                      currentStatus === 'open' ? 'border-primary bg-primary text-primary-foreground shadow-sm ring-2 ring-primary/20' : 'bg-background border-border hover:bg-muted/50',
                     )}
                   >
                     待整改
                   </button>
                   <button
                     type="button"
-                    disabled={currentStatus === 'waived' || currentStatus === 'rectifying'}
                     onClick={() => void updateImproveFlag(true)}
+                    aria-pressed={currentStatus === 'rectifying'}
                     className={cn(
                       'min-h-9 rounded border px-2 py-1.5 text-xs font-medium transition-colors',
-                      willImprove && currentStatus !== 'open' && currentStatus !== 'verified_closed' ? 'border-current text-amber-600' : 'bg-background border-border hover:bg-muted/50',
+                      currentStatus === 'rectifying' ? 'border-amber-600 bg-amber-500 text-white shadow-sm ring-2 ring-amber-500/20' : 'bg-background border-border hover:bg-muted/50',
                     )}
                   >
                     整改中
                   </button>
                   <button
                     type="button"
-                    disabled={currentStatus !== 'rectifying'}
                     onClick={() => void markAsRectified()}
+                    aria-pressed={currentStatus === 'verified_closed'}
                     className={cn(
                       'min-h-9 rounded border px-2 py-1.5 text-xs font-medium transition-colors',
-                      currentStatus === 'verified_closed' ? 'border-current text-emerald-600' : 'bg-background border-border hover:bg-muted/50',
+                      currentStatus === 'verified_closed' ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-600/20' : 'bg-background border-border hover:bg-muted/50',
                     )}
                   >
                     整改完成
@@ -227,14 +218,18 @@ export function IssueRectificationDialog({ issue, open, onOpenChange, onSaved }:
                   <button
                     type="button"
                     onClick={() => void updateImproveFlag(false)}
+                    aria-pressed={currentStatus === 'waived'}
                     className={cn(
                       'min-h-9 rounded border px-2 py-1.5 text-xs font-medium transition-colors',
-                      !willImprove ? 'border-current text-muted-foreground' : 'bg-background border-border hover:bg-muted/50',
+                      currentStatus === 'waived' ? 'border-slate-600 bg-slate-600 text-white shadow-sm ring-2 ring-slate-600/20' : 'bg-background border-border hover:bg-muted/50',
                     )}
                   >
                     不整改
                   </button>
                 </div>
+                <p className="text-xs font-medium text-muted-foreground" aria-live="polite">
+                  当前已保存状态：{currentStatus === 'open' ? '待整改' : currentStatus === 'rectifying' ? '整改中' : currentStatus === 'verified_closed' ? '整改完成' : '不整改'}
+                </p>
               </div>
             </div>
 

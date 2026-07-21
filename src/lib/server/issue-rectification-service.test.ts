@@ -131,8 +131,29 @@ void (async () => {
   assert.equal(waived.actions.length, 0);
   assert.equal(waived.verifications.length, 0);
   const closed = structuredClone(state);
-  await assert.rejects(() => executeIssueCommand(startCommand, fakeStore(state)), /not allowed from verified_closed/);
-  assert.deepEqual(state, closed, 'a command validated before another commit cannot overwrite the locked current status');
+  await executeIssueCommand({
+    ...startCommand,
+    fields: { improve_plan: 'restart without a forced sequence' },
+  }, fakeStore(state));
+  assert.equal(state.issue.status, 'rectifying', 'a completed issue can be switched directly back to rectifying');
+  await executeIssueCommand({
+    issueId: 'issue-1', actorId: 'actor-1', command: 'triage', requestedStatus: 'open', fields: {},
+  }, fakeStore(state));
+  assert.equal(state.issue.status, 'open', 'a rectifying issue can be switched directly back to pending');
+  await executeIssueCommand({
+    issueId: 'issue-1', actorId: 'actor-1', command: 'waive', requestedStatus: 'waived', fields: { no_improve_reason: 'not applicable now' },
+  }, fakeStore(state));
+  assert.equal(state.issue.status, 'waived', 'a pending issue can be switched directly to waived');
+  assert.notDeepEqual(state, closed, 'direct status selections persist their canonical state instead of being rejected by sequence rules');
+
+  const directlyCompleted = initial();
+  await executeIssueCommand({
+    issueId: 'issue-1', actorId: 'actor-1', command: 'verify', requestedStatus: 'verified_closed',
+    fields: { verification_note: 'completed without a prior status selection' },
+  }, fakeStore(directlyCompleted));
+  assert.equal(directlyCompleted.issue.status, 'verified_closed', 'a pending issue can be marked complete directly');
+  assert.equal(directlyCompleted.actions.length, 1, 'direct completion creates the required audit action');
+  assert.equal(directlyCompleted.completedActions.length, 1, 'direct completion closes its created audit action');
 
   const staleVersion = initial();
   staleVersion.issue.version = 2;
@@ -145,6 +166,8 @@ void (async () => {
   assert.match(dialogSource, /transition:\s*'waive'/, 'dialog waives with an explicit command');
   assert.doesNotMatch(dialogSource, /JSON\.stringify\(\{\s*status:/, 'dialog never sends a status-only mutation');
   assert.match(dialogSource, /setCurrent\(data\.data\)/, 'dialog trusts canonical server data after commands');
+  assert.doesNotMatch(dialogSource, /disabled=\{/, 'all four rectification states remain selectable without a forced sequence');
+  assert.match(dialogSource, /aria-pressed=/, 'the persisted status is visibly selected after saving');
   assert.doesNotMatch(dialogSource, /已重开/, 'dialog exposes only the canonical four-state labels');
   assert.doesNotMatch(dialogSource, /整改历史/, 'dialog retains only the current rectification fields instead of loading a history timeline');
   assert.doesNotMatch(dialogSource, /\/rectifications/, 'dialog does not request rectification-history data when opened');

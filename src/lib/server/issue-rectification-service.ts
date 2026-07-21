@@ -267,7 +267,19 @@ export async function executeIssueCommand(
       });
     }
     if (input.command === 'submit_verification' || input.command === 'verify') {
-      const actionId = await tx.getLatestRectificationAction(input.issueId);
+      let actionId = await tx.getLatestRectificationAction(input.issueId);
+      if (!actionId && input.command === 'verify') {
+        await tx.createAction({
+          issueId: input.issueId,
+          actorId: input.actorId,
+          plan: optionalString(fields, 'improve_plan') ?? (locked.improvePlan?.trim() || 'Directly marked rectified'),
+          dueAt: optionalString(fields, 'plan_complete_date') ?? null,
+          responsiblePerson: optionalString(fields, 'responsible_person') ?? null,
+          responsibleDept: optionalString(fields, 'responsible_dept') ?? null,
+          note: optionalString(fields, 'verification_note') ?? null,
+        });
+        actionId = await tx.getLatestRectificationAction(input.issueId);
+      }
       if (!actionId) throw new Error('rectification action required');
       const actualCompleteDate = patch.actualCompleteDate ?? new Date().toISOString().slice(0, 10);
       await tx.createVerification({
