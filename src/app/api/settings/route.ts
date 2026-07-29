@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { forbidden, isAuthResponse, requireAdmin, requireUser } from '@/lib/server/auth';
-import { probeAIConfiguration } from '@/lib/server/ai';
+import { describeAIConnectivityFailure, probeAIConfigurationWithTokenFallback } from '@/lib/server/ai';
 import { decryptSecret, encryptSecret, isEncryptedSecret } from '@/lib/server/secret-crypto';
 import { buildFinalLegacyAIConfig, resolveAIConfigProbeInput } from '@/lib/server/ai-config-save-gate';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
@@ -70,11 +70,12 @@ export async function PUT(request: NextRequest) {
         body: finalValue,
         decryptExistingKey: decryptSecret,
       });
-      await probeAIConfiguration({
+      finalValue.request_options = await probeAIConfigurationWithTokenFallback({
         ...probeInput,
         apiKey: isEncryptedSecret(probeInput.apiKey) ? decryptSecret(probeInput.apiKey) : probeInput.apiKey,
       });
-    } catch {
+    } catch (error) {
+      const failure = describeAIConnectivityFailure(error);
       await writeSecurityAudit(client, {
         request,
         actor: admin,
@@ -82,9 +83,18 @@ export async function PUT(request: NextRequest) {
         outcome: 'failed',
         targetType: 'platform_setting',
         targetId: 'ai_config',
-        metadata: { key: 'ai_config', model: finalValue.model || '' },
+        metadata: {
+          key: 'ai_config',
+          model: finalValue.model || '',
+          connectivityCode: failure.code,
+          upstreamStatus: failure.upstreamStatus ?? null,
+        },
       });
-      return NextResponse.json({ code: 1, message: 'AI 连通性测试失败：请检查调用地址、模型、API Key 和网络后重试' }, { status: 422 });
+      return NextResponse.json({
+        code: 1,
+        message: failure.message,
+        details: { reason: failure.code, ...(failure.upstreamStatus ? { upstream_status: failure.upstreamStatus } : {}) },
+      }, { status: 422 });
     }
     value = finalValue;
   }

@@ -73,6 +73,12 @@ export interface AIConnectivityProbeInput {
   timeoutMs?: number;
 }
 
+export type AIConnectivityFailure = {
+  code: 'configuration_incomplete' | 'endpoint_not_allowed' | 'provider_unreachable' | 'upstream_rejected' | 'rate_limited' | 'provider_error' | 'invalid_response' | 'unknown';
+  message: string;
+  upstreamStatus?: number;
+};
+
 const PROTECTED_REQUEST_FIELDS = new Set(['model', 'messages', 'temperature', 'max_tokens', 'max_completion_tokens']);
 
 export function normalizeAIRequestOptions(value: unknown): AIRequestOptions {
@@ -132,6 +138,47 @@ export function assertSafeAIEndpoint(apiUrl: string) {
 }
 
 /**
+ * Converts a probe error into an actionable, credential-safe diagnostic for
+ * administrators. Provider response bodies are intentionally never exposed.
+ */
+export function describeAIConnectivityFailure(error: unknown): AIConnectivityFailure {
+  const raw = error instanceof Error ? error.message : '';
+  const httpMatch = raw.match(/HTTP (\d{3})/);
+  if (httpMatch) {
+    const upstreamStatus = Number(httpMatch[1]);
+    if (upstreamStatus === 401 || upstreamStatus === 403) {
+      return { code: 'upstream_rejected', message: `模型服务返回 HTTP ${upstreamStatus}：请检查 API Key 是否有效且具备该模型权限。`, upstreamStatus };
+    }
+    if (upstreamStatus === 404) {
+      return { code: 'upstream_rejected', message: '模型服务返回 HTTP 404：请检查调用地址是否为 Chat Completions 地址。', upstreamStatus };
+    }
+    if (upstreamStatus === 422) {
+      return { code: 'upstream_rejected', message: '模型服务返回 HTTP 422：请检查模型名称及该服务要求的请求参数。', upstreamStatus };
+    }
+    if (upstreamStatus === 429) {
+      return { code: 'rate_limited', message: '模型服务返回 HTTP 429：当前请求受限，请稍后重试或检查服务配额。', upstreamStatus };
+    }
+    if (upstreamStatus >= 500) {
+      return { code: 'provider_error', message: `模型服务返回 HTTP ${upstreamStatus}：服务端暂时不可用，请稍后重试。`, upstreamStatus };
+    }
+    return { code: 'upstream_rejected', message: `模型服务返回 HTTP ${upstreamStatus}：请检查调用地址、模型和服务端策略。`, upstreamStatus };
+  }
+  if (raw.includes('允许的域名白名单')) {
+    return { code: 'endpoint_not_allowed', message: '调用地址不在 AI_ALLOWED_HOSTS 白名单内，请将该内网主机加入部署环境后重启服务。' };
+  }
+  if (raw.includes('endpoint, model, and API key are required')) {
+    return { code: 'configuration_incomplete', message: '调用地址、模型名和 API Key 均为必填项。' };
+  }
+  if (raw.includes('provider is unreachable or timed out')) {
+    return { code: 'provider_unreachable', message: '无法连接模型服务或请求超时：请检查内网路由、DNS、端口和 TLS 配置。' };
+  }
+  if (raw.includes('invalid Chat Completions response')) {
+    return { code: 'invalid_response', message: '模型服务未返回兼容的 Chat Completions 响应，请检查网关协议。' };
+  }
+  return { code: 'unknown', message: 'AI 连通性测试失败：请检查调用地址、模型、API Key 和网络后重试。' };
+}
+
+/**
  * Performs a minimal OpenAI-compatible chat request before a configuration is persisted.
  * The caller owns persistence; this helper never writes a configuration or logs credentials.
  */
@@ -162,7 +209,7 @@ export async function probeAIConfiguration({
         model,
         messages: [{ role: 'user', content: 'ping' }],
         temperature: 0,
-        maxTokens: 1,
+        maxTokens: 16,
         requestOptions,
       })),
     });
@@ -181,15 +228,38 @@ export async function probeAIConfiguration({
     throw new Error('AI connection test failed: invalid Chat Completions response');
   }
   const firstChoice = (result as { choices?: unknown[] } | null)?.choices?.[0] as {
-    message?: { role?: unknown; content?: unknown };
+    message?: { role?: unknown; content?: unknown; reasoning_content?: unknown };
   } | undefined;
   if (
     !firstChoice
     || firstChoice.message?.role !== 'assistant'
-    || typeof firstChoice.message.content !== 'string'
-    || !firstChoice.message.content.trim()
+    || (
+      typeof firstChoice.message.content !== 'string'
+      && typeof firstChoice.message.reasoning_content !== 'string'
+    )
   ) {
     throw new Error('AI connection test failed: invalid Chat Completions response');
+  }
+}
+
+/**
+ * OpenAI-compatible gateways do not uniformly accept the legacy max_tokens
+ * field. Retry once with max_completion_tokens only when the default field is
+ * rejected, then return the successful selection for persistence.
+ */
+export async function probeAIConfigurationWithTokenFallback(input: AIConnectivityProbeInput): Promise<AIRequestOptions> {
+  const requestOptions = normalizeAIRequestOptions(input.requestOptions);
+  try {
+    await probeAIConfiguration({ ...input, requestOptions });
+    return requestOptions;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    const mayBeTokenFieldMismatch = /HTTP (400|422)/.test(message);
+    if (requestOptions.tokenField || !mayBeTokenFieldMismatch) throw error;
+
+    const compatibleOptions: AIRequestOptions = { ...requestOptions, tokenField: 'max_completion_tokens' };
+    await probeAIConfiguration({ ...input, requestOptions: compatibleOptions });
+    return compatibleOptions;
   }
 }
 

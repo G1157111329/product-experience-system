@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { isAuthResponse, requireAdmin } from '@/lib/server/auth';
-import { probeAIConfiguration } from '@/lib/server/ai';
+import { describeAIConnectivityFailure, probeAIConfigurationWithTokenFallback } from '@/lib/server/ai';
 import { decryptSecret, encryptSecret, isEncryptedSecret } from '@/lib/server/secret-crypto';
 import { buildFinalAIModelConfig, resolveAIConfigProbeInput } from '@/lib/server/ai-config-save-gate';
 import { writeSecurityAudit } from '@/lib/server/security-audit';
@@ -13,7 +13,7 @@ function sanitizeAIConfig(item: Record<string, unknown>) {
 
 async function probeFinalModelConfig(payload: Record<string, unknown>) {
   const probeInput = resolveAIConfigProbeInput({ body: payload, decryptExistingKey: decryptSecret });
-  await probeAIConfiguration({
+  payload.request_options = await probeAIConfigurationWithTokenFallback({
     ...probeInput,
     apiKey: isEncryptedSecret(probeInput.apiKey) ? decryptSecret(probeInput.apiKey) : probeInput.apiKey,
   });
@@ -52,7 +52,8 @@ export async function POST(request: NextRequest) {
   });
   try {
     await probeFinalModelConfig(payload);
-  } catch {
+  } catch (error) {
+    const failure = describeAIConnectivityFailure(error);
     await writeSecurityAudit(client, {
       request,
       actor: admin,
@@ -60,9 +61,18 @@ export async function POST(request: NextRequest) {
       outcome: 'failed',
       targetType: 'ai_model_config',
       targetId: body.id ? String(body.id) : null,
-      metadata: { provider: payload.provider, model: payload.model },
+      metadata: {
+        provider: payload.provider,
+        model: payload.model,
+        connectivityCode: failure.code,
+        upstreamStatus: failure.upstreamStatus ?? null,
+      },
     });
-    return NextResponse.json({ code: 1, message: 'AI 连通性测试失败：请检查调用地址、模型、API Key 和网络后重试' }, { status: 422 });
+    return NextResponse.json({
+      code: 1,
+      message: failure.message,
+      details: { reason: failure.code, ...(failure.upstreamStatus ? { upstream_status: failure.upstreamStatus } : {}) },
+    }, { status: 422 });
   }
 
   payload.updated_at = new Date().toISOString();
